@@ -131,6 +131,16 @@
   --border-radius-base: 16px;
   --spacing-unit: 8px;
 
+  /* Slock-like semantic tokens (Phase 1) */
+  --slock-sidebar-bg: var(--console-rail-bg);
+  --slock-sidebar-width: 52px;
+  --slock-channel-width: 260px;
+  --slock-context-width: 320px;
+  --slock-border-color: var(--console-border-soft);
+  --slock-message-gap: 12px;
+  --slock-avatar-size: 32px;
+  --slock-density: compact;
+
   --font-size-caption: 0.625rem;
   --font-size-label: 0.6875rem;
   --font-size-compact: 0.8125rem;

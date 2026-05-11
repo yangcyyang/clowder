@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clowder Local Slock Mode Mock</title>
+    <style>
+      :root {
+        --bg: #f7f4ef;
+        --rail: #ebe3d8;
+        --panel: #f1e9df;
+        --paper: #fffdf9;
+        --soft: #f6efe7;
+        --line: #e2d5ca;
+        --line-strong: #d2c0b2;
+        --text: #241f1b;
+        --muted: #7a6f66;
+        --faint: #a1958b;
+        --accent: #d97757;
+        --accent-soft: #f3dfd4;
+        --blue: #4f7ecf;
+        --green: #2f9e63;
+        --shadow: 0 20px 60px rgba(42, 35, 28, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 56px 282px minmax(520px, 1fr) 336px;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .rail {
+        background: var(--rail);
+        padding: 12px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .rail-logo,
+      .rail-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+      }
+
+      .rail-logo {
+        background: var(--text);
+        color: #fffaf4;
+        font-weight: 800;
+      }
+
+      .rail-btn {
+        border: 0;
+        background: rgba(255, 255, 255, 0.35);
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .rail-btn.active {
+        background: var(--paper);
+        color: var(--accent);
+        box-shadow: 0 8px 24px rgba(42, 35, 28, 0.08);
+      }
+
+      .spaces {
+        background: var(--panel);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .spaces-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .spaces-title {
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .new-btn {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        border-radius: 10px;
+        padding: 6px 9px;
+        color: var(--muted);
+      }
+
+      .search {
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: var(--soft);
+        color: var(--faint);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        font-size: 13px;
+        margin-bottom: 16px;
+      }
+
+      .section-label {
+        margin: 14px 6px 7px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: var(--faint);
+        text-transform: uppercase;
+      }
+
+      .space-item {
+        position: relative;
+        display: grid;
+        grid-template-columns: 28px 1fr auto;
+        gap: 9px;
+        align-items: center;
+        min-height: 48px;
+        padding: 8px 9px;
+        border-radius: 12px;
+        color: var(--muted);
+      }
+
+      .space-item.active {
+        background: var(--paper);
+        color: var(--text);
+        box-shadow: 0 10px 28px rgba(42, 35, 28, 0.05);
+      }
+
+      .space-item.active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 10px;
+        bottom: 10px;
+        width: 3px;
+        border-radius: 99px;
+        background: var(--accent);
+      }
+
+      .space-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .space-main {
+        min-width: 0;
+      }
+
+      .space-name {
+        font-size: 13px;
+        font-weight: 650;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .space-sub {
+        margin-top: 2px;
+        font-size: 11px;
+        color: var(--faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+
+      .main {
+        background: var(--bg);
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .chat-header {
+        height: 64px;
+        padding: 0 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .chat-title {
+        font-size: 16px;
+        font-weight: 760;
+      }
+
+      .chat-meta {
+        margin-top: 3px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        border-radius: 999px;
+        padding: 7px 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .timeline {
+        flex: 1;
+        overflow: auto;
+        padding: 22px;
+      }
+
+      .message {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 820px);
+        gap: 11px;
+        margin-bottom: 18px;
+      }
+
+      .avatar {
+        width: 34px;
+        height: 34px;
+        border-radius: 11px;
+        display: grid;
+        place-items: center;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        font-weight: 800;
+        color: var(--accent);
+      }
+
+      .message-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 5px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .sender {
+        font-weight: 750;
+        color: var(--text);
+      }
+
+      .status {
+        border-radius: 999px;
+        padding: 2px 7px;
+        font-size: 11px;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .bubble {
+        background: var(--paper);
+        border-radius: 14px;
+        padding: 12px 14px;
+        line-height: 1.62;
+        font-size: 14px;
+        box-shadow: 0 10px 28px rgba(42, 35, 28, 0.045);
+      }
+
+      .bubble.user {
+        background: #fff7f1;
+        border-left: 3px solid var(--accent);
+      }
+
+      .msg-actions {
+        display: flex;
+        gap: 7px;
+        margin-top: 7px;
+      }
+
+      .msg-action {
+        font-size: 11px;
+        color: var(--faint);
+      }
+
+      .task-card {
+        margin-top: 10px;
+        border-radius: 12px;
+        background: var(--soft);
+        padding: 10px 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .task-title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .composer-wrap {
+        padding: 14px 22px 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      .composer {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        min-height: 86px;
+        box-shadow: var(--shadow);
+        padding: 12px;
+      }
+
+      .composer-input {
+        color: var(--muted);
+        font-size: 14px;
+        min-height: 38px;
+      }
+
+      .composer-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 10px;
+      }
+
+      .tool-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .tool {
+        border: 1px solid var(--line);
+        background: var(--soft);
+        border-radius: 999px;
+        padding: 6px 9px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .send {
+        border: 0;
+        border-radius: 999px;
+        background: var(--text);
+        color: #fffaf4;
+        padding: 8px 14px;
+        font-weight: 700;
+      }
+
+      .context {
+        background: var(--panel);
+        border-left: 1px solid var(--line);
+        padding: 14px;
+        overflow: auto;
+      }
+
+      .context-title {
+        font-size: 15px;
+        font-weight: 760;
+        margin-bottom: 12px;
+      }
+
+      .tabs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 5px;
+        background: var(--soft);
+        border-radius: 12px;
+        padding: 4px;
+        margin-bottom: 14px;
+      }
+
+      .tab {
+        text-align: center;
+        border-radius: 9px;
+        padding: 7px 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .tab.active {
+        background: var(--paper);
+        color: var(--text);
+        font-weight: 750;
+      }
+
+      .panel-card {
+        background: var(--paper);
+        border-radius: 14px;
+        padding: 13px;
+        margin-bottom: 12px;
+        box-shadow: 0 10px 30px rgba(42, 35, 28, 0.045);
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .panel-title {
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .small {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .progress {
+        height: 7px;
+        background: var(--soft);
+        border-radius: 99px;
+        overflow: hidden;
+        margin-top: 9px;
+      }
+
+      .progress span {
+        display: block;
+        height: 100%;
+        width: 66%;
+        background: var(--accent);
+        border-radius: 99px;
+      }
+
+      .agent-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .agent-row:last-child {
+        border-bottom: 0;
+      }
+
+      .agent-left {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .mini-avatar {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      @media (max-width: 1100px) {
+        .app {
+          grid-template-columns: 52px 250px minmax(0, 1fr);
+        }
+        .context {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="rail">
+        <div class="rail-logo">C</div>
+        <button class="rail-btn active">💬</button>
+        <button class="rail-btn">✓</button>
+        <button class="rail-btn">◎</button>
+        <button class="rail-btn">⚙</button>
+      </aside>
+
+      <aside class="spaces">
+        <div class="spaces-header">
+          <div class="spaces-title">Clowder Local</div>
+          <button class="new-btn">＋</button>
+        </div>
+        <div class="search">搜索项目、对话、Agent</div>
+
+        <div class="section-label">项目空间</div>
+        <div class="space-item active">
+          <div class="space-icon">#</div>
+          <div class="space-main">
+            <div class="space-name">clowder 本地改造</div>
+            <div class="space-sub">Phase 1 正在规划</div>
+          </div>
+          <div class="dot"></div>
+        </div>
+        <div class="space-item">
+          <div class="space-icon">#</div>
+          <div class="space-main">
+            <div class="space-name">cat-cafe 教程研究</div>
+            <div class="space-sub">Evidence Store 已同步</div>
+          </div>
+        </div>
+
+        <div class="section-label">Agent DM</div>
+        <div class="space-item">
+          <div class="space-icon">C</div>
+          <div class="space-main">
+            <div class="space-name">Codex</div>
+            <div class="space-sub">代码执行 / UI 改造</div>
+          </div>
+        </div>
+        <div class="space-item">
+          <div class="space-icon">K</div>
+          <div class="space-main">
+            <div class="space-name">Kimi</div>
+            <div class="space-sub">中文梳理 / 资料总结</div>
+          </div>
+        </div>
+
+        <div class="section-label">最近线程</div>
+        <div class="space-item">
+          <div class="space-icon">↳</div>
+          <div class="space-main">
+            <div class="space-name">Slock-like WebUI</div>
+            <div class="space-sub">3 条新回复</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="chat-header">
+          <div>
+            <div class="chat-title"># clowder 本地改造</div>
+            <div class="chat-meta">本地 AI 团队工作台 · 4 个 Agent · 2 个任务进行中</div>
+          </div>
+          <div class="header-actions">
+            <div class="pill">Phase 1</div>
+            <div class="pill">Context 开启</div>
+          </div>
+        </header>
+
+        <section class="timeline">
+          <article class="message">
+            <div class="avatar">Y</div>
+            <div>
+              <div class="message-head">
+                <span class="sender">yangcyyang</span>
+                <span>23:31</span>
+              </div>
+              <div class="bubble user">
+                Phase 1 和 Phase 2 我觉得可以推进去做。先做视觉与壳层，再做交互语义。
+              </div>
+              <div class="msg-actions">
+                <span class="msg-action">Reply</span>
+                <span class="msg-action">Create task</span>
+                <span class="msg-action">Copy link</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="message">
+            <div class="avatar">C</div>
+            <div>
+              <div class="message-head">
+                <span class="sender">Codex</span>
+                <span>23:33</span>
+                <span class="status">in progress</span>
+              </div>
+              <div class="bubble">
+                我会先落两个产物：设计规范和三栏主界面 mock。确认后再改 AppShell、ThreadSidebar、ChatMessage 和 ChatInput，避免直接改代码导致风格跑偏。
+                <div class="task-card">
+                  <div>
+                    <div class="task-title">task #24 · Slock-like WebUI 规范</div>
+                    <div class="small">输出 spec + mock，进入 Phase 1 前验收</div>
+                  </div>
+                  <span class="status">in_review</span>
+                </div>
+              </div>
+              <div class="msg-actions">
+                <span class="msg-action">Reply in thread</span>
+                <span class="msg-action">Evidence</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="message">
+            <div class="avatar">K</div>
+            <div>
+              <div class="message-head">
+                <span class="sender">Kimi</span>
+                <span>23:34</span>
+                <span class="status">done</span>
+              </div>
+              <div class="bubble">
+                clowder 功能点已经拆成核心协作层、Hub 工作台、社区层、IM 层、扩展层和基础设施层。本地版建议隐藏社区和 IM，保留群聊、A2A、Cat 体系、Redis、Hub 核心。
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer-input">输入消息，使用 @Codex / @Kimi / @Claude 指派任务...</div>
+            <div class="composer-bar">
+              <div class="tool-row">
+                <button class="tool">@Agent</button>
+                <button class="tool">Attach</button>
+                <button class="tool">Queue</button>
+                <button class="tool">Thread</button>
+              </div>
+              <button class="send">发送</button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="context">
+        <div class="context-title">Context Panel</div>
+        <div class="tabs">
+          <div class="tab active">Tasks</div>
+          <div class="tab">Agents</div>
+          <div class="tab">Evidence</div>
+          <div class="tab">Files</div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head">
+            <div class="panel-title">Phase 1：视觉与壳层</div>
+            <span class="status">active</span>
+          </div>
+          <div class="small">AppShell、左侧栏、消息样式、主题 token</div>
+          <div class="progress"><span></span></div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head">
+            <div class="panel-title">Phase 2：交互语义</div>
+            <span class="status">next</span>
+          </div>
+          <div class="small">thread reply、task 状态、Agent 成员状态、Context Panel</div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head">
+            <div class="panel-title">Agent 状态</div>
+          </div>
+          <div class="agent-row">
+            <div class="agent-left"><span class="mini-avatar">C</span><span class="small">Codex</span></div>
+            <span class="status">running</span>
+          </div>
+          <div class="agent-row">
+            <div class="agent-left"><span class="mini-avatar">K</span><span class="small">Kimi</span></div>
+            <span class="status">idle</span>
+          </div>
+          <div class="agent-row">
+            <div class="agent-left"><span class="mini-avatar">G</span><span class="small">Gemini</span></div>
+            <span class="status">queued</span>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-head">
+            <div class="panel-title">Evidence</div>
+            <span class="small">3 条</span>
+          </div>
+          <div class="small">console design system、clowder feature list、slock UI 评估记录</div>
+        </div>
+      </aside>
+    </div>
+  </body>
+</html>

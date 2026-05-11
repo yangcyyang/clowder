@@ -11,9 +11,8 @@ import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
+  { id: 'mission', path: '/mission-hub', label: '任务', match: (p: string) => p.startsWith('/mission') },
   { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
-  { id: 'mission', path: '/mission-hub', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
-  { id: 'signals', path: '/signals', label: '信号', match: (p: string) => p.startsWith('/signals') },
 ] as const;
 
 function ChatIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -41,20 +40,6 @@ function MissionIcon({ className = 'w-5 h-5' }: { className?: string }) {
       <path d="M15 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9 13h6" strokeLinecap="round" />
       <path d="M9 17h3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SignalIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>信号</title>
-      <path
-        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
     </svg>
   );
 }
@@ -101,7 +86,6 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
   home: ChatIcon,
-  signals: SignalIcon,
   memory: MemoryIcon,
   mission: MissionIcon,
   settings: SettingsIcon,
