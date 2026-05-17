@@ -72,6 +72,8 @@ export interface StoredMessage {
   /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
   timestamp: number;
+  /** Timestamp when a user message was edited in place. */
+  editedAt?: number;
   /** F045: Extended thinking content (accumulated from CLI thinking blocks). Persisted for F5 recovery. */
   thinking?: string;
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing (non-routing) */
@@ -259,6 +261,8 @@ export interface IMessageStore {
     id: string,
     extra: NonNullable<StoredMessage['extra']>,
   ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Update plain-text message content in place. Returns null if not found. */
+  updateContent(id: string, content: string, editedAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /** #1462: augment callback-persisted messages with metadata collected only on the stream path. */
   augmentStreamMetadata(
     id: string,
@@ -577,6 +581,7 @@ export class MessageStore {
     delete msg.metadata;
     delete msg.extra;
     delete msg.thinking;
+    delete msg.editedAt;
     msg.deletedAt = Date.now();
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
@@ -620,6 +625,14 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     msg.extra = extra;
+    return msg;
+  }
+
+  updateContent(id: string, content: string, editedAt: number): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    msg.content = content;
+    msg.editedAt = editedAt;
     return msg;
   }
 

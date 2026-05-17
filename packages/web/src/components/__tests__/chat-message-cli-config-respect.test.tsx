@@ -91,7 +91,7 @@ function makeCallbackCompanion(): ChatMessageType {
   } as ChatMessageType;
 }
 
-describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility', () => {
+describe('ChatMessage Slock-like CLI suppression', () => {
   let container: HTMLDivElement;
   let root: Root;
   let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
@@ -142,7 +142,7 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
     });
   }
 
-  it('A. stream-origin + text content + NO callback companion + collapsed config → CLI Output stays collapsed but advertises stdout', () => {
+  it('A. stream-origin + text content + NO callback companion → stdout is rendered as normal text, no CLI Output chrome', () => {
     const MARKER = 'STDOUT_HINT';
     storeMessages = [];
 
@@ -152,20 +152,12 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
       }),
     );
 
-    // CLI Output exists
-    expect(container.textContent).toContain('CLI Output');
-    // Config remains authoritative: body should be collapsed by default.
-    const cliBody = container.querySelector('[data-testid="cli-output-body"]');
-    expect(cliBody).toBeNull();
-    // Collapsed summary still tells the user stdout exists, so it does not look empty/missing.
-    const cliHeader = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('CLI Output'),
-    );
-    expect(cliHeader?.textContent).toContain('stdout');
-    expect(cliHeader?.textContent).toContain(MARKER);
+    expect(container.textContent).toContain(MARKER);
+    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('A2. stream-origin + text content + NO callback companion + expanded config → CLI Output is expanded', () => {
+  it('A2. stream-origin + text content + expanded config → still no CLI Output chrome', () => {
     const MARKER = 'STREAM_FINAL_SPEECH_MARKER_42';
     globalCliOutputDefault = 'expanded';
     storeMessages = [];
@@ -176,12 +168,12 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
       }),
     );
 
-    const cliBody = container.querySelector('[data-testid="cli-output-body"]');
-    expect(cliBody).toBeTruthy();
-    expect(cliBody?.textContent).toContain(MARKER);
+    expect(container.textContent).toContain(MARKER);
+    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('B. stream-origin + text content + callback companion → CLI Output stays default-collapsed (47/codex stdout, callback is the speech)', () => {
+  it('B. stream-origin + text content + callback companion → no CLI Output chrome', () => {
     const STDOUT_MARKER = 'STDOUT_MARKER_47_CODEX';
     storeMessages = [
       makeStreamMessage({ id: 'msg-stream-target', content: `narrative ${STDOUT_MARKER}` }),
@@ -195,14 +187,12 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
       }),
     );
 
-    // CLI Output exists (since toolEvents present)
-    expect(container.textContent).toContain('CLI Output');
-    // Body should NOT be in DOM (default-collapsed since callback companion exists → not the primary speech channel)
-    const cliBody = container.querySelector('[data-testid="cli-output-body"]');
-    expect(cliBody).toBeNull();
+    expect(container.textContent).toContain(STDOUT_MARKER);
+    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('C. stream-origin + tools but NO text content → CLI Output stays default-collapsed (no speech to surface)', () => {
+  it('C. stream-origin + tools but NO text content → pure tool message is hidden', () => {
     storeMessages = [];
 
     renderMessage(
@@ -211,13 +201,12 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
       }),
     );
 
-    expect(container.textContent).toContain('CLI Output');
-    // No text content → no need to default-expand → body unmounted
-    const cliBody = container.querySelector('[data-testid="cli-output-body"]');
-    expect(cliBody).toBeNull();
+    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.textContent).not.toContain('Read');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('D. callback-origin message → not affected by stream heuristic (regression guard)', () => {
+  it('D. callback-origin message → content remains visible and CLI Output chrome is hidden', () => {
     storeMessages = [];
 
     renderMessage(
@@ -229,9 +218,44 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
       }),
     );
 
-    // CLI Output exists; body should be collapsed by default (callback origin doesn't trigger heuristic)
-    expect(container.textContent).toContain('CLI Output');
-    const cliBody = container.querySelector('[data-testid="cli-output-body"]');
-    expect(cliBody).toBeNull();
+    expect(container.textContent).toContain('callback speech');
+    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
+  });
+
+  it('E. model signature and model metadata lines are hidden from assistant text', () => {
+    storeMessages = [];
+
+    renderMessage(
+      makeStreamMessage({
+        content: [
+          '在，任务我来处理。',
+          '当前会话身份标注为：',
+          '@gpt52 · model=gpt-5.5',
+          '请确认输入范围。',
+          '[砚砚/GPT-5.5🐾]',
+        ].join('\n'),
+      }),
+    );
+
+    expect(container.textContent).toContain('在，任务我来处理。');
+    expect(container.textContent).toContain('请确认输入范围。');
+    expect(container.textContent).not.toContain('当前会话身份标注');
+    expect(container.textContent).not.toContain('model=gpt');
+    expect(container.textContent).not.toContain('[砚砚/GPT-5.5🐾]');
+  });
+
+  it('F. model signature lines are hidden even when cat data is missing', () => {
+    storeMessages = [];
+
+    renderMessage(
+      makeStreamMessage({
+        catId: 'missing-cat',
+        content: ['自然语言结论保留。', '[分工师/GPT-5.5🐾]'].join('\n'),
+      }),
+    );
+
+    expect(container.textContent).toContain('自然语言结论保留。');
+    expect(container.textContent).not.toContain('[分工师/GPT-5.5🐾]');
   });
 });

@@ -2,7 +2,7 @@
   --cat-cream-white: #fcfaf7;
   --cat-soft-blue: #81d4fa;
   --cat-warm-brown: #8d6e63;
-  --cat-paw-pink: #c96442;
+  --cat-paw-pink: #cc6743;
   --cat-deep-ink: #241f1b;
   --cat-muted-stone: #746b64;
   --cat-light-sand: #f2e9e0;
@@ -17,7 +17,7 @@
   --cafe-border: var(--cat-border-tan);
   --cafe-border-subtle: #ede6de;
   --cafe-accent: var(--cat-paw-pink);
-  --cafe-accent-hover: #b55838;
+  --cafe-accent-hover: #b85c3a;
   --cafe-accent-foreground: #fffdfb;
   --cafe-crosspost: var(--cat-soft-blue);
   --cafe-interactive: #6f6259;
@@ -187,19 +187,19 @@
 }
 
 [data-theme="dark"] {
-  --cafe-surface: #1c1917;
-  --cafe-surface-elevated: #292524;
-  --cafe-surface-sunken: #0c0a09;
-  --cafe-text: #faf9f7;
-  --cafe-text-secondary: #a8a29e;
-  --cafe-text-muted: #78716c;
-  --cafe-border: #44403c;
-  --cafe-border-subtle: #33302c;
-  --cafe-accent: #ffb899;
-  --cafe-accent-hover: #ffc5aa;
-  --cafe-accent-foreground: #2b251f;
+  --cafe-surface: #0f1117;
+  --cafe-surface-elevated: #161b26;
+  --cafe-surface-sunken: #080a10;
+  --cafe-text: #e8eaf0;
+  --cafe-text-secondary: #8892a4;
+  --cafe-text-muted: #5a6275;
+  --cafe-border: #1e2333;
+  --cafe-border-subtle: #151a26;
+  --cafe-accent: #e0547a;
+  --cafe-accent-hover: #ea6d8a;
+  --cafe-accent-foreground: #0d0f14;
   --cafe-crosspost: #64b5f6;
-  --cafe-interactive: #b0937a;
+  --cafe-interactive: #6b7b9a;
   --bg-app: var(--cafe-surface);
   --text-primary: var(--cafe-text);
   --text-secondary: var(--cafe-text-secondary);

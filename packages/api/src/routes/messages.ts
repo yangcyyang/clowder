@@ -176,6 +176,11 @@ const getMessagesSchema = z.object({
   threadId: z.string().min(1).max(100).optional(),
 });
 
+const searchMessagesSchema = z.object({
+  q: z.string().trim().min(1).max(120),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
@@ -1252,6 +1257,50 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     }
   });
 
+  // GET /api/messages/search - 全文搜索消息内容
+  app.get('/api/messages/search', async (request) => {
+    const parseResult = searchMessagesSchema.safeParse(request.query);
+    if (!parseResult.success) {
+      return { messages: [] };
+    }
+
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) {
+      return { messages: [] };
+    }
+
+    const { q, limit } = parseResult.data;
+    const normalizedQuery = q.toLowerCase();
+    const recentMessages = await opts.messageStore.getRecent(10000);
+    const matches = recentMessages
+      .filter((m) => {
+        if (m.userId !== userId && !isSystemUserMessage(m)) return false;
+        if (!m.content?.trim()) return false;
+        return m.content.toLowerCase().includes(normalizedQuery);
+      })
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit)
+      .map((m) => ({
+        id: m.id,
+        threadId: m.threadId,
+        content: m.content,
+        timestamp: m.timestamp,
+        catId: m.catId,
+        ...(m.editedAt ? { editedAt: m.editedAt } : {}),
+        type: (m.catId
+          ? isSystemUserMessage(m)
+            ? 'system'
+            : 'assistant'
+          : m.source
+            ? 'connector'
+            : isSystemUserMessage(m)
+              ? 'system'
+              : 'user') as 'user' | 'assistant' | 'connector' | 'system',
+      }));
+
+    return { messages: matches };
+  });
+
   // GET /api/messages - 获取历史消息
   app.get('/api/messages', async (request) => {
     const parseResult = getMessagesSchema.safeParse(request.query);
@@ -1314,6 +1363,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             : 'user') as TimelineItem['type'],
       catId: m.catId,
       content: m.content,
+      ...(m.editedAt ? { editedAt: m.editedAt } : {}),
       ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
       ...(m.toolEvents ? { toolEvents: m.toolEvents } : {}),
       ...(m.metadata ? { metadata: m.metadata } : {}),

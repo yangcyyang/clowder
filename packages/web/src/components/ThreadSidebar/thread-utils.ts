@@ -50,6 +50,56 @@ export interface ThreadGroup {
   archivedGroups?: ThreadGroup[];
 }
 
+export type SlockSidebarSurfaceType = 'channel' | 'dm' | 'project';
+
+/** Top-level front-end grouping for the slock-like sidebar shell. */
+export interface SlockSidebarSurface {
+  type: SlockSidebarSurfaceType;
+  label: string;
+  description: string;
+  groups: ThreadGroup[];
+  /** Channel surface owns the lobby entry because it is a shared public space. */
+  includeDefaultThread?: boolean;
+}
+
+/**
+ * Build a front-end-only information architecture on top of existing thread
+ * groups. This deliberately does not introduce real channel / DM / project
+ * backend semantics.
+ */
+export function buildSlockLikeSidebarSurfaces(
+  threadGroups: ThreadGroup[],
+  includeDefaultThread: boolean,
+): SlockSidebarSurface[] {
+  const channelGroups = threadGroups.filter((group) => group.type === 'system');
+  const dmGroups = threadGroups.filter((group) => group.type === 'recent');
+  const projectGroups = threadGroups.filter((group) => group.type !== 'system' && group.type !== 'recent');
+
+  const surfaces: SlockSidebarSurface[] = [
+    {
+      type: 'channel',
+      label: 'Channel',
+      description: '公共空间',
+      groups: channelGroups,
+      includeDefaultThread,
+    },
+    {
+      type: 'dm',
+      label: '个人对话（模拟）',
+      description: '最近活跃',
+      groups: dmGroups,
+    },
+    {
+      type: 'project',
+      label: 'Project',
+      description: '项目与收藏',
+      groups: projectGroups,
+    },
+  ];
+
+  return surfaces.filter((surface) => surface.includeDefaultThread || surface.groups.length > 0);
+}
+
 type ThreadActivitySource = Pick<ThreadState, 'lastActivity'> | undefined;
 
 /**

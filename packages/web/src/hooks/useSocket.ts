@@ -99,6 +99,7 @@ export interface SocketCallbacks {
   onHeartbeat?: (data: { threadId: string; timestamp: number }) => void;
   onMessageDeleted?: (data: { messageId: string; threadId: string; deletedBy: string }) => void;
   onMessageRestored?: (data: { messageId: string; threadId: string }) => void;
+  onMessageEdited?: (data: { messageId: string; threadId: string; content: string; editedAt: number }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
   onAuthorizationRequest?: (data: {
     requestId: string;
@@ -668,6 +669,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
       callbacksRef.current.onMessageRestored?.(data);
+    });
+    socket.on('message_edited', (data: { messageId: string; threadId: string; content: string; editedAt: number }) => {
+      callbacksRef.current.onMessageEdited?.(data);
     });
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);

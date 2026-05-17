@@ -69,6 +69,42 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('searches message content across threads newest first', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'plain setup',
+      mentions: [],
+      timestamp: 1000,
+      threadId: 'thread-a',
+    });
+    const older = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'Need a semantic search prototype',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-a',
+    });
+    const newer = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'Search results should show message excerpts',
+      mentions: [],
+      timestamp: 3000,
+      threadId: 'thread-b',
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages/search?q=search&limit=10' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages[0].id, newer.id);
+    assert.equal(body.messages[0].threadId, 'thread-b');
+    assert.equal(body.messages[0].type, 'assistant');
+    assert.equal(body.messages[1].id, older.id);
+  });
+
   it('maps canonical system messages to type=system', async () => {
     messageStore.append({
       userId: 'system',

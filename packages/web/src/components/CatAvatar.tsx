@@ -62,7 +62,7 @@ export function CatAvatar({
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
       <div
-        className={`rounded-full ring-2 overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
+        className={`rounded-md ring-2 overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
           isStreaming ? 'animate-pulse' : ''
         }`}
         style={{

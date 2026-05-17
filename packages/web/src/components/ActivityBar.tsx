@@ -187,7 +187,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   return (
     <nav
-      className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 py-2.5 px-[6px] bg-[var(--console-rail-bg)] ${className ?? ''}`}
+      className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 ${className ?? ''}`}
       aria-label="主导航"
     >
       {NAV_ITEMS.map((item) => {

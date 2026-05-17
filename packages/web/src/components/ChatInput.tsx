@@ -9,9 +9,9 @@ import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
+import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
-import { ChatInputActionButton } from './ChatInputActionButton';
 import { ChatInputMenus } from './ChatInputMenus';
 import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
@@ -33,7 +33,12 @@ const MAX_IMAGE_DRAFT_THREADS = 5;
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
   threadId?: string;
-  onSend: (content: string, images?: File[], whisper?: WhisperOptions, deliveryMode?: DeliveryMode) => void;
+  onSend: (
+    content: string,
+    images?: File[],
+    whisper?: WhisperOptions,
+    deliveryMode?: DeliveryMode,
+  ) => Promise<{ userMessageId?: string } | string | void> | { userMessageId?: string } | string | void;
   onStop?: () => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -42,6 +47,16 @@ interface ChatInputProps {
 }
 
 const ACCEPTED_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
+
+function ImageUploadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="3" y="4" width="14" height="12" rx="2.5" />
+      <circle cx="7.5" cy="8" r="1.3" fill="currentColor" stroke="none" />
+      <path d="M5.5 14l3.2-3.3 2.2 2.1 1.6-1.7L16 14" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export function ChatInput({
   threadId,
@@ -83,8 +98,9 @@ export function ChatInput({
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
   const [isPreparingImages, setIsPreparingImages] = useState(false);
-  const [whisperMode, setWhisperMode] = useState(false);
+  const [whisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
+  const [sendAsTask, setSendAsTask] = useState(false);
 
   // F108B AC-B7: In whisper mode, check if SELECTED targets are busy (not thread-level).
   // When all whisper targets are idle → show Send button, not Queue.
@@ -120,13 +136,6 @@ export function ChatInput({
     textareaRef.current?.focus();
   }, [pendingChatInsert, setPendingChatInsert, threadId]);
 
-  const handleTranscript = useCallback((text: string) => {
-    setInput((prev) => {
-      const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-      return prev + separator + text;
-    });
-  }, []);
-
   const filteredCatOptions = useMemo(() => {
     if (!mentionFilter) return catOptions;
     const lower = mentionFilter.toLowerCase();
@@ -149,7 +158,7 @@ export function ChatInput({
   const pathCompletion = usePathCompletion(input);
 
   const doSend = useCallback(
-    (deliveryMode?: DeliveryMode) => {
+    async (deliveryMode?: DeliveryMode) => {
       if (sendTemporarilyDisabled) return;
       if (whisperMode && whisperTargets.size === 0) return;
       const trimmed = input.trim();
@@ -159,21 +168,67 @@ export function ChatInput({
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
             : undefined;
-        onSend(trimmed, images.length > 0 ? images : undefined, whisper, deliveryMode);
+        const sendImages = images.length > 0 ? images : undefined;
         setInput('');
         ghostRef.current = null;
         setGhostSuggestion(null);
         setImages([]);
         setShowMentions(false);
         setShowGameMenu(false);
+        setSendAsTask(false);
+
+        const sendResult = await onSend(trimmed, sendImages, whisper, deliveryMode);
+        const sentMessageId =
+          typeof sendResult === 'string'
+            ? sendResult
+            : sendResult && typeof sendResult.userMessageId === 'string'
+              ? sendResult.userMessageId
+              : undefined;
+
+        if (sendAsTask && sentMessageId && threadId) {
+          try {
+            const res = await apiFetch('/api/tasks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                threadId,
+                title: trimmed.slice(0, 100),
+                why: '',
+                createdBy: 'user',
+                sourceMessageId: sentMessageId,
+              }),
+            });
+            if (res.ok) {
+              const task = (await res.json()) as TaskItem;
+              useTaskStore.getState().addTask(task);
+            }
+          } catch {
+            // Message send already succeeded. Task creation can be retried from the task panel later.
+          }
+        }
       }
     },
-    [input, disabled, onSend, images, sendTemporarilyDisabled, whisperMode, whisperTargets, addHistoryEntry],
+    [
+      input,
+      disabled,
+      onSend,
+      images,
+      sendTemporarilyDisabled,
+      whisperMode,
+      whisperTargets,
+      addHistoryEntry,
+      sendAsTask,
+      threadId,
+    ],
   );
 
   const handleSend = useCallback(() => doSend(undefined), [doSend]);
   const handleQueueSend = useCallback(() => doSend('queue'), [doSend]);
   const handleForceSend = useCallback(() => doSend('force'), [doSend]);
+  const handlePrimarySend = useCallback(() => {
+    if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
+    else handleSend();
+  }, [handleQueueSend, handleSend, hasActiveInvocation, whisperTargetsAllIdle]);
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
@@ -473,24 +528,6 @@ export function ChatInput({
     });
   }, [whisperCats, whisperMode, activeCatIds]);
 
-  const handleGameClick = useCallback(() => {
-    setShowMentions(false);
-    setMentionStart(-1);
-    setShowGameMenu((prev) => !prev);
-    setGameStep('list');
-    setSelectedIdx(0);
-  }, []);
-
-  const handleWhisperToggle = useCallback(() => {
-    setWhisperMode((prev) => {
-      if (!prev) {
-        // F108B P1-1: Default to NO cats selected (design spec Scene 1: "默认都不选")
-        setWhisperTargets(new Set());
-      }
-      return !prev;
-    });
-  }, []);
-
   // Sync input text + images to module-level draft maps (covers all sources: typing, voice, mentions)
   // useLayoutEffect runs synchronously before browser paint and before unmount,
   // ensuring the draft is written to the Map before the component is destroyed
@@ -551,7 +588,7 @@ export function ChatInput({
   }, [activeMenu, closeMenus]);
 
   return (
-    <div className="relative bg-[var(--console-shell-bg)] safe-area-bottom">
+    <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
       {/* F39: Queue status bar — visible when cat is running */}
       {hasActiveInvocation && (
         <div className="px-4 pt-2 flex items-center gap-2">
@@ -640,17 +677,14 @@ export function ChatInput({
       {mobileToolbar && (
         <MobileInputToolbar
           onAttach={() => fileInputRef.current?.click()}
-          onWhisperToggle={handleWhisperToggle}
-          onGameClick={handleGameClick}
           onClose={() => setMobileToolbar(false)}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           maxImages={images.length >= 5}
-          whisperMode={whisperMode}
         />
       )}
 
-      <div className="flex gap-2 items-center p-4 pt-2">
+      <div className="flex items-center gap-2 p-4 pt-2">
         {/* Mobile: + toggle button */}
         <button
           onClick={() => setMobileToolbar((v) => !v)}
@@ -670,50 +704,37 @@ export function ChatInput({
           </svg>
         </button>
 
-        {/* Desktop: tool buttons always visible */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-          className="hidden rounded-xl p-3 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30 md:block"
-          aria-label="Attach images"
-        >
-          <AttachIcon className="w-5 h-5" />
-        </button>
+        <div className="hidden items-center gap-1 md:flex">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="上传图片"
+            title="上传图片"
+          >
+            <ImageUploadIcon className="h-[18px] w-[18px]" />
+          </button>
 
-        <button
-          onClick={handleWhisperToggle}
-          disabled={disabled || sendTemporarilyDisabled}
-          className={`hidden md:block p-3 rounded-xl transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+          <button
+            type="button"
+            disabled
+            className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-cafe-muted/60 opacity-60"
+            aria-label="上传文件（占位）"
+            title="上传文件（占位）"
+          >
+            <AttachIcon className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+
+        <div
+          className={`group relative flex min-h-[44px] flex-1 items-center rounded-[12px] border bg-cafe-surface transition-colors focus-within:ring-1 ${
             whisperMode
-              ? 'text-conn-amber-text bg-conn-amber-bg ring-1 ring-conn-amber-text/30'
-              : 'text-cafe-muted hover:text-conn-amber-text hover:bg-cafe-surface'
+              ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus-within:ring-conn-amber-text'
+              : 'border-[var(--console-input-stroke)] focus-within:ring-[var(--console-input-stroke)]'
           }`}
-          aria-label="Whisper mode"
-          title="悄悄话模式"
+          data-bootcamp-step="chat-input"
+          data-guide-id="chat.input"
         >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-
-        <button
-          ref={gameBtnRef}
-          onClick={handleGameClick}
-          disabled={disabled || sendTemporarilyDisabled}
-          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-cocreator-primary hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          aria-label="Game mode"
-          title="游戏模式"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
-          </svg>
-        </button>
-
-        <div className="flex-1 relative" data-bootcamp-step="chat-input" data-guide-id="chat.input">
           <textarea
             ref={textareaRef}
             value={input}
@@ -727,13 +748,9 @@ export function ChatInput({
                 ? '悄悄话...'
                 : hasActiveInvocation && !whisperTargetsAllIdle
                   ? '继续输入，消息会排队...'
-                  : '输入消息... (@ 召唤猫猫)'
+                  : '输入消息 #当前对话'
             }
-            className={`w-full resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
-              whisperMode
-                ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus:ring-conn-amber-text'
-                : 'border-[var(--console-input-stroke)] bg-cafe-surface focus:ring-[var(--console-input-stroke)]'
-            }`}
+            className="max-h-[200px] min-h-[42px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm leading-5 text-cafe-text placeholder:text-cafe-muted focus:outline-none"
             rows={1}
             disabled={disabled}
           />
@@ -749,17 +766,62 @@ export function ChatInput({
           )}
         </div>
 
-        <ChatInputActionButton
-          onTranscript={handleTranscript}
-          onSend={handleSend}
-          onStop={onStop}
-          onQueueSend={handleQueueSend}
-          onForceSend={handleForceSend}
-          disabled={disabled}
-          sendDisabled={sendTemporarilyDisabled}
-          hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
-          hasText={!!input.trim()}
-        />
+        <label
+          className="hidden h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
+          title="发送后创建任务"
+        >
+          <input
+            type="checkbox"
+            checked={sendAsTask}
+            onChange={(event) => setSendAsTask(event.target.checked)}
+            className="h-3.5 w-3.5 accent-[var(--console-input-stroke)]"
+          />
+          <span className="whitespace-nowrap">As Task</span>
+        </label>
+
+        {hasActiveInvocation && !disabled && onStop && (
+          <button
+            onClick={() => onStop()}
+            className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
+            title="停止生成"
+            aria-label="Stop generation"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <rect x="4" y="4" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        )}
+
+        {hasActiveInvocation && !whisperTargetsAllIdle && input.trim() && (
+          <button
+            onClick={handleForceSend}
+            disabled={Boolean(disabled || sendTemporarilyDisabled)}
+            className="hidden h-9 w-9 items-center justify-center rounded-[10px] text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-40 md:flex"
+            aria-label="强制发送"
+            title="强制发送 — 中断当前猫猫"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path
+                fillRule="evenodd"
+                d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </button>
+        )}
+
+        <button
+          onClick={handlePrimarySend}
+          disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
+          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+          title={hasActiveInvocation && !whisperTargetsAllIdle ? '排队发送' : '发送消息'}
+          aria-label={hasActiveInvocation && !whisperTargetsAllIdle ? '排队发送' : 'Send message'}
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 2L11 13" />
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+          </svg>
+        </button>
       </div>
 
       {showHistorySearch && (

@@ -64,6 +64,7 @@ const defaultProps = {
   onOpenMobileStatus: vi.fn(),
   statusPanelOpen: false,
   onToggleStatusPanel: vi.fn(),
+  onOpenChannelSettings: vi.fn(),
   defaultCatId: 'opus',
 };
 

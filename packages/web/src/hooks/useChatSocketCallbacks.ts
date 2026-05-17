@@ -40,6 +40,7 @@ export function useChatSocketCallbacks({
     setIntentMode,
     setTargetCats,
     removeThreadMessage,
+    patchMessage,
     requestStreamCatchUp,
   } = useChatStore();
   const { addTask, updateTask } = useTaskStore();
@@ -96,6 +97,13 @@ export function useChatSocketCallbacks({
       onMessageRestored: (data: { messageId: string; threadId: string }) => {
         requestStreamCatchUp(data.threadId);
       },
+      onMessageEdited: (data: { messageId: string; threadId: string; content: string; editedAt: number }) => {
+        if (data.threadId === threadId) {
+          patchMessage(data.messageId, { content: data.content, editedAt: data.editedAt });
+          return;
+        }
+        requestStreamCatchUp(data.threadId);
+      },
       onThreadBranched: () => {
         /* branch navigation handled by the action initiator */
       },
@@ -128,6 +136,7 @@ export function useChatSocketCallbacks({
       addTask,
       updateTask,
       removeThreadMessage,
+      patchMessage,
       requestStreamCatchUp,
       resetTimeout,
       clearDoneTimeout,

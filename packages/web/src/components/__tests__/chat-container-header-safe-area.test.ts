@@ -16,9 +16,6 @@ vi.mock('@/components/ExportButton', () => ({
 vi.mock('@/components/ThemeToggle', () => ({
   ThemeToggle: () => null,
 }));
-vi.mock('@/components/VoiceCompanionButton', () => ({
-  VoiceCompanionButton: () => null,
-}));
 vi.mock('@/components/icons/CatCafeLogo', () => ({
   CatCafeLogo: () => React.createElement('span', null, 'logo'),
 }));
@@ -47,7 +44,7 @@ describe('ChatContainerHeader safe-area', () => {
         onOpenMobileStatus: vi.fn(),
         statusPanelOpen: true,
         onToggleStatusPanel: vi.fn(),
-        defaultCatId: 'opus',
+        onOpenChannelSettings: vi.fn(),
       }),
     );
 

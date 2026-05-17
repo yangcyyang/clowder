@@ -8,6 +8,11 @@ import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chat
 import { apiFetch } from '@/utils/api-client';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
+export interface SendMessageResult {
+  userMessageId?: string;
+  optimisticMessageId: string;
+  queued?: boolean;
+}
 
 /** F35: Whisper options for private messages */
 export interface WhisperOptions {
@@ -60,7 +65,7 @@ export function useSendMessage(activeThreadId?: string) {
       overrideThreadId?: string,
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
-    ) => {
+    ): Promise<SendMessageResult | undefined> => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
       const hasImages = Boolean(images && images.length > 0);
@@ -72,7 +77,7 @@ export function useSendMessage(activeThreadId?: string) {
       setUploadStatus(hasImages ? 'uploading' : 'idle');
 
       const wasCommand = await processCommand(content, threadId);
-      if (wasCommand) return;
+      if (wasCommand) return undefined;
 
       const clientMessageId = createClientId();
       const optimisticMessageId = `user-${clientMessageId}`;
@@ -129,7 +134,7 @@ export function useSendMessage(activeThreadId?: string) {
           removeThreadMessage(threadId, optimisticMessageId);
           setThreadLoading(threadId, false);
           setThreadHasActiveInvocation(threadId, false);
-          return true;
+            return true;
         }
         if (body?.status !== 'queued' || isQueueSend) return false;
         if (threadId !== activeThread) {
@@ -170,6 +175,11 @@ export function useSendMessage(activeThreadId?: string) {
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
+          const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
+          setUploadStatus('idle');
+          setUploadError(null);
+          window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
+          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued' };
         } else {
           const res = await apiFetch('/api/messages', {
             method: 'POST',
@@ -190,11 +200,12 @@ export function useSendMessage(activeThreadId?: string) {
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
+          const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
+          setUploadStatus('idle');
+          setUploadError(null);
+          window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
+          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued' };
         }
-        setUploadStatus('idle');
-        setUploadError(null);
-        // Guide engine: signal that message was sent (advance confirm steps on chat.input)
-        window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
       } catch (err) {
         // F39: Only clear invocation flags for normal (non-queue, non-force) sends.
         // Queue sends never set them. Force sends target a thread where a cat is
@@ -224,6 +235,7 @@ export function useSendMessage(activeThreadId?: string) {
         } else {
           addMessage(errorMessagePayload);
         }
+        return undefined;
       }
     },
     [

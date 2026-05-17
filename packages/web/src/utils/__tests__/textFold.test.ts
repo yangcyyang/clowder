@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldFoldText, TEXT_FOLD_THRESHOLD } from '../textFold';
+import { getTextFoldReason, shouldFoldText, TEXT_FOLD_THRESHOLD } from '../textFold';
 
 describe('shouldFoldText', () => {
   it('returns false for short text', () => {
@@ -29,7 +29,25 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
   });
 
-  it('threshold defaults to 20', () => {
-    expect(TEXT_FOLD_THRESHOLD).toBe(20);
+  it('folds structured agent handoff content even under threshold', () => {
+    const text = [
+      '@gpt52',
+      '**🔒 代理名称**：simple_html_worker',
+      '**📝 任务定义**：写一个简单网页',
+      '**⚙️ 执行动作**：创建 HTML 文件',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(true);
+    expect(getTextFoldReason(text)).toBe('structured-agent');
+  });
+
+  it('folds Chinese heading content as structured agent detail', () => {
+    expect(getTextFoldReason('## 执行计划\n先做 A\n再做 B')).toBe('structured-agent');
+    expect(getTextFoldReason('任务名称：写一个简单网页')).toBe('structured-agent');
+    expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe('structured-agent');
+  });
+
+  it('threshold defaults to 10', () => {
+    expect(TEXT_FOLD_THRESHOLD).toBe(10);
   });
 });

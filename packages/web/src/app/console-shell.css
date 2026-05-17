@@ -94,7 +94,7 @@
 }
 
 [data-theme="dark"] {
-  --console-shell-bg: linear-gradient(180deg, #161210 0%, #1f1a17 100%);
+  --console-shell-bg: #0d1017;
   --console-panel-bg: color-mix(in srgb, var(--cafe-surface-elevated) 88%, black 12%);
   --console-card-bg: color-mix(in srgb, var(--cafe-surface-elevated) 76%, black 24%);
   --console-card-soft-bg: color-mix(in srgb, var(--cafe-surface) 70%, black 30%);
@@ -107,9 +107,9 @@
   --console-field-bg: color-mix(in srgb, var(--cafe-surface-sunken) 92%, white 8%);
   --console-active-bg: color-mix(in srgb, var(--cafe-accent) 26%, var(--console-card-bg) 74%);
   --console-hover-bg: color-mix(in srgb, var(--cafe-crosspost) 14%, var(--console-card-bg) 86%);
-  --console-rail-bg: #14110f;
-  --console-rail-item: #241f1b;
-  --console-rail-active: #302722;
+  --console-rail-bg: #090c12;
+  --console-rail-item: #131720;
+  --console-rail-active: #1a2030;
   --console-runtime-bg: color-mix(in srgb, #10b981 12%, var(--console-card-bg) 88%);
   --console-runtime-field-bg: color-mix(in srgb, #10b981 18%, var(--console-card-bg) 82%);
   --console-runtime-label: #6ee7b7;
@@ -128,7 +128,7 @@
   --console-inspector-bg: color-mix(in srgb, var(--console-panel-bg) 92%, black 8%);
   --console-inspector-gradient: linear-gradient(180deg, #1e1915 0%, #1a1512 50%, #14110f 100%);
   --console-voice-companion: #b89ee0;
-  --console-input-stroke: #c47a5d;
+  --console-input-stroke: #e0547a;
   --console-button-emphasis: #a08977;
   --console-button-emphasis-hover: #b8a495;
   --console-cat-fallback: #6b7280;

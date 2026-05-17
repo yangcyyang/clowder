@@ -4,44 +4,29 @@ import { Children, type ReactNode, useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
+const GENERIC_MENTION_RE = /@[^\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+/g;
 
 function highlightMentions(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIdx = 0;
   let m: RegExpExecArray | null;
 
-  const re = getMentionRe();
-  const toCat = getMentionToCat();
-  const colorMap = getMentionColor();
-
-  re.lastIndex = 0;
-  while ((m = re.exec(text)) !== null) {
+  GENERIC_MENTION_RE.lastIndex = 0;
+  while ((m = GENERIC_MENTION_RE.exec(text)) !== null) {
     if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
-    const catId = toCat[m[1].toLowerCase()] ?? 'opus';
-    const catColor = colorMap[catId] ?? '#9B7EBD';
-    const r = Number.parseInt(catColor.slice(1, 3), 16);
-    const g = Number.parseInt(catColor.slice(3, 5), 16);
-    const b = Number.parseInt(catColor.slice(5, 7), 16);
     parts.push(
       <span
         key={`m${m.index}`}
-        className="font-semibold"
-        style={{
-          color: catColor,
-          backgroundColor: `rgba(${r}, ${g}, ${b}, 0.15)`,
-          borderRadius: 4,
-          padding: '1px 5px',
-        }}
+        className="rounded bg-[var(--cafe-accent)]/15 px-0.5 font-semibold text-[var(--cafe-accent)]"
       >
         {m[0]}
       </span>,
     );
-    lastIdx = re.lastIndex;
+    lastIdx = GENERIC_MENTION_RE.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
   return parts;
@@ -199,9 +184,36 @@ function withMentionsAndLinks(children: ReactNode): ReactNode {
   });
 }
 
+/* ── Slock-like visual emphasis ────────────────────────────── */
+const SECTION_TITLE_RE = /^[\s]*[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳✅✔⓪🔎📋⚠💡🛠]/u;
+
+function getTextPrefix(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => (typeof child === 'string' ? child : ''))
+    .join('')
+    .trimStart();
+}
+
+function isSectionTitle(children: ReactNode): boolean {
+  return SECTION_TITLE_RE.test(getTextPrefix(children));
+}
+
 /* ── Markdown component overrides ──────────────────────────── */
 const mdComponents: Components = {
-  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{withMentionsAndLinks(children)}</p>,
+  p: ({ children }) => {
+    const sectionTitle = isSectionTitle(children);
+    return (
+      <p
+        className={
+          sectionTitle
+            ? 'mb-2 last:mb-0 leading-relaxed rounded bg-[rgba(204,103,67,0.06)] px-1.5 py-0.5'
+            : 'mb-2 last:mb-0 leading-relaxed'
+        }
+      >
+        {withMentionsAndLinks(children)}
+      </p>
+    );
+  },
   strong: ({ children }) => <strong className="font-semibold">{withMentions(children)}</strong>,
   em: ({ children }) => <em>{withMentions(children)}</em>,
   del: ({ children }) => <del className="opacity-60">{withMentions(children)}</del>,
@@ -241,25 +253,43 @@ const mdComponents: Components = {
       {children}
     </blockquote>
   ),
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-[var(--color-cafe-accent)] hover:underline break-all"
-    >
-      {withMentions(children)}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    // Only render as a real link for external URLs (http/https) or vscode:// deep links.
+    // Relative paths (e.g. agent-generated file references) would 404 in Next.js — render
+    // as styled text instead.
+    const isExternal = href?.startsWith('http://') || href?.startsWith('https://') || href?.startsWith('vscode://');
+    if (!isExternal) {
+      return (
+        <span className="text-[var(--color-cafe-accent)] break-all">{withMentions(children)}</span>
+      );
+    }
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[var(--color-cafe-accent)] hover:underline break-all"
+      >
+        {withMentions(children)}
+      </a>
+    );
+  },
   hr: () => <hr className="my-3 border-[var(--console-border-soft)]" />,
 
   /* Code blocks with copy button */
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  code: ({ className, children }) => (
-    <code className={`${className ?? ''} bg-[var(--console-pill-bg)]/50 rounded px-1 py-0.5 text-[0.85em] font-mono`}>
-      {children}
-    </code>
-  ),
+  code: ({ className, children }) => {
+    const isCodeBlock = /language-/.test(className ?? '');
+    if (isCodeBlock) return <code className={className}>{children}</code>;
+
+    return (
+      <code
+        className={`${className ?? ''} rounded border border-[rgba(204,103,67,0.25)] bg-[rgba(204,103,67,0.12)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--cafe-accent)]`}
+      >
+        {children}
+      </code>
+    );
+  },
 
   /* Tables (GFM) */
   table: ({ children }) => (

@@ -7,6 +7,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
+import { MessageContextMenu } from './MessageContextMenu';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
@@ -30,16 +31,30 @@ interface MessageActionsProps {
   message: ChatMessage;
   threadId: string;
   children: React.ReactNode;
+  onOpenThread?: (messageId: string) => void;
+  onPinMessage?: (message: ChatMessage) => void;
+  onEditMessage?: (message: ChatMessage) => void;
 }
 
-export function MessageActions({ message, threadId, children }: MessageActionsProps) {
+export function MessageActions({
+  message,
+  threadId,
+  children,
+  onOpenThread,
+  onPinMessage,
+  onEditMessage,
+}: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
+  const canInlineEdit = isUser && !message.contentBlocks?.length && !!onEditMessage;
   const canAct = (isUser || isAssistant) && !message.isStreaming;
-  const toolbarPositionClass = isUser ? 'top-8' : 'top-1';
+  // Toolbar floats just above the message row so it never overlaps content.
+  // Using bottom-full anchors the toolbar's bottom edge to the container top.
+  const toolbarPositionClass = 'bottom-full mb-0.5';
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
@@ -56,8 +71,53 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
   const handleEdit = useCallback(() => {
     setDialog({ type: 'edit', editedContent: message.content });
   }, [message.content]);
+  const handleInlineEdit = useCallback(() => {
+    onEditMessage?.(message);
+  }, [message, onEditMessage]);
 
   const handleBranchDirect = useCallback(() => setDialog({ type: 'branch-direct' }), []);
+  const handleReply = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('chat:set-reply', { detail: { messageId: message.id } }));
+    useToastStore.getState().addToast({
+      type: 'info',
+      title: '已设置引用回复',
+      message: '引用回复接入会在后续任务完善',
+      duration: 1600,
+    });
+  }, [message.id]);
+
+  const handleSavePlaceholder = useCallback(() => {
+    useToastStore.getState().addToast({
+      type: 'success',
+      title: '已收藏',
+      message: 'Inbox 聚合会在后续任务接入',
+      duration: 1800,
+    });
+  }, []);
+
+  const handlePin = useCallback(() => {
+    onPinMessage?.(message);
+    useToastStore.getState().addToast({
+      type: 'success',
+      title: '已固定消息',
+      message: 'Pin 持久化会在后续后端任务接入',
+      duration: 1600,
+    });
+  }, [message, onPinMessage]);
+
+  const handleSharePlaceholder = useCallback(() => {
+    useToastStore.getState().addToast({
+      type: 'info',
+      title: '功能开发中',
+      message: 'Share messages 将在后续版本接入',
+      duration: 1800,
+    });
+  }, []);
+
+  const handleOpenMoreMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setCtxMenu({ x: rect.left, y: rect.bottom + 6 });
+  }, []);
 
   const confirmSoftDelete = useCallback(async () => {
     setDialog({ type: 'none' });
@@ -158,13 +218,74 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 
   return (
-    <div className="group relative">
+    <div
+      className="group relative"
+      onContextMenu={(event) => {
+        if (!canAct) return;
+        event.preventDefault();
+        setCtxMenu({ x: event.clientX, y: event.clientY });
+      }}
+    >
       {children}
 
       {canAct && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-[var(--console-border-soft)] px-1 py-0.5`}
+          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm px-1 py-0.5`}
         >
+          <button
+            type="button"
+            onClick={handleReply}
+            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            title="引用回复"
+          >
+            Reply
+          </button>
+          {canInlineEdit && (
+            <button
+              type="button"
+              onClick={handleInlineEdit}
+              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              title="编辑消息"
+            >
+              Edit
+            </button>
+          )}
+          {onOpenThread && (
+            <button
+              type="button"
+              onClick={() => onOpenThread(message.id)}
+              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              title="在 Thread 面板中查看"
+            >
+              Thread
+            </button>
+          )}
+          {onPinMessage && (
+            <button
+              type="button"
+              onClick={handlePin}
+              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              title="固定消息"
+            >
+              Pin
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleSavePlaceholder}
+            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            title="收藏消息"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenMoreMenu}
+            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            title="更多操作"
+          >
+            More
+          </button>
           <button
             onClick={handleSoftDelete}
             className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
@@ -219,6 +340,18 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
             </svg>
           </button>
         </div>
+      )}
+      {ctxMenu && (
+        <MessageContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          messageId={message.id}
+          content={message.content}
+          onClose={() => setCtxMenu(null)}
+          onSave={handleSavePlaceholder}
+          onConvertToTask={handleBranchDirect}
+          onShare={handleSharePlaceholder}
+        />
       )}
 
       {/* Soft delete confirmation */}

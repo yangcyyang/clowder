@@ -76,6 +76,8 @@ export class RedisTaskStore implements ITaskStore {
       updatedAt: now,
       automationState: input.automationState,
       userId: input.userId,
+      sourceMessageId: input.sourceMessageId,
+      sourceSummaryId: input.sourceSummaryId,
     };
 
     await this.writeTask(task);
@@ -131,6 +133,8 @@ export class RedisTaskStore implements ITaskStore {
         updatedAt: now,
         automationState: input.automationState,
         userId: input.userId,
+        sourceMessageId: input.sourceMessageId,
+        sourceSummaryId: input.sourceSummaryId,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -184,6 +188,8 @@ export class RedisTaskStore implements ITaskStore {
         updatedAt: now,
         automationState: input.automationState,
         userId: input.userId,
+        sourceMessageId: input.sourceMessageId,
+        sourceSummaryId: input.sourceSummaryId,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -205,6 +211,8 @@ export class RedisTaskStore implements ITaskStore {
       why: input.why,
       userId: input.userId ?? existing.userId,
       automationState: input.automationState ?? existing.automationState,
+      sourceMessageId: input.sourceMessageId ?? existing.sourceMessageId,
+      sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
       updatedAt: now,
     };
 
@@ -476,6 +484,8 @@ export class RedisTaskStore implements ITaskStore {
       createdAt: String(task.createdAt),
       updatedAt: String(task.updatedAt),
       userId: task.userId ?? '',
+      sourceMessageId: task.sourceMessageId ?? '',
+      sourceSummaryId: task.sourceSummaryId ?? '',
     };
     if (task.automationState) {
       out.automationState = JSON.stringify(task.automationState);
@@ -497,6 +507,8 @@ export class RedisTaskStore implements ITaskStore {
       createdAt: parseInt(data.createdAt ?? '0', 10),
       updatedAt: parseInt(data.updatedAt ?? '0', 10),
       userId: data.userId || undefined,
+      sourceMessageId: data.sourceMessageId || undefined,
+      sourceSummaryId: data.sourceSummaryId || undefined,
     };
     if (data.automationState) {
       try {

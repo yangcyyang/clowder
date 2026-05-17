@@ -1,32 +1,38 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
+import type { CatStatusType } from '@/stores/chat-types';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
 
-import { BootcampListModal } from '../BootcampListModal';
-import { BootcampIcon } from '../icons/BootcampIcon';
-import { readProjectNames, writeProjectNames } from './active-workspace';
+import { CatAvatar } from '../CatAvatar';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
-import { SectionGroup } from './SectionGroup';
-import { ThreadItem } from './ThreadItem';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import {
+  formatRelativeTime,
   getProjectPaths,
   mergeLiveActivityIntoThreads,
-  projectDisplayName,
   sortAndGroupThreadsWithWorkspace,
+  type ThreadGroup,
 } from './thread-utils';
-import { createToggleWithReconcile } from './toggle-with-reconcile';
-import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
 
 interface ThreadSidebarProps {
   onClose?: () => void;
   className?: string;
+}
+
+interface MessageSearchResult {
+  id: string;
+  threadId: string;
+  content: string;
+  timestamp: number;
+  catId: string | null;
+  type: 'user' | 'assistant' | 'connector' | 'system';
 }
 
 function notifyThreadCreateFailure(message: string) {
@@ -38,6 +44,18 @@ function notifyThreadCreateFailure(message: string) {
   });
 }
 
+function getThreadDisplayTitle(thread: Pick<Thread, 'id' | 'title'> | undefined, fallbackThreadId: string): string {
+  if (thread?.title) return thread.title;
+  if (thread?.id === 'default' || fallbackThreadId === 'default') return '大厅';
+  return '未命名对话';
+}
+
+function formatMessageExcerpt(content: string): string {
+  const singleLine = content.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= 60) return singleLine;
+  return `${singleLine.slice(0, 60)}...`;
+}
+
 export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
@@ -46,60 +64,27 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     setCurrentProject,
     isLoadingThreads,
     setLoadingThreads,
-    updateThreadTitle,
     getThreadState,
     threadStates,
+    catStatuses,
   } = useChatStore();
+  const { cats } = useCatData();
   const [isCreating, setIsCreating] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [showBootcampList, setShowBootcampList] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [messageSearchResults, setMessageSearchResults] = useState<MessageSearchResult[]>([]);
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
   const [bindWarning, setBindWarning] = useState<string | null>(null);
-  // I-1: Thread to confirm deletion (null = no dialog)
-  const [deleteTarget, setDeleteTarget] = useState<Thread | null>(null);
   // F095 Phase D: Trash bin state
   const [showTrash, setShowTrash] = useState(false);
   const [trashedThreads, setTrashedThreads] = useState<Thread[]>([]);
   const [isLoadingTrash, setIsLoadingTrash] = useState(false);
-  // F070: governance health by project path
-  const [govHealth, setGovHealth] = useState<Record<string, string>>({});
 
   // F095 Phase E: scroll anchor for reorder stability
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // F095 Phase F: custom project display names
-  const [projectNames, setProjectNames] = useState(() =>
-    readProjectNames(typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem: () => {} }),
-  );
-
-  // Shared seq maps — created once, cross-referenced between pin/fav toggle instances
-  const pinSeqMap = useRef(new Map<string, number>());
-  const favSeqMap = useRef(new Map<string, number>());
-
-  // Stable toggle-with-reconcile instances (lazy-init in ref, survive re-renders)
-  const pinToggle = useRef<ReturnType<typeof createToggleWithReconcile>>();
-  const favToggle = useRef<ReturnType<typeof createToggleWithReconcile>>();
-  if (!pinToggle.current) {
-    pinToggle.current = createToggleWithReconcile({
-      fetch: apiFetch,
-      onUpdate: (id, val) => useChatStore.getState().updateThreadPin(id, val),
-      field: 'pinned',
-      seqMap: pinSeqMap.current,
-      siblingSeqMap: favSeqMap.current,
-      onUpdateSibling: (id, val) => useChatStore.getState().updateThreadFavorite(id, val),
-      siblingField: 'favorited',
-    });
-  }
-  if (!favToggle.current) {
-    favToggle.current = createToggleWithReconcile({
-      fetch: apiFetch,
-      onUpdate: (id, val) => useChatStore.getState().updateThreadFavorite(id, val),
-      field: 'favorited',
-      seqMap: favSeqMap.current,
-      siblingSeqMap: pinSeqMap.current,
-      onUpdateSibling: (id, val) => useChatStore.getState().updateThreadPin(id, val),
-      siblingField: 'pinned',
-    });
-  }
 
   const loadThreads = useCallback(async () => {
     setLoadingThreads(true);
@@ -148,24 +133,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, [loadThreads]);
-
-  // F070: Fetch governance health for all registered external projects
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiFetch('/api/governance/health');
-        if (!res.ok) return;
-        const data = (await res.json()) as { projects: { projectPath: string; status: string }[] };
-        const map: Record<string, string> = {};
-        for (const p of data.projects) {
-          map[p.projectPath] = p.status;
-        }
-        setGovHealth(map);
-      } catch {
-        // Best effort
-      }
-    })();
-  }, []);
 
   const navigateToThread = useCallback((threadId: string) => {
     pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
@@ -269,76 +236,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     [loadThreads, loadTrash],
   );
 
-  // I-1: Show confirmation dialog instead of deleting immediately
-  const handleDeleteRequest = useCallback(
-    (threadId: string) => {
-      const thread = threads.find((t) => t.id === threadId);
-      if (thread) setDeleteTarget(thread);
-    },
-    [threads],
-  );
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget) return;
-    const threadId = deleteTarget.id;
-    const isSystem = !!deleteTarget.connectorHubState;
-    setDeleteTarget(null);
-    try {
-      // P1-2: System threads require ?force=true (backend enforced)
-      const url = isSystem ? `/api/threads/${threadId}?force=true` : `/api/threads/${threadId}`;
-      const res = await apiFetch(url, { method: 'DELETE' });
-      if (!res.ok && res.status !== 204) return;
-      if (threadId === currentThreadId) {
-        navigateToThread('default');
-      }
-      await loadThreads();
-      // F095 Phase D: Refresh trash bin if visible
-      if (showTrash) void loadTrash();
-    } catch {
-      // Silently ignore
-    }
-  }, [deleteTarget, currentThreadId, navigateToThread, loadThreads, showTrash, loadTrash]);
-
-  const handleRename = useCallback(
-    async (threadId: string, title: string) => {
-      const nextTitle = title.trim();
-      if (!nextTitle) return;
-      try {
-        const res = await apiFetch(`/api/threads/${threadId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: nextTitle }),
-        });
-        if (!res.ok) return;
-        const updated = await res.json();
-        updateThreadTitle(threadId, updated.title ?? nextTitle);
-      } catch {
-        // Silently ignore
-      }
-    },
-    [updateThreadTitle],
-  );
-
-  const handleTogglePin = useCallback(
-    (threadId: string, pinned: boolean) => void pinToggle.current?.toggle(threadId, pinned),
-    [],
-  );
-
-  const handleToggleFavorite = useCallback(
-    (threadId: string, favorited: boolean) => void favToggle.current?.toggle(threadId, favorited),
-    [],
-  );
-
-  const handleUpdatePreferredCats = useCallback(async (threadId: string, cats: string[]) => {
-    const res = await apiFetch(`/api/threads/${threadId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preferredCats: cats }),
-    });
-    if (!res.ok) throw new Error('保存失败');
-    useChatStore.getState().updateThreadPreferredCats(threadId, cats);
-  }, []);
-
   const handleSelect = useCallback(
     (threadId: string) => {
       // Always clear unread badge — user clicking the thread = "I've seen it"
@@ -355,56 +252,54 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     [currentThreadId, navigateToThread, onClose],
   );
 
-  // F095 Phase F: Project action handlers
-  const handleOpenInFinder = useCallback(async (path: string) => {
-    await apiFetch('/api/workspace/reveal-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectPath: path }),
-    });
-  }, []);
-
-  const handleRenameProject = useCallback((path: string, name: string) => {
-    setProjectNames((prev) => {
-      const next = new Map(prev);
-      // If name matches default, remove override
-      if (name === projectDisplayName(path)) {
-        next.delete(path);
-      } else {
-        next.set(path, name);
-      }
-      writeProjectNames(next, localStorage);
-      return next;
-    });
-  }, []);
-
-  const handleArchiveThreads = useCallback(
-    async (path: string) => {
-      // P1-1: Exclude system threads (connectorHubState) — they have separate delete protection
-      const targets = threads.filter((t) => t.projectPath === path && t.id !== 'default' && !t.connectorHubState);
-      await Promise.allSettled(targets.map((t) => apiFetch(`/api/threads/${t.id}`, { method: 'DELETE' })));
-      // P2-1: If current thread was archived, redirect to default
-      if (currentThreadId && targets.some((t) => t.id === currentThreadId)) {
-        navigateToThread('default');
-      }
-      await loadThreads();
-      if (showTrash) void loadTrash();
-    },
-    [threads, loadThreads, currentThreadId, navigateToThread, showTrash, loadTrash],
-  );
-
-  const handleQuickCreate = useCallback(
-    (path: string) => {
-      void createInProject({ projectPath: path });
-    },
-    [createInProject],
-  );
-
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
+  const threadTitleById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const thread of liveThreads) {
+      map.set(thread.id, getThreadDisplayTitle(thread, thread.id));
+    }
+    map.set('default', '大厅');
+    return map;
+  }, [liveThreads]);
+  const unreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const thread of threads) {
+      const ts = threadStates[thread.id];
+      if (ts && ts.unreadCount > 0) {
+        ids.add(thread.id);
+      }
+    }
+    return ids;
+  }, [threads, threadStates]);
+  const unreadTotal = useMemo(() => {
+    let total = 0;
+    for (const thread of threads) {
+      total += threadStates[thread.id]?.unreadCount ?? 0;
+    }
+    return total;
+  }, [threads, threadStates]);
+  const savedTotal = useMemo(() => threads.filter((thread) => thread.favorited && thread.id !== 'default').length, [threads]);
   const filteredThreads = useMemo(() => {
-    if (!normalizedQuery) return liveThreads;
     return liveThreads.filter((thread) => {
+      if (showUnreadOnly && !unreadIds.has(thread.id)) {
+        return false;
+      }
+      if (showSavedOnly && (!thread.favorited || thread.id === 'default')) {
+        return false;
+      }
+
+      if (!normalizedQuery) {
+        return true;
+      }
+
       const title = (thread.title ?? '').toLowerCase();
       const fallback = (thread.id === 'default' ? '大厅' : '未命名对话').toLowerCase();
       const project = (thread.projectPath ?? '').toLowerCase();
@@ -416,18 +311,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         threadId.includes(normalizedQuery)
       );
     });
-  }, [liveThreads, normalizedQuery]);
-
-  const unreadIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const thread of threads) {
-      const ts = threadStates[thread.id];
-      if (ts && ts.unreadCount > 0) {
-        ids.add(thread.id);
-      }
-    }
-    return ids;
-  }, [threads, threadStates]);
+  }, [liveThreads, normalizedQuery, showSavedOnly, showUnreadOnly, unreadIds]);
 
   // F072: Mark all threads as read
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -446,24 +330,132 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, []);
 
   // F095 Phase B: Active workspace grouping
-  const { pinnedProjects, toggleProjectPin } = useProjectPins();
+  const { pinnedProjects } = useProjectPins();
   const threadGroups = useMemo(
     () => sortAndGroupThreadsWithWorkspace(filteredThreads, unreadIds, pinnedProjects),
     [filteredThreads, unreadIds, pinnedProjects],
   );
+  const flatChannelThreads = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Thread[] = [];
+    const collect = (group: ThreadGroup) => {
+      for (const thread of group.threads) {
+        if (thread.id === 'default' || seen.has(thread.id)) continue;
+        seen.add(thread.id);
+        result.push(thread);
+      }
+      group.archivedGroups?.forEach(collect);
+    };
+    threadGroups.forEach(collect);
+    return result;
+  }, [threadGroups]);
+
+  useEffect(() => {
+    const query = debouncedSearchQuery.trim();
+    if (!query) {
+      setMessageSearchResults([]);
+      setIsSearchingMessages(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingMessages(true);
+    apiFetch(`/api/messages/search?q=${encodeURIComponent(query)}&limit=20`)
+      .then(async (res) => {
+        if (!res.ok) return { messages: [] };
+        return (await res.json()) as { messages?: MessageSearchResult[] };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setMessageSearchResults(data.messages ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMessageSearchResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsSearchingMessages(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearchQuery]);
+
+  const catStatusMap = useMemo(() => {
+    const streamingStatuses = new Set<CatStatusType>(['spawning', 'pending', 'streaming']);
+    const onlineStatuses = new Set<CatStatusType>(['alive_but_silent', 'suspected_stall']);
+    const map = new Map<string, 'streaming' | 'online'>();
+    const collect = (statuses?: Record<string, CatStatusType>) => {
+      for (const [catId, status] of Object.entries(statuses ?? {})) {
+        if (streamingStatuses.has(status)) {
+          map.set(catId, 'streaming');
+        } else if (onlineStatuses.has(status) && map.get(catId) !== 'streaming') {
+          map.set(catId, 'online');
+        }
+      }
+    };
+
+    collect(catStatuses);
+    for (const state of Object.values(threadStates)) {
+      collect(state.catStatuses);
+    }
+    return map;
+  }, [catStatuses, threadStates]);
   const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
-  const showDefaultThread = normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery);
+  const showDefaultThread =
+    !showUnreadOnly && !showSavedOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
 
-  // F095: Collapse state with localStorage persistence + search/active auto-expand
-  const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({
-    threadGroups,
-    searchQuery: normalizedQuery,
-    currentThreadId,
-  });
-  const bootcampCount = useMemo(() => threads.filter((thread) => thread.bootcampState).length, [threads]);
+  const renderChannelRow = (thread: Pick<Thread, 'id' | 'title' | 'lastActiveAt'>) => {
+    const threadState = getThreadState(thread.id);
+    const unreadCount = threadState?.unreadCount ?? 0;
+    const isActive = currentThreadId === thread.id;
+    return (
+      <button
+        key={thread.id}
+        type="button"
+        data-thread-id={thread.id}
+        onClick={() => handleSelect(thread.id)}
+        className={`group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md px-3 text-left text-sm transition-colors ${
+          isActive
+            ? 'bg-[var(--console-active-bg)] text-cafe-text'
+            : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+        }`}
+        title={thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
+      >
+        <span className={`min-w-0 flex-1 truncate ${isActive ? 'font-semibold' : ''}`}>
+          {thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
+        </span>
+        {unreadCount > 0 ? (
+          <span className="rounded-full bg-[var(--cafe-accent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--cafe-accent-foreground)]">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        ) : (
+          <span className="text-[10px] text-cafe-muted opacity-0 transition-opacity group-hover:opacity-100">
+            {formatRelativeTime(thread.lastActiveAt, true)}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const renderMessageSearchResult = (message: MessageSearchResult) => {
+    const threadTitle = threadTitleById.get(message.threadId) ?? getThreadDisplayTitle(undefined, message.threadId);
+    return (
+      <button
+        key={message.id}
+        type="button"
+        onClick={() => handleSelect(message.threadId)}
+        className="mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
+        title={message.content}
+      >
+        <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-cafe-muted">{threadTitle}</span>
+        <span className="line-clamp-2 text-xs leading-4 text-cafe-secondary">{formatMessageExcerpt(message.content)}</span>
+      </button>
+    );
+  };
 
   return (
     <>
@@ -474,17 +466,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         <div className="p-3 flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setShowBootcampList(true)}
-              className="relative flex h-8 w-8 items-center justify-center rounded-lg text-conn-amber-text transition-colors hover:bg-conn-amber-bg/60"
-              data-testid="sidebar-bootcamp"
-              data-guide-id="sidebar.bootcamp"
-              title={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
-              aria-label={bootcampCount > 0 ? `我的训练营（${bootcampCount}）` : '开始训练营'}
-            >
-              <BootcampIcon className="h-4 w-4" />
-            </button>
             <button
               type="button"
               onClick={() => setShowPicker(true)}
@@ -521,191 +502,164 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           )}
         </div>
 
+        {/* Slock-style quick nav */}
+        <div className="space-y-0.5 px-2 py-1">
+          <button
+            type="button"
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${
+              showUnreadOnly
+                ? 'bg-[var(--console-active-bg)] text-cafe-text'
+                : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+            }`}
+            onClick={() => {
+              setShowSavedOnly(false);
+              setShowUnreadOnly((value) => !value);
+            }}
+            aria-pressed={showUnreadOnly}
+          >
+            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M3 4a2 2 0 012-2h10a2 2 0 012 2v10.5A2.5 2.5 0 0114.5 17h-9A2.5 2.5 0 013 14.5V4zm2 0v6h2.5a1 1 0 01.8.4l.9 1.2a1 1 0 00.8.4h2a1 1 0 00.8-.4l.9-1.2a1 1 0 01.8-.4H15V4H5z" />
+            </svg>
+            <span className="min-w-0 flex-1 text-left">Inbox</span>
+            {unreadTotal > 0 && (
+              <span className="rounded-full bg-[var(--cafe-accent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--cafe-accent-foreground)]">
+                {unreadTotal > 99 ? '99+' : unreadTotal}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${
+              showSavedOnly
+                ? 'bg-[var(--console-active-bg)] text-cafe-text'
+                : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+            }`}
+            onClick={() => {
+              setShowUnreadOnly(false);
+              setShowSavedOnly((value) => !value);
+            }}
+            aria-pressed={showSavedOnly}
+          >
+            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.956a1 1 0 00.95.69h4.16c.969 0 1.371 1.24.588 1.81l-3.366 2.445a1 1 0 00-.364 1.118l1.286 3.956c.3.921-.755 1.688-1.538 1.118l-3.366-2.445a1 1 0 00-1.176 0L6.045 18.02c-.783.57-1.838-.197-1.538-1.118l1.286-3.956a1 1 0 00-.364-1.118L2.063 9.383c-.783-.57-.38-1.81.588-1.81h4.16a1 1 0 00.95-.69l1.288-3.956z" />
+            </svg>
+            <span className="min-w-0 flex-1 text-left">Saved</span>
+            {savedTotal > 0 && (
+              <span className="rounded-full bg-[var(--console-rail-active)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cafe-secondary">
+                {savedTotal > 99 ? '99+' : savedTotal}
+              </span>
+            )}
+          </button>
+        </div>
+
         <div ref={scrollContainerRef} onScroll={handleScrollAnchor} className="flex-1 overflow-y-auto">
           {isLoadingThreads && threads.length === 0 && (
             <div className="text-center py-4 text-xs text-cafe-muted">加载中...</div>
           )}
 
-          {showDefaultThread && (
-            <ThreadItem
-              id="default"
-              title="大厅"
-              participants={[]}
-              lastActiveAt={Date.now()}
-              isActive={currentThreadId === 'default'}
-              onSelect={handleSelect}
-              threadState={getThreadState('default')}
-            />
-          )}
+          <div className="mt-2 border-t border-[var(--console-border-soft)] pt-2">
+            <div className="px-3 pb-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">CHANNEL</span>
+                <button
+                  type="button"
+                  onClick={() => setShowPicker(true)}
+                  className="flex h-5 w-5 items-center justify-center rounded-md text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text"
+                  aria-label="新增频道"
+                  title="新增频道"
+                >
+                  +
+                </button>
+              </div>
+            </div>
 
-          {threadGroups.length > 0 && (
-            <div className="flex items-center justify-end px-3 pt-1.5">
-              <button
-                type="button"
-                onClick={expandAll}
-                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
-                data-testid="expand-all-btn"
-              >
-                全部展开
-              </button>
-              <span className="text-[10px] text-cafe-muted mx-1">/</span>
-              <button
-                type="button"
-                onClick={collapseAll}
-                className="text-[10px] text-cafe-muted hover:text-cafe-accent transition-colors"
-                data-testid="collapse-all-btn"
-              >
-                全部折叠
-              </button>
+            {showDefaultThread && (
+              renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })
+            )}
+
+            {flatChannelThreads.map(renderChannelRow)}
+          </div>
+
+          {normalizedQuery.length > 0 && (
+            <div className="mt-3 border-t border-[var(--console-border-soft)] pt-2">
+              <div className="px-3 pb-1">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
+                  MESSAGES
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {isSearchingMessages ? (
+                  <div className="px-5 py-2 text-xs text-cafe-muted">搜索消息中...</div>
+                ) : messageSearchResults.length > 0 ? (
+                  messageSearchResults.map(renderMessageSearchResult)
+                ) : (
+                  <div className="px-5 py-2 text-xs text-cafe-muted">没有匹配的消息</div>
+                )}
+              </div>
             </div>
           )}
 
-          {threadGroups.map((group) => {
-            const groupKey = group.projectPath ?? group.type;
-            const icon =
-              group.type === 'pinned'
-                ? ('pin' as const)
-                : group.type === 'favorites'
-                  ? ('star' as const)
-                  : group.type === 'recent'
-                    ? ('clock' as const)
-                    : group.type === 'system'
-                      ? ('system' as const)
-                      : undefined;
-
-            // Archived container: render nested project groups
-            if (group.type === 'archived-container') {
-              return (
-                <SectionGroup
-                  key="archived-container"
-                  label={group.label}
-                  icon="archive"
-                  count={group.archivedGroups?.length ?? 0}
-                  isCollapsed={isCollapsed('archived-container')}
-                  onToggle={() => toggleGroup('archived-container')}
-                >
-                  {group.archivedGroups?.map((sub) => {
-                    const subKey = sub.projectPath ?? sub.type;
-                    return (
-                      <SectionGroup
-                        key={subKey}
-                        label={sub.projectPath ? (projectNames.get(sub.projectPath) ?? sub.label) : sub.label}
-                        count={sub.threads.length}
-                        isCollapsed={isCollapsed(subKey)}
-                        onToggle={() => toggleGroup(subKey)}
-                        projectPath={sub.projectPath}
-                        governanceStatus={sub.projectPath ? govHealth[sub.projectPath] : undefined}
-                        onToggleProjectPin={sub.projectPath ? () => toggleProjectPin(sub.projectPath!) : undefined}
-                        isProjectPinned={sub.projectPath ? pinnedProjects.has(sub.projectPath) : undefined}
-                        onQuickCreate={sub.projectPath ? () => handleQuickCreate(sub.projectPath!) : undefined}
-                        onOpenInFinder={
-                          sub.projectPath && sub.projectPath !== 'default'
-                            ? () => handleOpenInFinder(sub.projectPath!)
-                            : undefined
+          <div className="mt-3 border-t border-[var(--console-border-soft)] pt-2">
+            <div className="px-3 pb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
+                DIRECT MESSAGES
+              </span>
+            </div>
+            <div className="space-y-0.5 px-2">
+              {cats.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-cafe-muted">暂无 Agent</div>
+              ) : (
+                cats.map((cat) => {
+                  const status = catStatusMap.get(cat.id) ?? 'online';
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        const existing = liveThreads.find(
+                          (thread) =>
+                            thread.preferredCats?.length === 1 &&
+                            thread.preferredCats[0] === cat.id &&
+                            !thread.deletedAt,
+                        );
+                        if (existing) {
+                          navigateToThread(existing.id);
+                          return;
                         }
-                        onRenameProject={
-                          sub.projectPath ? (name: string) => handleRenameProject(sub.projectPath!, name) : undefined
-                        }
-                        onArchiveThreads={sub.projectPath ? () => handleArchiveThreads(sub.projectPath!) : undefined}
-                      >
-                        {sub.threads.map((t) => (
-                          <ThreadItem
-                            key={t.id}
-                            id={t.id}
-                            title={t.title}
-                            participants={t.participants}
-                            lastActiveAt={t.lastActiveAt}
-                            isActive={currentThreadId === t.id}
-                            onSelect={handleSelect}
-                            onDelete={handleDeleteRequest}
-                            onRename={handleRename}
-                            onTogglePin={handleTogglePin}
-                            onToggleFavorite={handleToggleFavorite}
-                            onUpdatePreferredCats={handleUpdatePreferredCats}
-                            isPinned={t.pinned}
-                            isFavorited={t.favorited}
-                            threadState={getThreadState(t.id)}
-                            indented
-                            preferredCats={t.preferredCats}
-                            isHubThread={!!t.connectorHubState}
-                          />
-                        ))}
-                      </SectionGroup>
-                    );
-                  })}
-                </SectionGroup>
-              );
-            }
+                        void createInProject({ title: formatCatName(cat), preferredCats: [cat.id] });
+                      }}
+                      disabled={isCreating}
+                      className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text disabled:opacity-40"
+                      title={`打开与 ${formatCatName(cat)} 的私信`}
+                    >
+                      <span className="relative flex-shrink-0">
+                        <CatAvatar catId={cat.id} size={24} />
+                        <span
+                          aria-label={status === 'streaming' ? '工作中' : '在线空闲'}
+                          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--console-panel-bg)]"
+                          style={{
+                            backgroundColor:
+                              status === 'streaming'
+                                ? '#eab308'
+                                : 'var(--console-status-connected)',
+                          }}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{formatCatName(cat)}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-            return (
-              <SectionGroup
-                key={groupKey}
-                label={group.projectPath ? (projectNames.get(group.projectPath) ?? group.label) : group.label}
-                icon={icon}
-                count={group.threads.length}
-                isCollapsed={isCollapsed(groupKey)}
-                onToggle={() => toggleGroup(groupKey)}
-                projectPath={group.projectPath}
-                governanceStatus={group.projectPath ? govHealth[group.projectPath] : undefined}
-                onToggleProjectPin={
-                  group.type === 'project' && group.projectPath ? () => toggleProjectPin(group.projectPath!) : undefined
-                }
-                isProjectPinned={
-                  group.type === 'project' && group.projectPath ? pinnedProjects.has(group.projectPath) : undefined
-                }
-                onQuickCreate={
-                  group.type === 'project' && group.projectPath
-                    ? () => handleQuickCreate(group.projectPath!)
-                    : undefined
-                }
-                // Note: system/pinned/recent/favorites groups get undefined for all project actions
-                // because group.type !== 'project'. This is intentional — only project sections
-                // should have Open in Finder / Rename / Archive / Quick Create.
-                onOpenInFinder={
-                  group.type === 'project' && group.projectPath && group.projectPath !== 'default'
-                    ? () => handleOpenInFinder(group.projectPath!)
-                    : undefined
-                }
-                onRenameProject={
-                  group.type === 'project' && group.projectPath
-                    ? (name: string) => handleRenameProject(group.projectPath!, name)
-                    : undefined
-                }
-                onArchiveThreads={
-                  group.type === 'project' && group.projectPath
-                    ? () => handleArchiveThreads(group.projectPath!)
-                    : undefined
-                }
-              >
-                {group.threads.map((t) => (
-                  <ThreadItem
-                    key={t.id}
-                    id={t.id}
-                    title={t.title}
-                    participants={t.participants}
-                    lastActiveAt={t.lastActiveAt}
-                    isActive={currentThreadId === t.id}
-                    onSelect={handleSelect}
-                    onDelete={handleDeleteRequest}
-                    onRename={handleRename}
-                    onTogglePin={handleTogglePin}
-                    onToggleFavorite={handleToggleFavorite}
-                    onUpdatePreferredCats={handleUpdatePreferredCats}
-                    isPinned={t.pinned}
-                    isFavorited={t.favorited}
-                    threadState={getThreadState(t.id)}
-                    indented={group.type === 'project'}
-                    preferredCats={t.preferredCats}
-                    isHubThread={!!t.connectorHubState}
-                  />
-                ))}
-              </SectionGroup>
-            );
-          })}
-
-          {normalizedQuery.length > 0 && threadGroups.length === 0 && !showDefaultThread && (
-            <div className="px-3 py-4 text-xs text-cafe-muted">没有匹配的对话</div>
-          )}
+          {(normalizedQuery.length > 0 || showUnreadOnly || showSavedOnly) &&
+            threadGroups.length === 0 &&
+            !showDefaultThread && (
+              <div className="px-3 py-4 text-xs text-cafe-muted">
+                {showUnreadOnly ? '暂无未读对话' : showSavedOnly ? '暂无收藏对话' : '没有匹配的对话'}
+              </div>
+            )}
         </div>
 
         {/* F095 Phase D: Trash bin section — styled as Pencil Sidebar Utility Row */}
@@ -772,100 +726,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           onCancel={() => setShowPicker(false)}
         />
       )}
-      <BootcampListModal
-        open={showBootcampList}
-        onClose={() => setShowBootcampList(false)}
-        currentThreadId={currentThreadId}
-      />
-
-      {/* I-1: Delete confirmation dialog (F095-G: typed confirmation for system threads) */}
-      {deleteTarget && (
-        <DeleteConfirmDialog
-          thread={deleteTarget}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={handleDeleteConfirm}
-        />
-      )}
     </>
-  );
-}
-
-/**
- * F095 Phase G: Delete confirmation dialog.
- * System threads (IM Hub) require typed confirmation (like GitHub repo deletion).
- * Regular threads show a simple confirm/cancel.
- */
-function DeleteConfirmDialog({
-  thread,
-  onCancel,
-  onConfirm,
-}: {
-  thread: Thread;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const isSystem = !!thread.connectorHubState;
-  const title = thread.title ?? '未命名对话';
-  const [typedName, setTypedName] = useState('');
-  const confirmed = !isSystem || typedName === title;
-  const confirmInputRef = useRef<HTMLInputElement>(null);
-  const confirmBtnRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (isSystem) confirmInputRef.current?.focus();
-    else setTimeout(() => confirmBtnRef.current?.focus(), 50);
-  }, [isSystem]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)]"
-      onClick={onCancel}
-    >
-      <div
-        className="bg-cafe-surface rounded-xl shadow-2xl p-5 max-w-sm w-full mx-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-bold text-cafe mb-2">{isSystem ? '删除系统对话' : '确认删除对话'}</h3>
-        <p className="text-sm text-cafe-secondary mb-1">即将删除「{title}」</p>
-        {isSystem ? (
-          <>
-            <p className="text-xs text-conn-red-text mb-2">
-              这是系统级对话（IM Hub 连接器）。删除可能影响平台消息路由。
-            </p>
-            <p className="text-xs text-cafe-secondary mb-2">请输入对话名称以确认删除：</p>
-            <input
-              ref={confirmInputRef}
-              value={typedName}
-              onChange={(e) => setTypedName(e.target.value)}
-              placeholder={title}
-              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--console-border-soft)] focus:outline-none focus:border-conn-red-ring mb-4"
-            />
-          </>
-        ) : (
-          <p className="text-xs text-cafe-secondary mb-4">
-            对话将移入回收站，30 天后自动清理。你可以随时从回收站恢复。
-          </p>
-        )}
-        <div className="flex gap-2 justify-end">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-lg border border-[var(--console-border-soft)] hover:bg-cafe-surface-elevated transition-colors"
-          >
-            取消
-          </button>
-          <button
-            ref={confirmBtnRef}
-            onClick={onConfirm}
-            disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors focus:outline-none focus:ring-2 ${
-              isSystem
-                ? 'bg-conn-red-text hover:opacity-90 focus:ring-conn-red-ring disabled:opacity-40 disabled:cursor-not-allowed'
-                : 'bg-conn-amber-text hover:opacity-90 focus:ring-conn-amber-ring'
-            }`}
-          >
-            {isSystem ? '确认删除' : '移入回收站'}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

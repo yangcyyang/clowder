@@ -129,6 +129,7 @@ export class RedisMessageStore {
       extra: msg.extra ? serializeExtra(msg.extra) : '',
       mentions: JSON.stringify(msg.mentions),
       timestamp: String(msg.timestamp),
+      ...(msg.editedAt ? { editedAt: String(msg.editedAt) } : {}),
       ...(msg.thinking ? { thinking: msg.thinking } : {}),
       ...(msg.origin ? { origin: msg.origin } : {}),
       ...(msg.visibility ? { visibility: msg.visibility } : {}),
@@ -213,6 +214,7 @@ export class RedisMessageStore {
     const parsedExtra = safeParseExtra(data.extra);
     const parsedSource = safeParseConnectorSource(data.source);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
+    const editedAt = data.editedAt ? parseInt(data.editedAt, 10) : undefined;
     return {
       id: data.id,
       threadId: data.threadId || DEFAULT_THREAD_ID,
@@ -225,6 +227,7 @@ export class RedisMessageStore {
       ...(parsedExtra ? { extra: parsedExtra } : {}),
       mentions: safeParseMentions(data.mentions),
       timestamp: parseInt(data.timestamp ?? '0', 10),
+      ...(editedAt ? { editedAt } : {}),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
@@ -702,6 +705,7 @@ export class RedisMessageStore {
       metadata: '',
       extra: '',
       thinking: '',
+      editedAt: '',
       mentions: '[]',
       deletedAt: String(now),
       deletedBy,
@@ -714,6 +718,7 @@ export class RedisMessageStore {
     delete msg.metadata;
     delete msg.extra;
     delete msg.thinking;
+    delete msg.editedAt;
     msg.deletedAt = now;
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
@@ -761,6 +766,18 @@ export class RedisMessageStore {
     const merged = { ...msg.extra, ...extra };
     await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
     msg.extra = merged;
+    return msg;
+  }
+
+  async updateContent(id: string, content: string, editedAt: number): Promise<StoredMessage | null> {
+    const msg = await this.getById(id);
+    if (!msg) return null;
+    await this.redis.hset(MessageKeys.detail(id), {
+      content,
+      editedAt: String(editedAt),
+    });
+    msg.content = content;
+    msg.editedAt = editedAt;
     return msg;
   }
 
@@ -837,6 +854,7 @@ export class RedisMessageStore {
       const parsedMetadata = safeParseMetadata(d.metadata);
       const parsedExtra = safeParseExtra(d.extra);
       const parsedSource = safeParseConnectorSource(d.source);
+      const editedAt = d.editedAt ? parseInt(d.editedAt, 10) : undefined;
       messages.push({
         id: d.id,
         threadId: d.threadId || DEFAULT_THREAD_ID,
@@ -849,6 +867,7 @@ export class RedisMessageStore {
         ...(parsedExtra ? { extra: parsedExtra } : {}),
         mentions: safeParseMentions(d.mentions),
         timestamp: parseInt(d.timestamp ?? '0', 10),
+        ...(editedAt ? { editedAt } : {}),
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),

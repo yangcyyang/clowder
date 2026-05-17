@@ -507,6 +507,7 @@ export function useChatHistory(threadId: string) {
               systemKind?: 'a2a_routing';
             };
             timestamp: number;
+            editedAt?: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
             visibility?: 'public' | 'whisper';
             whisperTo?: string[];
@@ -531,6 +532,7 @@ export function useChatHistory(threadId: string) {
                       : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
               catId: m.catId,
               content: m.content,
+              ...(m.editedAt ? { editedAt: m.editedAt } : {}),
               ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
               ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
               ...(m.metadata ? { metadata: m.metadata } : {}),

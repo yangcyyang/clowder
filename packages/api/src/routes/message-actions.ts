@@ -8,6 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface MessageActionsRoutesOptions {
@@ -25,6 +26,11 @@ const deleteBodySchema = z.object({
 
 const restoreBodySchema = z.object({
   userId: z.string().min(1).max(100),
+});
+
+const editBodySchema = z.object({
+  userId: z.string().min(1).max(100),
+  content: z.string().trim().min(1).max(20_000),
 });
 
 export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOptions> = async (app, opts) => {
@@ -115,6 +121,57 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       threadId: deleted.threadId,
       deletedAt: deleted.deletedAt,
       deletedBy: deleted.deletedBy,
+    };
+  });
+
+  // PATCH /api/messages/:id — edit a user's own plain-text message in place.
+  app.patch<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
+    const parseResult = editBodySchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parseResult.error.issues };
+    }
+
+    const { id } = request.params;
+    const { userId, content } = parseResult.data;
+    const targetMsg = await opts.messageStore.getById(id);
+
+    if (!targetMsg || targetMsg.deletedAt || targetMsg._tombstone) {
+      reply.status(404);
+      return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
+    }
+
+    if (targetMsg.userId !== userId || targetMsg.catId || isSystemUserMessage(targetMsg) || targetMsg.source) {
+      reply.status(403);
+      return { error: '只能编辑自己发送的普通消息', code: 'UNAUTHORIZED' };
+    }
+
+    if (targetMsg.contentBlocks?.length) {
+      reply.status(400);
+      return { error: '暂不支持编辑带图片或富内容的消息', code: 'UNSUPPORTED_CONTENT_BLOCK_EDIT' };
+    }
+
+    const editedAt = Date.now();
+    const updated = await opts.messageStore.updateContent(id, content, editedAt);
+    if (!updated) {
+      reply.status(500);
+      return { error: '编辑失败', code: 'EDIT_FAILED' };
+    }
+
+    opts.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'message_edited', {
+      messageId: id,
+      threadId: updated.threadId,
+      content: updated.content,
+      editedAt,
+      editedBy: userId,
+    });
+
+    return {
+      id: updated.id,
+      threadId: updated.threadId,
+      content: updated.content,
+      timestamp: updated.timestamp,
+      editedAt,
     };
   });
 

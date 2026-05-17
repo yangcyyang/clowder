@@ -31,8 +31,6 @@ describe('MobileInputToolbar', () => {
   function render(props: Partial<React.ComponentProps<typeof MobileInputToolbar>> = {}) {
     const defaults = {
       onAttach: vi.fn(),
-      onWhisperToggle: vi.fn(),
-      onGameClick: vi.fn(),
       onClose: vi.fn(),
       ...props,
     };
@@ -42,13 +40,13 @@ describe('MobileInputToolbar', () => {
     return defaults;
   }
 
-  it('renders three action buttons', () => {
+  it('renders only the attachment action', () => {
     render();
     const buttons = container.querySelectorAll('button');
-    expect(buttons.length).toBe(3);
+    expect(buttons.length).toBe(1);
     expect(container.textContent).toContain('附件');
-    expect(container.textContent).toContain('悄悄话');
-    expect(container.textContent).toContain('游戏');
+    expect(container.textContent).not.toContain('悄悄话');
+    expect(container.textContent).not.toContain('游戏');
   });
 
   it('calls onAttach + onClose when attach button is clicked', () => {
@@ -61,26 +59,9 @@ describe('MobileInputToolbar', () => {
     expect(fns.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onWhisperToggle + onClose when whisper button is clicked', () => {
-    const fns = render();
-    const whisperBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('悄悄话'));
-    act(() => {
-      whisperBtn?.click();
-    });
-    expect(fns.onWhisperToggle).toHaveBeenCalledTimes(1);
-    expect(fns.onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables buttons when disabled prop is set', () => {
+  it('disables attachment when disabled prop is set', () => {
     render({ disabled: true });
-    const buttons = container.querySelectorAll('button');
-    const whisperBtn = Array.from(buttons).find((b) => b.textContent?.includes('悄悄话'));
-    expect(whisperBtn?.disabled).toBe(true);
-  });
-
-  it('applies whisper-active styling when whisperMode is true', () => {
-    render({ whisperMode: true });
-    const whisperBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('悄悄话'));
-    expect(whisperBtn?.className).toContain('amber');
+    const attachBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('附件'));
+    expect(attachBtn?.disabled).toBe(true);
   });
 });

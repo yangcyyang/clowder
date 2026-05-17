@@ -923,6 +923,7 @@ export interface ChatState {
       contentBlocks?: readonly unknown[];
       extra?: Record<string, unknown>;
       origin?: 'stream' | 'callback' | 'briefing';
+      editedAt?: number;
       replyTo?: string;
       replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
       mentionsUser?: boolean;
@@ -1139,6 +1140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               content: sm.content,
               timestamp: sm.timestamp,
               deliveredAt,
+              ...(sm.editedAt ? { editedAt: sm.editedAt } : {}),
               ...(sm.catId ? { catId: sm.catId } : {}),
               contentBlocks: sm.contentBlocks as ChatMessage['contentBlocks'],
               ...(sm.extra ? { extra: sm.extra as ChatMessage['extra'] } : {}),

@@ -106,6 +106,8 @@ export class TaskStore implements ITaskStore {
       updatedAt: now,
       automationState: input.automationState,
       userId: input.userId,
+      sourceMessageId: input.sourceMessageId,
+      sourceSummaryId: input.sourceSummaryId,
     };
 
     this.tasks.set(task.id, task);
@@ -145,6 +147,8 @@ export class TaskStore implements ITaskStore {
           why: input.why,
           userId: input.userId ?? existing.userId,
           automationState: input.automationState ?? existing.automationState,
+          sourceMessageId: input.sourceMessageId ?? existing.sourceMessageId,
+          sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
           updatedAt: Date.now(),
         };
         this.tasks.set(existingId, updated);

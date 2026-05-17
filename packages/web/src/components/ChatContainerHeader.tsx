@@ -1,6 +1,5 @@
 import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
-import { VoiceCompanionButton } from './VoiceCompanionButton';
 
 interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
@@ -12,8 +11,7 @@ interface ChatContainerHeaderProps {
   onOpenMobileStatus: () => void;
   statusPanelOpen: boolean;
   onToggleStatusPanel: () => void;
-  /** F092: Default cat for voice companion */
-  defaultCatId: string;
+  onOpenChannelSettings: () => void;
 }
 
 export function ChatContainerHeader({
@@ -29,11 +27,11 @@ export function ChatContainerHeader({
   onOpenMobileStatus,
   statusPanelOpen,
   onToggleStatusPanel,
-  defaultCatId,
+  onOpenChannelSettings,
 }: ChatContainerHeaderProps) {
   return (
     <header className="safe-area-top">
-      <div className="h-[54px] px-6 flex items-center gap-2.5">
+      <div className="h-[54px] border-b border-[var(--slock-border-color)] px-6 flex items-center gap-2.5">
         <button
           onClick={onToggleSidebar}
           className="p-1 rounded-md hover:bg-[var(--console-hover-bg)] transition-colors md:hidden"
@@ -52,7 +50,21 @@ export function ChatContainerHeader({
           <ThreadIndicator threadId={threadId} />
         </div>
         <ExportButton threadId={threadId} />
-        <VoiceCompanionButton threadId={threadId} defaultCatId={defaultCatId} />
+        <button
+          type="button"
+          onClick={onOpenChannelSettings}
+          className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1"
+          title="频道设置"
+          aria-label="频道设置"
+        >
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              d="M11.49 3.17a1.5 1.5 0 00-2.98 0l-.08.55a6.95 6.95 0 00-1.4.58l-.45-.33a1.5 1.5 0 00-2.11 2.11l.33.45c-.24.45-.44.92-.58 1.4l-.55.08a1.5 1.5 0 000 2.98l.55.08c.14.49.34.96.58 1.4l-.33.45a1.5 1.5 0 002.11 2.11l.45-.33c.45.24.92.44 1.4.58l.08.55a1.5 1.5 0 002.98 0l.08-.55c.49-.14.96-.34 1.4-.58l.45.33a1.5 1.5 0 002.11-2.11l-.33-.45c.24-.45.44-.92.58-1.4l.55-.08a1.5 1.5 0 000-2.98l-.55-.08a6.95 6.95 0 00-.58-1.4l.33-.45a1.5 1.5 0 00-2.11-2.11l-.45.33a6.95 6.95 0 00-1.4-.58l-.08-.55zM10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
         {authPendingCount > 0 && (
           <span
             className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-conn-amber-bg text-conn-amber-text text-[10px] font-bold animate-pulse-subtle"

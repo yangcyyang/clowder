@@ -88,6 +88,27 @@ describe('MessageStore.restore()', () => {
   });
 });
 
+describe('MessageStore.updateContent()', () => {
+  it('updates content and editedAt', () => {
+    const store = new MessageStore();
+    const msgs = seedMessages(store);
+    const editedAt = 12345;
+
+    const result = store.updateContent(msgs[0].id, 'updated content', editedAt);
+
+    assert.ok(result);
+    assert.equal(result.content, 'updated content');
+    assert.equal(result.editedAt, editedAt);
+    assert.equal(store.getById(msgs[0].id).content, 'updated content');
+  });
+
+  it('returns null for nonexistent id', () => {
+    const store = new MessageStore();
+    const result = store.updateContent('nonexistent', 'updated content', Date.now());
+    assert.equal(result, null);
+  });
+});
+
 // --- Unit: Read path filtering ---
 
 describe('Read path filtering (skip soft-deleted)', () => {
@@ -225,6 +246,86 @@ describe('DELETE /api/messages/:id (soft delete)', () => {
 
     assert.equal(res.statusCode, 404);
     assert.equal(res.json().code, 'MESSAGE_NOT_FOUND');
+
+    await app.close();
+  });
+});
+
+describe('PATCH /api/messages/:id (edit)', () => {
+  it('edits an owned plain-text user message and broadcasts message_edited', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const msgs = seedMessages(messageStore);
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/messages/${msgs[1].id}`,
+      payload: { userId: 'user-1', content: ' edited message ' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.id, msgs[1].id);
+    assert.equal(body.content, 'edited message');
+    assert.ok(body.editedAt);
+    assert.equal(messageStore.getById(msgs[1].id).content, 'edited message');
+    assert.equal(messageStore.getById(msgs[1].id).editedAt, body.editedAt);
+
+    const events = socketManager.getEvents();
+    assert.ok(events.some((e) => e.event === 'message_edited' && e.data.messageId === msgs[1].id));
+
+    await app.close();
+  });
+
+  it('rejects editing another user message', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const msgs = seedMessages(messageStore);
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/messages/${msgs[1].id}`,
+      payload: { userId: 'user-2', content: 'edited message' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(messageStore.getById(msgs[1].id).content, 'message 1');
+
+    await app.close();
+  });
+
+  it('rejects editing cat messages', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const catMsg = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'cat response',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-sd',
+    });
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/messages/${catMsg.id}`,
+      payload: { userId: 'user-1', content: 'edited cat' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(messageStore.getById(catMsg.id).content, 'cat response');
 
     await app.close();
   });

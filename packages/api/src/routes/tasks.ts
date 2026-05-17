@@ -31,6 +31,8 @@ const createSchema = z.object({
   why: z.string().max(1000).default(''),
   createdBy: createdBySchema,
   ownerCatId: catIdSchema().nullable().optional(),
+  sourceMessageId: z.string().optional(),
+  sourceSummaryId: z.string().optional(),
 });
 
 const updateSchema = z
@@ -53,8 +55,10 @@ function toCreateInput(data: z.infer<typeof createSchema>): CreateTaskInput {
     createdBy: data.createdBy as CatId | 'user',
   };
   if (data.ownerCatId != null) {
-    return { ...input, ownerCatId: data.ownerCatId as CatId };
+    input.ownerCatId = data.ownerCatId as CatId;
   }
+  if (data.sourceMessageId) input.sourceMessageId = data.sourceMessageId;
+  if (data.sourceSummaryId) input.sourceSummaryId = data.sourceSummaryId;
   return input;
 }
 
