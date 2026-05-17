@@ -853,7 +853,7 @@
         {
           "id": "opencode-default",
           "provider": "opencode",
-          "defaultModel": "opencode/minimax-m2.5-free",
+          "defaultModel": "xiaomi-mimo/mimo-v2.5-pro",
           "mcpSupport": true,
           "cli": {
             "command": "opencode",
