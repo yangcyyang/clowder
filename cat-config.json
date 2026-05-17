@@ -576,9 +576,9 @@
           "acp": {
             "command": "gemini",
             "startupArgs": [
-              "--acp",
+              "--experimental-acp",
               "--approval-mode",
-              "yolo"
+              "auto_edit"
             ],
             "mcpWhitelist": [
               "cat-cafe",
@@ -637,9 +637,9 @@
           "acp": {
             "command": "gemini",
             "startupArgs": [
-              "--acp",
+              "--experimental-acp",
               "--approval-mode",
-              "yolo"
+              "auto_edit"
             ],
             "mcpWhitelist": [
               "cat-cafe",
@@ -853,7 +853,7 @@
         {
           "id": "opencode-default",
           "provider": "opencode",
-          "defaultModel": "anthropic/claude-opus-4-6",
+          "defaultModel": "opencode/minimax-m2.5-free",
           "mcpSupport": true,
           "cli": {
             "command": "opencode",

@@ -476,7 +476,7 @@
           },
           "acp": {
             "command": "gemini",
-            "startupArgs": ["--acp", "--approval-mode", "yolo"],
+            "startupArgs": ["--experimental-acp", "--approval-mode", "auto_edit"],
             "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
             "supportsMultiplexing": true
           },
@@ -519,7 +519,7 @@
           },
           "acp": {
             "command": "gemini",
-            "startupArgs": ["--acp", "--approval-mode", "yolo"],
+            "startupArgs": ["--experimental-acp", "--approval-mode", "auto_edit"],
             "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
             "supportsMultiplexing": true
           },
@@ -685,7 +685,7 @@
         {
           "id": "opencode-default",
           "clientId": "opencode",
-          "defaultModel": "claude-opus-4-6",
+          "defaultModel": "opencode/minimax-m2.5-free",
           "mcpSupport": true,
           "cli": {
             "command": "opencode",
