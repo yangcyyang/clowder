@@ -366,7 +366,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         openInlineThread({ threadId, sourceMessage });
       }
     },
-    [handleInlineThreadReplyCountChange, inlineThreadReplies, messages, openInlineThread, setThreads, threadId],
+    [clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, messages, openInlineThread, setThreads, threadId],
   );
   useEffect(() => {
     clearInlineThreadCloseTimer();
