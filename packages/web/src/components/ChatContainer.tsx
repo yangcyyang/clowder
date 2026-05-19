@@ -88,6 +88,7 @@ const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
 const INLINE_THREAD_EXIT_MS = 180;
 
 type InlineThreadReplyState = Record<string, { branchThreadId: string; replyCount: number }>;
+type ThreadReplyInfo = InlineThreadReplyState[string] & { newCount?: number };
 type ChannelTab = 'chat' | 'tasks' | 'files';
 const EMPTY_MEMBER_IDS: string[] = [];
 
@@ -288,6 +289,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const setThreads = useChatStore((s) => s.setThreads);
+  const threadStates = useChatStore((s) => s.threadStates);
   const handleInlineThreadReplyCountChange = useCallback(
     (sourceMessageId: string, branchThreadId: string, replyCount: number) => {
       setInlineThreadReplies((prev) => ({
@@ -309,10 +311,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const openInlineThread = useCallback(
     (next: { threadId: string; sourceMessage: ChatMessageData }) => {
       clearInlineThreadCloseTimer();
+      clearUnread(next.threadId);
       setInlineThreadClosing(false);
       setInlineThread(next);
     },
-    [clearInlineThreadCloseTimer],
+    [clearInlineThreadCloseTimer, clearUnread],
   );
   const closeInlineThread = useCallback(() => {
     if (!inlineThread) return;
@@ -335,6 +338,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setStatusPanelOpen(false);
       const existing = inlineThreadReplies[messageId] ?? sourceMessage.extra?.slockThread;
       if (existing) {
+        clearUnread(existing.branchThreadId);
         openInlineThread({ threadId: existing.branchThreadId, sourceMessage });
         return;
       }
@@ -892,6 +896,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         msg.type !== 'system' &&
         msg.timestamp - prevMsg.timestamp < MESSAGE_GROUP_WINDOW_MS
       );
+      const baseThreadReplyInfo = inlineThreadReplies[msg.id] ?? msg.extra?.slockThread;
+      const threadReplyInfo: ThreadReplyInfo | undefined = baseThreadReplyInfo
+        ? {
+            ...baseThreadReplyInfo,
+            newCount: threadStates[baseThreadReplyInfo.branchThreadId]?.unreadCount ?? 0,
+          }
+        : undefined;
 
       return (
         <MessageActions
@@ -906,7 +917,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             message={msg}
             getCatById={getCatById}
             isGrouped={isGrouped}
-            threadReplyInfo={inlineThreadReplies[msg.id] ?? msg.extra?.slockThread}
+            threadReplyInfo={threadReplyInfo}
             onOpenThread={handleOpenInlineThread}
             isEditing={editingMessageId === msg.id}
             editDraft={editingMessageId === msg.id ? editingDraft : ''}
@@ -924,6 +935,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       messages,
       handleOpenInlineThread,
       inlineThreadReplies,
+      threadStates,
       handleStartEditMessage,
       editingMessageId,
       editingDraft,

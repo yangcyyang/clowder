@@ -81,7 +81,7 @@ function MessageTaskBadge({ task, seq }: { task: TaskItem; seq: number }) {
   );
 }
 
-function ThreadReplyBadge({ count, onOpen }: { count: number; onOpen: () => void }) {
+function ThreadReplyBadge({ count, newCount = 0, onOpen }: { count: number; newCount?: number; onOpen: () => void }) {
   if (count <= 0) return null;
 
   return (
@@ -96,6 +96,7 @@ function ThreadReplyBadge({ count, onOpen }: { count: number; onOpen: () => void
         className="inline-flex items-center rounded-full border border-[var(--cafe-accent)]/30 bg-[var(--cafe-accent)]/10 px-2 py-0.5 text-[11px] font-semibold leading-none text-[var(--cafe-accent)] transition-colors hover:bg-[var(--cafe-accent)]/15"
       >
         {count} {count === 1 ? 'reply' : 'replies'}
+        {newCount > 0 && <span className="ml-1 text-conn-emerald-text">· {newCount} new</span>}
       </button>
     </div>
   );
@@ -127,7 +128,7 @@ interface ChatMessageProps {
   message: ChatMessageType;
   getCatById: (id: string) => CatData | undefined;
   isGrouped?: boolean;
-  threadReplyInfo?: { branchThreadId: string; replyCount: number };
+  threadReplyInfo?: { branchThreadId: string; replyCount: number; newCount?: number };
   onOpenThread?: (messageId: string) => void;
   isEditing?: boolean;
   editDraft?: string;
@@ -397,7 +398,11 @@ export function ChatMessage({
           {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
           <MessageReactions messageId={message.id} />
           {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
-            <ThreadReplyBadge count={threadReplyInfo.replyCount} onOpen={() => onOpenThread(message.id)} />
+            <ThreadReplyBadge
+              count={threadReplyInfo.replyCount}
+              newCount={threadReplyInfo.newCount}
+              onOpen={() => onOpenThread(message.id)}
+            />
           )}
         </div>
       </div>
@@ -544,7 +549,11 @@ export function ChatMessage({
         {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
         <MessageReactions messageId={message.id} />
         {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
-          <ThreadReplyBadge count={threadReplyInfo.replyCount} onOpen={() => onOpenThread(message.id)} />
+          <ThreadReplyBadge
+            count={threadReplyInfo.replyCount}
+            newCount={threadReplyInfo.newCount}
+            onOpen={() => onOpenThread(message.id)}
+          />
         )}
       </div>
     </div>
