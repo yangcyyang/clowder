@@ -882,7 +882,7 @@ export function ChatInput({
         </div>
 
         <div
-          className={`group relative flex min-h-[44px] flex-1 items-center rounded-[12px] border bg-cafe-surface transition-colors focus-within:ring-1 ${
+          className={`group relative flex min-h-[100px] flex-1 items-start rounded-[12px] border bg-cafe-surface transition-colors focus-within:ring-1 ${
             whisperMode
               ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus-within:ring-conn-amber-text'
               : 'border-[var(--console-input-stroke)] focus-within:ring-[var(--console-input-stroke)]'
@@ -912,8 +912,8 @@ export function ChatInput({
                 ? '悄悄话...'
                 : '输入消息 #当前对话'
             }
-            className="max-h-[200px] min-h-[42px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm leading-5 text-cafe-text placeholder:text-cafe-muted focus:outline-none"
-            rows={1}
+            className="max-h-[300px] min-h-[88px] flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-5 text-cafe-text placeholder:text-cafe-muted focus:outline-none"
+            rows={3}
             disabled={disabled}
           />
           {ghostSuggestion && !pathCompletion.isOpen && (
