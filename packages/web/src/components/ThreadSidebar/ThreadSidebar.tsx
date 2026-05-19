@@ -68,6 +68,15 @@ function isLegacyBranchThread(thread: Pick<Thread, 'title'>): boolean {
   return (thread.title ?? '').includes('(分支)');
 }
 
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
@@ -297,16 +306,25 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, [searchQuery]);
 
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
+  const dmThreadByCatId = useMemo(() => {
+    const map = new Map<string, Thread>();
+    for (const thread of liveThreads) {
+      if (thread.deletedAt) continue;
+      const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
+      const catId = directCats?.[0];
+      if (!catId || directCats.length !== 1) continue;
+      if (thread.isDM || thread.preferredCats?.length === 1) {
+        map.set(catId, thread);
+      }
+    }
+    return map;
+  }, [liveThreads]);
   const openDirectMessage = useCallback(
     async (catId: string) => {
-      const existing = liveThreads.find((thread) => {
-        if (thread.deletedAt) return false;
-        const directMember = thread.participatingCats?.length === 1 && thread.participatingCats[0] === catId;
-        const legacyPreferred = thread.preferredCats?.length === 1 && thread.preferredCats[0] === catId;
-        return (thread.isDM && directMember) || legacyPreferred;
-      });
+      const existing = dmThreadByCatId.get(catId);
       if (existing) {
         setSavedMessagesViewOpen(false);
+        useChatStore.getState().clearUnread(existing.id);
         navigateToThread(existing.id);
         if (typeof window !== 'undefined' && window.innerWidth < 768) {
           onClose?.();
@@ -339,7 +357,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         setIsCreating(false);
       }
     },
-    [liveThreads, loadThreads, navigateToThread, onClose],
+    [dmThreadByCatId, loadThreads, navigateToThread, onClose],
   );
   const threadTitleById = useMemo(() => {
     const map = new Map<string, string>();
@@ -524,9 +542,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           {thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
         </span>
         {unreadCount > 0 ? (
-          <span className="rounded-full bg-[var(--cafe-accent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--cafe-accent-foreground)]">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+          <UnreadBadge count={unreadCount} />
         ) : (
           <span className="[font-size:var(--clowder-type-meta)] text-[var(--clowder-sidebar-row-muted)] opacity-0 transition-opacity group-hover:opacity-100">
             {formatRelativeTime(thread.lastActiveAt, true)}
@@ -709,6 +725,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                 cats.map((cat) => {
                   const status = catStatusMap.get(cat.id) ?? 'online';
                   const isActiveDm = activeDmCatIds.has(cat.id);
+                  const dmThread = dmThreadByCatId.get(cat.id);
+                  const unreadCount = dmThread ? (getThreadState(dmThread.id)?.unreadCount ?? 0) : 0;
                   return (
                     <button
                       key={cat.id}
@@ -738,6 +756,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                         />
                       </span>
                       <span className="min-w-0 flex-1 truncate">{formatCatName(cat)}</span>
+                      <UnreadBadge count={unreadCount} />
                     </button>
                   );
                 })

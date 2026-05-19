@@ -103,6 +103,7 @@ export function ChatInput({
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
   const storeTargetCats = useChatStore((s) => s.targetCats);
+  const catStatuses = useChatStore((s) => s.catStatuses);
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const inv of Object.values(activeInvocations ?? {})) {
@@ -757,6 +758,7 @@ export function ChatInput({
           setLobbyMode(role as 'player' | 'god-view' | 'detective');
         }}
         menuRef={menuRef}
+        catStatuses={catStatuses}
       />
 
       {whisperMode && !showMentions && !showGameMenu && (

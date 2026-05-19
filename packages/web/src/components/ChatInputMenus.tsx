@@ -1,6 +1,7 @@
 'use client';
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import type { CatStatusType } from '@/stores/chat-types';
 import { type CatOption, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
 
 /** SVG icon components for game menu — no emoji (design fidelity rule). */
@@ -63,6 +64,11 @@ interface ChatInputMenusProps {
   onInsertMention: (opt: CatOption) => void;
   onSendCommand: (command: string) => void;
   menuRef: RefObject<HTMLDivElement>;
+  catStatuses?: Record<string, CatStatusType>;
+}
+
+function isWorkingStatus(status?: CatStatusType): boolean {
+  return status === 'spawning' || status === 'pending' || status === 'streaming';
 }
 
 export function ChatInputMenus({
@@ -76,6 +82,7 @@ export function ChatInputMenus({
   onInsertMention,
   onSendCommand,
   menuRef,
+  catStatuses = {},
 }: ChatInputMenusProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollDown, setCanScrollDown] = useState(false);
@@ -110,37 +117,50 @@ export function ChatInputMenus({
       {showMentions && (
         <div
           ref={menuRef}
-          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-[var(--console-border-soft)] overflow-hidden w-64 z-10 max-h-80 flex flex-col"
+          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-[var(--console-border-soft)] overflow-hidden w-72 z-10 max-h-80 flex flex-col"
         >
           <div ref={scrollRef} className="overflow-y-auto flex-1">
-            {catOptions.map((opt, i) => (
-              <button
-                key={opt.id}
-                ref={i === selectedIdx ? selectedRef : undefined}
-                className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-cafe-surface-elevated' : 'hover:bg-cafe-surface-elevated'}`}
-                onMouseEnter={() => onSelectIdx(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onInsertMention(opt);
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={opt.avatar}
-                  alt={opt.label}
-                  className="w-7 h-7 rounded-full"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
+            {catOptions.map((opt, i) => {
+              const isWorking = isWorkingStatus(catStatuses[opt.id]);
+              return (
+                <button
+                  key={opt.id}
+                  ref={i === selectedIdx ? selectedRef : undefined}
+                  className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-cafe-surface-elevated' : 'hover:bg-cafe-surface-elevated'}`}
+                  onMouseEnter={() => onSelectIdx(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onInsertMention(opt);
                   }}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold" style={{ color: opt.color }}>
-                    {opt.label}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={opt.avatar}
+                    alt={opt.label}
+                    className="w-7 h-7 rounded-full"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className="h-2 w-2 flex-shrink-0 rounded-full"
+                        style={{ backgroundColor: isWorking ? '#eab308' : (opt.color ?? 'var(--console-status-connected)') }}
+                        aria-label={isWorking ? '工作中' : '在线'}
+                      />
+                      <span className="truncate text-sm font-semibold" style={{ color: opt.color }}>
+                        {opt.label}
+                      </span>
+                    </div>
+                    <div className="truncate text-xs text-cafe-muted">{opt.desc}</div>
                   </div>
-                  <div className="text-xs text-cafe-muted">{opt.desc}</div>
-                </div>
-              </button>
-            ))}
+                  <span className="ml-2 flex-shrink-0 text-right font-mono text-[11px] text-cafe-muted">
+                    {opt.insert.trim()}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           {canScrollDown && (
             <div className="px-4 py-1 text-[10px] text-cafe-muted text-center border-t border-[var(--console-border-soft)] bg-gradient-to-t from-cafe-surface shrink-0">
