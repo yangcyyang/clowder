@@ -83,6 +83,10 @@
   --terminal-bg-deep: #16161c;
   --terminal-border: #2a2a32;
   --terminal-text: #e2e8f0;
+  /* Chat code block — light mode: warm subtle surface, not dark terminal */
+  --chat-code-bg: #eee4da;
+  --chat-code-text: #4a3d33;
+  --chat-code-btn-bg: #e0d4c9;
   --terminal-text-muted: #888888;
   --terminal-text-dim: #666666;
   --terminal-text-error: #f7768e;
@@ -167,6 +171,10 @@
   --semantic-info-bg: color-mix(in srgb, #0ea5e9 12%, var(--console-card-bg) 88%);
   --semantic-info-text: #38bdf8;
   --semantic-muted-text: #6b7280;
+  /* Chat code block — dark mode: keep terminal style */
+  --chat-code-bg: #413a50;
+  --chat-code-text: #e2e8f0;
+  --chat-code-btn-bg: #493a50;
 }
 
 [data-visual-theme="slack"] {

@@ -55,13 +55,13 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <div className="relative group my-2">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] bg-[var(--terminal-btn-bg)] text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--terminal-bg)] transition-opacity"
+        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] bg-[var(--chat-code-btn-bg)] text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--chat-code-bg)] transition-opacity"
       >
         {copied ? '已复制' : '复制'}
       </button>
       <pre
         ref={preRef}
-        className="bg-[var(--terminal-bg)] text-[var(--terminal-text)] rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
+        className="bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
       >
         {children}
       </pre>
