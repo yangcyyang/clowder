@@ -1106,8 +1106,97 @@ created: 2026-02-26
 
 ---
 
+### LL-054: Next dev 的浏览器专用包不能进 SSR vendor chunk
+- 状态：draft
+- 更新时间：2026-05-18
+
+- 坑：Clowder Web 多次出现 `Cannot find module './vendor-chunks/@xterm+xterm@6.0.0.js'`，页面退化成无样式 HTML，用户误以为“清缓存后又坏了”。
+- 根因：`@xterm/xterm`、`@xterm/addon-fit`、`@xterm/addon-attach` 是浏览器专用库，但 `TerminalTab.tsx` / `AgentPaneViewer.tsx` 静态导入后，Next 14 dev 的 SSR 路径仍可能生成并复用 `vendor-chunks/@xterm...`。只在 `predev` 清 `.next` 能修启动缓存，不能消除 HMR 后再次打包的根因。
+- 触发条件：Next dev 运行中访问 Workspace/Terminal 相关 UI，或 HMR 后旧 server vendor chunk 与当前依赖图不一致。
+- 修复：在 `packages/web/next.config.js` 的 `experimental.serverComponentsExternalPackages` 中外部化 `@xterm/xterm`、`@xterm/addon-fit`、`@xterm/addon-attach`，让它们不进入服务端组件打包路径。
+- 防护：任何浏览器专用库（Terminal、Canvas、WebRTC、AudioWorklet 等）若被 React 组件静态导入，必须检查是否需要 client-only dynamic import 或 Next server external 配置；清缓存只能作为止血，不得当成根治。
+- 来源锚点：
+  - `packages/web/next.config.js`
+  - `packages/web/src/components/workspace/TerminalTab.tsx`
+  - `packages/web/src/components/workspace/AgentPaneViewer.tsx`
+  - task #98（xterm SSR vendor chunk 根治）
+- 原理（可选）：前端构建缓存问题和 SSR 打包边界问题是两类问题。缓存清理解决“旧产物残留”，external/dynamic import 才解决“错误依赖进入服务端图”。
+
+- 关联：task #93 | task #98
+
+### LL-055: 本地 CLI 模型配置必须以实际可运行 provider/model 为准
+- 状态：draft
+- 更新时间：2026-05-18
+
+- 坑：OpenCode 在 Clowder 里报 `authentication_error: The API Key appears invalid`，初看像 key 坏了，实际是 Clowder 配置里的模型 ID 指向了错误 provider。
+- 根因：Clowder 配置中写的是 `opencode/minimax-m2.5-free`，但用户本机真实 OpenCode 配置使用的是 `xiaomi-mimo/mimo-v2.5-pro`。运行副本与本机 CLI 配置漂移后，系统会走错 provider，错误表现成 API key invalid。
+- 触发条件：修改 `cat-config.json`、`.cat-cafe/cat-catalog.json`、`.cat-cafe/accounts.json` 或本机 `~/.config/opencode/opencode.json` 后，没有用真实 CLI 命令验证 provider/model 是否可运行。
+- 修复：把 OpenCode 默认模型恢复为 `xiaomi-mimo/mimo-v2.5-pro`，并在本机 OpenCode config 中补齐 `models` 映射；用 `opencode models` 与 `opencode run -m xiaomi-mimo/mimo-v2.5-pro` 验证通过。
+- 防护：模型下拉或 agent 配置不能只靠“记忆中的最新模型列表”；保存前至少做一次本机 CLI 可用性检查。错误信息出现 `API Key invalid` 时，必须同时检查 provider/model 路由是否走错。
+- 来源锚点：
+  - `cat-config.json`
+  - `.cat-cafe/cat-catalog.json`
+  - `.cat-cafe/accounts.json`
+  - `/Users/cy/.config/opencode/opencode.json`
+  - commit `5f0f5b9 chore: restore opencode mimo model config`
+- 原理（可选）：本地 agent 平台的模型配置是“运行契约”，不是展示文案。契约正确性的最低证据是实际 CLI 能跑通，而不是配置字段看起来合理。
+
+- 关联：task #96 | task #77
+
+### LL-056: 显式 @mention 应按 Agent 槽位排队，不能被 thread 级锁误伤
+- 状态：draft
+- 更新时间：2026-05-18
+
+- 坑：用户先 `@Kimi hi`，再 `@Codex hi`，第二条消息被显示为“排队中”。这不符合 Slock-like 群聊预期：不同 Agent 应该能并行响应各自被 @ 的消息。
+- 根因：`InvocationTracker.tryStartThreadAll()` 仍按 thread-level 判断忙闲，只要同一 thread 任一 Agent 正在运行，就返回 `null`，导致不同目标 Agent 的显式 @mention 被同一个线程锁串行化。
+- 触发条件：同一 thread 内，用户连续向不同 Agent 发送显式 @mention 消息，且第一只 Agent 仍在运行中。
+- 修复：把锁粒度改为 per-target cat slot：只有请求中的目标 Agent slot 忙时才排队，同 thread 其他 Agent 可立即开始；显式 @mention 路径保留 TOCTOU 降级队列。
+- 防护：A2A/Slock-like 路由测试必须覆盖三类场景：不同 Agent 并发、同 Agent 排队、广播消息保守排队。不能只用“thread 有 active invocation”作为是否允许发送的判断。
+- 来源锚点：
+  - `packages/api/src/services/invocation-tracker.ts`
+  - `packages/api/src/routes/messages.ts`
+  - `packages/api/test/invocation-tracker.test.js`
+  - `packages/api/test/messages-delivery-mode.test.js`
+  - task #81（per-agent 排队修复）
+- 原理（可选）：群聊协作模型的并发边界应是“收件人/执行者”，不是“房间”。thread 是上下文容器，不应天然成为执行互斥锁。
+
+- 关联：ADR-023 | task #81
+
+### LL-057: 原生模块 ABI 决定 API 启动 Node 版本
+- 状态：draft
+- 更新时间：2026-05-18
+
+- 坑：重启 Clowder API 时，如果使用 Node 22，会因为 `better-sqlite3` 原生模块 ABI 不匹配导致 API 启动失败；表面看是 API 3004 无响应，前端表现为 `Failed to fetch` 或“网络错误”。
+- 根因：项目当前 `better-sqlite3` native binary 是按 Node 25 的 ABI 编译的。不同 Node major 的 ABI 不兼容，不能混用旧 shell 默认 Node 和 Homebrew Node 25。
+- 触发条件：手动重启 3004，或新开 shell 使用默认 `node` 版本而不是 `/opt/homebrew/bin/node` / Node 25 运行 API。
+- 修复：重启 API 时固定使用 `/opt/homebrew/bin/node`（Node 25），或确保当前 shell 的 `node -v` 与 native module ABI 匹配。
+- 防护：所有 Clowder API 重启 SOP 必须先输出 `node -v`；遇到 3004 无响应时，不得只说“服务挂了”，要同时检查 PID、启动日志、Node 版本和 native module 报错。
+- 来源锚点：
+  - `packages/api/package.json`
+  - `pnpm-lock.yaml`
+  - `data/logs/api/`
+  - 2026-05-16 至 2026-05-18 多次 API 重启排障记录
+- 原理（可选）：带 native addon 的 Node 服务，运行时版本是二进制契约的一部分。包安装能成功不代表任意 Node 版本都能启动。
+
+- 关联：task #62 | task #67 | task #81 运行态验证记录
+
 ## 8) 维护约定
 
 - 本文件是入口，不替代 ADR/bug-report 原文。
 - 新条目默认 `draft`，经交叉复核后改为 `validated`。
 - 归档规则：被明确否定或被新机制完全替代时标 `archived`，保留历史链路。
+
+
+### LL-058: AI-PPT
+- 状态：draft
+- 更新时间：2026-05-18
+
+- 坑：沉淀我们讨论设计规范
+- 根因：待补充。
+- 触发条件：待补充。
+- 修复：待补充。
+- 防护：待补充。
+- 来源锚点：thread:thread_mpakwvu7yo79fha7
+- 原理（可选）：待补充。
+
+- 关联：待补充。

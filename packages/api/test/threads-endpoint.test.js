@@ -63,6 +63,30 @@ describe('Thread API', () => {
     assert.ok(body.pinnedAt);
   });
 
+  it('POST /api/threads/dm creates and reuses a direct message thread', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/threads/dm',
+      payload: { userId: 'alice', catId: 'codex' },
+    });
+    assert.equal(first.statusCode, 201);
+    const created = JSON.parse(first.body);
+    assert.equal(created.isDM, true);
+    assert.deepEqual(created.participatingCats, ['codex']);
+    assert.deepEqual(created.preferredCats, ['codex']);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/threads/dm',
+      payload: { userId: 'alice', catId: 'codex' },
+    });
+    assert.equal(second.statusCode, 200);
+    const reused = JSON.parse(second.body);
+    assert.equal(reused.id, created.id);
+    assert.equal(reused.isDM, true);
+    assert.deepEqual(reused.participatingCats, ['codex']);
+  });
+
   it('POST /api/threads with backlogItemId links the thread when item exists', async () => {
     // Pre-create the backlog item so validation passes
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');

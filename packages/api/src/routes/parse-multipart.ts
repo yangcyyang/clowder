@@ -4,8 +4,9 @@
  * 从 messages.ts 提取，降低文件复杂度。
  */
 
-import type { ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
+import type { FileContent, ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
 import type { Multipart } from '@fastify/multipart';
+import { FileUploadError, saveUploadedFiles, type UploadFile } from './file-upload.js';
 import { ImageUploadError, saveUploadedImages, type UploadImageFile } from './image-upload.js';
 import { sendMessageSchema } from './messages.schema.js';
 
@@ -29,7 +30,8 @@ export async function parseMultipart(
 ): Promise<ParsedMultipart> {
   // F35: Use string | string[] to support multi-value fields like whisperTo
   const fields: Record<string, string | string[]> = {};
-  const files: UploadImageFile[] = [];
+  const imageFiles: UploadImageFile[] = [];
+  const attachmentFiles: UploadFile[] = [];
 
   for await (const part of request.parts()) {
     if (part.type === 'field' && typeof part.value === 'string') {
@@ -45,11 +47,16 @@ export async function parseMultipart(
       // If we defer `toBuffer()` until after the loop, parser may block waiting
       // for this stream to be consumed and request hangs.
       const buffer = await part.toBuffer();
-      files.push({
+      const upload = {
         filename: part.filename,
         mimetype: part.mimetype,
         toBuffer: async () => buffer,
-      });
+      };
+      if (part.fieldname === 'attachments') {
+        attachmentFiles.push(upload);
+      } else {
+        imageFiles.push(upload);
+      }
     }
   }
 
@@ -66,14 +73,32 @@ export async function parseMultipart(
   const { content, userId, threadId, idempotencyKey } = parseResult.data;
   const blocks: MessageContent[] = [{ type: 'text', text: content } as TextContent];
 
-  if (files.length > 0) {
+  if (imageFiles.length > 0) {
     try {
-      const saved = await saveUploadedImages(files, uploadDir);
+      const saved = await saveUploadedImages(imageFiles, uploadDir);
       for (const img of saved) {
         blocks.push(img.content as ImageContent);
       }
     } catch (err) {
       if (err instanceof ImageUploadError) {
+        return { error: err.message };
+      }
+      throw err;
+    }
+  }
+
+  if (attachmentFiles.length > 0) {
+    try {
+      const saved = await saveUploadedFiles(attachmentFiles, uploadDir);
+      for (const file of saved) {
+        if (file.content.mimeType?.startsWith('image/')) {
+          blocks.push({ type: 'image', url: file.content.url } as ImageContent);
+        } else {
+          blocks.push(file.content as FileContent);
+        }
+      }
+    } catch (err) {
+      if (err instanceof FileUploadError) {
         return { error: err.message };
       }
       throw err;

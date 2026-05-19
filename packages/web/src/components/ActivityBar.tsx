@@ -9,6 +9,11 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
+type VisualTheme = 'claude' | 'slack' | 'tesla';
+
+const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
+const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla'];
+
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
   { id: 'mission', path: '/mission-hub', label: '任务', match: (p: string) => p.startsWith('/mission') },
@@ -82,6 +87,20 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
       />
     </svg>
   );
+}
+
+function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
+  return (
+    <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
+      {theme === 'tesla' ? 'T' : theme === 'slack' ? 'S' : 'C'}
+    </span>
+  );
+}
+
+function getVisualThemeLabel(theme: VisualTheme): string {
+  if (theme === 'tesla') return 'Tesla';
+  if (theme === 'slack') return 'Slack';
+  return 'Claude';
 }
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
@@ -162,7 +181,25 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const { toggleTheme, resolvedTheme } = useCafeTheme();
   const { pinned } = usePinnedSections();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const [visualTheme, setVisualTheme] = useState<VisualTheme>('claude');
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
+    const nextTheme = VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme) ? (storedTheme as VisualTheme) : 'claude';
+    setVisualTheme(nextTheme);
+    document.documentElement.dataset.visualTheme = nextTheme;
+    setMounted(true);
+  }, []);
+
+  const toggleVisualTheme = useCallback(() => {
+    setVisualTheme((current) => {
+      const currentIndex = VISUAL_THEME_ORDER.indexOf(current);
+      const nextTheme = VISUAL_THEME_ORDER[(currentIndex + 1) % VISUAL_THEME_ORDER.length] ?? 'claude';
+      document.documentElement.dataset.visualTheme = nextTheme;
+      window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);
+      return nextTheme;
+    });
+  }, []);
 
   const handleNav = useCallback(
     (path: string) => {
@@ -187,7 +224,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   return (
     <nav
-      className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 ${className ?? ''}`}
+      className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
       aria-label="主导航"
     >
       {NAV_ITEMS.map((item) => {
@@ -217,6 +254,15 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <button
+          type="button"
+          onClick={toggleVisualTheme}
+          className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
+          title={mounted ? `当前 ${getVisualThemeLabel(visualTheme)} 风格，点击切换下一套` : '切换视觉风格'}
+          aria-label={mounted ? `当前 ${getVisualThemeLabel(visualTheme)} 风格，点击切换下一套` : '切换视觉风格'}
+        >
+          <VisualThemeIcon theme={mounted ? visualTheme : 'claude'} />
+        </button>
         <button
           type="button"
           onClick={toggleTheme}

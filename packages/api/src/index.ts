@@ -116,6 +116,7 @@ import {
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
+import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
@@ -151,6 +152,7 @@ import {
   guideActionRoutes,
   intentCardRoutes,
   invocationsRoutes,
+  knowledgeRoutes,
   leaderboardEventsRoutes,
   leaderboardRoutes,
   libraryRoutes,
@@ -434,6 +436,16 @@ async function main(): Promise<void> {
   }
   const storageResult = assertStorageReady(!!redis);
   app.log.info(`[api] Storage mode: ${storageResult.mode}`);
+
+  const catSupervisor = new CatSupervisor({
+    ...(redis ? { redis } : {}),
+    socketManager,
+    log: app.log,
+  });
+  catSupervisor.start();
+  app.addHook('onClose', async () => {
+    catSupervisor.stop();
+  });
 
   // F102 KD-34: append listener placeholder (wired after memoryServices init)
   let appendListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
@@ -978,7 +990,7 @@ async function main(): Promise<void> {
       let service: AgentService;
       switch (config.clientId) {
         case 'anthropic':
-          service = new ClaudeAgentService({ catId });
+          service = new ClaudeAgentService({ catId, cliCommand: config.cli?.command });
           break;
         case 'openai':
           service = new CodexAgentService({ catId });
@@ -1067,6 +1079,7 @@ async function main(): Promise<void> {
       }
       agentRegistry.register(id, service);
     }
+    await catSupervisor.syncCats(configs, (catId) => isCatAvailable(catId));
     if (router) router.refreshFromRegistry(agentRegistry);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
@@ -1241,6 +1254,7 @@ async function main(): Promise<void> {
     socketManager,
     messageStore,
     log: app.log,
+    catSupervisor,
   });
   socketManager.setQueueProcessor(queueProcessor);
 
@@ -1303,6 +1317,7 @@ async function main(): Promise<void> {
     draftStore,
     invocationQueue,
     queueProcessor,
+    catSupervisor,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
@@ -1698,6 +1713,7 @@ async function main(): Promise<void> {
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
   await app.register(featureDocDetailRoutes);
+  await app.register(knowledgeRoutes);
   await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });

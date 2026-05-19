@@ -10,6 +10,7 @@ vi.mock('@/stores/chatStore', () => ({
     setHasActiveInvocation: vi.fn(),
     setIntentMode: vi.fn(),
     setTargetCats: vi.fn(),
+    addMessage: vi.fn(),
     removeThreadMessage: vi.fn(),
     requestStreamCatchUp: vi.fn(),
   }),

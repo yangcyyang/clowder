@@ -506,7 +506,7 @@ pnpm runtime:status     # Show worktree status
 
 # === Build & Test ===
 pnpm build              # Build all packages
-pnpm dev                # Run all packages in parallel dev mode
+pnpm dev                # Run the unified local dev launcher (loads .env, Web=3003, API=3004)
 pnpm test               # Run all tests
 
 # === Code Quality ===

@@ -201,6 +201,8 @@ export const AuditEventTypes = {
   CONFIG_UPDATED: 'config_updated',
   /** 敏感环境变量被写入（owner-only, keys-only audit） */
   ENV_SENSITIVE_WRITE: 'env_sensitive_write',
+  /** 高风险操作 guard/audit（删除、批量修改、运行时配置等） */
+  DANGEROUS_ACTION: 'dangerous_action',
 
   // === 消息级审计 (茶话会夺魂 bug fix #37) ===
 

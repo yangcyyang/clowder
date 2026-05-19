@@ -5,6 +5,10 @@ export interface VisibleSystemInfoResult {
   variant: VisibleSystemInfoVariant;
 }
 
+export function isSilentSystemInfo(parsed: Record<string, unknown> | null | undefined): boolean {
+  return parsed?.type === 'provider_capability';
+}
+
 function formatPingpongTerminated(parsed: Record<string, unknown>): VisibleSystemInfoResult {
   const fromCatId = typeof parsed.fromCatId === 'string' ? parsed.fromCatId : 'unknown';
   const targetCatId = typeof parsed.targetCatId === 'string' ? parsed.targetCatId : 'unknown';
@@ -27,6 +31,10 @@ function formatRoleRejected(parsed: Record<string, unknown>): VisibleSystemInfoR
 }
 
 export function formatVisibleSystemInfo(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+  if (isSilentSystemInfo(parsed)) {
+    return null;
+  }
+
   if (parsed?.type === 'a2a_followup_available') {
     const mentions = parsed.mentions as Array<{ catId: string; mentionedBy: string }>;
     return {

@@ -71,6 +71,28 @@ interface ConnectorMessageEvent {
   };
 }
 
+type CatStatusChangeEvent = {
+  catId: string;
+  status: 'online_idle' | 'processing' | 'timeout' | 'offline';
+  updatedAt: number;
+};
+
+const mapSupervisorStatusToUiStatus = (
+  status: CatStatusChangeEvent['status'],
+): import('../stores/chat-types').CatStatusType => {
+  switch (status) {
+    case 'processing':
+      return 'streaming';
+    case 'timeout':
+      return 'suspected_stall';
+    case 'offline':
+      return 'done';
+    case 'online_idle':
+    default:
+      return 'alive_but_silent';
+  }
+};
+
 interface SocketIoTransportLike {
   name?: string;
   ws?: WebSocket;
@@ -659,6 +681,17 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('heartbeat', (data: { threadId: string; timestamp: number }) => {
       callbacksRef.current.onHeartbeat?.(data);
+    });
+
+    socket.on('catStatusChange', (data: CatStatusChangeEvent) => {
+      if (!data?.catId) return;
+      const uiStatus = mapSupervisorStatusToUiStatus(data.status);
+      useChatStore.getState().setCatStatus(data.catId, uiStatus);
+      recordInvocationEvent({
+        event: 'agent_message',
+        eventType: `cat_status:${data.status}`,
+        catId: data.catId,
+      });
     });
 
     socket.on('message_deleted', (data: { messageId: string; threadId: string; deletedBy: string }) => {

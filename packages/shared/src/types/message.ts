@@ -31,6 +31,17 @@ export interface ImageContent {
 }
 
 /**
+ * File attachment content
+ */
+export interface FileContent {
+  readonly type: 'file';
+  readonly filename: string;
+  readonly url: string;
+  readonly mimeType?: string;
+  readonly size?: number;
+}
+
+/**
  * Code content
  */
 export interface CodeContent {
@@ -63,7 +74,7 @@ export interface ToolResultContent {
 /**
  * Message content - union of all content types
  */
-export type MessageContent = TextContent | ImageContent | CodeContent | ToolCallContent | ToolResultContent;
+export type MessageContent = TextContent | ImageContent | FileContent | CodeContent | ToolCallContent | ToolResultContent;
 
 /**
  * Message status

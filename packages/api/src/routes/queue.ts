@@ -22,6 +22,10 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import {
+  auditDangerousActionBestEffort,
+  requireDangerousActionConfirmation,
+} from '../utils/dangerous-action-guard.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
@@ -354,6 +358,24 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
+    const confirmation = requireDangerousActionConfirmation(request, 'queue.clear', '清空队列');
+    if (!confirmation.ok) {
+      void auditDangerousActionBestEffort({
+        request,
+        actorId: guard.userId,
+        action: 'queue.clear',
+        targetType: 'thread_queue',
+        targetId: threadId,
+        threadId,
+        severity: 'medium',
+        result: 'blocked',
+        confirmation: confirmation.confirmation,
+        reason: confirmation.code,
+      });
+      reply.status(428);
+      return { error: confirmation.error, code: confirmation.code };
+    }
+
     // F117: Collect message IDs from non-processing entries for cancelation
     // Skip 'processing' entries — their invocation is already running and will markDelivered itself
     const entriesBeforeClear = invocationQueue.list(threadId, guard.userId);
@@ -366,6 +388,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
 
     const cleared = invocationQueue.clear(threadId, guard.userId);
+    void auditDangerousActionBestEffort({
+      request,
+      actorId: guard.userId,
+      action: 'queue.clear',
+      targetType: 'thread_queue',
+      targetId: threadId,
+      threadId,
+      severity: 'medium',
+      result: 'succeeded',
+      confirmation: confirmation.confirmation,
+      metadata: {
+        cleared,
+        canceledMessageCount: allMessageIds.length,
+      },
+    });
     socketManager.emitToUser(guard.userId, 'queue_updated', {
       threadId,
       queue: [],

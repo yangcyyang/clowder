@@ -65,6 +65,7 @@ const defaultProps = {
   statusPanelOpen: false,
   onToggleStatusPanel: vi.fn(),
   onOpenChannelSettings: vi.fn(),
+  onOpenKnowledgeCapture: vi.fn(),
   defaultCatId: 'opus',
 };
 

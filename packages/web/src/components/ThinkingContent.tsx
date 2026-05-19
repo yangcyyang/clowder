@@ -125,11 +125,11 @@ export function ThinkingContent({
           <ThinkingChevron expanded={expanded} color={breedColor} />
         </span>
         <BrainIcon />
-        <span className="font-medium" style={{ color: 'var(--cafe-text-muted)' }}>
+        <span className="font-medium" style={{ color: 'rgba(255,255,255,0.65)' }}>
           {label}
         </span>
         {!expanded && (
-          <span className="truncate max-w-[240px]" style={{ color: 'var(--cafe-text-muted)' }}>
+          <span className="truncate max-w-[240px]" style={{ color: 'rgba(255,255,255,0.50)' }}>
             {preview}
           </span>
         )}
@@ -138,7 +138,7 @@ export function ThinkingContent({
         <div style={{ backgroundColor: surfaceInner }}>
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           <div
-            style={{ padding: '8px 12px 10px 12px', color: 'var(--cafe-text-muted)' }}
+            style={{ padding: '8px 12px 10px 12px', color: 'rgba(255,255,255,0.72)' }}
             className="text-xs leading-relaxed cli-output-md"
           >
             <MarkdownContent content={content} className={className} />

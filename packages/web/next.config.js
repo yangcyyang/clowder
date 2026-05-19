@@ -24,11 +24,19 @@ function resolveApiBaseUrl() {
 }
 
 const apiBaseUrl = resolveApiBaseUrl();
+const distDir = process.env.NEXT_DIST_DIR ?? (process.env.NODE_ENV === 'development' ? '.next-dev' : '.next');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: { proxyTimeout: 120_000 },
+  // Keep dev-server artifacts separate from `next build` output. Running build
+  // while 3003 is open previously overwrote `.next/static`, leaving dev HTML
+  // pointing at missing CSS/JS files and rendering the app as raw HTML.
+  distDir,
+  experimental: {
+    proxyTimeout: 120_000,
+    serverComponentsExternalPackages: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-attach'],
+  },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
   async headers() {
@@ -51,7 +59,12 @@ const nextConfig = {
       },
     ];
   },
-  webpack: (config) => {
+  webpack: (config, { dev }) => {
+    if (dev) {
+      // Next dev vendor chunks have repeatedly gone stale during HMR.
+      // Keep production splitting intact; disable only local dev splitting.
+      config.optimization.splitChunks = false;
+    }
     // Suppress onnxruntime-web "Critical dependency" warnings — dynamic require() in
     // minified bundle is expected and cannot be statically analyzed by webpack.
     config.ignoreWarnings = [{ module: /onnxruntime-web/ }];
@@ -75,7 +88,7 @@ const nextConfig = {
   },
 };
 
-module.exports = withPWA({
+const pwaOptions = {
   dest: 'public',
   disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
   reloadOnOnline: true,
@@ -107,4 +120,9 @@ module.exports = withPWA({
       },
     ],
   },
-})(nextConfig);
+};
+
+module.exports =
+  process.env.NODE_ENV === 'development' && !enablePwaInDev
+    ? nextConfig
+    : withPWA(pwaOptions)(nextConfig);

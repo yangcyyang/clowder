@@ -11,7 +11,15 @@ export interface ImageContent {
   url: string;
 }
 
-export type MessageContent = TextContent | ImageContent;
+export interface FileContent {
+  type: 'file';
+  filename: string;
+  url: string;
+  mimeType?: string;
+  size?: number;
+}
+
+export type MessageContent = TextContent | ImageContent | FileContent;
 
 /** F8: Token usage data from CLI invocations.
  *  inputTokens = TOTAL input (normalised across providers).
@@ -328,6 +336,10 @@ export interface Thread {
   bubbleCli?: 'global' | 'expanded' | 'collapsed';
   /** F32-b: Thread-level default cat preference */
   preferredCats?: string[];
+  /** Slock-style configured channel members. Distinct from participants activity history. */
+  participatingCats?: string[];
+  /** Slock-style direct message thread. Kept out of regular CHANNEL list. */
+  isDM?: boolean;
   /** F049: workflow phase for mission-control dispatch */
   phase?: 'coding' | 'research' | 'brainstorm';
   /** F049 Phase2: reverse link to source backlog item */

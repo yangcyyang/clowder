@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "sync:vendor-assets": "node scripts/sync-vendor-assets.mjs",
-    "predev": "pnpm run sync:vendor-assets",
-    "dev": "next dev",
+    "clean:next": "node scripts/clean-next-dev-cache.mjs",
+    "predev": "pnpm run clean:next && pnpm run sync:vendor-assets",
+    "dev": "next dev -p 3003",
     "prebuild": "pnpm run sync:vendor-assets",
     "build": "next build",
     "prestart": "pnpm run sync:vendor-assets",

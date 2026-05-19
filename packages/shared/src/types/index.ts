@@ -374,6 +374,7 @@ export type {
 export type {
   AgentStreamMessage,
   CodeContent,
+  FileContent,
   ImageContent,
   Message,
   MessageContent,
@@ -523,6 +524,7 @@ export type {
   ConflictAutomationState,
   CreateTaskInput,
   ReviewAutomationState,
+  TaskEvidence,
   TaskItem,
   TaskKind,
   TaskStatus,

@@ -151,6 +151,26 @@ describe('useAgentMessages system_info warning', () => {
     );
   });
 
+  it('keeps provider capability probes out of the visible message stream', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'kimi',
+        content: JSON.stringify({
+          type: 'provider_capability',
+          capability: 'image_input',
+          status: 'available',
+        }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
   // Bug-J: provider_signal messages carry upstream-origin warnings (Antigravity
   // capacity retry notices, stream_error grace-window hints). Before this
   // handler they were silently dropped — users saw bubbles hang without any

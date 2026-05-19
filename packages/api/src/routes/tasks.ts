@@ -25,6 +25,17 @@ const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
 /** createdBy accepts any registered catId OR 'user' */
 const createdBySchema = z.union([catIdSchema(), z.literal('user')]);
 
+const evidenceSchema = z
+  .object({
+    tests: z.string().max(2000).optional(),
+    build: z.string().max(2000).optional(),
+    screenshot: z.string().max(2000).optional(),
+    review: z.string().max(2000).optional(),
+    lesson: z.string().max(2000).optional(),
+    updatedAt: z.number().optional(),
+  })
+  .optional();
+
 const createSchema = z.object({
   threadId: z.string().min(1),
   title: z.string().min(1).max(200),
@@ -33,6 +44,7 @@ const createSchema = z.object({
   ownerCatId: catIdSchema().nullable().optional(),
   sourceMessageId: z.string().optional(),
   sourceSummaryId: z.string().optional(),
+  evidence: evidenceSchema,
 });
 
 const updateSchema = z
@@ -41,6 +53,7 @@ const updateSchema = z
     ownerCatId: catIdSchema().nullable().optional(),
     status: z.enum(VALID_STATUSES).optional(),
     why: z.string().max(1000).optional(),
+    evidence: evidenceSchema,
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided',
@@ -59,6 +72,7 @@ function toCreateInput(data: z.infer<typeof createSchema>): CreateTaskInput {
   }
   if (data.sourceMessageId) input.sourceMessageId = data.sourceMessageId;
   if (data.sourceSummaryId) input.sourceSummaryId = data.sourceSummaryId;
+  if (data.evidence !== undefined) input.evidence = { ...data.evidence, updatedAt: Date.now() };
   return input;
 }
 
@@ -69,6 +83,7 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   if (data.status !== undefined) input.status = data.status;
   if (data.why !== undefined) input.why = data.why;
   if (data.ownerCatId !== undefined) input.ownerCatId = data.ownerCatId as CatId | null;
+  if (data.evidence !== undefined) input.evidence = { ...data.evidence, updatedAt: Date.now() };
   return input;
 }
 

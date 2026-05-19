@@ -30,6 +30,7 @@ export type {
   ChatMessagePatch,
   EvidenceData,
   EvidenceResultData,
+  FileContent,
   GameState,
   ImageContent,
   MessageContent,
@@ -833,6 +834,7 @@ export interface ChatState {
   updateThreadThinkingMode: (threadId: string, mode: 'debug' | 'play') => void;
 
   updateThreadPreferredCats: (threadId: string, preferredCats: string[]) => void;
+  updateThreadParticipatingCats: (threadId: string, participatingCats: string[]) => void;
   updateThreadBubbleDisplay: (threadId: string, field: 'bubbleThinking' | 'bubbleCli', value: BubbleOverride) => void;
   setGlobalBubbleDefaults: (defaults: GlobalBubbleDefaults) => void;
   fetchGlobalBubbleDefaults: () => Promise<void>;
@@ -1912,6 +1914,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       threads: state.threads.map((t) =>
         t.id === threadId ? { ...t, preferredCats: preferredCats.length > 0 ? preferredCats : undefined } : t,
+      ),
+    })),
+
+  updateThreadParticipatingCats: (threadId, participatingCats) =>
+    set((state) => ({
+      threads: state.threads.map((t) =>
+        t.id === threadId
+          ? { ...t, participatingCats: participatingCats.length > 0 ? participatingCats : undefined }
+          : t,
       ),
     })),
 

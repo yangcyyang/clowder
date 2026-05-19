@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { SortableQueueEntryRow } from './QueueEntryRow';
 import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import { useConfirm } from './useConfirm';
 
 const COLLAPSE_THRESHOLD = 4;
 
@@ -35,6 +36,7 @@ interface QueuePanelProps {
 
 export function QueuePanel({ threadId }: QueuePanelProps) {
   const coCreator = useCoCreatorConfig();
+  const confirm = useConfirm();
   const rawQueue = useChatStore((s) => s.queue);
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
   const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
@@ -94,8 +96,29 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   }, [threadId]);
 
   const handleClear = useCallback(async () => {
-    await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
-  }, [threadId]);
+    const ok = await confirm({
+      title: '清空队列',
+      message: '确认清空当前频道的排队消息？这些排队消息会被取消。',
+      confirmLabel: '清空',
+      variant: 'danger',
+    });
+    if (!ok) return;
+
+    const res = await apiFetch(`/api/threads/${threadId}/queue`, {
+      method: 'DELETE',
+      headers: { 'X-Clowder-Dangerous-Action-Confirmed': 'queue.clear' },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      addToast({
+        type: 'error',
+        title: '清空失败',
+        message: body?.error ?? '清空队列失败，请重试',
+        threadId,
+        duration: 5000,
+      });
+    }
+  }, [addToast, confirm, threadId]);
 
   const handleSteerOpen = useCallback((entryId: string) => {
     setSteerMode('immediate');

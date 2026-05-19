@@ -176,6 +176,35 @@ describe('ThreadStore preferredCats (memory)', () => {
   });
 });
 
+describe('ThreadStore participatingCats (memory)', () => {
+  test('updateParticipatingCats sets channel members without touching activity participants', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { createCatId } = await import('@cat-cafe/shared');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'test');
+    store.addParticipants(thread.id, [createCatId('codex')]);
+    store.updateParticipatingCats(thread.id, [createCatId('opus'), createCatId('gemini')]);
+
+    const updated = store.get(thread.id);
+    assert.deepEqual(updated.participatingCats, [createCatId('opus'), createCatId('gemini')]);
+    assert.deepEqual(updated.participants, [createCatId('codex')]);
+  });
+
+  test('updateParticipatingCats dedupes and clears channel members', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { createCatId } = await import('@cat-cafe/shared');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'test');
+    store.updateParticipatingCats(thread.id, [createCatId('opus'), createCatId('opus')]);
+    assert.deepEqual(store.get(thread.id).participatingCats, [createCatId('opus')]);
+
+    store.updateParticipatingCats(thread.id, []);
+    assert.equal(store.get(thread.id).participatingCats, undefined);
+  });
+});
+
 // ── AgentRouter preferredCats routing tests ───────────
 
 describe('AgentRouter preferredCats routing', () => {

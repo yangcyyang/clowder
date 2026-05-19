@@ -45,6 +45,28 @@ interface HubCatEditorProps {
   hideDelete?: boolean;
 }
 
+const MODEL_PRESETS_BY_CLIENT: Partial<Record<HubCatEditorFormState['clientId'], string[]>> = {
+  anthropic: ['claude-opus-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  openai: ['gpt-5.5', 'gpt-5', 'o4-mini', 'codex-mini'],
+  google: ['gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  kimi: ['kimi-code/kimi-for-coding'],
+  opencode: ['xiaomi-mimo/mimo-v2.5-pro', 'claude-opus-4-6'],
+};
+
+function uniqueModelOptions(...groups: Array<string[] | undefined>): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const group of groups) {
+    for (const option of group ?? []) {
+      const value = option.trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      options.push(value);
+    }
+  }
+  return options;
+}
+
 export function HubCatEditor({
   cat,
   draft,
@@ -83,8 +105,8 @@ export function HubCatEditor({
   );
   const modelOptions = useMemo(() => {
     if (form.clientId === 'antigravity') return [];
-    return selectedProfile?.models ?? [];
-  }, [form.clientId, selectedProfile]);
+    return uniqueModelOptions(selectedProfile?.models, MODEL_PRESETS_BY_CLIENT[form.clientId]);
+  }, [form.clientId, selectedProfile?.models]);
   const showCodexSettings = form.clientId === 'openai';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
@@ -574,7 +596,7 @@ export function HubCatEditor({
     }
   };
 
-  const overlayTitle = cat ? cat.displayName || cat.name || cat.id : '添加成员';
+  const overlayTitle = cat ? '成员配置 / 预览与编辑' : '添加成员';
 
   const editorHeader = (
     <div className="flex shrink-0 items-start justify-between px-7 py-5">

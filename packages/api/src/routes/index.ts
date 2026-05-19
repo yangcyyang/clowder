@@ -31,6 +31,7 @@ export { governanceStatusRoute } from './governance-status.js';
 export { guideActionRoutes } from './guide-action-routes.js';
 export { intentCardRoutes } from './intent-card-routes.js';
 export { invocationsRoutes } from './invocations.js';
+export { knowledgeRoutes } from './knowledge.js';
 export { leaderboardRoutes } from './leaderboard.js';
 export { leaderboardEventsRoutes } from './leaderboard-events.js';
 export { libraryRoutes } from './library.js';

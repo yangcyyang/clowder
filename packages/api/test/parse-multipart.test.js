@@ -54,3 +54,32 @@ test('parseMultipart drains file stream before waiting for remaining parts', asy
     await rm(uploadDir, { recursive: true, force: true });
   }
 });
+
+test('parseMultipart saves generic attachment files as file content blocks', async () => {
+  const uploadDir = await mkdtemp(join(tmpdir(), 'cat-cafe-parse-multipart-file-'));
+  const request = {
+    parts: async function* () {
+      yield { type: 'field', fieldname: 'content', value: 'see attached' };
+      yield {
+        type: 'file',
+        fieldname: 'attachments',
+        filename: 'notes.txt',
+        mimetype: 'text/plain',
+        toBuffer: async () => Buffer.from('hello file'),
+      };
+    },
+  };
+
+  try {
+    const parsed = await parseMultipart(request, uploadDir);
+    assert.ok(!('error' in parsed), 'expected multipart parse success');
+    assert.equal(parsed.contentBlocks.length, 2);
+    assert.equal(parsed.contentBlocks[1].type, 'file');
+    assert.equal(parsed.contentBlocks[1].filename, 'notes.txt');
+    assert.equal(parsed.contentBlocks[1].mimeType, 'text/plain');
+    assert.equal(parsed.contentBlocks[1].size, 10);
+    assert.match(parsed.contentBlocks[1].url, /^\/uploads\//);
+  } finally {
+    await rm(uploadDir, { recursive: true, force: true });
+  }
+});

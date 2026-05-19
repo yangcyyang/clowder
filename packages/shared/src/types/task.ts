@@ -50,6 +50,16 @@ export interface AutomationState {
   readonly closedAt?: number;
 }
 
+/** Delivery evidence attached to a work task. */
+export interface TaskEvidence {
+  readonly tests?: string;
+  readonly build?: string;
+  readonly screenshot?: string;
+  readonly review?: string;
+  readonly lesson?: string;
+  readonly updatedAt?: number;
+}
+
 export interface TaskItem {
   readonly id: string;
   /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
@@ -76,6 +86,8 @@ export interface TaskItem {
   readonly sourceMessageId?: string;
   /** Source summary ID for traceability (4-A feature) */
   readonly sourceSummaryId?: string;
+  /** Human-visible delivery evidence for task acceptance. */
+  readonly evidence?: TaskEvidence;
 }
 
 export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'createdBy'> & {
@@ -86,6 +98,7 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   userId?: string;
   sourceMessageId?: string;
   sourceSummaryId?: string;
+  evidence?: TaskEvidence;
 };
 
 /** Mutable partial for updates — strips readonly from TaskItem fields */
@@ -95,4 +108,5 @@ export type UpdateTaskInput = {
   status?: TaskStatus;
   why?: string;
   automationState?: AutomationState;
+  evidence?: TaskEvidence;
 };

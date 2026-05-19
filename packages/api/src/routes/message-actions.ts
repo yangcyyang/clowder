@@ -10,6 +10,10 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import {
+  auditDangerousActionBestEffort,
+  readDangerousActionConfirmation,
+} from '../utils/dangerous-action-guard.js';
 
 export interface MessageActionsRoutesOptions {
   messageStore: IMessageStore;
@@ -94,6 +98,21 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
         deletedBy: userId,
       });
 
+      void auditDangerousActionBestEffort({
+        request,
+        actorId: userId,
+        action: 'message.hard_delete',
+        targetType: 'message',
+        targetId: id,
+        threadId: deleted.threadId,
+        severity: 'high',
+        result: 'succeeded',
+        confirmation: 'existing_confirm_field',
+        metadata: {
+          confirmTitleProvided: Boolean(confirmTitle),
+        },
+      });
+
       return {
         id: deleted.id,
         threadId: deleted.threadId,
@@ -114,6 +133,18 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       messageId: id,
       threadId: deleted.threadId,
       deletedBy: userId,
+    });
+
+    void auditDangerousActionBestEffort({
+      request,
+      actorId: userId,
+      action: 'message.soft_delete',
+      targetType: 'message',
+      targetId: id,
+      threadId: deleted.threadId,
+      severity: 'medium',
+      result: 'succeeded',
+      confirmation: readDangerousActionConfirmation(request, 'message.soft_delete') ?? 'not_required',
     });
 
     return {

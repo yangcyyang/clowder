@@ -71,6 +71,11 @@ interface LoggerLike {
   error(obj: unknown, msg?: string): void;
 }
 
+interface CatSupervisorLike {
+  markProcessing(catIds: string | readonly string[]): Promise<void> | void;
+  markIdle(catIds: string | readonly string[]): Promise<void> | void;
+}
+
 /** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 export interface OutboundDeliveryHookLike {
   deliver(
@@ -120,6 +125,8 @@ export interface QueueProcessorDeps {
   streamingHook?: StreamingOutboundHookLike;
   /** F088 fix: optional thread metadata lookup for outbound delivery. */
   threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
+  /** Task #112: lightweight always-online status supervisor. */
+  catSupervisor?: CatSupervisorLike;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -747,6 +754,7 @@ export class QueueProcessor {
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId);
+      void this.deps.catSupervisor?.markProcessing(targetCats);
 
       // 3. Backfill message ID
       if (messageId) {
@@ -1099,6 +1107,7 @@ export class QueueProcessor {
 
       return 'failed';
     } finally {
+      void this.deps.catSupervisor?.markIdle(targetCats);
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);

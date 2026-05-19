@@ -6,10 +6,12 @@
  */
 
 import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
+import { parse as parseYaml } from 'yaml';
 import type { SkillConflict } from '../config/governance/skill-conflict.js';
 import { detectConflicts } from '../config/governance/skill-conflict.js';
 import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
@@ -58,6 +60,13 @@ interface SkillsResponse {
   conflicts: SkillConflict[];
 }
 
+interface LocalSkillFrontmatter {
+  name?: unknown;
+  description?: unknown;
+  category?: unknown;
+  triggers?: unknown;
+}
+
 /** Resolve Clowder AI skills source from module location (stable across cwd/project). */
 function resolveCatCafeSkillsSourceDir(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -70,6 +79,70 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
+
+function extractSkillFrontmatter(content: string): LocalSkillFrontmatter | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = parseYaml(match[1]) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as LocalSkillFrontmatter) : null;
+  } catch {
+    return null;
+  }
+}
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
+function toLocalSkillEntry(frontmatter: LocalSkillFrontmatter): SkillEntry | null {
+  if (typeof frontmatter.name !== 'string' || !frontmatter.name.trim()) return null;
+  const name = frontmatter.name.trim();
+  const description = typeof frontmatter.description === 'string' ? frontmatter.description.trim() : '';
+  const triggers = toStringList(frontmatter.triggers);
+  return {
+    name,
+    category:
+      typeof frontmatter.category === 'string' && frontmatter.category.trim() ? frontmatter.category.trim() : 'gstack',
+    trigger: triggers.length > 0 ? triggers.join('、') : description,
+    mounts: { claude: true, codex: true, gemini: true, kimi: true },
+  };
+}
+
+async function listLocalClaudeSkills(skillsDir: string): Promise<SkillEntry[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(skillsDir);
+  } catch {
+    return [];
+  }
+
+  const skills = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const content = await readFile(join(skillsDir, entry, 'SKILL.md'), 'utf-8');
+        const frontmatter = extractSkillFrontmatter(content);
+        return frontmatter ? toLocalSkillEntry(frontmatter) : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return skills
+    .filter((skill): skill is SkillEntry => Boolean(skill))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/skills', async (request, reply) => {
@@ -131,19 +204,27 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       }),
     );
 
-    // Order: BOOTSTRAP insertion order first, then unregistered skills appended
-    const ordered: string[] = [];
+    // Order: BOOTSTRAP insertion order first, then local user skills, then unregistered built-ins.
+    // Local skills are real user-facing skills, but should not affect cat-cafe registration checks.
+    const registeredOrdered: string[] = [];
+    const unregisteredOrdered: string[] = [];
     const bootstrapOrdered = new Set<string>();
     for (const bsName of bootstrapEntries.keys()) {
       if (sourceSet.has(bsName)) {
-        ordered.push(bsName);
+        registeredOrdered.push(bsName);
         bootstrapOrdered.add(bsName);
       }
     }
     for (const name of sourceSkills) {
-      if (!bootstrapOrdered.has(name)) ordered.push(name);
+      if (!bootstrapOrdered.has(name)) unregisteredOrdered.push(name);
     }
-    const skills = ordered.map((n) => mountLookup.get(n)!).filter(Boolean);
+    const registeredSkills = registeredOrdered.map((n) => mountLookup.get(n)!).filter(Boolean);
+    const unregisteredSkills = unregisteredOrdered.map((n) => mountLookup.get(n)!).filter(Boolean);
+    const builtinSkillNames = new Set(sourceSkills);
+    const localClaudeSkills = (await listLocalClaudeSkills(join(home, '.claude', 'skills'))).filter(
+      (skill) => !builtinSkillNames.has(skill.name),
+    );
+    const skills = [...registeredSkills, ...localClaudeSkills, ...unregisteredSkills];
 
     // Registration consistency check
     const sourceNames = new Set(sourceSkills);

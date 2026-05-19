@@ -1,5 +1,6 @@
 import type { GameView } from '@cat-cafe/shared';
 import { useMemo } from 'react';
+import { deriveBubbleId } from '@/debug/bubbleIdentity';
 import type { SocketCallbacks } from '@/hooks/useSocket';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
@@ -39,6 +40,7 @@ export function useChatSocketCallbacks({
     setHasActiveInvocation,
     setIntentMode,
     setTargetCats,
+    addMessage,
     removeThreadMessage,
     patchMessage,
     requestStreamCatchUp,
@@ -74,9 +76,23 @@ export function useChatSocketCallbacks({
       onSpawnStarted: (data) => {
         // F118 D2: Earliest signal — fires before intent_mode.
         // Per-cat setCatStatus('spawning') is handled by the socket layer.
+        const startedAt = Date.now();
         setLoading(true);
         setHasActiveInvocation(true);
-        setTargetCats(data.targetCats ?? []);
+        const targetCats = data.targetCats ?? [];
+        setTargetCats(targetCats);
+        for (const catId of targetCats) {
+          addMessage({
+            id: deriveBubbleId(data.invocationId, catId, () => `msg-${startedAt}-${catId}-spawning`),
+            type: 'assistant',
+            catId,
+            content: '',
+            origin: 'stream',
+            extra: { stream: { invocationId: data.invocationId } },
+            timestamp: startedAt,
+            isStreaming: true,
+          });
+        }
       },
       onTaskCreated: (task) => {
         const t = task as Record<string, unknown>;
@@ -133,6 +149,7 @@ export function useChatSocketCallbacks({
       setHasActiveInvocation,
       setIntentMode,
       setTargetCats,
+      addMessage,
       addTask,
       updateTask,
       removeThreadMessage,

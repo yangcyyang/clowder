@@ -201,6 +201,40 @@ describe('Tasks Routes', () => {
     assert.equal(events[1].event, 'task_updated');
   });
 
+  test('PATCH updates delivery evidence and broadcasts', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: {
+        evidence: {
+          tests: 'node --test packages/api/test/tasks-route.test.js passed',
+          build: 'pnpm --filter @cat-cafe/api build passed',
+          review: '@专家-Claude review passed',
+        },
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.evidence.tests, 'node --test packages/api/test/tasks-route.test.js passed');
+    assert.equal(body.evidence.build, 'pnpm --filter @cat-cafe/api build passed');
+    assert.equal(body.evidence.review, '@专家-Claude review passed');
+    assert.equal(typeof body.evidence.updatedAt, 'number');
+
+    const events = socketManager.getEvents();
+    assert.equal(events.length, 2);
+    assert.equal(events[1].event, 'task_updated');
+    assert.equal(events[1].data.evidence.review, '@专家-Claude review passed');
+  });
+
   test('PATCH returns 404 for nonexistent task', async () => {
     const app = await createApp();
     const response = await app.inject({

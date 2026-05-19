@@ -255,6 +255,9 @@ export async function* routeSerial(
   // F108: Key by parentInvocationId for concurrent isolation
   const worklist = [...targetCats];
   const maxDepth = options.maxA2ADepth ?? getMaxA2ADepth();
+  const a2aRoutingMode =
+    options.a2aRoutingMode ?? (process.env.CAT_CAFE_A2A_ROUTING_MODE === 'slock' ? 'slock' : 'legacy');
+  const enableHiddenTextScanA2A = a2aRoutingMode !== 'slock';
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
 
   let index = 0;
@@ -1010,12 +1013,20 @@ export async function* routeSerial(
         }
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
-        // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId);
+        // Line-start @mention = always actionable in legacy mode.
+        // Slock-style mode keeps syntax diagnostics but does not extend the hidden worklist.
+        const detectedA2AMentions = parseA2AMentions(storedContent, catId);
+        a2aMentions = enableHiddenTextScanA2A ? detectedA2AMentions : [];
 
         // clowder-ai#489: baseline counter — line-start mentions
-        if (a2aMentions.length > 0) {
-          lineStartDetected.add(a2aMentions.length, { 'agent.id': catId as string });
+        if (detectedA2AMentions.length > 0) {
+          lineStartDetected.add(detectedA2AMentions.length, { 'agent.id': catId as string });
+          if (!enableHiddenTextScanA2A) {
+            log.info(
+              { threadId, catId: catId as string, detectedA2AMentions },
+              'A2A final-text scan detected mention but hidden worklist routing is disabled',
+            );
+          }
         }
 
         // F167 Phase H AC-H3/H5 (KD-24): final routing slot validator.
@@ -1031,7 +1042,7 @@ export async function* routeSerial(
         }
         const phaseHResult = validateRoutingSyntax({
           text: storedContent,
-          lineStartMentions: a2aMentions,
+          lineStartMentions: detectedA2AMentions,
           toolNames: collectedToolNames,
           structuredTargetCats: [...structuredTargetCats],
           rosterHandles: phaseHRosterHandles,

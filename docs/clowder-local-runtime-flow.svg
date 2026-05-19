@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1040" viewBox="0 0 1500 1040" role="img" aria-labelledby="title desc">
+  <title id="title">本地 Clowder AI 运行路线图</title>
+  <desc id="desc">展示本地 Clowder 从用户输入、Web Console、API Runtime、消息队列、路由调度、Agent CLI、callback 写回、前端气泡显示，到记忆 Pack Skills 观测沉淀的完整运行路线。</desc>
+
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fffdfb"/>
+      <stop offset="55%" stop-color="#fcfaf7"/>
+      <stop offset="100%" stop-color="#f1e8df"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#4b3628" flood-opacity="0.13"/>
+    </filter>
+
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a6f60"/>
+    </marker>
+
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f7f98"/>
+    </marker>
+
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5f8a61"/>
+    </marker>
+
+    <style>
+      .bg { fill: url(#pageBg); }
+      .title { font: 800 36px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #241f1b; }
+      .subtitle { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #746b64; }
+      .lane-title { font: 800 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #b35f42; letter-spacing: .14em; }
+      .box-title { font: 800 20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #2f2924; }
+      .box-text { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #5f554e; }
+      .box-note { font: 500 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #807269; }
+      .num { font: 900 16px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #fffdfb; }
+      .badge-text { font: 800 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #755241; }
+      .route-label { font: 700 12px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #8a6f60; }
+
+      .card { fill: #fffdfb; stroke: #ded1c5; stroke-width: 1.4; rx: 20; filter: url(#softShadow); }
+      .card-user { fill: #fff6ef; stroke: #e29578; stroke-width: 2; rx: 20; filter: url(#softShadow); }
+      .card-web { fill: #eef7fb; stroke: #9fc9dc; stroke-width: 1.8; rx: 20; filter: url(#softShadow); }
+      .card-api { fill: #fff8e8; stroke: #e5c779; stroke-width: 1.8; rx: 20; filter: url(#softShadow); }
+      .card-agent { fill: #f6f0fb; stroke: #cdb9df; stroke-width: 1.8; rx: 20; filter: url(#softShadow); }
+      .card-memory { fill: #eff8f0; stroke: #a9cfaa; stroke-width: 1.8; rx: 20; filter: url(#softShadow); }
+      .subcard { fill: rgba(255,255,255,.62); stroke: rgba(130,105,92,.18); stroke-width: 1; rx: 13; }
+      .badge { fill: #f0e6dc; stroke: #e2d5ca; stroke-width: 1; rx: 10; }
+      .circle { fill: #cc6743; }
+      .line { fill: none; stroke: #8a6f60; stroke-width: 2.4; marker-end: url(#arrow); }
+      .line-soft { fill: none; stroke: #b49b8c; stroke-width: 2; stroke-dasharray: 7 8; marker-end: url(#arrow); }
+      .line-blue { fill: none; stroke: #4f7f98; stroke-width: 2.4; marker-end: url(#arrowBlue); }
+      .line-green { fill: none; stroke: #5f8a61; stroke-width: 2.4; marker-end: url(#arrowGreen); }
+      .loop { fill: none; stroke: #b49b8c; stroke-width: 2; stroke-dasharray: 8 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1500" height="1040"/>
+
+  <text class="title" x="56" y="62">本地 Clowder 运行路线图</text>
+  <text class="subtitle" x="58" y="92">从你的一句话开始，Clowder 把它变成消息、任务、会话、Agent 执行、callback 写回、前端展示，并继续沉淀为记忆和可复用能力。</text>
+
+  <!-- Main row cards -->
+  <rect class="card-user" x="52" y="150" width="210" height="184"/>
+  <circle class="circle" cx="84" cy="184" r="15"/>
+  <text class="num" x="79" y="190">1</text>
+  <text class="lane-title" x="108" y="188">INPUT</text>
+  <text class="box-title" x="82" y="226">你 / CVO</text>
+  <text class="box-text" x="82" y="258">提出目标、发消息</text>
+  <text class="box-text" x="82" y="282">选择频道 / Pack / 任务</text>
+  <text class="box-note" x="82" y="310">方向判断在你这里</text>
+
+  <rect class="card-web" x="322" y="150" width="246" height="184"/>
+  <circle class="circle" cx="354" cy="184" r="15"/>
+  <text class="num" x="349" y="190">2</text>
+  <text class="lane-title" x="378" y="188">WEB CONSOLE</text>
+  <text class="box-title" x="352" y="226">前端控制台</text>
+  <text class="box-text" x="352" y="258">localhost:3003</text>
+  <text class="box-text" x="352" y="282">Chat / Tasks / Files</text>
+  <text class="box-note" x="352" y="310">把操作转成 API 请求</text>
+
+  <rect class="card-api" x="630" y="150" width="250" height="184"/>
+  <circle class="circle" cx="662" cy="184" r="15"/>
+  <text class="num" x="657" y="190">3</text>
+  <text class="lane-title" x="686" y="188">API RUNTIME</text>
+  <text class="box-title" x="660" y="226">后端中枢</text>
+  <text class="box-text" x="660" y="258">localhost:3004</text>
+  <text class="box-text" x="660" y="282">保存状态、调度队列</text>
+  <text class="box-note" x="660" y="310">Socket.IO 实时同步</text>
+
+  <rect class="card" x="942" y="150" width="252" height="184"/>
+  <circle class="circle" cx="974" cy="184" r="15"/>
+  <text class="num" x="969" y="190">4</text>
+  <text class="lane-title" x="998" y="188">ROUTING</text>
+  <text class="box-title" x="972" y="226">队列与路由</text>
+  <text class="box-text" x="972" y="258">消息优先级 / 批处理</text>
+  <text class="box-text" x="972" y="282">可见性 / 会话上下文</text>
+  <text class="box-note" x="972" y="310">决定谁该上场</text>
+
+  <rect class="card-agent" x="1258" y="150" width="190" height="184"/>
+  <circle class="circle" cx="1290" cy="184" r="15"/>
+  <text class="num" x="1285" y="190">5</text>
+  <text class="lane-title" x="1314" y="188">AGENT CLI</text>
+  <text class="box-title" x="1288" y="226">猫猫执行</text>
+  <text class="box-text" x="1288" y="258">Claude / Codex</text>
+  <text class="box-text" x="1288" y="282">Gemini / Kimi</text>
+  <text class="box-note" x="1288" y="310">外部 CLI 真干活</text>
+
+  <!-- Main arrows -->
+  <path class="line" d="M 262 242 C 288 242, 296 242, 322 242"/>
+  <text class="route-label" x="278" y="225">提交</text>
+  <path class="line" d="M 568 242 C 596 242, 602 242, 630 242"/>
+  <text class="route-label" x="584" y="225">请求</text>
+  <path class="line" d="M 880 242 C 906 242, 916 242, 942 242"/>
+  <text class="route-label" x="898" y="225">入队</text>
+  <path class="line" d="M 1194 242 C 1220 242, 1232 242, 1258 242"/>
+  <text class="route-label" x="1210" y="225">派发</text>
+
+  <!-- Middle protocol area -->
+  <rect class="card" x="174" y="410" width="1152" height="212"/>
+  <text class="lane-title" x="214" y="448">COLLABORATION CORE</text>
+  <text class="box-title" x="214" y="482">协作核心：让多 Agent 可以稳定接力，而不是互相抢话</text>
+
+  <rect class="subcard" x="220" y="512" width="220" height="70"/>
+  <text class="box-text" x="244" y="540">F175 统一消息队列</text>
+  <text class="box-note" x="244" y="562">优先级、批处理、可观察</text>
+
+  <rect class="subcard" x="472" y="512" width="220" height="70"/>
+  <text class="box-text" x="496" y="540">Session / Thread</text>
+  <text class="box-note" x="496" y="562">上下文、当前现场、状态</text>
+
+  <rect class="subcard" x="724" y="512" width="220" height="70"/>
+  <text class="box-text" x="748" y="540">F167 A2A Ball</text>
+  <text class="box-note" x="748" y="562">持球、传球、防循环</text>
+
+  <rect class="subcard" x="976" y="512" width="220" height="70"/>
+  <text class="box-text" x="1000" y="540">Whisper 可见性</text>
+  <text class="box-note" x="1000" y="562">悄悄话只给指定对象</text>
+
+  <path class="line-soft" d="M 755 334 C 755 362, 755 382, 755 410"/>
+  <path class="line-soft" d="M 1068 334 C 1068 366, 1016 392, 1016 512"/>
+
+  <!-- Callback and UI return -->
+  <rect class="card-api" x="946" y="690" width="250" height="178"/>
+  <circle class="circle" cx="978" cy="724" r="15"/>
+  <text class="num" x="973" y="730">6</text>
+  <text class="lane-title" x="1002" y="728">CALLBACK</text>
+  <text class="box-title" x="976" y="766">写回结果</text>
+  <text class="box-text" x="976" y="798">callback-auth 验证</text>
+  <text class="box-text" x="976" y="822">写入消息 / 任务 / 状态</text>
+  <text class="box-note" x="976" y="846">防止假冒 Agent 写入</text>
+
+  <rect class="card-web" x="628" y="690" width="250" height="178"/>
+  <circle class="circle" cx="660" cy="724" r="15"/>
+  <text class="num" x="655" y="730">7</text>
+  <text class="lane-title" x="684" y="728">UI UPDATE</text>
+  <text class="box-title" x="658" y="766">前端刷新</text>
+  <text class="box-text" x="658" y="798">F183 Bubble Pipeline</text>
+  <text class="box-text" x="658" y="822">排序、去重、稳定气泡</text>
+  <text class="box-note" x="658" y="846">你看到新的聊天结果</text>
+
+  <rect class="card-memory" x="310" y="690" width="250" height="178"/>
+  <circle class="circle" cx="342" cy="724" r="15"/>
+  <text class="num" x="337" y="730">8</text>
+  <text class="lane-title" x="366" y="728">PERSIST</text>
+  <text class="box-title" x="340" y="766">沉淀能力</text>
+  <text class="box-text" x="340" y="798">Memory / Evidence</text>
+  <text class="box-text" x="340" y="822">Pack / Skills / Library</text>
+  <text class="box-note" x="340" y="846">下一轮协作可复用</text>
+
+  <path class="line-blue" d="M 1352 334 C 1352 520, 1196 578, 1071 690"/>
+  <text class="route-label" x="1228" y="558">执行完成后回调</text>
+
+  <path class="line-blue" d="M 946 778 C 916 778, 908 778, 878 778"/>
+  <text class="route-label" x="898" y="762">Socket 推送</text>
+
+  <path class="line-blue" d="M 628 778 C 598 778, 590 778, 560 778"/>
+  <text class="route-label" x="576" y="762">重要内容</text>
+
+  <!-- Feedback loops -->
+  <path class="loop" d="M 435 868 C 360 944, 120 930, 120 334"/>
+  <text class="route-label" x="174" y="916">记忆与经验回流到下一次判断</text>
+
+  <path class="loop" d="M 435 690 C 450 642, 510 624, 580 582"/>
+  <text class="route-label" x="442" y="648">补充上下文</text>
+
+  <path class="loop" d="M 1196 778 C 1390 770, 1418 430, 1250 304"/>
+  <text class="route-label" x="1262" y="690">健康检查 / Hook 状态</text>
+
+  <!-- Bottom operational strip -->
+  <rect class="card" x="86" y="915" width="1328" height="74"/>
+  <text class="lane-title" x="116" y="946">LOCAL RUNTIME</text>
+  <text class="box-text" x="116" y="972">本地常驻进程：Web 3003、API 3004、Socket.IO、Agent CLI、MCP Server、Hook Health、Trace / Metrics / Logs</text>
+
+  <rect class="badge" x="1050" y="940" width="96" height="28"/>
+  <text class="badge-text" x="1074" y="959">3003</text>
+  <rect class="badge" x="1160" y="940" width="96" height="28"/>
+  <text class="badge-text" x="1184" y="959">3004</text>
+  <rect class="badge" x="1270" y="940" width="112" height="28"/>
+  <text class="badge-text" x="1296" y="959">Agent CLI</text>
+</svg>

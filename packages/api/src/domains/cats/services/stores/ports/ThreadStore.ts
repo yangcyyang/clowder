@@ -119,6 +119,15 @@ export interface Thread {
   mentionActionabilityMode?: MentionActionabilityMode;
   /** F32-b Phase 2: Thread-level cat preference. When set, messages without @mention route to these cats instead of participants/default. */
   preferredCats?: CatId[];
+  /**
+   * Slock-style channel member list.
+   *
+   * Do not conflate with `participants`: participants is activity history,
+   * participatingCats is explicit channel membership for UI and @mention scope.
+   */
+  participatingCats?: CatId[];
+  /** Slock-style direct message thread. One human + one agent, not a public channel. */
+  isDM?: boolean;
   /** F049: workflow phase for dispatch/intent guidance */
   phase?: ThreadPhase;
   /** F049 Phase2: reverse link for backlog dispatch provenance */
@@ -276,6 +285,8 @@ export interface IThreadStore {
   updateThinkingMode(threadId: string, mode: 'debug' | 'play'): void | Promise<void>;
   updateMentionActionabilityMode(threadId: string, mode: MentionActionabilityMode): void | Promise<void>;
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
+  updateParticipatingCats(threadId: string, catIds: CatId[]): void | Promise<void>;
+  updateIsDM(threadId: string, isDM: boolean): void | Promise<void>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
   /**
@@ -517,6 +528,27 @@ export class ThreadStore implements IThreadStore {
       thread.preferredCats = unique;
     } else {
       delete thread.preferredCats;
+    }
+  }
+
+  updateParticipatingCats(threadId: string, catIds: CatId[]): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    const unique = [...new Set(catIds)];
+    if (unique.length > 0) {
+      thread.participatingCats = unique;
+    } else {
+      delete thread.participatingCats;
+    }
+  }
+
+  updateIsDM(threadId: string, isDM: boolean): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (isDM) {
+      thread.isDM = true;
+    } else {
+      delete thread.isDM;
     }
   }
 

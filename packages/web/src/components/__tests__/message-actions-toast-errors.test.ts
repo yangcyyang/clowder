@@ -5,7 +5,7 @@
  * both show a toast. This was the main silent-failure bug: fetch succeeds
  * but res.ok === false, never enters catch, no user feedback.
  *
- * Covers: confirmSoftDelete, confirmHardDelete, confirmBranch, confirmBranchDirect
+ * Covers: confirmSoftDelete, confirmHardDelete, confirmEdit, confirmBranchDirect
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,14 +17,16 @@ const addToastMock = vi.hoisted(() => vi.fn());
 const confirmDialogSpy = vi.hoisted(() => vi.fn());
 const pushMock = vi.fn();
 const removeThreadMessageMock = vi.fn();
+const patchMessageMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: { removeThreadMessage: typeof removeThreadMessageMock }) => unknown) =>
-    selector({ removeThreadMessage: removeThreadMessageMock }),
+  useChatStore: (
+    selector: (state: { removeThreadMessage: typeof removeThreadMessageMock; patchMessage: typeof patchMessageMock }) => unknown,
+  ) => selector({ removeThreadMessage: removeThreadMessageMock, patchMessage: patchMessageMock }),
 }));
 
 vi.mock('@/stores/toastStore', () => ({
@@ -74,6 +76,12 @@ function renderActions(root: Root, msg = userMessage) {
   });
 }
 
+function changeTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 type DialogProps = {
   title?: string;
   open?: boolean;
@@ -117,6 +125,7 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
   beforeEach(() => {
     pushMock.mockReset();
     removeThreadMessageMock.mockReset();
+    patchMessageMock.mockReset();
     apiFetchMock.mockReset();
     addToastMock.mockReset();
     getUserIdMock.mockReset();
@@ -227,68 +236,66 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
     });
   });
 
-  // ── 3. Branch (from edit) ──
+  // ── 3. Edit in place ──
 
-  describe('confirmBranch (edit → branch)', () => {
+  describe('confirmEdit', () => {
     it('shows toast on !res.ok', async () => {
       apiFetchMock.mockResolvedValue({
         ok: false,
         status: 403,
-        json: async () => ({ error: '无权对此对话创建分支' }),
+        json: async () => ({ error: '无权编辑' }),
       });
       renderActions(root);
 
       // Edit button → opens textarea modal (not a ConfirmDialog)
-      const editBtn = container.querySelector('button[title="编辑 (创建分支)"]') as HTMLButtonElement;
+      const editBtn = container.querySelector('button[title="编辑消息"]') as HTMLButtonElement;
       expect(editBtn).not.toBeNull();
       await act(async () => {
         editBtn.click();
       });
 
-      // Click the "保存" button inside the edit modal to trigger branch-confirm dialog
+      // Click the "保存" button inside the edit modal to send PATCH /api/messages/:id
       const saveBtn = Array.from(container.querySelectorAll('button')).find(
         (b) => b.textContent === '保存',
       ) as HTMLButtonElement | null;
       expect(saveBtn).not.toBeNull();
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(textarea).not.toBeNull();
+      await act(async () => {
+        changeTextareaValue(textarea!, 'hello edited');
+      });
       await act(async () => {
         saveBtn!.click();
       });
 
-      // Now the branch-confirm dialog should be open
-      const dialog = findOpenDialog('创建分支');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
-
       expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
+      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '编辑失败' });
       expect(pushMock).not.toHaveBeenCalled();
+      expect(patchMessageMock).not.toHaveBeenCalled();
     });
 
     it('shows toast on network error (catch path)', async () => {
       apiFetchMock.mockRejectedValue(new Error('Network error'));
       renderActions(root);
 
-      const editBtn = container.querySelector('button[title="编辑 (创建分支)"]') as HTMLButtonElement;
+      const editBtn = container.querySelector('button[title="编辑消息"]') as HTMLButtonElement;
       await act(async () => {
         editBtn.click();
       });
       const saveBtn = Array.from(container.querySelectorAll('button')).find(
         (b) => b.textContent === '保存',
       ) as HTMLButtonElement;
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(textarea).not.toBeNull();
+      await act(async () => {
+        changeTextareaValue(textarea!, 'hello edited');
+      });
       await act(async () => {
         saveBtn.click();
       });
 
-      const dialog = findOpenDialog('创建分支');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
-
       expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
+      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '编辑失败' });
     });
   });
 

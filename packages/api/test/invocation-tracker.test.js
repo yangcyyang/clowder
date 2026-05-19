@@ -360,14 +360,23 @@ describe('InvocationTracker: tryStartThreadAll', () => {
     assert.equal(tracker.has('t1', 'codex'), true);
   });
 
-  it('returns null when thread has active slots', () => {
+  it('starts free target cats even when another cat is active in the same thread', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'gemini', 'user1', ['gemini']);
+    const controller = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(controller, 'free target cats should start');
+    assert.equal(tracker.has('t1', 'gemini'), true);
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+  });
+
+  it('returns null when any requested target cat is active', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
     const result = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
     assert.equal(result, null);
-    // gemini should still be active, opus/codex not registered
-    assert.equal(tracker.has('t1', 'gemini'), true);
-    assert.equal(tracker.has('t1', 'opus'), false);
+    // opus should still be active, codex not registered because the batch is atomic
+    assert.equal(tracker.has('t1', 'opus'), true);
     assert.equal(tracker.has('t1', 'codex'), false);
   });
 

@@ -93,6 +93,56 @@ describe('POST /api/messages deliveryMode', () => {
     if (app) await app.close();
   });
 
+  it('explicit mention to a free cat executes while another cat is active in the same thread', async () => {
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['codex'],
+      intent: { intent: 'execute' },
+      hasMentions: true,
+    }));
+    deps.invocationTracker.has.mock.mockImplementation((_threadId, catId) => catId === 'kimi');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '@codex hi',
+        threadId: 'thread-1',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'processing');
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 1);
+  });
+
+  it('explicit mention queues when the requested cat is already active', async () => {
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['codex'],
+      intent: { intent: 'execute' },
+      hasMentions: true,
+    }));
+    deps.invocationTracker.has.mock.mockImplementation((_threadId, catId) => catId === 'codex');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '@codex hi again',
+        threadId: 'thread-1',
+      },
+    });
+
+    assert.equal(res.statusCode, 202);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'queued');
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1);
+  });
+
   it('queue mode + active invocation → enqueues and returns 202', async () => {
     // Simulate active invocation
     deps.invocationTracker.has.mock.mockImplementation(() => true);

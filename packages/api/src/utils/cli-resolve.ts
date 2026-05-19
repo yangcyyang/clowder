@@ -81,6 +81,16 @@ export function resolveCliCommand(command: string): string | null {
     resolvedCache.delete(command);
   }
 
+  // Explicit path: allow runtime member configs to point at repo-local or
+  // user-local wrappers without forcing them onto PATH.
+  if (command.includes('/') || command.includes('\\')) {
+    const resolved = resolve(command);
+    if (existsSync(resolved)) {
+      resolvedCache.set(command, resolved);
+      return resolved;
+    }
+  }
+
   // Fast path: already in PATH
   try {
     const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;

@@ -89,6 +89,10 @@ export interface RouteOptions {
   currentUserMessageId?: string | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
+  /** A2A routing mode.
+   *  legacy: final response text line-start @mention extends the hidden worklist.
+   *  slock: only explicit callback / visible message routing may dispatch another cat. */
+  a2aRoutingMode?: 'legacy' | 'slock' | undefined;
   /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain. */
   queueHasQueuedMessages?: ((threadId: string) => boolean) | undefined;
   /** A2A dedup hook: skip text-scan @mention if cat already dispatched via callback path. */

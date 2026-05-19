@@ -5,7 +5,7 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
+const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT', 'NODE_ENV', 'NEXT_DIST_DIR'];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -70,5 +70,23 @@ describe('next.config rewrites', () => {
       'next.config.js requires @ducanh2912/next-pwa during next build, so it cannot live in devDependencies',
     );
     assert.equal(packageJson.devDependencies?.['@ducanh2912/next-pwa'], undefined);
+  });
+
+  it('uses an isolated distDir for local dev so next build cannot overwrite running dev assets', async () => {
+    await withEnv({ NODE_ENV: 'development' }, async (config) => {
+      assert.equal(config.distDir, '.next-dev');
+    });
+  });
+
+  it('uses the standard .next distDir for production build output', async () => {
+    await withEnv({ NODE_ENV: 'production' }, async (config) => {
+      assert.equal(config.distDir, '.next');
+    });
+  });
+
+  it('allows explicit distDir override for one-off diagnostics', async () => {
+    await withEnv({ NODE_ENV: 'development', NEXT_DIST_DIR: '.next-debug' }, async (config) => {
+      assert.equal(config.distDir, '.next-debug');
+    });
   });
 });

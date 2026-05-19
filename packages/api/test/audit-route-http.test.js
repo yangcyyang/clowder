@@ -24,9 +24,9 @@ describe('audit route HTTP-level access control', () => {
     await app?.close();
   });
 
-  async function buildApp(threads) {
+  async function buildApp(threads, auditLog) {
     app = Fastify();
-    await app.register(auditRoutes, { threadStore: stubThreadStore(threads) });
+    await app.register(auditRoutes, { threadStore: stubThreadStore(threads), ...(auditLog ? { auditLog } : {}) });
     await app.ready();
     return app;
   }
@@ -107,5 +107,76 @@ describe('audit route HTTP-level access control', () => {
     assert.equal(res.statusCode, 404);
     const body = JSON.parse(res.body);
     assert.equal(body.error, 'Thread not found');
+  });
+
+  it('lists dangerous action audit events with action/result filters', async () => {
+    const auditLog = {
+      readByDate: async () => [
+        {
+          id: 'danger-1',
+          type: 'dangerous_action',
+          timestamp: 1000,
+          data: {
+            actorId: 'owner-admin',
+            action: 'thread.delete',
+            targetType: 'thread',
+            targetId: 't1',
+            result: 'blocked',
+            severity: 'critical',
+            confirmation: 'not_required',
+          },
+        },
+        {
+          id: 'danger-2',
+          type: 'dangerous_action',
+          timestamp: 2000,
+          data: {
+            actorId: 'owner-admin',
+            action: 'queue.clear',
+            targetType: 'queue',
+            targetId: 't2',
+            result: 'succeeded',
+            severity: 'high',
+            confirmation: 'ui_confirmed',
+          },
+        },
+        { id: 'other-1', type: 'server_started', timestamp: 3000, data: {} },
+      ],
+      readByThread: async () => [],
+      listFiles: async () => ['audit-2026-05-19.ndjson'],
+      getLogPath: () => '/tmp/audit-2026-05-19.ndjson',
+    };
+    await buildApp({}, auditLog);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/audit/dangerous-actions?date=2026-05-19&action=thread.delete&result=blocked',
+      headers: { 'x-cat-cafe-user': 'owner-admin' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.total, 1);
+    assert.equal(body.events[0].id, 'danger-1');
+    assert.deepEqual(body.actions, ['queue.clear', 'thread.delete']);
+    assert.deepEqual(body.results, ['blocked', 'succeeded']);
+  });
+
+  it('requires identity for global dangerous audit list', async () => {
+    await buildApp(
+      {},
+      {
+        readByDate: async () => [],
+        readByThread: async () => [],
+        listFiles: async () => [],
+        getLogPath: () => '/tmp/audit.ndjson',
+      },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/audit/dangerous-actions?date=2026-05-19',
+    });
+    assert.equal(res.statusCode, 401);
   });
 });

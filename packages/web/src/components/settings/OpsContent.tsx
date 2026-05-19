@@ -9,6 +9,7 @@ import { HubLeaderboardTab } from '../HubLeaderboardTab';
 import { HubObservabilityTab } from '../HubObservabilityTab';
 import { HubRoutingPolicyTab } from '../HubRoutingPolicyTab';
 import { HubToolUsageTab } from '../HubToolUsageTab';
+import { DangerousActionAuditPanel } from './DangerousActionAuditPanel';
 import { DEFAULT_OPS_SUBSECTION, OPS_SUBSECTIONS } from './ops-nav-config';
 
 export function OpsContent() {
@@ -50,6 +51,8 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
       return <HubLeaderboardTab />;
     case 'observability':
       return <HubObservabilityTab />;
+    case 'audit':
+      return <DangerousActionAuditPanel />;
     case 'health':
       return (
         <div className="space-y-6">

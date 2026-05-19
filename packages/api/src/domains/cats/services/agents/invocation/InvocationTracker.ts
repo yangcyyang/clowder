@@ -262,12 +262,17 @@ export class InvocationTracker {
   }
 
   /**
-   * Non-preemptive thread-level start for ALL target cats.
-   * Atomically checks if ANY slot is active, then registers all cats with independent controllers.
+   * Non-preemptive per-target start for ALL target cats.
+   * Atomically checks the requested cat slots, then registers all free targets
+   * with independent controllers. Other cats in the same thread may keep running.
    */
   tryStartThreadAll(threadId: string, catIds: string[], userId: string = 'unknown'): AbortController | null {
     if (this.deleting.has(threadId)) return null;
-    if (this.has(threadId)) return null;
+    for (const catId of catIds) {
+      const key = this.slotKey(threadId, catId);
+      const inv = this.active.get(key);
+      if (inv && !this.isExpired(key, inv)) return null;
+    }
     const now = Date.now();
     let primaryController: AbortController | undefined;
     for (const catId of catIds) {

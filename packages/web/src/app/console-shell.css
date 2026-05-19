@@ -15,6 +15,7 @@
   --console-rail-bg: #eee6dc;
   --console-rail-item: #e8ddd2;
   --console-rail-active: #fffdfb;
+  --console-rail-fg: #4a3d33;
   --console-input-stroke: #e49a7d;
   --console-voice-companion: #8e72b8;
   --console-stop: #f26767;
@@ -110,6 +111,7 @@
   --console-rail-bg: #090c12;
   --console-rail-item: #131720;
   --console-rail-active: #1a2030;
+  --console-rail-fg: #e8eaf0;
   --console-runtime-bg: color-mix(in srgb, #10b981 12%, var(--console-card-bg) 88%);
   --console-runtime-field-bg: color-mix(in srgb, #10b981 18%, var(--console-card-bg) 82%);
   --console-runtime-label: #6ee7b7;
@@ -165,6 +167,118 @@
   --semantic-info-bg: color-mix(in srgb, #0ea5e9 12%, var(--console-card-bg) 88%);
   --semantic-info-text: #38bdf8;
   --semantic-muted-text: #6b7280;
+}
+
+[data-visual-theme="slack"] {
+  --console-shell-bg: #ffffff;
+  --console-panel-bg: #ffffff;
+  --console-card-bg: #ffffff;
+  --console-card-soft-bg: #f8f6f3;
+  --console-code-bg: #f4ede4;
+  --console-pill-bg: #f4ede4;
+  --console-border-soft: #ddd4c8;
+  --console-border-strong: #cfc6bb;
+  --console-shadow: 0 8px 28px rgba(29, 28, 29, 0.08);
+  --console-shadow-soft: 0 8px 20px rgba(29, 28, 29, 0.06);
+  --console-field-bg: #f8f6f3;
+  --console-active-bg: #f4ede4;
+  --console-hover-bg: rgba(255, 255, 255, 0.08);
+  --console-rail-bg: #4a154b;
+  --console-rail-item: rgba(255, 255, 255, 0.08);
+  --console-rail-active: #611f69;
+  --console-rail-fg: #ffffff;
+  --console-input-stroke: #1264a3;
+  --console-button-emphasis: #4a154b;
+  --console-button-emphasis-hover: #611f69;
+  --console-modal-title: #4a154b;
+  --console-modal-close-bg: #f4ede4;
+  --console-modal-close-fg: #4a154b;
+  --console-cat-fallback: #7c4082;
+  --console-status-connected: #2bac76;
+}
+
+[data-visual-theme="tesla"] {
+  --console-shell-bg: #ffffff;
+  --console-panel-bg: #ffffff;
+  --console-card-bg: #ffffff;
+  --console-card-soft-bg: #f4f4f4;
+  --console-code-bg: #f4f4f4;
+  --console-pill-bg: #eeeeee;
+  --console-border-soft: #eeeeee;
+  --console-border-strong: #d0d1d2;
+  --console-shadow: none;
+  --console-shadow-soft: none;
+  --console-field-bg: #ffffff;
+  --console-active-bg: #f4f4f4;
+  --console-hover-bg: #f4f4f4;
+  --console-rail-bg: #ffffff;
+  --console-rail-item: #ffffff;
+  --console-rail-active: #f4f4f4;
+  --console-rail-fg: #171a20;
+  --console-input-stroke: #3e6ae1;
+  --console-button-emphasis: #171a20;
+  --console-button-emphasis-hover: #393c41;
+  --console-modal-title: #171a20;
+  --console-modal-close-bg: #f4f4f4;
+  --console-modal-close-fg: #393c41;
+  --console-cat-fallback: #8e8e8e;
+  --console-status-connected: #3e6ae1;
+}
+
+[data-theme="dark"][data-visual-theme="slack"] {
+  --console-shell-bg: #1a1d21;
+  --console-panel-bg: #222529;
+  --console-card-bg: #222529;
+  --console-card-soft-bg: #2b2e33;
+  --console-code-bg: #111316;
+  --console-pill-bg: #2b2e33;
+  --console-border-soft: #34373c;
+  --console-border-strong: #4a4d52;
+  --console-shadow: 0 24px 56px rgba(0, 0, 0, 0.34);
+  --console-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.24);
+  --console-field-bg: #111316;
+  --console-active-bg: rgba(54, 197, 240, 0.16);
+  --console-hover-bg: rgba(255, 255, 255, 0.08);
+  --console-rail-bg: #350d36;
+  --console-rail-item: rgba(255, 255, 255, 0.08);
+  --console-rail-active: #611f69;
+  --console-rail-fg: #ffffff;
+  --console-input-stroke: #36c5f0;
+  --console-button-emphasis: #36c5f0;
+  --console-button-emphasis-hover: #5bd2f4;
+  --console-modal-title: #f8f8f8;
+  --console-modal-close-bg: #2b2e33;
+  --console-modal-close-fg: #d1d2d3;
+  --console-cat-fallback: #7c4082;
+  --console-status-connected: #36c5f0;
+}
+
+[data-theme="dark"][data-visual-theme="tesla"] {
+  --console-shell-bg: #0f1115;
+  --console-panel-bg: #0f1115;
+  --console-card-bg: #171a20;
+  --console-card-soft-bg: #20242a;
+  --console-code-bg: #090b0f;
+  --console-pill-bg: #20242a;
+  --console-border-soft: #2b2f36;
+  --console-border-strong: #3a3f48;
+  --console-shadow: none;
+  --console-shadow-soft: none;
+  --console-field-bg: #090b0f;
+  --console-active-bg: #171a20;
+  --console-hover-bg: #171a20;
+  --console-rail-bg: #0f1115;
+  --console-rail-item: #0f1115;
+  --console-rail-active: #171a20;
+  --console-rail-fg: #f4f4f4;
+  --console-input-stroke: #5c86ff;
+  --console-button-emphasis: #f4f4f4;
+  --console-button-emphasis-hover: #ffffff;
+  --console-modal-title: #f4f4f4;
+  --console-modal-close-bg: #171a20;
+  --console-modal-close-fg: #c8c9cc;
+  --console-cat-fallback: #8e8e8e;
+  --console-status-connected: #5c86ff;
 }
 
 .console-shell {

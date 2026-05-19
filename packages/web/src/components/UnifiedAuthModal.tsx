@@ -10,17 +10,12 @@ const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google',
 
 /** Suggested models per client — kept in sync with cat-template.json clientDefaults. */
 const MODEL_SUGGESTIONS: Partial<Record<BuiltinAccountClient, string[]>> = {
-  anthropic: [
-    'claude-sonnet-4-6',
-    'claude-opus-4-6',
-    'claude-opus-4-6[1m]',
-    'claude-sonnet-4-5-20250929',
-    'claude-opus-4-5-20251101',
-  ],
-  openai: ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.3-codex-spark'],
-  google: ['gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3.1-pro-preview'],
-  dare: ['claude-sonnet-4-6'],
-  opencode: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+  anthropic: ['claude-opus-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  openai: ['gpt-5.5', 'gpt-5', 'o4-mini', 'codex-mini'],
+  google: ['gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  kimi: ['kimi-code/kimi-for-coding'],
+  dare: ['claude-sonnet-4-5'],
+  opencode: ['xiaomi-mimo/mimo-v2.5-pro', 'claude-opus-4-6'],
 };
 
 export interface UnifiedAuthEditData {

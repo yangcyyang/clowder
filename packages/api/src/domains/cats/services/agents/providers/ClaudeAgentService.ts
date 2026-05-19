@@ -127,6 +127,8 @@ interface ClaudeAgentServiceOptions {
   model?: string;
   /** Absolute path to MCP server entry (dist/index.js) for --mcp-config */
   mcpServerPath?: string;
+  /** Override executable name/path for Claude-family CLIs. */
+  cliCommand?: string;
 }
 
 /**
@@ -158,6 +160,7 @@ export class ClaudeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
+  private readonly cliCommand: string;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
   private mcpConfigFilePath: string | undefined;
 
@@ -166,6 +169,7 @@ export class ClaudeAgentService implements AgentService {
     this.spawnFn = options?.spawnFn;
     // F32-b: model from options > env (getCatModel) > default
     this.model = options?.model ?? getCatModel(this.catId as string);
+    this.cliCommand = options?.cliCommand ?? 'claude';
     const configuredPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
     if (configuredPath && configuredPath.trim().length > 0) {
       this.mcpServerPath = isAbsolute(configuredPath) ? configuredPath : resolve(process.cwd(), configuredPath);
@@ -285,14 +289,14 @@ export class ClaudeAgentService implements AgentService {
     };
 
     try {
-      const claudeCommand = resolveCliCommand('claude');
+      const claudeCommand = resolveCliCommand(this.cliCommand);
       log.info({ catId: this.catId, resolved: claudeCommand ?? null }, 'Resolving claude CLI command');
       if (!claudeCommand) {
         log.warn({ catId: this.catId }, 'Claude CLI not found');
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError('claude'),
+          error: formatCliNotFoundError(this.cliCommand),
           metadata,
           timestamp: Date.now(),
         };

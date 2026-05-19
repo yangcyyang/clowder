@@ -1,29 +1,53 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent,
+} from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { type ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
+import { ChatMessage } from './ChatMessage';
+import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import { MentionPicker } from './MentionPicker';
+import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 320;
 const THREAD_PANEL_MIN_WIDTH = 280;
 const THREAD_PANEL_MAX_WIDTH = 500;
 
+function detectSlashCommand(value: string, cursor: number): string | null {
+  if (!value.startsWith('/') || cursor <= 0) return null;
+  const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
+  if (cursor > token.length) return null;
+  return value.slice(1, cursor);
+}
+
 interface InlineThreadPanelProps {
   threadId: string;
   sourceMessage: ChatMessageData;
+  isClosing?: boolean;
   onClose: () => void;
   onReplyCountChange?: (sourceMessageId: string, branchThreadId: string, replyCount: number) => void;
 }
 
-function formatMessageAuthor(message: ChatMessageData): string {
-  if (message.type === 'user' && !message.catId) return '用户';
-  return message.catId ?? 'Agent';
-}
-
-export function InlineThreadPanel({ threadId, sourceMessage, onClose, onReplyCountChange }: InlineThreadPanelProps) {
+export function InlineThreadPanel({
+  threadId,
+  sourceMessage,
+  isClosing = false,
+  onClose,
+  onReplyCountChange,
+}: InlineThreadPanelProps) {
+  const { cats } = useCatData();
   const [panelWidth, setPanelWidth, resetPanelWidth] = usePersistedState(
     'cat-cafe:inlineThreadPanelWidth',
     THREAD_PANEL_DEFAULT_WIDTH,
@@ -31,14 +55,51 @@ export function InlineThreadPanel({ threadId, sourceMessage, onClose, onReplyCou
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionStart, setMentionStart] = useState(-1);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionSelectedIdx, setMentionSelectedIdx] = useState(0);
+  const [showSlashCommands, setShowSlashCommands] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+  const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
+  const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+  }, []);
   const handlePanelResize = useCallback(
     (delta: number) => {
       setPanelWidth((prev) => Math.min(THREAD_PANEL_MAX_WIDTH, Math.max(THREAD_PANEL_MIN_WIDTH, prev - delta)));
     },
     [setPanelWidth],
   );
+
+  const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
+  const filteredCatOptions = useMemo(() => {
+    if (!mentionFilter) return catOptions;
+    const lower = mentionFilter.toLowerCase();
+    return catOptions.filter(
+      (option) =>
+        option.label.toLowerCase().includes(lower) ||
+        option.insert.toLowerCase().includes(lower) ||
+        option.id.toLowerCase().includes(lower),
+    );
+  }, [catOptions, mentionFilter]);
+
+  const closeMentionPicker = useCallback(() => {
+    setShowMentionPicker(false);
+    setMentionStart(-1);
+    setMentionFilter('');
+  }, []);
+
+  const closeSlashPicker = useCallback(() => {
+    setShowSlashCommands(false);
+    setSlashQuery('');
+    setSlashSelectedIdx(0);
+  }, []);
 
   const loadMessages = useCallback(() => {
     let cancelled = false;
@@ -107,6 +168,7 @@ export function InlineThreadPanel({ threadId, sourceMessage, onClose, onReplyCou
         throw new Error(body?.detail ?? body?.error ?? `HTTP ${res.status}`);
       }
       setInput('');
+      closeMentionPicker();
       onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1);
       loadMessages();
     } catch (err) {
@@ -114,86 +176,231 @@ export function InlineThreadPanel({ threadId, sourceMessage, onClose, onReplyCou
     } finally {
       setSending(false);
     }
-  }, [input, loadMessages, onReplyCountChange, replyMessages.length, sending, sourceMessage.id, threadId]);
+  }, [
+    closeMentionPicker,
+    input,
+    loadMessages,
+    onReplyCountChange,
+    replyMessages.length,
+    sending,
+    sourceMessage.id,
+    threadId,
+  ]);
+
+  const handleInputChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setInput(value);
+      const slashQuery = detectSlashCommand(value, event.target.selectionStart);
+      if (slashQuery !== null) {
+        closeMentionPicker();
+        setShowSlashCommands(true);
+        setSlashQuery(slashQuery);
+        setSlashSelectedIdx(0);
+        return;
+      }
+      closeSlashPicker();
+
+      const trigger = detectMenuTrigger(value, event.target.selectionStart);
+      if (trigger?.type === 'mention') {
+        setShowMentionPicker(true);
+        setMentionStart(trigger.start);
+        setMentionFilter(trigger.filter);
+        setMentionSelectedIdx(0);
+      } else {
+        closeMentionPicker();
+      }
+    },
+    [closeMentionPicker, closeSlashPicker],
+  );
+
+  const insertMention = useCallback(
+    (option: CatOption) => {
+      const before = input.slice(0, mentionStart);
+      const after = input.slice(mentionStart + mentionFilter.length + 1);
+      const next = `${before}${option.insert}${after}`;
+      setInput(next);
+      closeMentionPicker();
+      setTimeout(() => {
+        const cursor = before.length + option.insert.length;
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(cursor, cursor);
+      }, 0);
+    },
+    [closeMentionPicker, input, mentionFilter.length, mentionStart],
+  );
+
+  const insertSlashCommand = useCallback(
+    (item: SlashCommandItem) => {
+      const rest = input.replace(/^\/[^\s]*/, '');
+      const next = `${item.command}${rest}`;
+      setInput(next);
+      closeSlashPicker();
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(item.command.length, item.command.length);
+      }, 0);
+    },
+    [closeSlashPicker, input],
+  );
+
+  const handleInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showSlashCommands) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          if (slashItems.length > 0) setSlashSelectedIdx((idx) => (idx + 1) % slashItems.length);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (slashItems.length > 0) setSlashSelectedIdx((idx) => (idx - 1 + slashItems.length) % slashItems.length);
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          const item = slashItems[slashSelectedIdx];
+          if (item) insertSlashCommand(item);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeSlashPicker();
+          return;
+        }
+      }
+
+      if (showMentionPicker) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          if (filteredCatOptions.length > 0) setMentionSelectedIdx((idx) => (idx + 1) % filteredCatOptions.length);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (filteredCatOptions.length > 0) {
+            setMentionSelectedIdx((idx) => (idx - 1 + filteredCatOptions.length) % filteredCatOptions.length);
+          }
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          const option = filteredCatOptions[mentionSelectedIdx];
+          if (option) insertMention(option);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMentionPicker();
+          return;
+        }
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void handleSend();
+      }
+    },
+    [
+      closeMentionPicker,
+      closeSlashPicker,
+      filteredCatOptions,
+      handleSend,
+      insertMention,
+      insertSlashCommand,
+      mentionSelectedIdx,
+      showMentionPicker,
+      showSlashCommands,
+      slashItems,
+      slashSelectedIdx,
+    ],
+  );
 
   return (
-    <>
-      <div className="hidden lg:flex">
-        <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
-      </div>
+    <div
+      className="thread-panel-motion hidden h-full min-h-0 flex-shrink-0 lg:flex"
+      data-open={isClosing ? 'false' : 'true'}
+    >
+      <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
       <aside
-        className="hidden lg:flex h-full flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-panel-bg)]"
+        className="flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
         style={{ width: panelWidth }}
       >
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4 py-3">
-        <span className="text-sm font-semibold text-[var(--cafe-text)]">Thread</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded px-1.5 py-0.5 text-xs text-[var(--cafe-text-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]"
-          aria-label="关闭 Thread 面板"
-        >
-          x
-        </button>
-      </div>
-
-      <div className="flex-shrink-0 border-b border-[var(--slock-border-color)] p-3">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
-          原始消息
-        </div>
-        <div className="rounded-lg bg-[var(--console-card-soft-bg)] px-3 py-2 text-sm">
-          <div className="mb-1 text-xs text-[var(--cafe-text-muted)]">{formatMessageAuthor(sourceMessage)}</div>
-          <div className="whitespace-pre-wrap break-words text-[var(--cafe-text)]">
-            {sourceMessage.content?.trim() || '（无正文）'}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3">
-        {loading ? (
-          <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
-        ) : replyMessages.length === 0 ? (
-          <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
-        ) : (
-          replyMessages.map((msg) => (
-            <div key={msg.id} className="mb-3 rounded-lg bg-[var(--console-card-soft-bg)] px-3 py-2 text-sm">
-              <div className="mb-1 text-xs text-[var(--cafe-text-muted)]">{formatMessageAuthor(msg)}</div>
-              <div className="whitespace-pre-wrap break-words text-[var(--cafe-text)]">
-                {msg.content?.trim() || '（无正文）'}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
-        {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-              event.preventDefault();
-              void handleSend();
-            }
-          }}
-          placeholder="回复 Thread..."
-          rows={3}
-          className="w-full resize-none rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] px-3 py-2 text-sm text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--color-cafe-accent)]"
-        />
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-[11px] text-[var(--cafe-text-muted)]">⌘/Ctrl + Enter 发送</span>
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4 py-3">
+          <span className="text-sm font-semibold text-[var(--cafe-text)]">Thread</span>
           <button
             type="button"
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-            className="rounded-md bg-[var(--color-cafe-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-accent-foreground)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onClose}
+            className="rounded px-1.5 py-0.5 text-xs text-[var(--cafe-text-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]"
+            aria-label="关闭 Thread 面板"
           >
-            {sending ? '发送中...' : '发送'}
+            x
           </button>
         </div>
-      </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
+          <div className="mb-4 border-b border-[var(--slock-border-color)] pb-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
+              原始消息
+            </div>
+            <div className="px-1 py-1">
+              <ChatMessage message={sourceMessage} getCatById={getCatById} disableContentCollapse />
+            </div>
+          </div>
+          {loading ? (
+            <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
+          ) : replyMessages.length === 0 ? (
+            <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
+          ) : (
+            replyMessages.map((msg) => (
+              <ChatMessage key={msg.id} message={msg} getCatById={getCatById} disableContentCollapse />
+            ))
+          )}
+        </div>
+
+        <div className="flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
+          {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
+          <div className="relative">
+            {showMentionPicker && (
+              <MentionPicker
+                options={filteredCatOptions}
+                selectedIdx={mentionSelectedIdx}
+                onSelectIdx={setMentionSelectedIdx}
+                onPick={insertMention}
+              />
+            )}
+            {showSlashCommands && (
+              <SlashCommandPicker
+                query={slashQuery}
+                selectedIdx={slashSelectedIdx}
+                onSelectIdx={setSlashSelectedIdx}
+                onPick={insertSlashCommand}
+                onItemsChange={setSlashItems}
+              />
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              placeholder="回复 Thread..."
+              rows={3}
+              className="w-full resize-none rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] px-3 py-2 text-sm text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--color-cafe-accent)]"
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[11px] text-[var(--cafe-text-muted)]">⌘/Ctrl + Enter 发送</span>
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim() || sending}
+              className="rounded-md bg-[var(--color-cafe-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-accent-foreground)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sending ? '发送中...' : '发送'}
+            </button>
+          </div>
+        </div>
       </aside>
-    </>
+    </div>
   );
 }

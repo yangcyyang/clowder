@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatInput, threadDrafts, threadImageDrafts } from '@/components/ChatInput';
+import { ChatInput, threadDrafts, threadFileDrafts, threadImageDrafts } from '@/components/ChatInput';
 import { ThreadItem } from '@/components/ThreadSidebar/ThreadItem';
 import type { WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode, Thread } from '@/stores/chat-types';
@@ -58,7 +58,13 @@ vi.mock('@/utils/api-client', () => ({
 
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 
-type OnSend = (content: string, images?: File[], whisper?: WhisperOptions, deliveryMode?: DeliveryMode) => void;
+type OnSend = (
+  content: string,
+  images?: File[],
+  attachments?: File[],
+  whisper?: WhisperOptions,
+  deliveryMode?: DeliveryMode,
+) => void;
 
 function makeThread(id: string, title: string): Thread {
   const now = Date.now();
@@ -123,6 +129,7 @@ describe('ThreadItem draft badge', () => {
   beforeEach(() => {
     threadDrafts.clear();
     threadImageDrafts.clear();
+    threadFileDrafts.clear();
     useChatStore.setState({
       messages: [],
       isLoading: false,
@@ -207,7 +214,7 @@ describe('ThreadItem draft badge', () => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
-    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined, undefined);
     expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
   });
 

@@ -21,6 +21,7 @@ interface CatAvatarProps {
   catId: string;
   size?: number;
   status?: CatStatus;
+  tone?: 'default' | 'quiet';
   /** F174 D2b-2: corner status dot for callback-auth health surface (明厨亮灶 实体层). */
   callbackAuthStatus?: CallbackAuthStatus;
   /** Optional aria-label / hover hint for the status dot (e.g. "broken · 12 fails"). */
@@ -39,6 +40,7 @@ export function CatAvatar({
   catId,
   size = 32,
   status,
+  tone = 'default',
   callbackAuthStatus,
   callbackAuthLabel,
   callbackAuthPopover,
@@ -52,6 +54,7 @@ export function CatAvatar({
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
   const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
+  const visibleRingColor = tone === 'quiet' && !isStreaming && !isError ? 'var(--clowder-avatar-quiet-ring)' : ringColor;
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
@@ -68,7 +71,7 @@ export function CatAvatar({
         style={{
           width: size,
           height: size,
-          ['--tw-ring-color' as string]: isError ? 'var(--console-stop)' : ringColor,
+          ['--tw-ring-color' as string]: isError ? 'var(--console-stop)' : visibleRingColor,
           boxShadow: glowShadow,
         }}
       >

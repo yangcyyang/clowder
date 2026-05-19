@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clowder AI 本地架构与进度说明</title>
+  <style>
+    :root {
+      --bg: #f7f3ea;
+      --paper: #fffdf8;
+      --ink: #24201c;
+      --muted: #6f665d;
+      --line: #ded3c3;
+      --soft: #f0e7d9;
+      --accent: #8f5c2c;
+      --accent-2: #2f6f70;
+      --green: #2f7a4f;
+      --yellow: #b07a16;
+      --red: #a54235;
+      --blue: #3b6793;
+      --purple: #765aa6;
+      --shadow: 0 12px 30px rgba(58, 45, 30, 0.08);
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow: auto;
+      padding: 24px 18px;
+      border-right: 1px solid var(--line);
+      background: #efe4d2;
+    }
+
+    nav .brand {
+      font-weight: 800;
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    nav .sub {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+
+    nav a {
+      display: block;
+      color: var(--ink);
+      text-decoration: none;
+      padding: 7px 9px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    nav a:hover { background: rgba(255, 255, 255, 0.55); }
+
+    main {
+      min-width: 0;
+      padding: 44px 54px 80px;
+    }
+
+    .hero {
+      max-width: 1180px;
+      padding: 32px;
+      border: 1px solid var(--line);
+      background: linear-gradient(135deg, #fffdf8, #f5ead9);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+    }
+
+    h1, h2, h3, h4 { line-height: 1.24; }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 54px 0 18px;
+      padding-top: 12px;
+      border-top: 2px solid var(--line);
+      font-size: 26px;
+    }
+
+    h3 {
+      margin: 32px 0 12px;
+      font-size: 20px;
+    }
+
+    h4 {
+      margin: 22px 0 8px;
+      font-size: 16px;
+    }
+
+    p { margin: 10px 0; }
+    .lead {
+      max-width: 900px;
+      font-size: 18px;
+      color: #3f372f;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      background: #fbf4e7;
+      padding: 12px 14px;
+      border-radius: 0 8px 8px 0;
+      color: #3e3429;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: 0 4px 16px rgba(58, 45, 30, 0.04);
+    }
+
+    .card h3, .card h4 { margin-top: 0; }
+    .metric {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1.1;
+    }
+    .metric-label {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin: 14px 0 22px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #efe2cf;
+      font-weight: 700;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: #f0e6d8;
+      padding: 2px 5px;
+      border-radius: 5px;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow: auto;
+      background: #27231f;
+      color: #f5eadc;
+      padding: 16px;
+      border-radius: var(--radius);
+      line-height: 1.55;
+      font-size: 13px;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .done { color: var(--green); background: #e4f0e8; border-color: #c3dfcc; }
+    .progress { color: var(--yellow); background: #fbefcf; border-color: #edd498; }
+    .spec { color: var(--blue); background: #e4edf5; border-color: #c2d6e9; }
+    .risk { color: var(--red); background: #f5e1dd; border-color: #e5c1ba; }
+    .idea { color: var(--purple); background: #ebe4f3; border-color: #d7c8e8; }
+
+    .flow {
+      background: #fff8ec;
+      border: 1px dashed #c9b79d;
+      border-radius: var(--radius);
+      padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow: auto;
+      white-space: pre;
+    }
+
+    .section-kicker {
+      color: var(--accent);
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+
+    .source {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    .callout {
+      background: #e8f0ed;
+      border: 1px solid #c4d9d1;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .warn {
+      background: #fff2d8;
+      border: 1px solid #e8ce91;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .danger {
+      background: #f8e3df;
+      border: 1px solid #e5b8b0;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      nav {
+        position: relative;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+      main { padding: 26px 18px 60px; }
+      .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; }
+      h1 { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <div class="brand">Clowder 本地说明</div>
+      <div class="sub">基于本机 <code>clowder-ai</code> 与课程目录生成<br />快照日期：2026-05-18</div>
+      <a href="#summary">1. 总览结论</a>
+      <a href="#evidence">2. 本地证据与范围</a>
+      <a href="#course-map">3. 课程脉络如何落到现在</a>
+      <a href="#repo-map">4. 仓库结构地图</a>
+      <a href="#runtime">5. 运行时总架构</a>
+      <a href="#frontend">6. 前端与 Console</a>
+      <a href="#api">7. API 与调度层</a>
+      <a href="#agents">8. 猫猫与 Agent CLI</a>
+      <a href="#message">9. 消息与气泡管线</a>
+      <a href="#a2a">10. A2A 与球权协议</a>
+      <a href="#memory">11. 记忆与图书馆</a>
+      <a href="#pack">12. Pack 与 Growth</a>
+      <a href="#skills">13. Skills、家规、门禁</a>
+      <a href="#connectors">14. 外部连接与语音</a>
+      <a href="#ops">15. 运维、可观测、安装</a>
+      <a href="#gaps">16. 未完善与待补齐</a>
+      <a href="#how-to-read">17. 如何继续看这个项目</a>
+    </nav>
+
+    <main>
+      <section class="hero" id="summary">
+        <div class="section-kicker">Current Local Snapshot</div>
+        <h1>Clowder AI 本地架构与进度说明</h1>
+        <p class="lead">
+          这份文档基于当前本地仓库和《multi-agent 课程》整理。核心判断是：
+          <strong>Clowder 已经不只是多 Agent 编程工具，而是在走向“可领养、可治理、可迁移、可成长的 AI 团队操作系统”。</strong>
+        </p>
+        <div class="note">
+          当前本地分支为 <code>feature/slock-like-webui</code>，工作区有未提交改动。
+          因此本文描述的是“本地正在演进中的真实状态”，不是干净 release 或 main 分支说明。
+        </div>
+      </section>
+
+      <section id="evidence">
+        <h2>1. 本地证据与范围</h2>
+        <p>
+          这次盘点使用的是本机路径：
+          <code>/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai</code>。
+          同时参考课程目录：
+          <code>multi-agent课程/lessons</code>。
+        </p>
+
+        <div class="grid four">
+          <div class="card">
+            <div class="metric">193</div>
+            <div class="metric-label">Feature 文档<br /><code>docs/features/F*.md</code></div>
+          </div>
+          <div class="card">
+            <div class="metric">20</div>
+            <div class="metric-label">ADR 决策文档<br /><code>docs/decisions</code></div>
+          </div>
+          <div class="card">
+            <div class="metric">34</div>
+            <div class="metric-label">本地 Skill<br /><code>cat-cafe-skills/*/SKILL.md</code></div>
+          </div>
+          <div class="card">
+            <div class="metric">6</div>
+            <div class="metric-label">breed 配置<br /><code>cat-config.json</code></div>
+          </div>
+        </div>
+
+        <h3>Feature 状态粗分</h3>
+        <p>
+          当前 <code>docs/features/index.json</code> 中共有 193 个 Feature。
+          粗略分桶结果如下。注意：当前 <code>status</code> 仍是自然语言混合字段，
+          包含 owner、priority、completed 等信息，所以这里是基于文本前缀的粗分类。
+        </p>
+        <table>
+          <thead>
+            <tr><th>状态桶</th><th>数量</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="tag done">done / closed</span></td><td>约 144</td><td>已经完成、关闭、被 realized 或 superseded 的功能。</td></tr>
+            <tr><td><span class="tag progress">in-progress / partial</span></td><td>约 24</td><td>部分阶段完成、仍在推进、pending merge 或 phase-a-done。</td></tr>
+            <tr><td><span class="tag spec">spec</span></td><td>约 19</td><td>已有规格文档，但还未完整落地。</td></tr>
+            <tr><td><span class="tag idea">idea</span></td><td>约 2</td><td>保留槽位或早期想法。</td></tr>
+            <tr><td><span class="tag risk">other</span></td><td>约 4</td><td>parked、follow-up、特殊文本状态。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="warn">
+          <strong>一个结构化改进点：</strong>
+          第十课强调 schema/frontmatter，但当前 Feature index 的 <code>status</code> 仍然是混合文本。
+          后续最好拆成 <code>status</code>、<code>owner</code>、<code>priority</code>、<code>completedAt</code>、
+          <code>reviewer</code>、<code>source</code> 等结构字段。
+        </div>
+      </section>
+
+      <section id="course-map">
+        <h2>2. 课程脉络如何落到现在</h2>
+        <p>
+          课程不是“理想教程”，而是一条真实演化链：从工具调用，到 CLI 工程化，
+          到多猫协作，再到知识、记忆、Pack、门禁。现在本地仓库里的结构，基本都能在课程里找到根。
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>课程阶段</th><th>解决的问题</th><th>现在本地对应结构</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>第 0-2 课：工具与 CLI</td>
+              <td>AI 从聊天到能干活；SDK 不够，转向真实 Agent CLI；处理 stderr、进程、Redis 隔离。</td>
+              <td><code>packages/api/src/domains/cats/services/agents</code>、各 provider service、CLI spawn、runtime worktree、Redis 脚本。</td>
+            </tr>
+            <tr>
+              <td>第 3-5 课：元规则、A2A、MCP 回传</td>
+              <td>让猫不是工具，而是能主动说话、互相传球的协作者。</td>
+              <td><code>cat-cafe-skills/refs/shared-rules.md</code>、<code>callback-*.ts</code>、<code>packages/mcp-server/src/tools</code>、A2A route/callback。</td>
+            </tr>
+            <tr>
+              <td>第 6 课：生产安全</td>
+              <td>AI 能执行命令后，数据安全和危险操作必须有硬护栏。</td>
+              <td>Redis 防护、危险操作 guard、preflight、备份恢复脚本、治理规则。</td>
+            </tr>
+            <tr>
+              <td>第 7-8 课：平台化与 Session</td>
+              <td>从 coding tool 到生活/平台；Rich Blocks、PWA、Whisper、Session Chain。</td>
+              <td>Rich components、<code>visibility/whisperTo</code>、session-chain routes/tools、ContextHealthBar。</td>
+            </tr>
+            <tr>
+              <td>第 9-11 课：上下文、知识、语音</td>
+              <td>保证 Agent 做的是你真正想要的；知识不腐；猫能听能说。</td>
+              <td><code>docs/features</code>、<code>evidence.sqlite</code>、<code>packages/api/src/domains/memory</code>、TTS/ASR sidecar service。</td>
+            </tr>
+            <tr>
+              <td>第 12-15 课：无 Boss、闭环、记忆、纪律</td>
+              <td>从单次交付走向长期团队治理：没有 Boss Agent，靠对等判断 + 结构化执行。</td>
+              <td>Pack、家规、Feature lifecycle、Quality Gate、Merge Gate、A2A 球权、observability、AppShell。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>课程与本地现状的关系：</strong>
+          第十五课还停在 149 个 Feature 阶段；本地已经到 193 个 Feature，
+          说明现在的重点已经从“证明三猫协作可行”，推进到“开源产品化、图书馆记忆、Pack 生态、Console 外壳、A2A 治理”。
+        </div>
+      </section>
+
+      <section id="repo-map">
+        <h2>3. 仓库结构地图</h2>
+        <p>当前仓库可以按“运行时代码、产品界面、知识文档、技能规则、部署运维”来理解。</p>
+
+        <table>
+          <thead>
+            <tr><th>路径</th><th>角色</th><th>你应该怎么看</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>packages/api</code></td>
+              <td>后端大脑与运行时编排层</td>
+              <td>路由、消息、Agent 调用、队列、记忆、Pack、telemetry、connector、服务管理都在这里。</td>
+            </tr>
+            <tr>
+              <td><code>packages/web</code></td>
+              <td>前端 Console 与聊天界面</td>
+              <td>AppShell、ActivityBar、ThreadSidebar、Settings、Memory、Mission Hub、Rich Blocks。</td>
+            </tr>
+            <tr>
+              <td><code>packages/shared</code></td>
+              <td>跨端类型与 schema</td>
+              <td>Pack schema、cat config 类型、bubble contract、shared utility。</td>
+            </tr>
+            <tr>
+              <td><code>packages/mcp-server</code></td>
+              <td>给猫猫使用的 MCP 工具层</td>
+              <td>callback、evidence、session-chain、rich block、game、signals、schedule 等工具。</td>
+            </tr>
+            <tr>
+              <td><code>cat-cafe-skills</code></td>
+              <td>团队 SOP 与行为协议</td>
+              <td>不是普通文档，是会被 Agent 按需加载的工作流：TDD、review、merge gate、knowledge engineering 等。</td>
+            </tr>
+            <tr>
+              <td><code>docs/features</code></td>
+              <td>Feature 真相源</td>
+              <td>一个 Feature 一个聚合文件，记录 why、what、AC、决策、风险、依赖。</td>
+            </tr>
+            <tr>
+              <td><code>docs/decisions</code></td>
+              <td>ADR 决策层</td>
+              <td>重大架构选择的长期证据，例如 memory、Pack、metadata、directory hygiene。</td>
+            </tr>
+            <tr>
+              <td><code>scripts</code></td>
+              <td>安装、检查、同步、服务启动</td>
+              <td>工程纪律的脚手架：pre-merge、frontmatter、skills manifest、MCP doctor、services 等。</td>
+            </tr>
+            <tr>
+              <td><code>desktop</code></td>
+              <td>桌面安装包外壳</td>
+              <td>Electron/installer/release pipeline，对应 F179。</td>
+            </tr>
+            <tr>
+              <td><code>data</code>、<code>evidence.sqlite</code>、<code>world.sqlite</code></td>
+              <td>本地运行数据</td>
+              <td>证据索引、世界状态、运行时缓存。注意索引是编译产物，不是真相源。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="runtime">
+        <h2>4. 运行时总架构</h2>
+        <p>
+          Clowder 的运行可以理解成三层：模型层、Agent CLI 层、平台层。
+          模型负责推理，CLI 负责工具/文件/命令执行，Clowder 平台负责身份、路由、记忆、队列、门禁、审计。
+        </p>
+
+        <div class="flow">用户 / CVO
+  │
+  ▼
+packages/web  前端 Console
+  ├─ 对话 / ThreadSidebar / Rich Blocks
+  ├─ Settings / Members / Accounts / MCP / Skills / Ops
+  ├─ Memory / Mission Hub / Signals / Workspace
+  │
+  ▼
+packages/api  平台运行时
+  ├─ HTTP routes + WebSocket
+  ├─ Thread / Message / Queue / Invocation
+  ├─ Agent Router + Agent Services
+  ├─ Memory Resolver + Pack Compiler + Skills
+  ├─ Telemetry + Services + Connectors
+  │
+  ▼
+Agent CLI 层
+  ├─ Claude Code
+  ├─ Codex / GPT
+  ├─ Gemini ACP
+  ├─ Antigravity
+  └─ opencode / Kimi 等扩展
+  │
+  ▼
+MCP + 文件系统 + Git + Redis + SQLite + 外部 IM / GitHub / 语音服务</div>
+
+        <h3>关键设计思想</h3>
+        <div class="grid three">
+          <div class="card">
+            <h4>判断去中心化</h4>
+            <p>没有 Boss Agent。多只猫可以独立判断、互相质疑、传球、review。</p>
+          </div>
+          <div class="card">
+            <h4>执行结构化</h4>
+            <p>队列、active slot、session、hooks、worktree、Redis、门禁保证执行不乱。</p>
+          </div>
+          <div class="card">
+            <h4>知识可追溯</h4>
+            <p>Feature、ADR、Lesson、Evidence、Library 让系统不是每次从零开始。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="frontend">
+        <h2>5. 前端与 Console</h2>
+        <p>
+          当前本地分支最明显的改造是 F190：从旧 Hub modal 向正式 AppShell/Settings Shell 迁移。
+          这意味着 Clowder 正在从“一个聊天页面带复杂设置弹窗”，转成“有主导航、有设置中心、有记忆页、有任务页的 Console 应用”。
+        </p>
+
+        <h3>当前前端主入口</h3>
+        <table>
+          <thead>
+            <tr><th>路径/组件</th><th>作用</th><th>状态判断</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>AppShell.tsx</code></td><td>全局三栏壳：ActivityBar + ThreadSidebar + content。</td><td><span class="tag progress">进行中</span> F190 迁移核心。</td></tr>
+            <tr><td><code>ActivityBar.tsx</code></td><td>左侧全局导航：对话、任务、记忆、设置、置顶设置区、主题切换。</td><td><span class="tag progress">进行中</span> 替代 Hub 入口。</td></tr>
+            <tr><td><code>/settings</code></td><td>正式设置中心，12 个 section。</td><td><span class="tag progress">部分完成</span> 有骨架和部分内容，仍有占位。</td></tr>
+            <tr><td><code>/memory</code></td><td>记忆搜索、状态、健康、catalog、graph。</td><td><span class="tag done">已成体系</span> 对应 F102/F186。</td></tr>
+            <tr><td><code>/mission-hub</code></td><td>任务/Feature/社区事项入口。</td><td><span class="tag done">已有入口</span> 但仍在演化。</td></tr>
+            <tr><td><code>ChatContainer</code> / <code>ChatInput</code></td><td>主对话体验、发送、mention、slash command、whisper、附件。</td><td><span class="tag progress">持续改造</span> 当前有 MentionPicker/SlashCommandPicker 新增。</td></tr>
+            <tr><td><code>QueuePanel</code></td><td>显示和管理排队消息。</td><td><span class="tag spec">待升级</span> F175 Phase B 仍未完成。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Settings Shell 的 12 个分区</h3>
+        <div class="grid three">
+          <div class="card"><h4>成员管理</h4><p>猫猫名册、默认协作对象、排序、可用状态。</p></div>
+          <div class="card"><h4>账户与密钥</h4><p>模型账户、凭据、执行身份、accountRef。</p></div>
+          <div class="card"><h4>IM 对接</h4><p>飞书、钉钉、企微、外部消息入口。</p></div>
+          <div class="card"><h4>Skill 管理</h4><p>Skill 市场、安装计划、本地能力预览。</p></div>
+          <div class="card"><h4>MCP 管理</h4><p>MCP 服务、工具目录、浏览器自动化依赖。</p></div>
+          <div class="card"><h4>插件/集成</h4><p>插件状态、外部集成、安装结果。</p></div>
+          <div class="card"><h4>能力市场</h4><p>搜索和安装 MCP、Skill、插件。</p></div>
+          <div class="card"><h4>语音管理</h4><p>ASR/TTS、术语表、语音服务状态。</p></div>
+          <div class="card"><h4>系统配置</h4><p>环境选项、默认行为、运行时开关。</p></div>
+          <div class="card"><h4>规则与 SOP</h4><p>家规、协作 SOP、模型提示词入口。</p></div>
+          <div class="card"><h4>通知</h4><p>推送订阅、提醒策略、设备联动。</p></div>
+          <div class="card"><h4>运维监控</h4><p>服务健康、命令工具、运行态观测。</p></div>
+        </div>
+
+        <div class="warn">
+          <strong>迁移期风险：</strong>
+          F190 文档明确提到 dual ThreadSidebar、部分 Settings 面板引用尚未实现的后端路由。
+          这说明当前 Console 外壳正在换骨，短期内会有过渡复杂度。
+        </div>
+      </section>
+
+      <section id="api">
+        <h2>6. API 与调度层</h2>
+        <p>
+          <code>packages/api</code> 是 Clowder 的平台层。它既是 HTTP/WebSocket 服务，
+          又是 Agent 调度器、记忆服务、Pack 编译器、外部连接器和服务管理器。
+        </p>
+
+        <h3>API 域划分</h3>
+        <table>
+          <thead>
+            <tr><th>目录</th><th>负责内容</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>domains/cats</code></td><td>猫猫运行核心：Agent 调用、context、session、stores、A2A、TTS、game、push。</td></tr>
+            <tr><td><code>domains/memory</code></td><td>F102/F186 记忆系统：evidence store、resolver、scanner、library catalog、graph、summary。</td></tr>
+            <tr><td><code>domains/packs</code></td><td>F129 Pack：loader、compiler、security guard、store、export。</td></tr>
+            <tr><td><code>domains/services</code></td><td>ASR/TTS/Embedding/LLM postprocess 等 sidecar 服务 manifest 与自启动。</td></tr>
+            <tr><td><code>infrastructure/connectors</code></td><td>外部平台连接：IM、GitHub repo events、media、enterprise。</td></tr>
+            <tr><td><code>infrastructure/telemetry</code></td><td>OTel、trace store、metrics snapshot、burn-rate monitor、redactor。</td></tr>
+            <tr><td><code>routes</code></td><td>HTTP API 注册层，文件很多，说明功能面已经非常宽。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>后端启动时会组装的关键服务</h3>
+        <ul>
+          <li>MessageStore / ThreadStore / InvocationRecordStore：消息、线程和调用记录。</li>
+          <li>InvocationQueue / QueueProcessor：排队、优先级、active slot。</li>
+          <li>AgentRouter / AgentService：解析目标猫并调用对应 CLI。</li>
+          <li>MemoryServices：evidenceStore、indexBuilder、knowledgeResolver、catalog、markerQueue。</li>
+          <li>PackStore / PackLoader / PackSecurityGuard：Pack 管理与安全编译。</li>
+          <li>CommandRegistry：核心 slash command + skill commands。</li>
+          <li>SocketManager：实时广播、气泡更新、thread seq。</li>
+          <li>Telemetry：trace、metrics、health、burn-rate 告警。</li>
+        </ul>
+      </section>
+
+      <section id="agents">
+        <h2>7. 猫猫与 Agent CLI</h2>
+        <p>
+          本地 <code>cat-config.json</code> 已经不是固定三猫，而是 6 个 breed、多 variant。
+          这对应第七课和 F32/F129 的方向：从写死三猫，走向可配置团队。
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>breed / 猫格</th><th>典型 provider</th><th>角色定位</th><th>状态意义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Ragdoll / 布偶猫</td><td>Anthropic Claude</td><td>主架构、深度开发、系统设计。</td><td>有多个 variant：Opus、Sonnet、Opus 4.5、Opus 4.7。</td></tr>
+            <tr><td>Maine Coon / 缅因猫</td><td>OpenAI Codex/GPT</td><td>Review、安全、测试、调试、严谨审查。</td><td>包含 GPT-5.4、Codex Spark 等不同速度/上下文 variant。</td></tr>
+            <tr><td>Siamese / 暹罗猫</td><td>Google Gemini</td><td>设计、创意、视觉、表达。</td><td>配置中明确有“禁止写代码”等角色护栏。</td></tr>
+            <tr><td>金渐层 / opencode</td><td>opencode / 多模型</td><td>外部 orchestrator 能力、通用执行。</td><td>代表“单猫内部可编排，跨猫仍对等”。</td></tr>
+            <tr><td>Kimi / 其他扩展</td><td>Kimi、GLM、MiniMax、Qwen 等</td><td>可扩展 provider 试验。</td><td>说明 Clowder 已经走向 provider-agnostic。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Agent 调用链</h3>
+        <div class="flow">用户消息 / connector 消息 / A2A 消息
+  → messages route / callback route / queue
+  → router.resolveTargetsAndIntent()
+  → InvocationQueue / active slot 判断
+  → AgentService.invoke()
+  → provider CLI spawn
+  → stdout/stderr/stream-json/ndjson 解析
+  → callback/MCP 回传
+  → MessageStore 持久化
+  → WebSocket 广播
+  → 前端 BubbleReducer 合并渲染</div>
+      </section>
+
+      <section id="message">
+        <h2>8. 消息与气泡管线</h2>
+        <p>
+          F183 是当前架构里非常重要的收敛点。它不是一个 UI 小修，而是把“气泡裂了、不见了、F5 才出来、发完才出来”的长期问题，收敛成一套消息管线架构。
+        </p>
+
+        <h3>为什么气泡以前容易出 bug</h3>
+        <ul>
+          <li>Redis MessageStore、Redis DraftStore、IndexedDB、Zustand/Ledger 多个真相源竞争。</li>
+          <li>OUTER invocationId 和 INNER invocationId 混用，不同 provider 路径补丁很多。</li>
+          <li>消息写入口太多，stream/callback/draft/queue/hydration/replace/provider transform 各走各的。</li>
+          <li>WebSocket fire-and-forget，长 invocation 下会有 gap 和 catch-up 问题。</li>
+          <li>hydration merge 策略过复杂，每加一种消息 origin 就可能漏 case。</li>
+        </ul>
+
+        <h3>F183 的收敛方案</h3>
+        <table>
+          <thead>
+            <tr><th>机制</th><th>作用</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Stable identity</td><td>稳定身份收敛为 <code>(catId, invocationId, bubbleKind)</code>。</td></tr>
+            <tr><td>BubbleReducer / Single Writer</td><td>所有 stream/callback/done/error/tool/background path 尽量统一进 reducer。</td></tr>
+            <tr><td>Thread-scoped seq</td><td>实时事件带 seq，客户端发现 gap 后 catch-up。</td></tr>
+            <tr><td>IDB fallback</td><td>IDB 降级为离线首屏 fallback，在线 hydrate 时 server history authoritative。</td></tr>
+            <tr><td>Invariant gate</td><td>dev/runtime 检测 duplicate stable identity、phase regression、canonical key split。</td></tr>
+            <tr><td>Replay harness</td><td>用历史 fixture 回放，避免新路径再引入旧 bug。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          这就是课程第十五课“速度来自纪律”的具体例子：不是靠说“以后小心气泡”，而是把消息身份、写入口、回放、断言、catch-up 全部工程化。
+        </div>
+      </section>
+
+      <section id="a2a">
+        <h2>9. A2A 与球权协议</h2>
+        <p>
+          第十二课讲“没有 Boss Agent”。但没有 Boss 不等于没有秩序。
+          F167 正在把多猫协作里的“传球、接球、退球、升级、持球”做成运行时协议。
+        </p>
+
+        <h3>当前要解决的 A2A 问题</h3>
+        <table>
+          <thead>
+            <tr><th>问题</th><th>表现</th><th>对应治理</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>漏传球</td><td>该 @ 的时候没 @，链条断掉。</td><td>早期 F064 已覆盖一部分。</td></tr>
+            <tr><td>乒乓球</td><td>两只猫反复 @，但没人真正干活。</td><td>F167 L1 same-pair streak 警告/熔断。</td></tr>
+            <tr><td>虚空传球</td><td>说“我来做”，但实际把球传走或没人接。</td><td>球权出口检查、接/退/升三选一。</td></tr>
+            <tr><td>角色错配</td><td>让 designer 写代码、让不合适的猫接任务。</td><td>角色适配门禁。</td></tr>
+            <tr><td>真持球无执行层</td><td>猫说“我继续做”，CLI 退出后没人再唤醒。</td><td><code>hold_ball</code> MCP：有界持球 + 自动唤醒。</td></tr>
+            <tr><td>假终局</td><td>review 给了结论就停，author 没收到下一步。</td><td>Forced-pass guard：结论后默认必须传球。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>球权协议的本质</h3>
+        <div class="flow">每次猫输出结尾，都要回答：
+
+1. 球在我手上，我继续执行什么？
+2. 球传给谁？为什么是它？
+3. 我做不了，退回/升级给谁？
+4. 需要 CVO 决策吗？
+
+不能只说状态，必须给出可执行的下一棒。</div>
+      </section>
+
+      <section id="memory">
+        <h2>10. 记忆与图书馆</h2>
+        <p>
+          课程第十课讲“别让 AI 随地大小拉 markdown”，第十四课讲“三层记忆与自我进化”。
+          本地现在已经从 F102 的项目 evidence 系统，推进到 F186 的图书馆记忆。
+        </p>
+
+        <h3>F102：项目证据库</h3>
+        <ul>
+          <li><code>evidence.sqlite</code> 是编译产物，不是真相源。</li>
+          <li>真相源仍是 <code>docs/features</code>、<code>docs/decisions</code>、<code>docs/public-lessons.md</code> 等文档。</li>
+          <li>支持 lexical、semantic、hybrid 三种检索。</li>
+          <li>支持 summary segments、summary state、edges、embedding meta。</li>
+          <li>通过 <code>IKnowledgeResolver</code> 做联邦检索与 RRF rank fusion。</li>
+        </ul>
+
+        <h3>F186：图书馆记忆架构</h3>
+        <p>
+          F186 把记忆从“项目附属能力”升级为“多域 Collection 图书馆”。
+          核心抽象是：
+        </p>
+        <pre>Collection = truth_source
+           + owner
+           + scanner
+           + authority_ceiling
+           + review_policy
+           + index_policy</pre>
+
+        <table>
+          <thead>
+            <tr><th>组件</th><th>职责</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>LibraryCatalog</td><td>Collection 注册表，只存元数据和路由策略。</td></tr>
+            <tr><td>LibraryResolver</td><td>根据 dimension/collections/sensitivity 做 fan-out、RRF 聚合、分组返回。</td></tr>
+            <tr><td>Scanner</td><td>FlatScanner、StructuredScanner、RepoScanner，把 truth source 编译进索引。</td></tr>
+            <tr><td>SecretScanner</td><td>外部 Collection chunk/embed 前先扫 secret，避免把密钥入库。</td></tr>
+            <tr><td>GraphResolver</td><td>Typed graph，支持 related/evolved/supersedes/invalidates 等关系。</td></tr>
+            <tr><td>Knowledge Feed</td><td>候选知识先进入审核队列，再 materialize 到真相源。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="warn">
+          <strong>重要边界：</strong>
+          外部 Collection 内容是 evidence data，不是 instruction。也就是说，外部项目里的 AGENTS.md、规则、笔记不能改变猫的系统提示词或工具权限。
+        </div>
+      </section>
+
+      <section id="pack">
+        <h2>11. Pack 与 Growth</h2>
+        <p>
+          F129 / ADR-021 是当前“新思路”的核心。
+          它把 Clowder 从一个具体的 Cat Café，推向“可分享的 multi-agent 协作世界”。
+        </p>
+
+        <h3>产品公式</h3>
+        <pre>Experience = Me × Pack + Growth</pre>
+        <ul>
+          <li><strong>Me</strong>：用户自己，本地私有，不打包。</li>
+          <li><strong>Pack</strong>：可分享的协作世界定义，像文化种子。</li>
+          <li><strong>Growth</strong>：用户和猫一起长出来的私有关系/记忆，不能直接外发。</li>
+        </ul>
+
+        <h3>Pack 不是 Plugin</h3>
+        <table>
+          <thead>
+            <tr><th>Plugin</th><th>Pack</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>给 Agent 加一个工具/API。</td><td>定义一群 Agent 如何在某个世界里协作。</td></tr>
+            <tr><td>能力包。</td><td>协作世界。</td></tr>
+            <tr><td>关注“能做什么”。</td><td>关注“谁是谁、怎么协作、什么不能做、知识在哪里”。</td></tr>
+            <tr><td>常常是运行时代码。</td><td>前 8 层尽量 YAML/Markdown 零代码，最后 capability 才是代码。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Pack 内部结构</h3>
+        <div class="flow">my-pack/
+├── pack.yaml
+├── masks/
+├── guardrails.yaml
+├── defaults.yaml
+├── workflows/
+├── knowledge/
+├── expression/
+├── bridges/
+├── world-driver.yaml
+└── capabilities/</div>
+
+        <h3>安全边界</h3>
+        <ul>
+          <li>Pack 不原样注入 system prompt，必须 schema → compile → canonical prompt block。</li>
+          <li>guardrails 只能加严，不能放宽 Core Rails。</li>
+          <li>未知字段 fail-closed。</li>
+          <li>Growth 私有，不能作为 Pack 直接外发。</li>
+        </ul>
+      </section>
+
+      <section id="skills">
+        <h2>12. Skills、家规、门禁</h2>
+        <p>
+          Clowder 的团队经验主要沉淀在 <code>cat-cafe-skills</code> 和 <code>shared-rules.md</code>。
+          这部分是“猫猫如何作为团队行动”的核心。
+        </p>
+
+        <h3>本地 Skill 类型</h3>
+        <div class="grid three">
+          <div class="card"><h4>交付类</h4><p><code>feat-lifecycle</code>、<code>tdd</code>、<code>quality-gate</code>、<code>merge-gate</code>。</p></div>
+          <div class="card"><h4>协作类</h4><p><code>cross-cat-handoff</code>、<code>request-review</code>、<code>receive-review</code>、<code>collaborative-thinking</code>。</p></div>
+          <div class="card"><h4>知识类</h4><p><code>knowledge-engineering</code>、<code>self-evolution</code>、<code>deep-research</code>。</p></div>
+          <div class="card"><h4>产品/界面类</h4><p><code>console-dev</code>、<code>browser-preview</code>、<code>pencil-design</code>、<code>rich-messaging</code>。</p></div>
+          <div class="card"><h4>运维/事故类</h4><p><code>incident-response</code>、<code>workspace-navigator</code>、<code>worktree</code>。</p></div>
+          <div class="card"><h4>内容生产类</h4><p><code>guide-authoring</code>、<code>ppt-forge</code>、<code>video-forge</code>、<code>image-generation</code>。</p></div>
+        </div>
+
+        <h3>家规的作用</h3>
+        <p>
+          <code>shared-rules.md</code> 是三猫共用规则真相源，会被 SystemPromptBuilder 编译摘要注入每只猫。
+          它不是“提示词装饰”，而是整个团队的社会契约。
+        </p>
+        <ul>
+          <li>Rule 0：规则是边界，不是全部，保留判断力。</li>
+          <li>P1：面向终态，不绕路。</li>
+          <li>P2：共创伙伴，不是木头人。</li>
+          <li>P3：方向正确 > 执行速度。</li>
+          <li>P4：单一真相源。</li>
+          <li>P5：可验证才算完成。</li>
+          <li>Magic Words：脚手架、绕路了、喵约、星星罐子、第一性原理等手动拉闸词。</li>
+        </ul>
+      </section>
+
+      <section id="connectors">
+        <h2>13. 外部连接、MCP、语音</h2>
+        <p>
+          Clowder 已经不只是浏览器里的聊天界面，而是在向“多入口、多设备、多服务”的平台发展。
+        </p>
+
+        <h3>外部消息与 connector</h3>
+        <ul>
+          <li>F088 Chat Gateway：飞书、Telegram 等外部聊天平台进入 Cat Café thread。</li>
+          <li>Connector Binding：外部 chat 与内部 thread 的映射。</li>
+          <li>Callback Auth：外部回调鉴权、持久化、降级与可观测，对应 F174。</li>
+          <li>WeCom / Feishu / Telegram / GitHub 等入口逐步接入。</li>
+        </ul>
+
+        <h3>MCP Portable Provisioning</h3>
+        <p>
+          F145 解决的是“新机器 clone 后 MCP 不该手工一个个挂”的问题。
+          它区分声明式期望态与本机解析态：
+        </p>
+        <ul>
+          <li><code>capabilities.json</code> 不再存机器绝对路径。</li>
+          <li><code>.cat-cafe/mcp-resolved.json</code> 存本机解析结果。</li>
+          <li><code>pnpm mcp:doctor</code> 输出 ready/missing/unresolved。</li>
+          <li>ACP/Gemini 可以自动获得内置 <code>cat-cafe*</code> MCP servers。</li>
+          <li>用户项目自己的 <code>.mcp.json</code> 也可以 merge 到 ACP session。</li>
+        </ul>
+
+        <h3>语音与服务</h3>
+        <p>
+          课程第十一课讲 ASR/TTS。当前本地有 service manifest 与 sidecar 管理：
+          Whisper/Qwen ASR、TTS、Embedding、LLM postprocess 等都通过 <code>scripts/services</code> 和 <code>/api/services</code> 管理。
+        </p>
+      </section>
+
+      <section id="ops">
+        <h2>14. 运维、可观测、安装</h2>
+
+        <h3>可观测性 F153</h3>
+        <p>
+          F153 从 OTel SDK、metrics、health check，一路做到 Hub 内嵌 trace tree、metrics history、burn-rate 告警。
+          现在它的定位是 descriptive observability plane：先回答“发生了什么”，不是做质量评分。
+        </p>
+        <ul>
+          <li>TelemetryRedactor：凭证、业务正文、系统标识符分级脱敏。</li>
+          <li>MetricAttributeAllowlist：防止高基数标签爆炸。</li>
+          <li>LocalTraceStore：内存 ring buffer。</li>
+          <li>MetricsSnapshotStore：Prometheus 指标采样历史。</li>
+          <li>HubTraceTree：前端 trace 树。</li>
+          <li>Phase F 仍在设计 trace 持久化。</li>
+        </ul>
+
+        <h3>安装与开源用户</h3>
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>意义</th><th>当前状态</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>F171 First Partner Onboarding</td><td>首次进入先配置第一位伙伴，不要求用户先理解全系统。</td><td><span class="tag done">done</span></td></tr>
+            <tr><td>F179 Desktop Installer Release Pipeline</td><td>自动产出 Windows/Mac 安装包。</td><td><span class="tag progress">AC-B3 待跨猫验证</span></td></tr>
+            <tr><td>F180 Agent CLI Hook Health</td><td>检测和修复用户级 Claude/Codex hooks。</td><td><span class="tag progress">AC-D4 待开源闭环</span></td></tr>
+            <tr><td>F190 Console Settings Shell</td><td>正式设置中心，替代 Hub modal。</td><td><span class="tag progress">branch implemented, pending merge</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="gaps">
+        <h2>15. 未完善与待补齐清单</h2>
+        <p>下面是基于本地 Feature 文档和代码结构看到的待补齐项。</p>
+
+        <table>
+          <thead>
+            <tr><th>优先级</th><th>项</th><th>现状</th><th>建议下一步</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag risk">P0/P1</span></td>
+              <td>F190 Console Shell 合入与视觉回归</td>
+              <td>已在分支实现，pending merge；存在 dual ThreadSidebar 和 planned API endpoints。</td>
+              <td>合入后做一次端到端视觉回归：对话、设置、记忆、任务、移动端。</td>
+            </tr>
+            <tr>
+              <td><span class="tag risk">P0</span></td>
+              <td>F167 A2A Chain Quality</td>
+              <td>仍 in-progress；球权、hold_ball、forced-pass 等仍在治理。</td>
+              <td>把高频事故 case 做成 replay/eval，形成稳定 gate。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P1</span></td>
+              <td>F175 队列前端编排</td>
+              <td>Phase A 后端完成；Phase B QueuePanel 拖动排序、独立删除、视觉分组未完成。</td>
+              <td>优先补 QueuePanel，因为它是 CVO 控制执行顺序的关键表面。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P1</span></td>
+              <td>F179 安装包跨猫验证</td>
+              <td>v0.9.1 assets 已产出，但 AC-B3 仍未完成。</td>
+              <td>找非作者/非 reviewer 下载 dmg/exe 实测安装启动。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P1</span></td>
+              <td>F180 Open-source closure</td>
+              <td>Hook Health 大部分完成，AC-D4 开源 issue 收口未完成。</td>
+              <td>完成 fixed-internal → synced → close 链路，并补公开文档。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P1</span></td>
+              <td>F178 Persistent MCP Agent-Key Auth</td>
+              <td>in-progress。</td>
+              <td>确认跨 invocation 写权限边界和审计，避免 MCP 权限漂移。</td>
+            </tr>
+            <tr>
+              <td><span class="tag spec">P1</span></td>
+              <td>F187 Thread Labels</td>
+              <td>spec 状态。</td>
+              <td>线程多后标签/筛选会很重要，适合接在 Console Shell 稳定后做。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P1/P2</span></td>
+              <td>Pack 生态完整闭环</td>
+              <td>F129 架构和 schema 已有，Phase A 完成，但示范 Pack、remix、importer、capability pack 仍是长线。</td>
+              <td>先 dogfood 一个 Coding 协作世界 Pack，再做一个非 coding Pack 验证边界。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P2</span></td>
+              <td>Feature metadata 结构化</td>
+              <td>index status 混合自然语言。</td>
+              <td>引入结构化 frontmatter 字段，生成干净 index，减少搜索污染。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P2</span></td>
+              <td>Telemetry 持久化</td>
+              <td>F153 Phase F 设计中；当前 LocalTraceStore 重启丢。</td>
+              <td>落地 pointer-based hydrate trace，而不是把完整 span JSON 塞进 Redis。</td>
+            </tr>
+            <tr>
+              <td><span class="tag progress">P2</span></td>
+              <td>普通用户认知负担</td>
+              <td>能力非常多，Settings 12 区、Skill、MCP、Pack、Memory 都在增长。</td>
+              <td>继续推进 first-run、progressive disclosure、in-context health，而不是把所有设置一次性摊开。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="how-to-read">
+        <h2>16. 如何继续看这个项目</h2>
+        <p>如果你想继续理解当前本地运转情况，建议按这个顺序读：</p>
+
+        <ol>
+          <li><code>docs/VISION.md</code>：先理解产品愿景，不要先看代码。</li>
+          <li><code>README.zh-CN.md</code>：理解对外定位、支持 CLI、核心能力。</li>
+          <li><code>cat-cafe-skills/refs/shared-rules.md</code>：理解这支团队怎么行动。</li>
+          <li><code>docs/architecture/2026-05-05-architecture-views.md</code>：看 5 张架构图谱的设计意图。</li>
+          <li><code>docs/features/F190-console-settings-shell.md</code>：理解当前分支产品壳改造。</li>
+          <li><code>docs/features/F183-bubble-pipeline-architecture-consolidation.md</code>：理解消息气泡为什么是架构问题。</li>
+          <li><code>docs/features/F186-library-memory-architecture.md</code>：理解图书馆记忆。</li>
+          <li><code>docs/decisions/021-f129-pack-system-architecture.md</code>：理解 Pack/Growth 新思路。</li>
+          <li><code>docs/features/F167-a2a-chain-quality.md</code>：理解多猫协作从“能 @”到“会传球”的治理。</li>
+        </ol>
+
+        <div class="callout">
+          <strong>最终理解方式：</strong>
+          不要把 Clowder 当成“AI 编程工具”看。更准确的理解是：
+          <strong>它是一个让人领养、训练、治理、迁移 AI 团队的操作系统。</strong>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

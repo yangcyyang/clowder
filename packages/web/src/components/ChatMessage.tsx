@@ -14,6 +14,8 @@ import { ContentBlocks } from './ContentBlocks';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
+import { MarkdownContent } from './MarkdownContent';
+import { MessageReactions } from './MessageReactions';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
@@ -133,6 +135,7 @@ interface ChatMessageProps {
   onChangeEditDraft?: (value: string) => void;
   onSaveEdit?: () => void;
   onCancelEdit?: () => void;
+  disableContentCollapse?: boolean;
 }
 
 export function ChatMessage({
@@ -147,6 +150,7 @@ export function ChatMessage({
   onChangeEditDraft,
   onSaveEdit,
   onCancelEdit,
+  disableContentCollapse = false,
 }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -261,7 +265,7 @@ export function ChatMessage({
           : 'text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/5';
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
-        <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
+        <div className={`px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${toneClass}`}>
           {isFollowup && <span className="mr-1">🔗</span>}
           {message.content}
           {isFollowup && (
@@ -285,7 +289,7 @@ export function ChatMessage({
     return (
       <div
         data-message-id={message.id}
-        className="group flex justify-start gap-2 mb-4 items-start hover:bg-[rgba(255,255,255,0.03)] hover:ring-1 hover:ring-black/10 rounded-lg px-2 -mx-2 transition-colors"
+        className="group flex justify-start gap-2 mb-4 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)]"
       >
         <button
           type="button"
@@ -311,10 +315,10 @@ export function ChatMessage({
           )}
         </button>
         <div className="max-w-[75%]">
-          <div className="flex justify-start items-center gap-2 mb-1">
+          <div className="flex justify-start items-center gap-2 mb-1 [line-height:var(--clowder-leading-tight)]">
             {isWhisper && (
               <span
-                className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+                className={`px-1.5 py-0.5 rounded [font-size:var(--clowder-type-meta)] ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
               >
                 {isRevealed ? '已揭秘' : `悄悄话 → ${message.whisperTo?.join(', ') ?? ''}`}
               </span>
@@ -322,11 +326,11 @@ export function ChatMessage({
             {message.replyTo && message.replyPreview && !isSchedulerReply && (
               <ReplyPill replyPreview={message.replyPreview} replyToId={message.replyTo} getCatById={getCatById} />
             )}
-            <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            {message.editedAt && <span className="text-xs text-cafe-muted">（已编辑）</span>}
-            <span className="text-xs font-semibold" style={{ color: coCreatorPrimary }}>
+            <span className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-user)]">
               {coCreator.name}
             </span>
+            <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
+            {message.editedAt && <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>}
           </div>
           <div
             className={
@@ -375,11 +379,14 @@ export function ChatMessage({
               </div>
             ) : hasBlocks ? (
               <ContentBlocks blocks={message.contentBlocks!} />
+            ) : disableContentCollapse ? (
+              <MarkdownContent content={message.content} />
             ) : (
               <CollapsibleMarkdown content={message.content} />
             )}
           </div>
           {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
+          <MessageReactions messageId={message.id} />
           {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
             <ThreadReplyBadge count={threadReplyInfo.replyCount} onOpen={() => onOpenThread(message.id)} />
           )}
@@ -406,7 +413,7 @@ export function ChatMessage({
   return (
     <div
       data-message-id={message.id}
-      className={`group flex gap-2 items-start hover:bg-[rgba(255,255,255,0.03)] hover:ring-1 hover:ring-black/10 rounded-lg px-2 -mx-2 transition-colors ${isAssistantContinuation ? 'mb-1' : 'mb-4'}`}
+      className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${isAssistantContinuation ? 'mb-1' : 'mb-4'}`}
     >
       {catData && !isAssistantContinuation && (
         <button
@@ -421,16 +428,16 @@ export function ChatMessage({
       {catData && isAssistantContinuation && <div className="w-8 flex-shrink-0" aria-hidden="true" />}
       <div className="max-w-[85%] md:max-w-[720px] min-w-0">
         {catStyle && !isAssistantContinuation && (
-          <div className="mb-1 flex flex-col gap-1 min-w-0">
+          <div className="mb-1 flex flex-col gap-1 min-w-0 [line-height:var(--clowder-leading-tight)]">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs font-semibold" style={{ color: catStyle.color }}>
+              <span className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-agent)]">
                 {catStyle.label}
               </span>
-              <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
-              {message.editedAt && <span className="text-xs text-cafe-muted">（已编辑）</span>}
+              <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">{formatTime(message.timestamp)}</span>
+              {message.editedAt && <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>}
               {isWhisper && (
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+                  className={`px-1.5 py-0.5 rounded [font-size:var(--clowder-type-meta)] ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
                 >
                   {isRevealed
                     ? '已揭秘'
@@ -492,10 +499,12 @@ export function ChatMessage({
         >
           {hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
+          ) : disableContentCollapse && hasTextContent ? (
+            <MarkdownContent content={visibleContent} className={catStyle?.font} />
           ) : hasTextContent ? (
             <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} />
           ) : message.isStreaming ? (
-            <span className="text-xs text-cafe-secondary">Thinking...</span>
+            <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
           ) : null}
           {message.thinking && (
             <ThinkingContent
@@ -524,6 +533,7 @@ export function ChatMessage({
           )}
         </div>
         {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
+        <MessageReactions messageId={message.id} />
         {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
           <ThreadReplyBadge count={threadReplyInfo.replyCount} onOpen={() => onOpenThread(message.id)} />
         )}

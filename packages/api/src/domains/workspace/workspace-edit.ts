@@ -14,16 +14,18 @@ const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 interface TokenPayload {
   worktreeId: string;
   exp: number; // Unix ms
+  actorId?: string;
 }
 
 /**
  * Sign an edit session token.
  * Format: base64url(JSON payload).signature
  */
-export function signEditToken(worktreeId: string): string {
+export function signEditToken(worktreeId: string, actorId?: string): string {
   const payload: TokenPayload = {
     worktreeId,
     exp: Date.now() + TOKEN_TTL_MS,
+    ...(actorId ? { actorId } : {}),
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = createHmac('sha256', TOKEN_SECRET).update(payloadB64).digest('base64url');

@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
+import { getDefaultReactionEmojis, toggleMessageReaction } from '@/utils/message-reactions';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -24,7 +26,6 @@ type DialogState =
   | { type: 'soft-delete' }
   | { type: 'hard-delete'; threadTitle: string | null }
   | { type: 'edit'; editedContent: string }
-  | { type: 'branch-confirm'; editedContent: string }
   | { type: 'branch-direct' };
 
 interface MessageActionsProps {
@@ -46,15 +47,28 @@ export function MessageActions({
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [saved, setSaved] = useState(() => isMessageSaved(message.id));
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
+  const patchMessage = useChatStore((s) => s.patchMessage);
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
   const canInlineEdit = isUser && !message.contentBlocks?.length && !!onEditMessage;
   const canAct = (isUser || isAssistant) && !message.isStreaming;
-  // Toolbar floats just above the message row so it never overlaps content.
-  // Using bottom-full anchors the toolbar's bottom edge to the container top.
-  const toolbarPositionClass = 'bottom-full mb-0.5';
+  // Keep the toolbar inside the hover frame so message + actions read as one unit.
+  const toolbarPositionClass = 'top-1';
+
+  useEffect(() => {
+    const syncSaved = () => setSaved(isMessageSaved(message.id));
+    syncSaved();
+    window.addEventListener(SAVED_MESSAGES_EVENT, syncSaved);
+    window.addEventListener('storage', syncSaved);
+    return () => {
+      window.removeEventListener(SAVED_MESSAGES_EVENT, syncSaved);
+      window.removeEventListener('storage', syncSaved);
+    };
+  }, [message.id]);
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
@@ -86,14 +100,23 @@ export function MessageActions({
     });
   }, [message.id]);
 
-  const handleSavePlaceholder = useCallback(() => {
+  const handleSave = useCallback(() => {
+    const nextSaved = toggleSavedMessage(threadId, message);
+    setSaved(nextSaved);
     useToastStore.getState().addToast({
-      type: 'success',
-      title: '已收藏',
-      message: 'Inbox 聚合会在后续任务接入',
+      type: nextSaved ? 'success' : 'info',
+      title: nextSaved ? '已收藏消息' : '已取消收藏',
+      message: nextSaved ? '可在左侧 Saved 查看这条消息' : '这条消息已从 Saved 移除',
       duration: 1800,
     });
-  }, []);
+  }, [message, threadId]);
+  const handleReaction = useCallback(
+    (emoji: string) => {
+      toggleMessageReaction(message.id, emoji, getUserId());
+      setReactionPickerOpen(false);
+    },
+    [message.id],
+  );
 
   const handlePin = useCallback(() => {
     onPinMessage?.(message);
@@ -124,7 +147,10 @@ export function MessageActions({
     try {
       const res = await apiFetch(`/api/messages/${message.id}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Clowder-Dangerous-Action-Confirmed': 'message.soft_delete',
+        },
         body: JSON.stringify({ userId: getUserId(), mode: 'soft' }),
       });
       if (res.ok) {
@@ -159,36 +185,37 @@ export function MessageActions({
     }
   }, [dialog, message.id, threadId, removeThreadMessage]);
 
-  const handleBranchConfirm = useCallback(() => {
+  const confirmEdit = useCallback(async () => {
     if (dialog.type !== 'edit') return;
-    setDialog({ type: 'branch-confirm', editedContent: dialog.editedContent });
-  }, [dialog]);
-
-  const confirmBranch = useCallback(async () => {
-    if (dialog.type !== 'branch-confirm') return;
-    const { editedContent } = dialog;
+    const nextContent = dialog.editedContent.trim();
+    if (!nextContent) return;
+    if (nextContent === message.content.trim()) {
+      setDialog({ type: 'none' });
+      return;
+    }
     setDialog({ type: 'none' });
     try {
-      const res = await apiFetch(`/api/threads/${threadId}/branch`, {
-        method: 'POST',
+      const res = await apiFetch(`/api/messages/${message.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fromMessageId: message.id,
-          editedContent: editedContent !== message.content ? editedContent : undefined,
           userId: getUserId(),
+          content: nextContent,
         }),
       });
+      const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        const { threadId: newThreadId } = await res.json();
-        pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
+        patchMessage(message.id, {
+          content: (body?.content as string) ?? nextContent,
+          editedAt: (body?.editedAt as number) ?? Date.now(),
+        });
       } else {
-        const body = await res.json().catch(() => ({}));
-        showErrorToast('分支创建失败', body);
+        showErrorToast('编辑失败', body);
       }
     } catch {
-      showErrorToast('分支创建失败');
+      showErrorToast('编辑失败');
     }
-  }, [dialog, message.id, message.content, threadId]);
+  }, [dialog, message.id, message.content, patchMessage]);
 
   const branchingRef = useRef(false);
   const confirmBranchDirect = useCallback(async () => {
@@ -219,7 +246,7 @@ export function MessageActions({
 
   return (
     <div
-      className="group relative"
+      className="group relative rounded-lg px-3 py-2 transition-shadow hover:ring-1 hover:ring-black/20"
       onContextMenu={(event) => {
         if (!canAct) return;
         event.preventDefault();
@@ -230,7 +257,7 @@ export function MessageActions({
 
       {canAct && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm px-1 py-0.5`}
+          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm px-1 py-0.5`}
         >
           <button
             type="button"
@@ -260,6 +287,32 @@ export function MessageActions({
               Thread
             </button>
           )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setReactionPickerOpen((open) => !open)}
+              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              title="添加表情反应"
+              aria-expanded={reactionPickerOpen}
+            >
+              React
+            </button>
+            {reactionPickerOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 flex gap-1 rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] p-1 shadow-lg">
+                {getDefaultReactionEmojis().map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleReaction(emoji)}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-sm transition-colors hover:bg-[var(--cafe-surface-elevated)]"
+                    title={`添加 ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {onPinMessage && (
             <button
               type="button"
@@ -272,11 +325,14 @@ export function MessageActions({
           )}
           <button
             type="button"
-            onClick={handleSavePlaceholder}
-            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
-            title="收藏消息"
+            onClick={handleSave}
+            className={`rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-cafe-surface-elevated hover:text-cafe ${
+              saved ? 'text-[var(--cafe-accent)]' : 'text-cafe-muted'
+            }`}
+            title={saved ? '取消收藏消息' : '收藏消息'}
+            aria-pressed={saved}
           >
-            Save
+            {saved ? 'Saved' : 'Save'}
           </button>
           <button
             type="button"
@@ -313,7 +369,7 @@ export function MessageActions({
             <button
               onClick={handleEdit}
               className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-[var(--color-cafe-accent)] transition-colors"
-              title="编辑 (创建分支)"
+              title="编辑消息"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -348,7 +404,7 @@ export function MessageActions({
           messageId={message.id}
           content={message.content}
           onClose={() => setCtxMenu(null)}
-          onSave={handleSavePlaceholder}
+          onSave={handleSave}
           onConvertToTask={handleBranchDirect}
           onShare={handleSharePlaceholder}
         />
@@ -402,7 +458,7 @@ export function MessageActions({
                 取消
               </button>
               <button
-                onClick={handleBranchConfirm}
+                onClick={confirmEdit}
                 disabled={!dialog.editedContent.trim()}
                 className="px-4 py-2 text-sm text-[var(--cafe-surface)] bg-[var(--color-cafe-accent)] hover:bg-[var(--color-cafe-accent)]/80 rounded-lg disabled:opacity-40"
               >
@@ -412,16 +468,6 @@ export function MessageActions({
           </div>
         </div>
       )}
-
-      {/* Branch confirmation (from edit) */}
-      <ConfirmDialog
-        open={dialog.type === 'branch-confirm'}
-        title="创建分支"
-        message="编辑将从此消息创建一个新的对话分支。原对话保留不变。是否继续？"
-        confirmLabel="创建分支"
-        onConfirm={confirmBranch}
-        onCancel={close}
-      />
 
       {/* Direct branch confirmation (no edit) */}
       <ConfirmDialog

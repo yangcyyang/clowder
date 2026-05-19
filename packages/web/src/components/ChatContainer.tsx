@@ -31,6 +31,12 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import {
+  consumeSavedMessageScrollTarget,
+  isSavedMessagesViewOpen,
+  SAVED_MESSAGES_VIEW_EVENT,
+  setSavedMessagesViewOpen,
+} from '@/utils/saved-messages';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
@@ -43,6 +49,7 @@ import { ChatMessage } from './ChatMessage';
 import { ConnectionStatusBar } from './ConnectionStatusBar';
 import { EditChannelModal } from './EditChannelModal';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
+import { FilesPanel } from './FilesPanel';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
@@ -51,9 +58,10 @@ import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjec
 import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
+import { InlineThreadPanel } from './InlineThreadPanel';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
-import { InlineThreadPanel } from './InlineThreadPanel';
+import { KnowledgeCaptureModal } from './KnowledgeCaptureModal';
 import { MessageActions } from './MessageActions';
 import { MobileStatusSheet } from './MobileStatusSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
@@ -61,6 +69,7 @@ import { ProjectSetupCard } from './ProjectSetupCard';
 import { QueuePanel } from './QueuePanel';
 import { RightStatusPanel } from './RightStatusPanel';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
+import { SavedMessagesPanel } from './SavedMessagesPanel';
 import { SplitPaneView } from './SplitPaneView';
 import { TasksPanel } from './TasksPanel';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -77,22 +86,18 @@ interface ChatContainerProps {
 }
 
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
+const INLINE_THREAD_EXIT_MS = 180;
 
 type InlineThreadReplyState = Record<string, { branchThreadId: string; replyCount: number }>;
 type ChannelTab = 'chat' | 'tasks' | 'files';
+const EMPTY_MEMBER_IDS: string[] = [];
 
 function formatPinnedMessagePreview(message: ChatMessageData): string {
   const text = message.content?.trim() || '（无正文）';
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 
-function ChannelTabs({
-  activeTab,
-  onTabChange,
-}: {
-  activeTab: ChannelTab;
-  onTabChange: (tab: ChannelTab) => void;
-}) {
+function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabChange: (tab: ChannelTab) => void }) {
   const tabs: Array<{ id: ChannelTab; label: string }> = [
     { id: 'chat', label: 'CHAT' },
     { id: 'tasks', label: 'TASKS' },
@@ -117,9 +122,7 @@ function ChannelTabs({
               aria-pressed={isActive}
             >
               {tab.label}
-              {isActive && (
-                <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--cafe-accent)]" />
-              )}
+              {isActive && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--cafe-accent)]" />}
             </button>
           );
         })}
@@ -193,6 +196,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
   const [inlineThread, setInlineThread] = useState<{ threadId: string; sourceMessage: ChatMessageData } | null>(null);
+  const [inlineThreadClosing, setInlineThreadClosing] = useState(false);
+  const inlineThreadCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inlineThreadReplies, setInlineThreadReplies] = useState<InlineThreadReplyState>({});
   const [pinnedMessage, setPinnedMessage] = useState<ChatMessageData | null>(null);
   const [activeTab, setActiveTab] = useState<ChannelTab>('chat');
@@ -200,6 +205,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [editingDraft, setEditingDraft] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [channelSettingsOpen, setChannelSettingsOpen] = useState(false);
+  const [knowledgeCaptureOpen, setKnowledgeCaptureOpen] = useState(false);
   const [isSavingChannel, setIsSavingChannel] = useState(false);
   const [isDeletingChannel, setIsDeletingChannel] = useState(false);
   const [channelSettingsError, setChannelSettingsError] = useState<string | null>(null);
@@ -207,6 +213,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
+  const [savedMessagesViewOpen, setSavedMessagesViewOpenState] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -294,6 +301,33 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     },
     [],
   );
+  const clearInlineThreadCloseTimer = useCallback(() => {
+    if (inlineThreadCloseTimerRef.current) {
+      clearTimeout(inlineThreadCloseTimerRef.current);
+      inlineThreadCloseTimerRef.current = null;
+    }
+  }, []);
+  const openInlineThread = useCallback(
+    (next: { threadId: string; sourceMessage: ChatMessageData }) => {
+      clearInlineThreadCloseTimer();
+      setInlineThreadClosing(false);
+      setInlineThread(next);
+    },
+    [clearInlineThreadCloseTimer],
+  );
+  const closeInlineThread = useCallback(() => {
+    if (!inlineThread) return;
+    clearInlineThreadCloseTimer();
+    setInlineThreadClosing(true);
+    inlineThreadCloseTimerRef.current = setTimeout(() => {
+      inlineThreadCloseTimerRef.current = null;
+      setInlineThread(null);
+      setInlineThreadClosing(false);
+    }, INLINE_THREAD_EXIT_MS);
+  }, [clearInlineThreadCloseTimer, inlineThread]);
+  useEffect(() => {
+    return () => clearInlineThreadCloseTimer();
+  }, [clearInlineThreadCloseTimer]);
   const handleOpenInlineThread = useCallback(
     async (messageId: string) => {
       const sourceMessage = messages.find((message) => message.id === messageId);
@@ -302,7 +336,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setStatusPanelOpen(false);
       const existing = inlineThreadReplies[messageId];
       if (existing) {
-        setInlineThread({ threadId: existing.branchThreadId, sourceMessage });
+        openInlineThread({ threadId: existing.branchThreadId, sourceMessage });
         return;
       }
 
@@ -313,12 +347,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           body: JSON.stringify({ fromMessageId: messageId, userId: getUserId() }),
         });
         if (!res.ok) {
-          setInlineThread({ threadId, sourceMessage });
+          openInlineThread({ threadId, sourceMessage });
           return;
         }
         const data = (await res.json()) as { threadId?: string };
         const branchThreadId = data.threadId ?? threadId;
-        setInlineThread({ threadId: branchThreadId, sourceMessage });
+        openInlineThread({ threadId: branchThreadId, sourceMessage });
         handleInlineThreadReplyCountChange(messageId, branchThreadId, 0);
         const threadsRes = await apiFetch('/api/threads');
         if (threadsRes.ok) {
@@ -326,11 +360,16 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           setThreads(threadsData.threads);
         }
       } catch {
-        setInlineThread({ threadId, sourceMessage });
+        openInlineThread({ threadId, sourceMessage });
       }
     },
-    [handleInlineThreadReplyCountChange, inlineThreadReplies, messages, setThreads, threadId],
+    [handleInlineThreadReplyCountChange, inlineThreadReplies, messages, openInlineThread, setThreads, threadId],
   );
+  useEffect(() => {
+    clearInlineThreadCloseTimer();
+    setInlineThreadClosing(false);
+    setInlineThread(null);
+  }, [clearInlineThreadCloseTimer, threadId]);
   const {
     pending: authPending,
     respond: authRespond,
@@ -423,6 +462,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentThread = storeThreads.find((thread) => thread.id === threadId);
   const currentThreadTitle = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
+  const currentThreadMemberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? EMPTY_MEMBER_IDS;
   const currentBootcampPhase = currentBootcampState?.phase;
   const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
     threadId,
@@ -763,7 +803,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [addToast, editingDraft, editingMessageId, isSavingEdit, messages, patchMessage]);
 
   const handleSaveChannelSettings = useCallback(
-    async (nextTitle: string) => {
+    async ({ title: nextTitle, participatingCats }: { title: string; participatingCats: string[] }) => {
       if (isSavingChannel || isDeletingChannel) return;
       setIsSavingChannel(true);
       setChannelSettingsError(null);
@@ -771,16 +811,28 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: nextTitle }),
+          body: JSON.stringify({ title: nextTitle, participatingCats }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
           setChannelSettingsError((body?.error as string) ?? '保存失败，请稍后重试');
           return;
         }
-        useChatStore.getState().updateThreadTitle(threadId, (body?.title as string) ?? nextTitle);
+        useChatStore.setState((state) => ({
+          threads: state.threads.map((thread) =>
+            thread.id === threadId
+              ? {
+                  ...thread,
+                  title: (body?.title as string) ?? nextTitle,
+                  participatingCats: Array.isArray(body?.participatingCats)
+                    ? (body.participatingCats as string[])
+                    : participatingCats,
+                }
+              : thread,
+          ),
+        }));
         setChannelSettingsOpen(false);
-        addToast({ type: 'success', title: '频道已更新', message: '频道名称已保存', duration: 2200 });
+        addToast({ type: 'success', title: '频道已更新', message: '频道名称和成员已保存', duration: 2200 });
       } catch {
         setChannelSettingsError('网络请求未完成，请稍后重试');
       } finally {
@@ -790,12 +842,27 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     [addToast, isDeletingChannel, isSavingChannel, threadId],
   );
 
+  const handleKnowledgeCreated = useCallback(
+    (result: { id: string; path: string }) => {
+      addToast({
+        type: 'success',
+        title: '知识已沉淀',
+        message: `${result.id} → ${result.path}`,
+        duration: 4000,
+      });
+    },
+    [addToast],
+  );
+
   const handleDeleteChannel = useCallback(async () => {
     if (threadId === 'default' || isDeletingChannel || isSavingChannel) return;
     setIsDeletingChannel(true);
     setChannelSettingsError(null);
     try {
-      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
+        method: 'DELETE',
+        headers: { 'X-Clowder-Dangerous-Action-Confirmed': 'thread.soft_delete' },
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setChannelSettingsError((body?.error as string) ?? '删除失败，请稍后重试');
@@ -906,6 +973,34 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   useEffect(() => {
     clearUnread(threadId);
   }, [threadId, clearUnread]);
+
+  useEffect(() => {
+    const syncSavedMessagesView = () => setSavedMessagesViewOpenState(isSavedMessagesViewOpen());
+    syncSavedMessagesView();
+    window.addEventListener(SAVED_MESSAGES_VIEW_EVENT, syncSavedMessagesView);
+    window.addEventListener('popstate', syncSavedMessagesView);
+    return () => {
+      window.removeEventListener(SAVED_MESSAGES_VIEW_EVENT, syncSavedMessagesView);
+      window.removeEventListener('popstate', syncSavedMessagesView);
+    };
+  }, []);
+
+  useEffect(() => {
+    // 切换频道后 Saved 是独立视图，必须自动关闭，避免误以为还在原频道。
+    setSavedMessagesViewOpen(false);
+  }, [threadId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const messageId = consumeSavedMessageScrollTarget(threadId);
+    if (!messageId) return;
+    window.setTimeout(() => {
+      document.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 80);
+  }, [messages.length, threadId]);
 
   const disconnectBottomChromeObserver = useCallback(() => {
     bottomChromeObserverRef.current?.disconnect();
@@ -1082,6 +1177,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             setChannelSettingsError(null);
             setChannelSettingsOpen(true);
           }}
+          onOpenKnowledgeCapture={() => setKnowledgeCaptureOpen(true)}
         />
 
         <ChannelTabs activeTab={activeTab} onTabChange={setActiveTab} />
@@ -1105,7 +1201,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
         {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} />}
 
-        {activeTab === 'chat' ? (
+        {savedMessagesViewOpen ? (
+          <div className="flex-1 overflow-hidden">
+            <SavedMessagesPanel currentThreadId={threadId} />
+          </div>
+        ) : activeTab === 'chat' ? (
           <div className="flex-1 relative overflow-hidden">
             <main
               ref={scrollContainerRef}
@@ -1237,16 +1337,16 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             <TasksPanel threadId={threadId} />
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto bg-[var(--console-shell-bg)] p-5">
-            <div className="mx-auto max-w-3xl rounded-lg border border-dashed border-[var(--slock-border-color)] p-6 text-center text-sm text-cafe-muted">
-              文件功能即将开放
-            </div>
+          <div className="flex-1 overflow-hidden">
+            <FilesPanel messages={messages} getCatById={getCatById} />
           </div>
         )}
 
         <div
           ref={attachBottomChromeRef}
-          className={`sticky bottom-0 z-20 bg-[var(--console-shell-bg)] ${activeTab === 'chat' ? '' : 'hidden'}`}
+          className={`sticky bottom-0 z-20 bg-[var(--console-shell-bg)] ${
+            activeTab === 'chat' && !savedMessagesViewOpen ? '' : 'hidden'
+          }`}
         >
           {authPending.length > 0 && (
             <div className="border-t border-conn-amber-ring bg-conn-amber-bg/40 py-2">
@@ -1303,8 +1403,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             <ChatInput
               key={threadId}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode) =>
-                handleSend(content, images, undefined, whisper, deliveryMode)
+              onSend={(content, images, attachments, whisper, deliveryMode) =>
+                handleSend(content, images, undefined, whisper, deliveryMode, attachments)
               }
               onStop={handleStop}
               disabled={connectionStatus.isReadonly}
@@ -1413,7 +1513,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         <InlineThreadPanel
           threadId={inlineThread.threadId}
           sourceMessage={inlineThread.sourceMessage}
-          onClose={() => setInlineThread(null)}
+          isClosing={inlineThreadClosing}
+          onClose={closeInlineThread}
           onReplyCountChange={handleInlineThreadReplyCountChange}
         />
       )}
@@ -1470,6 +1571,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       <EditChannelModal
         open={channelSettingsOpen}
         title={currentThreadTitle}
+        availableCats={cats}
+        selectedCatIds={currentThreadMemberIds}
         isDefaultThread={threadId === 'default'}
         isSaving={isSavingChannel}
         isDeleting={isDeletingChannel}
@@ -1480,6 +1583,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         }}
         onSave={handleSaveChannelSettings}
         onDelete={handleDeleteChannel}
+      />
+      <KnowledgeCaptureModal
+        open={knowledgeCaptureOpen}
+        sourceThreadId={threadId}
+        defaultTitle={currentThreadTitle}
+        onClose={() => setKnowledgeCaptureOpen(false)}
+        onCreated={handleKnowledgeCreated}
       />
       {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
       {(() => {

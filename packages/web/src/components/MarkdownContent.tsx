@@ -206,7 +206,7 @@ const mdComponents: Components = {
       <p
         className={
           sectionTitle
-            ? 'mb-2 last:mb-0 leading-relaxed rounded bg-[rgba(204,103,67,0.06)] px-1.5 py-0.5'
+            ? 'mb-2 last:mb-0 leading-relaxed rounded bg-[var(--clowder-section-title-bg)] px-1.5 py-0.5'
             : 'mb-2 last:mb-0 leading-relaxed'
         }
       >
@@ -284,7 +284,7 @@ const mdComponents: Components = {
 
     return (
       <code
-        className={`${className ?? ''} rounded border border-[rgba(204,103,67,0.25)] bg-[rgba(204,103,67,0.12)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--cafe-accent)]`}
+        className={`${className ?? ''} rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
       >
         {children}
       </code>

@@ -108,6 +108,7 @@ export class TaskStore implements ITaskStore {
       userId: input.userId,
       sourceMessageId: input.sourceMessageId,
       sourceSummaryId: input.sourceSummaryId,
+      evidence: input.evidence,
     };
 
     this.tasks.set(task.id, task);
@@ -149,6 +150,7 @@ export class TaskStore implements ITaskStore {
           automationState: input.automationState ?? existing.automationState,
           sourceMessageId: input.sourceMessageId ?? existing.sourceMessageId,
           sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
+          evidence: input.evidence ?? existing.evidence,
           updatedAt: Date.now(),
         };
         this.tasks.set(existingId, updated);
@@ -206,6 +208,7 @@ export class TaskStore implements ITaskStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+      ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
       updatedAt: Date.now(),
     };
 

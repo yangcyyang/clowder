@@ -693,6 +693,37 @@ describe('routeSerial A2A worklist', () => {
     assert.ok(codexText.length > 0, 'codex should be invoked via A2A');
   });
 
+  it('does not extend hidden worklist from final text in slock A2A routing mode', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const codexService = createCapturingService('codex', 'should not run');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        opus: createMockService('opus', '我写好了代码\n@缅因猫 请 review 一下'),
+        codex: codexService,
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'write hello world', 'user1', 'thread1', {
+      a2aRoutingMode: 'slock',
+    })) {
+      messages.push(msg);
+    }
+
+    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
+    assert.equal(codexText.length, 0, 'slock mode must not dispatch hidden final-text A2A');
+    assert.equal(codexService.calls.length, 0, 'codex service must not be invoked in slock mode');
+
+    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
+    assert.equal(handoffs.length, 0, 'slock mode must not emit hidden text-scan handoff');
+
+    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    assert.ok(opusAppend, 'opus response should still be persisted');
+    assert.deepEqual(opusAppend.mentions, [], 'disabled hidden text-scan should not store routable mentions');
+  });
+
   it('yields a2a_handoff event when A2A chain triggers', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({

@@ -814,6 +814,7 @@ export class AgentRouter {
       contentBlocks?: readonly MessageContent[];
       uploadDir?: string;
       signal?: AbortSignal;
+      a2aRoutingMode?: 'legacy' | 'slock';
       queueHasQueuedMessages?: (threadId: string) => boolean;
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
       invocationController?: AbortController;
@@ -871,6 +872,7 @@ export class AgentRouter {
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,
       signal: options?.signal,
+      a2aRoutingMode: options?.a2aRoutingMode,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
       invocationController: options?.invocationController,

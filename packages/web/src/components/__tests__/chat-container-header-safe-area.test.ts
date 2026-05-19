@@ -45,6 +45,7 @@ describe('ChatContainerHeader safe-area', () => {
         statusPanelOpen: true,
         onToggleStatusPanel: vi.fn(),
         onOpenChannelSettings: vi.fn(),
+        onOpenKnowledgeCapture: vi.fn(),
       }),
     );
 

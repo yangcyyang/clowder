@@ -340,6 +340,7 @@ export const KNOWN_OC_PROVIDERS = [
   'google',
   'azure',
   'deepseek',
+  'xiaomi-mimo',
 ];
 
 /** Merge well-known providers with any prefixes extracted from model strings like "openai/gpt-5.4". */
@@ -369,27 +370,66 @@ function ComboField({
   required?: boolean;
   placeholder?: string;
 }) {
-  const listId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}`;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const popupId = `combo-${label.replace(/\s+/g, '-').toLowerCase()}-options`;
+  const filteredSuggestions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return suggestions;
+    return suggestions.filter((suggestion) => suggestion.toLowerCase().includes(normalizedQuery));
+  }, [query, suggestions]);
+
   return (
     <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
       <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">
         {label}
         {required && <span className="ml-0.5 text-conn-red-text">*</span>}
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="relative min-w-0 flex-1">
         <input
           aria-label={ariaLabel ?? label}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-          list={listId}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setQuery(event.target.value);
+          }}
+          onFocus={() => {
+            setQuery('');
+            setOpen(true);
+          }}
+          onClick={() => {
+            setQuery('');
+            setOpen(true);
+          }}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          role="combobox"
+          aria-expanded={open && filteredSuggestions.length > 0}
+          aria-controls={popupId}
           className="w-full rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 py-1.5 text-[13px] leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
           placeholder={placeholder}
         />
-        <datalist id={listId}>
-          {suggestions.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
+        {open && filteredSuggestions.length > 0 ? (
+          <div
+            id={popupId}
+            className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-[12px] border border-cafe-border bg-[var(--console-card-bg)] p-1 shadow-[0_14px_34px_rgba(43,33,26,0.16)]"
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            {filteredSuggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                className="block w-full rounded-[9px] px-3 py-1.5 text-left text-[12px] font-semibold text-cafe transition hover:bg-[rgba(204,103,67,0.1)]"
+                onClick={() => {
+                  onChange(suggestion);
+                  setQuery('');
+                  setOpen(false);
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
     </label>
   );
@@ -465,10 +505,7 @@ export function AccountSection({
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
-  const providerSuggestions = useMemo(
-    () => buildProviderSuggestions(selectedProfile?.models ?? []),
-    [selectedProfile?.models],
-  );
+  const providerSuggestions = useMemo(() => buildProviderSuggestions(modelOptions), [modelOptions]);
 
   return (
     <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
@@ -533,7 +570,7 @@ export function AccountSection({
               required
               placeholder={
                 form.clientId === 'opencode'
-                  ? '例如 openai/gpt-5.4 或 openrouter/google/gemini-3-flash-preview'
+                  ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
                   : '模型标识符，如 claude-sonnet-4-5'
               }
             />

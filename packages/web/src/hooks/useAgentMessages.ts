@@ -29,7 +29,7 @@ import {
   markReplacedInvocation,
   removeReplacedInvocation,
 } from './shared-replaced-invocations';
-import { formatVisibleSystemInfo } from './system-info-visible';
+import { formatVisibleSystemInfo, isSilentSystemInfo } from './system-info-visible';
 import {
   clearActiveBubble as clearActiveBubbleLedger,
   clearAllActiveBubblesForThread as clearAllActiveBubblesForThreadLedger,
@@ -341,6 +341,8 @@ export function consumeBackgroundSystemInfo(
     if (visible) {
       sysContent = visible.content;
       sysVariant = visible.variant;
+    } else if (isSilentSystemInfo(parsed)) {
+      consumed = true;
     } else if (parsed?.type === 'invocation_created') {
       const targetCatId = parsed.catId ?? msg.catId;
       // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper invocationId
@@ -3530,6 +3532,7 @@ export function useAgentMessages() {
           const parsed = JSON.parse(providerContent);
           const visible = formatVisibleSystemInfo(parsed);
           if (visible) providerContent = visible.content;
+          else if (isSilentSystemInfo(parsed)) providerContent = '';
         } catch {
           /* non-JSON payload — display as-is */
         }
@@ -3555,6 +3558,8 @@ export function useAgentMessages() {
           if (visible) {
             sysContent = visible.content;
             sysVariant = visible.variant;
+          } else if (isSilentSystemInfo(parsed)) {
+            consumed = true;
           } else if (parsed?.type === 'invocation_created') {
             // New invocation boundary: clear stale task snapshot + finalized ref for this cat.
             // #586: Without clearing finalizedStreamRef here, a stale ref from the

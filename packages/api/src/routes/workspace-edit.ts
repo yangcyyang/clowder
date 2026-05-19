@@ -20,6 +20,7 @@ import {
   resolveWorkspacePath,
   WorkspaceSecurityError,
 } from '../domains/workspace/workspace-security.js';
+import { auditDangerousActionBestEffort, getDangerousActionActor } from '../utils/dangerous-action-guard.js';
 
 /** Extensions allowed for text editing (whitelist approach). */
 const EDITABLE_EXTENSIONS = new Set([
@@ -77,7 +78,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       await getWorktreeRoot(worktreeId); // validate worktree exists
-      const token = signEditToken(worktreeId);
+      const token = signEditToken(worktreeId, getDangerousActionActor(request));
       return { token, expiresIn: 1800 };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
@@ -151,7 +152,8 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
       reply.status(400);
       return { error: 'worktreeId and path required' };
     }
-    if (!editSessionToken || !verifyEditToken(editSessionToken, worktreeId)) {
+    const tokenPayload = editSessionToken ? verifyEditToken(editSessionToken, worktreeId) : null;
+    if (!tokenPayload) {
       reply.status(401);
       return { error: 'Invalid or expired edit session token' };
     }
@@ -219,7 +221,8 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
       reply.status(400);
       return { error: 'worktreeId and path required' };
     }
-    if (!editSessionToken || !verifyEditToken(editSessionToken, worktreeId)) {
+    const tokenPayload = editSessionToken ? verifyEditToken(editSessionToken, worktreeId) : null;
+    if (!tokenPayload) {
       reply.status(401);
       return { error: 'Invalid or expired edit session token' };
     }
@@ -236,6 +239,20 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
       } else {
         await rm(resolved);
       }
+      void auditDangerousActionBestEffort({
+        request,
+        actorId: tokenPayload.actorId ?? getDangerousActionActor(request),
+        action: 'workspace.delete_path',
+        targetType: s.isDirectory() ? 'directory' : 'file',
+        targetId: filePath,
+        severity: s.isDirectory() ? 'high' : 'medium',
+        result: 'succeeded',
+        confirmation: 'existing_confirm_field',
+        metadata: {
+          worktreeId,
+          emptyDirectoryOnly: s.isDirectory(),
+        },
+      });
       return { path: filePath, deleted: true };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {

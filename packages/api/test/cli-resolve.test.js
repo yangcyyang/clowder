@@ -36,6 +36,19 @@ test('resolveCliCommand returns null for non-existent CLI', () => {
   assert.equal(result, null);
 });
 
+test('resolveCliCommand accepts explicit executable paths', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-explicit-path-'));
+  const fakeBin = join(tempRoot, 'fake-cli');
+  writeFileSync(fakeBin, '#!/bin/sh\necho ok\n', { mode: 0o755 });
+
+  try {
+    const result = resolveCliCommand(fakeBin);
+    assert.equal(result, fakeBin);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 // --- Windows APPDATA fallback ---
 
 test(

@@ -7,6 +7,14 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
+import {
+  isSavedMessagesViewOpen,
+  loadSavedMessages,
+  SAVED_MESSAGES_EVENT,
+  SAVED_MESSAGES_VIEW_EVENT,
+  type SavedMessageSnapshot,
+  setSavedMessagesViewOpen,
+} from '@/utils/saved-messages';
 
 import { CatAvatar } from '../CatAvatar';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
@@ -56,6 +64,10 @@ function formatMessageExcerpt(content: string): string {
   return `${singleLine.slice(0, 60)}...`;
 }
 
+function isLegacyBranchThread(thread: Pick<Thread, 'title'>): boolean {
+  return (thread.title ?? '').includes('(分支)');
+}
+
 export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
@@ -76,7 +88,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [messageSearchResults, setMessageSearchResults] = useState<MessageSearchResult[]>([]);
   const [isSearchingMessages, setIsSearchingMessages] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
-  const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const [savedViewOpen, setSavedViewOpen] = useState(false);
+  const [savedMessages, setSavedMessages] = useState<SavedMessageSnapshot[]>([]);
   const [bindWarning, setBindWarning] = useState<string | null>(null);
   // F095 Phase D: Trash bin state
   const [showTrash, setShowTrash] = useState(false);
@@ -124,6 +137,28 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     // Fetch global bubble display defaults from Config Hub on mount
     void useChatStore.getState().fetchGlobalBubbleDefaults();
   }, [loadThreads]);
+
+  useEffect(() => {
+    const syncSavedMessages = () => setSavedMessages(loadSavedMessages());
+    syncSavedMessages();
+    window.addEventListener(SAVED_MESSAGES_EVENT, syncSavedMessages);
+    window.addEventListener('storage', syncSavedMessages);
+    return () => {
+      window.removeEventListener(SAVED_MESSAGES_EVENT, syncSavedMessages);
+      window.removeEventListener('storage', syncSavedMessages);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncSavedView = () => setSavedViewOpen(isSavedMessagesViewOpen());
+    syncSavedView();
+    window.addEventListener(SAVED_MESSAGES_VIEW_EVENT, syncSavedView);
+    window.addEventListener('popstate', syncSavedView);
+    return () => {
+      window.removeEventListener(SAVED_MESSAGES_VIEW_EVENT, syncSavedView);
+      window.removeEventListener('popstate', syncSavedView);
+    };
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -238,6 +273,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   const handleSelect = useCallback(
     (threadId: string) => {
+      setSavedMessagesViewOpen(false);
       // Always clear unread badge — user clicking the thread = "I've seen it"
       useChatStore.getState().clearUnread(threadId);
       if (threadId === currentThreadId) return;
@@ -261,6 +297,50 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, [searchQuery]);
 
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
+  const openDirectMessage = useCallback(
+    async (catId: string) => {
+      const existing = liveThreads.find((thread) => {
+        if (thread.deletedAt) return false;
+        const directMember = thread.participatingCats?.length === 1 && thread.participatingCats[0] === catId;
+        const legacyPreferred = thread.preferredCats?.length === 1 && thread.preferredCats[0] === catId;
+        return (thread.isDM && directMember) || legacyPreferred;
+      });
+      if (existing) {
+        setSavedMessagesViewOpen(false);
+        navigateToThread(existing.id);
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+          onClose?.();
+        }
+        return;
+      }
+
+      setIsCreating(true);
+      try {
+        const res = await apiFetch('/api/threads/dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ catId }),
+        });
+        if (!res.ok) {
+          notifyThreadCreateFailure('这次打开私信没有成功，请稍后重试。');
+          return;
+        }
+        const thread: Thread = await res.json();
+        setSavedMessagesViewOpen(false);
+        navigateToThread(thread.id);
+        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+          onClose?.();
+        }
+        await loadThreads();
+      } catch (err) {
+        console.error('[openDirectMessage] exception:', err);
+        notifyThreadCreateFailure('网络请求没有完成，打开私信失败。请稍后重试。');
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [liveThreads, loadThreads, navigateToThread, onClose],
+  );
   const threadTitleById = useMemo(() => {
     const map = new Map<string, string>();
     for (const thread of liveThreads) {
@@ -286,16 +366,18 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     }
     return total;
   }, [threads, threadStates]);
-  const savedTotal = useMemo(() => threads.filter((thread) => thread.favorited && thread.id !== 'default').length, [threads]);
+  const savedTotal = savedMessages.length;
   const filteredThreads = useMemo(() => {
     return liveThreads.filter((thread) => {
+      if (isLegacyBranchThread(thread)) {
+        return false;
+      }
+      if (thread.isDM) {
+        return false;
+      }
       if (showUnreadOnly && !unreadIds.has(thread.id)) {
         return false;
       }
-      if (showSavedOnly && (!thread.favorited || thread.id === 'default')) {
-        return false;
-      }
-
       if (!normalizedQuery) {
         return true;
       }
@@ -311,7 +393,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         threadId.includes(normalizedQuery)
       );
     });
-  }, [liveThreads, normalizedQuery, showSavedOnly, showUnreadOnly, unreadIds]);
+  }, [liveThreads, normalizedQuery, showUnreadOnly, unreadIds]);
 
   // F072: Mark all threads as read
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -384,13 +466,16 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const catStatusMap = useMemo(() => {
     const streamingStatuses = new Set<CatStatusType>(['spawning', 'pending', 'streaming']);
     const onlineStatuses = new Set<CatStatusType>(['alive_but_silent', 'suspected_stall']);
-    const map = new Map<string, 'streaming' | 'online'>();
+    const offlineStatuses = new Set<CatStatusType>(['done', 'error']);
+    const map = new Map<string, 'streaming' | 'online' | 'offline'>();
     const collect = (statuses?: Record<string, CatStatusType>) => {
       for (const [catId, status] of Object.entries(statuses ?? {})) {
         if (streamingStatuses.has(status)) {
           map.set(catId, 'streaming');
         } else if (onlineStatuses.has(status) && map.get(catId) !== 'streaming') {
           map.set(catId, 'online');
+        } else if (offlineStatuses.has(status) && !map.has(catId)) {
+          map.set(catId, 'offline');
         }
       }
     };
@@ -401,9 +486,19 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     }
     return map;
   }, [catStatuses, threadStates]);
+  const activeDmCatIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const thread of liveThreads) {
+      if (thread.id !== currentThreadId) continue;
+      const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
+      const directCat = directCats?.[0];
+      if (directCats?.length === 1 && directCat) ids.add(directCat);
+    }
+    return ids;
+  }, [currentThreadId, liveThreads]);
   const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
   const showDefaultThread =
-    !showUnreadOnly && !showSavedOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
+    !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
@@ -418,10 +513,10 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         type="button"
         data-thread-id={thread.id}
         onClick={() => handleSelect(thread.id)}
-        className={`group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md px-3 text-left text-sm transition-colors ${
+        className={`group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 px-3 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
           isActive
-            ? 'bg-[var(--console-active-bg)] text-cafe-text'
-            : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+            ? 'border-[var(--cafe-accent)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+            : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
         }`}
         title={thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
       >
@@ -433,7 +528,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         ) : (
-          <span className="text-[10px] text-cafe-muted opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="[font-size:var(--clowder-type-meta)] text-[var(--clowder-sidebar-row-muted)] opacity-0 transition-opacity group-hover:opacity-100">
             {formatRelativeTime(thread.lastActiveAt, true)}
           </span>
         )}
@@ -451,8 +546,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         className="mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
         title={message.content}
       >
-        <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-cafe-muted">{threadTitle}</span>
-        <span className="line-clamp-2 text-xs leading-4 text-cafe-secondary">{formatMessageExcerpt(message.content)}</span>
+        <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-[var(--clowder-sidebar-row-muted)]">{threadTitle}</span>
+        <span className="line-clamp-2 text-xs leading-[1.5] text-[var(--clowder-sidebar-row-text)]">{formatMessageExcerpt(message.content)}</span>
       </button>
     );
   };
@@ -460,11 +555,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   return (
     <>
       <aside
-        className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--console-panel-bg)]`}
+        className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--clowder-sidebar-bg)]`}
         style={{ boxShadow: '8px 0 24px rgba(43, 33, 26, 0.04)' }}
       >
         <div className="p-3 flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-cafe-black">对话</span>
+          <span className="[font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">对话</span>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -494,7 +589,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               type="button"
               onClick={handleMarkAllRead}
               disabled={isMarkingAllRead}
-              className="mt-1.5 text-[10px] text-cafe-muted hover:text-cafe-accent disabled:opacity-40 transition-colors"
+              className="mt-1.5 text-[10px] text-[var(--clowder-sidebar-row-muted)] hover:text-cafe-accent disabled:opacity-40 transition-colors"
               data-testid="mark-all-read-btn"
             >
               {isMarkingAllRead ? '清理中...' : '全部已读'}
@@ -506,13 +601,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         <div className="space-y-0.5 px-2 py-1">
           <button
             type="button"
-            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
               showUnreadOnly
-                ? 'bg-[var(--console-active-bg)] text-cafe-text'
-                : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+                ? 'bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+                : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
             }`}
             onClick={() => {
-              setShowSavedOnly(false);
+              setSavedMessagesViewOpen(false);
               setShowUnreadOnly((value) => !value);
             }}
             aria-pressed={showUnreadOnly}
@@ -529,23 +624,23 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </button>
           <button
             type="button"
-            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${
-              showSavedOnly
-                ? 'bg-[var(--console-active-bg)] text-cafe-text'
-                : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
+              savedViewOpen
+                ? 'bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+                : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
             }`}
             onClick={() => {
               setShowUnreadOnly(false);
-              setShowSavedOnly((value) => !value);
+              setSavedMessagesViewOpen(!savedViewOpen);
             }}
-            aria-pressed={showSavedOnly}
+            aria-pressed={savedViewOpen}
           >
             <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
               <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.956a1 1 0 00.95.69h4.16c.969 0 1.371 1.24.588 1.81l-3.366 2.445a1 1 0 00-.364 1.118l1.286 3.956c.3.921-.755 1.688-1.538 1.118l-3.366-2.445a1 1 0 00-1.176 0L6.045 18.02c-.783.57-1.838-.197-1.538-1.118l1.286-3.956a1 1 0 00-.364-1.118L2.063 9.383c-.783-.57-.38-1.81.588-1.81h4.16a1 1 0 00.95-.69l1.288-3.956z" />
             </svg>
             <span className="min-w-0 flex-1 text-left">Saved</span>
             {savedTotal > 0 && (
-              <span className="rounded-full bg-[var(--console-rail-active)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cafe-secondary">
+              <span className="rounded-full bg-[var(--console-rail-active)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--clowder-sidebar-row-text)]">
                 {savedTotal > 99 ? '99+' : savedTotal}
               </span>
             )}
@@ -554,17 +649,19 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
         <div ref={scrollContainerRef} onScroll={handleScrollAnchor} className="flex-1 overflow-y-auto">
           {isLoadingThreads && threads.length === 0 && (
-            <div className="text-center py-4 text-xs text-cafe-muted">加载中...</div>
+            <div className="text-center py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">加载中...</div>
           )}
 
-          <div className="mt-2 border-t border-[var(--console-border-soft)] pt-2">
-            <div className="px-3 pb-1">
+          <div className="mt-2 border-t border-[var(--clowder-sidebar-border)] pt-2">
+            <div className="px-3 pb-1 pt-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">CHANNEL</span>
+                <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
+                  CHANNEL
+                </span>
                 <button
                   type="button"
                   onClick={() => setShowPicker(true)}
-                  className="flex h-5 w-5 items-center justify-center rounded-md text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text"
+                  className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--clowder-sidebar-row-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
                   aria-label="新增频道"
                   title="新增频道"
                 >
@@ -573,74 +670,69 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               </div>
             </div>
 
-            {showDefaultThread && (
-              renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })
-            )}
+            <>
+              {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
 
-            {flatChannelThreads.map(renderChannelRow)}
+              {flatChannelThreads.map(renderChannelRow)}
+            </>
           </div>
 
           {normalizedQuery.length > 0 && (
-            <div className="mt-3 border-t border-[var(--console-border-soft)] pt-2">
-              <div className="px-3 pb-1">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
-                  MESSAGES
-                </span>
+            <div className="mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
+            <div className="px-3 pb-1 pt-1">
+              <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
+                MESSAGES
+              </span>
               </div>
               <div className="space-y-0.5">
                 {isSearchingMessages ? (
-                  <div className="px-5 py-2 text-xs text-cafe-muted">搜索消息中...</div>
+                  <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">搜索消息中...</div>
                 ) : messageSearchResults.length > 0 ? (
                   messageSearchResults.map(renderMessageSearchResult)
                 ) : (
-                  <div className="px-5 py-2 text-xs text-cafe-muted">没有匹配的消息</div>
+                  <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">没有匹配的消息</div>
                 )}
               </div>
             </div>
           )}
 
-          <div className="mt-3 border-t border-[var(--console-border-soft)] pt-2">
-            <div className="px-3 pb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
+          <div className="mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
+            <div className="px-3 pb-1 pt-1">
+              <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
                 DIRECT MESSAGES
               </span>
             </div>
             <div className="space-y-0.5 px-2">
               {cats.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-cafe-muted">暂无 Agent</div>
+                <div className="px-2 py-1.5 text-xs text-[var(--clowder-sidebar-row-muted)]">暂无 Agent</div>
               ) : (
                 cats.map((cat) => {
                   const status = catStatusMap.get(cat.id) ?? 'online';
+                  const isActiveDm = activeDmCatIds.has(cat.id);
                   return (
                     <button
                       key={cat.id}
                       type="button"
-                      onClick={() => {
-                        const existing = liveThreads.find(
-                          (thread) =>
-                            thread.preferredCats?.length === 1 &&
-                            thread.preferredCats[0] === cat.id &&
-                            !thread.deletedAt,
-                        );
-                        if (existing) {
-                          navigateToThread(existing.id);
-                          return;
-                        }
-                        void createInProject({ title: formatCatName(cat), preferredCats: [cat.id] });
-                      }}
+                      onClick={() => void openDirectMessage(cat.id)}
                       disabled={isCreating}
-                      className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text disabled:opacity-40"
+                      className={`flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
+                        isActiveDm
+                          ? 'border-[var(--cafe-accent)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+                          : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
+                      }`}
                       title={`打开与 ${formatCatName(cat)} 的私信`}
                     >
                       <span className="relative flex-shrink-0">
-                        <CatAvatar catId={cat.id} size={24} />
+                        <CatAvatar catId={cat.id} size={24} tone={status === 'streaming' || isActiveDm ? 'default' : 'quiet'} />
                         <span
-                          aria-label={status === 'streaming' ? '工作中' : '在线空闲'}
-                          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--console-panel-bg)]"
+                          aria-label={status === 'streaming' ? '工作中' : status === 'offline' ? '离线' : '在线空闲'}
+                          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--clowder-sidebar-bg)]"
                           style={{
                             backgroundColor:
                               status === 'streaming'
                                 ? '#eab308'
+                                : status === 'offline'
+                                  ? 'var(--clowder-sidebar-row-muted)'
                                 : 'var(--console-status-connected)',
                           }}
                         />
@@ -653,11 +745,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             </div>
           </div>
 
-          {(normalizedQuery.length > 0 || showUnreadOnly || showSavedOnly) &&
+          {(normalizedQuery.length > 0 || showUnreadOnly) &&
             threadGroups.length === 0 &&
             !showDefaultThread && (
-              <div className="px-3 py-4 text-xs text-cafe-muted">
-                {showUnreadOnly ? '暂无未读对话' : showSavedOnly ? '暂无收藏对话' : '没有匹配的对话'}
+              <div className="px-3 py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">
+                {showUnreadOnly ? '暂无未读对话' : '没有匹配的对话'}
               </div>
             )}
         </div>
@@ -667,7 +759,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <button
             type="button"
             onClick={handleToggleTrash}
-            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-code-bg)] text-xs text-cafe-secondary hover:opacity-80 transition-colors"
+            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-code-bg)] text-xs text-[var(--clowder-sidebar-row-text)] hover:opacity-80 transition-colors"
             data-testid="trash-bin-toggle"
           >
             <svg
@@ -694,14 +786,14 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </button>
           {showTrash && (
             <div className="max-h-48 overflow-y-auto">
-              {isLoadingTrash && <div className="px-3 py-2 text-[10px] text-cafe-muted">加载中...</div>}
+              {isLoadingTrash && <div className="px-3 py-2 text-[10px] text-[var(--clowder-sidebar-row-muted)]">加载中...</div>}
               {!isLoadingTrash && trashedThreads.length === 0 && (
-                <div className="px-3 py-2 text-[10px] text-cafe-muted">回收站是空的</div>
+                <div className="px-3 py-2 text-[10px] text-[var(--clowder-sidebar-row-muted)]">回收站是空的</div>
               )}
               {trashedThreads.map((t) => (
                 <div
                   key={t.id}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-cafe-secondary hover:bg-cafe-surface-elevated group"
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] group"
                 >
                   <span className="truncate flex-1">{t.title ?? '未命名对话'}</span>
                   <button

@@ -65,16 +65,18 @@ export function useSendMessage(activeThreadId?: string) {
       overrideThreadId?: string,
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
+      attachments?: File[],
     ): Promise<SendMessageResult | undefined> => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
       const hasImages = Boolean(images && images.length > 0);
+      const hasAttachments = Boolean(attachments && attachments.length > 0);
       const isQueueSend = deliveryMode === 'queue';
 
       // Queue sends don't reset refs — cat is still streaming
       if (!isQueueSend) resetRefs();
       setUploadError(null);
-      setUploadStatus(hasImages ? 'uploading' : 'idle');
+      setUploadStatus(hasImages || hasAttachments ? 'uploading' : 'idle');
 
       const wasCommand = await processCommand(content, threadId);
       if (wasCommand) return undefined;
@@ -90,12 +92,19 @@ export function useSendMessage(activeThreadId?: string) {
         timestamp: Date.now(),
         ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
       };
-      if (images && images.length > 0) {
+      if (hasImages || hasAttachments) {
         userMsg.contentBlocks = [
           { type: 'text' as const, text: content },
-          ...images.map((img) => ({
+          ...(images ?? []).map((img) => ({
             type: 'image' as const,
             url: URL.createObjectURL(img),
+          })),
+          ...(attachments ?? []).map((file) => ({
+            type: 'file' as const,
+            filename: file.name,
+            url: '#',
+            mimeType: file.type || 'application/octet-stream',
+            size: file.size,
           })),
         ];
       }
@@ -148,7 +157,7 @@ export function useSendMessage(activeThreadId?: string) {
       try {
         const deliveryModePayload = deliveryMode ? { deliveryMode } : {};
 
-        if (images && images.length > 0) {
+        if (hasImages || hasAttachments) {
           const formData = new FormData();
           formData.append('content', content);
           formData.append('threadId', threadId);
@@ -160,8 +169,11 @@ export function useSendMessage(activeThreadId?: string) {
               formData.append('whisperTo', catId);
             }
           }
-          for (const img of images) {
+          for (const img of images ?? []) {
             formData.append('images', img);
+          }
+          for (const file of attachments ?? []) {
+            formData.append('attachments', file);
           }
           const res = await apiFetch('/api/messages', {
             method: 'POST',
@@ -217,7 +229,7 @@ export function useSendMessage(activeThreadId?: string) {
           setThreadHasActiveInvocation(threadId, false);
         }
         const errorMessage = err instanceof Error ? err.message : 'Unknown';
-        if (hasImages) {
+        if (hasImages || hasAttachments) {
           setUploadStatus('failed');
           setUploadError(errorMessage);
         } else {

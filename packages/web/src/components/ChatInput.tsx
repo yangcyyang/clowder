@@ -21,14 +21,21 @@ import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { SlashCommandPicker, type SlashCommandItem } from './SlashCommandPicker';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-import { hasPendingThreadDraft, threadDrafts, threadImageDrafts } from './thread-drafts';
+import { hasPendingThreadDraft, threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
-export { threadDrafts, threadImageDrafts } from './thread-drafts';
+export { threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-drafts';
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
+const CVO_MODE_STORAGE_KEY = 'cat-cafe:cvoMode';
+const CVO_MODE_PREFIX = `[CVO_MODE] 在执行任何操作之前，你必须先以采访者身份问我 3 个问题，帮助澄清需求：
+① 你希望的最终产物/结果是什么？
+② 有什么约束条件或不能动的边界？
+③ 完成的标准是什么，怎样算"做好了"？
+请等我逐一回答后再开始执行。`;
 
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
@@ -36,6 +43,7 @@ interface ChatInputProps {
   onSend: (
     content: string,
     images?: File[],
+    attachments?: File[],
     whisper?: WhisperOptions,
     deliveryMode?: DeliveryMode,
   ) => Promise<{ userMessageId?: string } | string | void> | { userMessageId?: string } | string | void;
@@ -48,6 +56,13 @@ interface ChatInputProps {
 
 const ACCEPTED_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
 
+function detectSlashCommand(value: string, cursor: number): string | null {
+  if (!value.startsWith('/') || cursor <= 0) return null;
+  const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
+  if (cursor > token.length) return null;
+  return value.slice(1, cursor);
+}
+
 function ImageUploadIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -56,6 +71,12 @@ function ImageUploadIcon({ className }: { className?: string }) {
       <path d="M5.5 14l3.2-3.3 2.2 2.1 1.6-1.7L16 14" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function ChatInput({
@@ -69,7 +90,13 @@ export function ChatInput({
 }: ChatInputProps) {
   const { cats } = useCatData();
   const ime = useIMEGuard();
-  const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
+  const currentThreadMembers = useChatStore((s) => s.threads.find((thread) => thread.id === threadId)?.participatingCats);
+  const mentionCats = useMemo(() => {
+    if (!currentThreadMembers?.length) return cats;
+    const allowed = new Set(currentThreadMembers);
+    return cats.filter((cat) => allowed.has(cat.id));
+  }, [cats, currentThreadMembers]);
+  const catOptions = useMemo(() => buildCatOptions(mentionCats), [mentionCats]);
   // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
   const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
 
@@ -92,15 +119,43 @@ export function ChatInput({
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
+  const [showSlashCommands, setShowSlashCommands] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
+  const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
   const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
+  const [attachments, setAttachments] = useState<File[]>(() => (threadId ? (threadFileDrafts.get(threadId) ?? []) : []));
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
   const [sendAsTask, setSendAsTask] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [cvoMode, setCvoMode] = useState(false);
+  const activeUiReady = isHydrated && Boolean(hasActiveInvocation);
+
+  useEffect(() => {
+    setIsHydrated(true);
+    try {
+      setCvoMode(window.localStorage.getItem(CVO_MODE_STORAGE_KEY) === '1');
+    } catch {
+      // Keep the SSR-safe default when localStorage is unavailable.
+    }
+  }, []);
+
+  const updateCvoMode = useCallback((next: boolean) => {
+    setCvoMode(next);
+    if (typeof window === 'undefined') return;
+    try {
+      if (next) window.localStorage.setItem(CVO_MODE_STORAGE_KEY, '1');
+      else window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+    } catch {
+      // LocalStorage is a convenience preference; sending should not depend on it.
+    }
+  }, []);
 
   // F108B AC-B7: In whisper mode, check if SELECTED targets are busy (not thread-level).
   // When all whisper targets are idle → show Send button, not Queue.
@@ -118,6 +173,7 @@ export function ChatInput({
   const menuRef = useRef<HTMLDivElement>(null);
   const gameBtnRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
@@ -162,22 +218,29 @@ export function ChatInput({
       if (sendTemporarilyDisabled) return;
       if (whisperMode && whisperTargets.size === 0) return;
       const trimmed = input.trim();
-      if (trimmed && !disabled) {
-        addHistoryEntry(trimmed);
+      const hasPayload = trimmed.length > 0 || images.length > 0 || attachments.length > 0;
+      if (hasPayload && !disabled) {
+        if (trimmed) addHistoryEntry(trimmed);
+        const fallbackContent = attachments.length > 0 ? '上传文件' : '上传图片';
+        const userContent = trimmed || fallbackContent;
+        const contentToSend = cvoMode ? `${CVO_MODE_PREFIX}\n\n用户原始需求：\n${userContent}` : userContent;
         const whisper =
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
             : undefined;
         const sendImages = images.length > 0 ? images : undefined;
+        const sendAttachments = attachments.length > 0 ? attachments : undefined;
         setInput('');
         ghostRef.current = null;
         setGhostSuggestion(null);
         setImages([]);
+        setAttachments([]);
         setShowMentions(false);
         setShowGameMenu(false);
         setSendAsTask(false);
+        if (cvoMode) updateCvoMode(false);
 
-        const sendResult = await onSend(trimmed, sendImages, whisper, deliveryMode);
+        const sendResult = await onSend(contentToSend, sendImages, sendAttachments, whisper, deliveryMode);
         const sentMessageId =
           typeof sendResult === 'string'
             ? sendResult
@@ -192,7 +255,7 @@ export function ChatInput({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 threadId,
-                title: trimmed.slice(0, 100),
+                title: (trimmed || attachments[0]?.name || fallbackContent).slice(0, 100),
                 why: '',
                 createdBy: 'user',
                 sourceMessageId: sentMessageId,
@@ -213,12 +276,15 @@ export function ChatInput({
       disabled,
       onSend,
       images,
+      attachments,
       sendTemporarilyDisabled,
       whisperMode,
       whisperTargets,
       addHistoryEntry,
       sendAsTask,
       threadId,
+      cvoMode,
+      updateCvoMode,
     ],
   );
 
@@ -233,6 +299,7 @@ export function ChatInput({
   const closeMenus = useCallback(() => {
     setShowMentions(false);
     setShowGameMenu(false);
+    setShowSlashCommands(false);
   }, []);
 
   const [gameStarting, setGameStarting] = useState(false);
@@ -299,13 +366,24 @@ export function ChatInput({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
       setInput(val);
+      const slashQuery = detectSlashCommand(val, e.target.selectionStart);
+      if (slashQuery !== null) {
+        setShowSlashCommands(true);
+        setSlashQuery(slashQuery);
+        setSlashSelectedIdx(0);
+        setShowMentions(false);
+        setShowGameMenu(false);
+        return;
+      }
       const trigger = detectMenuTrigger(val, e.target.selectionStart);
       if (trigger?.type === 'game') {
+        setShowSlashCommands(false);
         setShowGameMenu(true);
         setGameStep('list');
         setShowMentions(false);
         setSelectedIdx(0);
       } else if (trigger?.type === 'mention') {
+        setShowSlashCommands(false);
         setShowMentions(true);
         setShowGameMenu(false);
         setMentionStart(trigger.start);
@@ -317,6 +395,22 @@ export function ChatInput({
       }
     },
     [closeMenus],
+  );
+
+  const insertSlashCommand = useCallback(
+    (item: SlashCommandItem) => {
+      const rest = input.replace(/^\/[^\s]*/, '');
+      const next = `${item.command}${rest}`;
+      setInput(next);
+      setShowSlashCommands(false);
+      setSlashQuery('');
+      setSlashSelectedIdx(0);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(item.command.length, item.command.length);
+      }, 0);
+    },
+    [input],
   );
 
   const handleHistorySelect = useCallback(
@@ -342,6 +436,30 @@ export function ChatInput({
       setMentionFilter('');
       setShowHistorySearch(true);
       return;
+    }
+
+    if (showSlashCommands) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (slashItems.length > 0) setSlashSelectedIdx((i) => (i + 1) % slashItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (slashItems.length > 0) setSlashSelectedIdx((i) => (i - 1 + slashItems.length) % slashItems.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const item = slashItems[slashSelectedIdx];
+        if (item) insertSlashCommand(item);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashCommands(false);
+        return;
+      }
     }
 
     if (activeMenu) {
@@ -445,7 +563,7 @@ export function ChatInput({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // F39+F108B: Enter while cat running → queue send; whisper to idle targets → normal send
-      if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
+      if (activeUiReady && !whisperTargetsAllIdle) handleQueueSend();
       else handleSend();
     }
   };
@@ -501,6 +619,18 @@ export function ChatInput({
     setImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const handleAttachmentSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length > 0) {
+      setAttachments((prev) => [...prev, ...selected].slice(0, 5));
+    }
+    e.target.value = '';
+  }, []);
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   const toggleWhisperTarget = useCallback((catId: string) => {
     setWhisperTargets((prev) => {
       const next = new Set(prev);
@@ -534,7 +664,7 @@ export function ChatInput({
   // on thread switch (key={threadId}). useEffect would lose the final keystroke.
   useLayoutEffect(() => {
     if (!threadId) return;
-    const hasDraft = input.trim().length > 0 || images.length > 0;
+    const hasDraft = input.trim().length > 0 || images.length > 0 || attachments.length > 0;
     if (input) threadDrafts.set(threadId, input);
     else threadDrafts.delete(threadId);
     if (images.length > 0) {
@@ -551,8 +681,21 @@ export function ChatInput({
     } else {
       threadImageDrafts.delete(threadId);
     }
+    if (attachments.length > 0) {
+      threadFileDrafts.delete(threadId);
+      threadFileDrafts.set(threadId, attachments);
+      while (threadFileDrafts.size > MAX_IMAGE_DRAFT_THREADS) {
+        const oldest = threadFileDrafts.keys().next().value;
+        if (oldest !== undefined) {
+          threadFileDrafts.delete(oldest);
+          setThreadHasDraft(oldest, hasPendingThreadDraft(oldest));
+        }
+      }
+    } else {
+      threadFileDrafts.delete(threadId);
+    }
     setThreadHasDraft(threadId, hasDraft);
-  }, [input, images, threadId, setThreadHasDraft]);
+  }, [input, images, attachments, threadId, setThreadHasDraft]);
 
   // F080: recalculate ghost suggestion whenever input changes (covers all setInput paths)
   useEffect(() => {
@@ -590,7 +733,7 @@ export function ChatInput({
   return (
     <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
       {/* F39: Queue status bar — visible when cat is running */}
-      {hasActiveInvocation && (
+      {activeUiReady && (
         <div className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-opus-primary)] animate-pulse" />
           <span className="text-xs text-[var(--color-opus-primary)] font-medium">猫猫正在回复中...</span>
@@ -598,7 +741,7 @@ export function ChatInput({
         </div>
       )}
 
-      {pathCompletion.isOpen && !activeMenu && (
+      {pathCompletion.isOpen && !activeMenu && !showSlashCommands && (
         <PathCompletionMenu
           entries={pathCompletion.entries}
           selectedIdx={pathCompletion.selectedIdx}
@@ -664,6 +807,33 @@ export function ChatInput({
 
       <ImagePreview files={images} onRemove={handleRemoveImage} />
 
+      {attachments.length > 0 && (
+        <div className="mx-4 mb-2 flex flex-wrap gap-2">
+          {attachments.map((file, index) => (
+            <div
+              key={`${file.name}-${file.size}-${index}`}
+              className="flex max-w-[240px] items-center gap-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe-primary"
+            >
+              <span className="shrink-0 rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-[10px] text-cafe-muted">
+                FILE
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{file.name}</span>
+                <span className="block text-cafe-muted">{formatFileSize(file.size)}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleRemoveAttachment(index)}
+                className="shrink-0 rounded px-1 text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-primary"
+                aria-label={`移除文件 ${file.name}`}
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -672,15 +842,16 @@ export function ChatInput({
         className="hidden"
         onChange={handleFileSelect}
       />
+      <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentSelect} />
 
       {/* Mobile expanded toolbar (above input row) */}
       {mobileToolbar && (
         <MobileInputToolbar
-          onAttach={() => fileInputRef.current?.click()}
+          onAttach={() => attachmentInputRef.current?.click()}
           onClose={() => setMobileToolbar(false)}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
-          maxImages={images.length >= 5}
+          maxImages={attachments.length >= 5}
         />
       )}
 
@@ -717,10 +888,11 @@ export function ChatInput({
 
           <button
             type="button"
-            disabled
-            className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-lg text-cafe-muted/60 opacity-60"
-            aria-label="上传文件（占位）"
-            title="上传文件（占位）"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="上传文件"
+            title="上传文件"
           >
             <AttachIcon className="h-[18px] w-[18px]" />
           </button>
@@ -735,6 +907,15 @@ export function ChatInput({
           data-bootcamp-step="chat-input"
           data-guide-id="chat.input"
         >
+          {showSlashCommands && (
+            <SlashCommandPicker
+              query={slashQuery}
+              selectedIdx={slashSelectedIdx}
+              onSelectIdx={setSlashSelectedIdx}
+              onPick={insertSlashCommand}
+              onItemsChange={setSlashItems}
+            />
+          )}
           <textarea
             ref={textareaRef}
             value={input}
@@ -746,7 +927,7 @@ export function ChatInput({
             placeholder={
               whisperMode
                 ? '悄悄话...'
-                : hasActiveInvocation && !whisperTargetsAllIdle
+                : activeUiReady && !whisperTargetsAllIdle
                   ? '继续输入，消息会排队...'
                   : '输入消息 #当前对话'
             }
@@ -779,7 +960,22 @@ export function ChatInput({
           <span className="whitespace-nowrap">As Task</span>
         </label>
 
-        {hasActiveInvocation && !disabled && onStop && (
+        <button
+          type="button"
+          onClick={() => updateCvoMode(!cvoMode)}
+          aria-pressed={cvoMode}
+          title="先采访：发送后让 Agent 先问 3 个澄清问题"
+          className={`hidden h-9 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors md:flex ${
+            cvoMode
+              ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
+              : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+          }`}
+        >
+          <span aria-hidden="true">🎯</span>
+          <span className="whitespace-nowrap">先采访</span>
+        </button>
+
+        {activeUiReady && !disabled && onStop && (
           <button
             onClick={() => onStop()}
             className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
@@ -792,7 +988,7 @@ export function ChatInput({
           </button>
         )}
 
-        {hasActiveInvocation && !whisperTargetsAllIdle && input.trim() && (
+        {activeUiReady && !whisperTargetsAllIdle && input.trim() && (
           <button
             onClick={handleForceSend}
             disabled={Boolean(disabled || sendTemporarilyDisabled)}
@@ -814,8 +1010,8 @@ export function ChatInput({
           onClick={handlePrimarySend}
           disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
           className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
-          title={hasActiveInvocation && !whisperTargetsAllIdle ? '排队发送' : '发送消息'}
-          aria-label={hasActiveInvocation && !whisperTargetsAllIdle ? '排队发送' : 'Send message'}
+          title={activeUiReady && !whisperTargetsAllIdle ? '排队发送' : '发送消息'}
+          aria-label={activeUiReady && !whisperTargetsAllIdle ? '排队发送' : 'Send message'}
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 2L11 13" />

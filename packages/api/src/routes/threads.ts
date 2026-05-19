@@ -8,7 +8,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { catIdSchema } from '@cat-cafe/shared';
+import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -28,6 +28,10 @@ import type {
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import {
+  auditDangerousActionBestEffort,
+  requireDangerousActionConfirmation,
+} from '../utils/dangerous-action-guard.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
@@ -99,12 +103,28 @@ const createThreadSchema = z
     projectPath: z.string().min(1).max(500).optional(),
     /** F32-b Phase 2: Thread-level cat preference (validated against catRegistry) */
     preferredCats: z.array(catIdSchema()).max(10).optional(),
+    /** Slock-style channel members. Mention-driven only; this does not broadcast messages. */
+    participatingCats: z.array(catIdSchema()).max(20).optional(),
     /** F095 Phase C: Pin thread on creation */
     pinned: z.boolean().optional(),
     /** F095 Phase C: Associate thread with a backlog item at creation */
     backlogItemId: z.string().min(1).max(100).optional(),
     /** F087: Initial bootcamp state */
     bootcampState: bootcampStateSchema.optional(),
+  })
+  .strict();
+
+const createDmThreadSchema = z
+  .object({
+    /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
+    userId: z.string().min(1).max(100).optional(),
+    catId: z
+      .string()
+      .min(1)
+      .max(100)
+      .refine((id) => catRegistry.getAllIds().length === 0 || catRegistry.has(id), {
+        message: 'Unknown cat ID',
+      }),
   })
   .strict();
 
@@ -130,6 +150,10 @@ function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean
 
 function sanitizeThreadForResponse(thread: Thread, _userId: string): Thread {
   return thread;
+}
+
+function getDmThreadTitle(catId: CatId): string {
+  return catRegistry.tryGet(catId)?.config.displayName ?? String(catId);
 }
 
 const threadRoutingRuleSchema = z
@@ -168,6 +192,8 @@ const updateThreadSchema = z
     thinkingMode: z.enum(['debug', 'play']).optional(),
     /** F32-b Phase 2: Update thread-level cat preference. Empty array clears. */
     preferredCats: z.array(catIdSchema()).max(10).optional(),
+    /** Slock-style channel members. Empty array clears. */
+    participatingCats: z.array(catIdSchema()).max(20).optional(),
     /** F042: Thread-level routing policy by intent/scope. null clears. */
     routingPolicy: threadRoutingPolicySchema.nullable().optional(),
     /** F092: Voice companion mode toggle. */
@@ -189,6 +215,7 @@ const updateThreadSchema = z
       data.favorited !== undefined ||
       data.thinkingMode !== undefined ||
       data.preferredCats !== undefined ||
+      data.participatingCats !== undefined ||
       data.routingPolicy !== undefined ||
       data.voiceMode !== undefined ||
       data.bootcampState !== undefined ||
@@ -211,7 +238,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Invalid request body', details: parseResult.error.issues };
     }
 
-    const { userId: legacyUserId, title, projectPath, preferredCats, pinned, backlogItemId } = parseResult.data;
+    const { userId: legacyUserId, title, projectPath, preferredCats, participatingCats, pinned, backlogItemId } =
+      parseResult.data;
     const userId = resolveUserId(request, { fallbackUserId: legacyUserId });
     if (!userId) {
       reply.status(401);
@@ -236,6 +264,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       await threadStore.updatePreferredCats(thread.id, preferredCats as CatId[]);
     }
 
+    if (participatingCats && participatingCats.length > 0) {
+      await threadStore.updateParticipatingCats(thread.id, participatingCats as CatId[]);
+    }
+
     // F095 Phase C: Pin thread on creation
     if (pinned) {
       await threadStore.updatePin(thread.id, true);
@@ -254,7 +286,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // Re-fetch if any post-create mutations applied
-    if ((preferredCats && preferredCats.length > 0) || pinned || backlogItemId) {
+    if (
+      (preferredCats && preferredCats.length > 0) ||
+      (participatingCats && participatingCats.length > 0) ||
+      pinned ||
+      backlogItemId
+    ) {
       thread = (await threadStore.get(thread.id)) ?? thread;
     }
 
@@ -267,6 +304,47 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     reply.status(201);
     return thread;
+  });
+
+  // POST /api/threads/dm - 创建或复用与单个 Agent 的私聊线程
+  app.post('/api/threads/dm', async (request, reply) => {
+    const parseResult = createDmThreadSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parseResult.error.issues };
+    }
+
+    const { userId: legacyUserId, catId } = parseResult.data;
+    const userId = resolveUserId(request, { fallbackUserId: legacyUserId });
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const threads = await threadStore.list(userId);
+    const existing = threads.find((thread) => {
+      if (thread.deletedAt) return false;
+      const directMembers = thread.participatingCats?.length === 1 && thread.participatingCats[0] === catId;
+      const legacyPreferred = thread.preferredCats?.length === 1 && thread.preferredCats[0] === catId;
+      return (thread.isDM && directMembers) || legacyPreferred;
+    });
+
+    if (existing) {
+      await threadStore.updateIsDM(existing.id, true);
+      await threadStore.updatePreferredCats(existing.id, [catId] as CatId[]);
+      await threadStore.updateParticipatingCats(existing.id, [catId] as CatId[]);
+      const updated = (await threadStore.get(existing.id)) ?? existing;
+      return sanitizeThreadForResponse(updated, userId);
+    }
+
+    let thread = await threadStore.create(userId, getDmThreadTitle(catId as CatId));
+    await threadStore.updateIsDM(thread.id, true);
+    await threadStore.updatePreferredCats(thread.id, [catId] as CatId[]);
+    await threadStore.updateParticipatingCats(thread.id, [catId] as CatId[]);
+    thread = (await threadStore.get(thread.id)) ?? thread;
+
+    reply.status(201);
+    return sanitizeThreadForResponse(thread, userId);
   });
 
   // GET /api/threads - 列出用户的对话
@@ -430,6 +508,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       favorited,
       thinkingMode,
       preferredCats,
+      participatingCats,
       routingPolicy,
       voiceMode,
       bootcampState,
@@ -442,6 +521,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     if (favorited !== undefined) await threadStore.updateFavorite(id, favorited);
     if (thinkingMode !== undefined) await threadStore.updateThinkingMode(id, thinkingMode);
     if (preferredCats !== undefined) await threadStore.updatePreferredCats(id, preferredCats as CatId[]);
+    if (participatingCats !== undefined) {
+      await threadStore.updateParticipatingCats(id, participatingCats as CatId[]);
+    }
     if (routingPolicy !== undefined) {
       await threadStore.updateRoutingPolicy(id, routingPolicy as ThreadRoutingPolicyV1 | null);
     }
@@ -501,6 +583,31 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         }
       }
 
+      const confirmation = thread?.connectorHubState
+        ? ({ ok: true, confirmation: 'existing_confirm_field' } as const)
+        : requireDangerousActionConfirmation(request, 'thread.soft_delete', '删除频道');
+      if (!confirmation.ok) {
+        const userId = resolveUserId(request, {});
+        void auditDangerousActionBestEffort({
+          request,
+          actorId: userId ?? 'unknown',
+          action: 'thread.soft_delete',
+          targetType: 'thread',
+          targetId: id,
+          threadId: id,
+          severity: 'medium',
+          result: 'blocked',
+          confirmation: confirmation.confirmation,
+          reason: confirmation.code,
+          metadata: {
+            threadTitle: thread?.title ?? null,
+            projectPath: thread?.projectPath ?? null,
+          },
+        });
+        reply.status(428);
+        return { error: confirmation.error, code: confirmation.code };
+      }
+
       // F095 Phase D: Soft-delete instead of hard delete — data preserved for trash bin
       const deleted = await threadStore.softDelete(id);
       if (!deleted) {
@@ -513,6 +620,23 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
       // I-2: Audit thread deletion for traceability (best-effort, don't block response)
       const userId = resolveUserId(request, {});
+      void auditDangerousActionBestEffort({
+        request,
+        actorId: userId ?? 'unknown',
+        action: 'thread.soft_delete',
+        targetType: 'thread',
+        targetId: id,
+        threadId: id,
+        severity: thread?.connectorHubState ? 'high' : 'medium',
+        result: 'succeeded',
+        confirmation: confirmation.confirmation,
+        metadata: {
+          threadTitle: thread?.title ?? null,
+          projectPath: thread?.projectPath ?? null,
+          systemThread: Boolean(thread?.connectorHubState),
+          force: (request.query as { force?: string }).force === 'true',
+        },
+      });
       void getEventAuditLog()
         .append({
           threadId: id,

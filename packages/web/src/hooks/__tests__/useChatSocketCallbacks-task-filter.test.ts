@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const addTaskMock = vi.fn();
 const updateTaskMock = vi.fn();
+const addMessageMock = vi.fn();
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: () => ({
@@ -17,7 +18,7 @@ vi.mock('@/stores/chatStore', () => ({
     setHasActiveInvocation: vi.fn(),
     setIntentMode: vi.fn(),
     setTargetCats: vi.fn(),
-    addMessage: vi.fn(),
+    addMessage: addMessageMock,
     removeMessage: vi.fn(),
     removeThreadMessage: vi.fn(),
     requestStreamCatchUp: vi.fn(),
@@ -65,6 +66,7 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
   beforeEach(() => {
     addTaskMock.mockClear();
     updateTaskMock.mockClear();
+    addMessageMock.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -117,5 +119,25 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
   it('allows work task_updated for the active thread', () => {
     captured!.onTaskUpdated!({ id: 't3', threadId: 'thread-1', kind: 'work', status: 'done' });
     expect(updateTaskMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates visible streaming placeholders on spawn_started', () => {
+    captured!.onSpawnStarted!({
+      threadId: 'thread-1',
+      invocationId: 'inv-kimi-1',
+      targetCats: ['kimi'],
+    });
+
+    expect(addMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'msg-inv-kimi-1-kimi',
+        type: 'assistant',
+        catId: 'kimi',
+        content: '',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-kimi-1' } },
+      }),
+    );
   });
 });

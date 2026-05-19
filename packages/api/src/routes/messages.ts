@@ -84,6 +84,11 @@ interface StreamingHookLike {
   notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
 }
 
+interface CatSupervisorLike {
+  markProcessing(catIds: string | readonly string[]): Promise<void> | void;
+  markIdle(catIds: string | readonly string[]): Promise<void> | void;
+}
+
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
@@ -127,6 +132,8 @@ export interface MessagesRoutesOptions {
   streamingHook?: StreamingHookLike;
   /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
   holdBallCancelDeps?: HoldBallCancelDeps;
+  /** Task #112: lightweight always-online status supervisor. */
+  catSupervisor?: CatSupervisorLike;
 }
 
 const log = createModuleLogger('routes/messages');
@@ -181,7 +188,7 @@ const searchMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // multipart transport cap; image-specific validation remains 10MB
 const MAX_FILES = 5;
 
 const DECISION_NOTIFICATION_RE = /\b(review|lgtm|merge|pr)\b/i;
@@ -602,11 +609,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       let controller: AbortController | undefined;
 
       if (mode !== 'force' && opts.invocationTracker) {
-        // F122 AC-A8: Atomic thread-level busy gate + slot registration.
-        // If thread became busy since initial has() check at line 306, degrade to queue.
+        // F122 AC-A8 + task #81: atomic per-target busy gate + slot registration.
+        // Explicit @mention dispatch should only queue when the requested cat slot
+        // is busy; other cats may keep running in the same thread.
         const tryResult = opts.invocationTracker.tryStartThreadAll(resolvedThreadId, targetCats, userId);
         if (tryResult === null) {
-          // TOCTOU: thread became busy between has() and here — degrade to queue
+          // TOCTOU: one requested target became busy between has() and here — degrade to queue
           if (opts.invocationQueue) {
             const enqueueResult = opts.invocationQueue.enqueue({
               threadId: resolvedThreadId,
@@ -844,6 +852,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             targetCats,
             invocationId: createResult.invocationId,
           });
+          void opts.catSupervisor?.markProcessing(targetCats);
 
           for await (const msg of router.routeExecution(
             userId,
@@ -1165,6 +1174,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           } // end else (non-abort error)
         } finally {
           clearInterval(heartbeatInterval);
+          void opts.catSupervisor?.markIdle(targetCats);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
           // F39: Notify queue processor for auto-dequeue chain
           opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch((err) => {
@@ -1209,6 +1219,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }, HEARTBEAT_INTERVAL_MS);
 
         try {
+          void opts.catSupervisor?.markProcessing(targetCats);
           // #768: intent_mode deferred to first CLI event (legacy path)
           let intentModeBroadcast = false;
 
@@ -1251,6 +1262,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           );
         } finally {
           clearInterval(heartbeatInterval);
+          void opts.catSupervisor?.markIdle(targetCats);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
       })();

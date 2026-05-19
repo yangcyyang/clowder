@@ -7,14 +7,16 @@ const getUserIdMock = vi.hoisted(() => vi.fn(() => 'alice'));
 const confirmDialogSpy = vi.hoisted(() => vi.fn());
 const pushMock = vi.fn();
 const removeThreadMessageMock = vi.fn();
+const patchMessageMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: { removeThreadMessage: typeof removeThreadMessageMock }) => unknown) =>
-    selector({ removeThreadMessage: removeThreadMessageMock }),
+  useChatStore: (
+    selector: (state: { removeThreadMessage: typeof removeThreadMessageMock; patchMessage: typeof patchMessageMock }) => unknown,
+  ) => selector({ removeThreadMessage: removeThreadMessageMock, patchMessage: patchMessageMock }),
 }));
 
 vi.mock('@/stores/toastStore', () => ({
@@ -50,6 +52,7 @@ describe('MessageActions identity source', () => {
   beforeEach(() => {
     pushMock.mockReset();
     removeThreadMessageMock.mockReset();
+    patchMessageMock.mockReset();
     window.history.pushState({}, '', '/?userId=alice');
 
     container = document.createElement('div');

@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --thread-panel-transition-duration: 180ms;
+  --thread-panel-transition-distance: 24px;
+}
+
 html {
   background: var(--cafe-surface);
 }
@@ -46,6 +51,27 @@ body {
 
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+.thread-panel-motion {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--thread-panel-transition-distance));
+  transition:
+    transform var(--thread-panel-transition-duration) ease-out,
+    opacity var(--thread-panel-transition-duration) ease-out;
+}
+
+.thread-panel-motion[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-panel-motion {
+    transition: none;
+  }
 }
 
 /* Quest input highlight: gentle amber glow on input area */

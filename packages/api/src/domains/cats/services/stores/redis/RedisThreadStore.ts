@@ -382,6 +382,25 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async updateParticipatingCats(threadId: string, catIds: CatId[]): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const unique = [...new Set(catIds)];
+    if (unique.length > 0) {
+      await this.setDetailFields(key, 'participatingCats', JSON.stringify(unique));
+    } else {
+      await this.deleteDetailFields(key, 'participatingCats');
+    }
+  }
+
+  async updateIsDM(threadId: string, isDM: boolean): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (isDM) {
+      await this.setDetailFields(key, 'isDM', 'true');
+    } else {
+      await this.deleteDetailFields(key, 'isDM');
+    }
+  }
+
   async updatePhase(threadId: string, phase: ThreadPhase): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'phase', phase);
@@ -849,6 +868,7 @@ export class RedisThreadStore implements IThreadStore {
       pinnedAt: String(thread.pinnedAt ?? 0),
       favorited: String(thread.favorited ?? false),
       favoritedAt: String(thread.favoritedAt ?? 0),
+      isDM: String(thread.isDM ?? false),
       thinkingMode: thread.thinkingMode ?? 'debug',
     };
     if (thread.phase) {
@@ -859,6 +879,9 @@ export class RedisThreadStore implements IThreadStore {
     }
     if (thread.preferredCats && thread.preferredCats.length > 0) {
       result.preferredCats = JSON.stringify(thread.preferredCats);
+    }
+    if (thread.participatingCats && thread.participatingCats.length > 0) {
+      result.participatingCats = JSON.stringify(thread.participatingCats);
     }
     if (thread.mentionActionabilityMode === 'relaxed') {
       result.mentionActionabilityMode = 'relaxed';
@@ -905,6 +928,7 @@ export class RedisThreadStore implements IThreadStore {
       pinnedAt: pinnedAt || null,
       favorited: data.favorited === 'true',
       favoritedAt: favoritedAt || null,
+      isDM: data.isDM === 'true',
       thinkingMode: (data.thinkingMode === 'debug' ? 'debug' : 'play') as 'debug' | 'play',
     };
     if (data.mentionActionabilityMode === 'relaxed') {
@@ -926,6 +950,16 @@ export class RedisThreadStore implements IThreadStore {
         }
       } catch {
         /* ignore malformed JSON — treat as no preference */
+      }
+    }
+    if (data.participatingCats) {
+      try {
+        const parsed = JSON.parse(data.participatingCats);
+        if (Array.isArray(parsed)) {
+          result.participatingCats = parsed as CatId[];
+        }
+      } catch {
+        /* ignore malformed JSON — treat as no configured members */
       }
     }
 

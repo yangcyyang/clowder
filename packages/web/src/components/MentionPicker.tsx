@@ -1,0 +1,57 @@
+'use client';
+
+import type { CatOption } from './chat-input-options';
+
+interface MentionPickerProps {
+  options: CatOption[];
+  selectedIdx: number;
+  onSelectIdx: (idx: number) => void;
+  onPick: (option: CatOption) => void;
+}
+
+export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: MentionPickerProps) {
+  return (
+    <div
+      data-testid="mention-picker"
+      className="absolute bottom-[calc(100%+8px)] left-0 z-20 flex max-h-72 w-72 flex-col overflow-hidden rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface shadow-lg"
+    >
+      <div className="border-b border-[var(--console-border-soft)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
+        Agents
+      </div>
+      <div className="flex-1 overflow-y-auto py-1">
+        {options.map((option, idx) => (
+          <button
+            key={option.id}
+            type="button"
+            className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+              idx === selectedIdx ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
+            }`}
+            onMouseEnter={() => onSelectIdx(idx)}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              onPick(option);
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={option.avatar}
+              alt={option.label}
+              className="h-7 w-7 rounded-md"
+              onError={(event) => {
+                (event.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-cafe-text">{option.label}</span>
+              <span className="block truncate text-xs leading-[1.45] text-cafe-muted">{option.id}</span>
+            </span>
+          </button>
+        ))}
+        {options.length === 0 && <div className="px-3 py-3 text-sm text-cafe-muted">没有匹配的 Agent</div>}
+      </div>
+      <div className="border-t border-[var(--console-border-soft)] px-3 py-1.5 text-[11px] text-cafe-muted">
+        ↑↓ 选择 · Enter 插入 · Esc 关闭
+      </div>
+    </div>
+  );
+}
