@@ -192,6 +192,10 @@ module.exports = {
           '0%': { opacity: '0', transform: 'translateY(4px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        'message-appear': {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
         'cat-bounce': {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-3px)' },
@@ -236,6 +240,7 @@ module.exports = {
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
+        'message-appear': 'message-appear 150ms ease-out',
         'cat-bounce': 'cat-bounce 0.8s ease-in-out infinite',
         'cat-shake': 'cat-shake 0.4s ease-in-out',
         'toast-in': 'toast-in 0.3s ease-out',
