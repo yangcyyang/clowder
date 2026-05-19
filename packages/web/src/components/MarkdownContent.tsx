@@ -1,6 +1,6 @@
 'use client';
 
-import { Children, type ReactNode, useCallback, useRef, useState } from 'react';
+import { Children, isValidElement, type ReactNode, useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -43,6 +43,14 @@ function CodeBlock({ children }: { children: ReactNode }) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const preRef = useRef<HTMLPreElement>(null);
 
+  // Detect if any child <code> has a language class → real code → use monospace.
+  // Plain ```text``` blocks (no language) render in sans-serif for readability.
+  const hasLanguage = Children.toArray(children).some((child) => {
+    if (!isValidElement(child)) return false;
+    const cls = (child.props as { className?: string }).className ?? '';
+    return /language-/.test(cls);
+  });
+
   const handleCopy = useCallback(() => {
     const text = preRef.current?.textContent ?? '';
     void navigator.clipboard.writeText(text);
@@ -61,7 +69,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
       </button>
       <pre
         ref={preRef}
-        className="bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
+        className={`bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto text-xs leading-relaxed [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs ${hasLanguage ? 'font-mono leading-5' : 'font-sans leading-relaxed'}`}
       >
         {children}
       </pre>
