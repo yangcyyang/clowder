@@ -1386,7 +1386,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.stream ||
       m.extra?.targetCats ||
       m.extra?.scheduler ||
-      m.extra?.systemKind
+      m.extra?.systemKind ||
+      m.extra?.slockThread
         ? {
             extra: {
               ...(m.extra.rich ? { rich: m.extra.rich } : {}),
@@ -1395,6 +1396,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra.targetCats ? { targetCats: m.extra.targetCats } : {}),
               ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
               ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
+              ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
             },
           }
         : {}),

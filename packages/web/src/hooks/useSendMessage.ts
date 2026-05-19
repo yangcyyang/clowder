@@ -28,7 +28,6 @@ export function useSendMessage(activeThreadId?: string) {
   const {
     addMessage,
     addMessageToThread,
-    removeMessage,
     removeThreadMessage,
     replaceThreadMessageId,
     setLoading,
@@ -146,10 +145,11 @@ export function useSendMessage(activeThreadId?: string) {
             return true;
         }
         if (body?.status !== 'queued' || isQueueSend) return false;
-        if (threadId !== activeThread) {
-          removeThreadMessage(threadId, optimisticMessageId);
-        } else {
-          removeMessage(optimisticMessageId);
+        // Slock-style UX: normal sends remain visible immediately even if the
+        // backend serializes execution internally. Explicit queue sends still
+        // use the old invisible-until-delivered path above.
+        if (body.userMessageId) {
+          replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
         }
         return true;
       };
@@ -255,7 +255,6 @@ export function useSendMessage(activeThreadId?: string) {
       processCommand,
       addMessage,
       addMessageToThread,
-      removeMessage,
       removeThreadMessage,
       replaceThreadMessageId,
       setLoading,

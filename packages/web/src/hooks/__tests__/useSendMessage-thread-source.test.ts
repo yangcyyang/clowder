@@ -251,7 +251,7 @@ describe('useSendMessage thread source', () => {
     expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-1');
   });
 
-  it('removes an optimistic active-thread user bubble when server smart-defaults to queued', async () => {
+  it('keeps an optimistic active-thread user bubble when server smart-defaults to queued', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ status: 'queued', userMessageId: 'msg-server-queued' }),
@@ -270,8 +270,8 @@ describe('useSendMessage thread source', () => {
     const optimisticUserCall = mockAddMessage.mock.calls[0];
     const optimisticMessage = optimisticUserCall?.[0] as { id: string };
     expect(optimisticMessage).toMatchObject({ type: 'user' });
-    expect(mockRemoveMessage).toHaveBeenCalledWith(optimisticMessage.id);
-    expect(mockReplaceThreadMessageId).not.toHaveBeenCalled();
+    expect(mockRemoveMessage).not.toHaveBeenCalledWith(optimisticMessage.id);
+    expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-queued');
   });
 
   it('uses a valid UUIDv4-shaped idempotencyKey when crypto.randomUUID is unavailable', async () => {
@@ -307,7 +307,7 @@ describe('useSendMessage thread source', () => {
     }
   });
 
-  it('removes an optimistic split-pane user bubble when server smart-defaults to queued', async () => {
+  it('keeps an optimistic split-pane user bubble when server smart-defaults to queued', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ status: 'queued', userMessageId: 'msg-server-2' }),
@@ -329,7 +329,7 @@ describe('useSendMessage thread source', () => {
     );
     const optimisticMessage = optimisticUserCall?.[1] as { id: string };
     expect(optimisticUserCall?.[0]).toBe('thread-target');
-    expect(mockRemoveThreadMessage).toHaveBeenCalledWith('thread-target', optimisticMessage.id);
-    expect(mockReplaceThreadMessageId).not.toHaveBeenCalled();
+    expect(mockRemoveThreadMessage).not.toHaveBeenCalledWith('thread-target', optimisticMessage.id);
+    expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-target', optimisticMessage.id, 'msg-server-2');
   });
 });

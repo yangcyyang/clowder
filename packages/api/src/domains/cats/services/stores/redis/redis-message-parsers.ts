@@ -57,6 +57,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing';
+      slockThread?: { branchThreadId: string; replyCount: number };
     }
   | undefined {
   if (!raw) return undefined;
@@ -81,6 +82,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing';
+      slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
     let hasField = false;
 
@@ -130,6 +132,19 @@ export function safeParseExtra(raw: string | undefined):
 
     if (parsed.systemKind === 'a2a_routing') {
       result.systemKind = 'a2a_routing';
+      hasField = true;
+    }
+
+    if (
+      parsed.slockThread &&
+      typeof parsed.slockThread === 'object' &&
+      typeof parsed.slockThread.branchThreadId === 'string' &&
+      Number.isFinite(parsed.slockThread.replyCount)
+    ) {
+      result.slockThread = {
+        branchThreadId: parsed.slockThread.branchThreadId,
+        replyCount: Math.max(0, Math.floor(parsed.slockThread.replyCount)),
+      };
       hasField = true;
     }
 

@@ -66,6 +66,8 @@ export interface StoredMessage {
     scheduler?: SchedulerMessageExtra['scheduler'];
     tracing?: { traceId: string; spanId: string; parentSpanId?: string };
     systemKind?: 'a2a_routing';
+    /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
+    slockThread?: { branchThreadId: string; replyCount: number };
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];

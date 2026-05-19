@@ -72,7 +72,6 @@ import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SavedMessagesPanel } from './SavedMessagesPanel';
 import { SplitPaneView } from './SplitPaneView';
 import { TasksPanel } from './TasksPanel';
-import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -334,7 +333,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       if (!sourceMessage) return;
 
       setStatusPanelOpen(false);
-      const existing = inlineThreadReplies[messageId];
+      const existing = inlineThreadReplies[messageId] ?? sourceMessage.extra?.slockThread;
       if (existing) {
         openInlineThread({ threadId: existing.branchThreadId, sourceMessage });
         return;
@@ -907,7 +906,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             message={msg}
             getCatById={getCatById}
             isGrouped={isGrouped}
-            threadReplyInfo={inlineThreadReplies[msg.id]}
+            threadReplyInfo={inlineThreadReplies[msg.id] ?? msg.extra?.slockThread}
             onOpenThread={handleOpenInlineThread}
             isEditing={editingMessageId === msg.id}
             editDraft={editingMessageId === msg.id ? editingDraft : ''}
@@ -942,9 +941,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // queue hydration or a missed intent_mode event). In that case we still need
   // the top cancel affordance — otherwise the thread looks active in the
   // execution bar but offers no single-cat cancel control.
-  const showThinkingIndicator =
-    intentMode === 'execute' ||
-    (intentMode == null && hasActiveInvocation && Object.keys(activeInvocations).length === 1);
 
   useVoiceAutoPlay();
   useVoiceStream();
@@ -1199,7 +1195,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         )}
 
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
-        {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} />}
 
         {savedMessagesViewOpen ? (
           <div className="flex-1 overflow-hidden">

@@ -285,6 +285,8 @@ export interface ChatMessage {
      * should precede.
      */
     systemKind?: 'a2a_routing';
+    /** Slock 归档导入：当前批次消息对应的 thread 回复分支。 */
+    slockThread?: { branchThreadId: string; replyCount: number };
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;

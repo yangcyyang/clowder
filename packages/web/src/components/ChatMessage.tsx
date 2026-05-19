@@ -203,6 +203,13 @@ export function ChatMessage({
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
   const isAssistantContinuation = isGrouped;
 
+  // Slock-like rendering: streaming tokens are buffered in store but hidden from
+  // the timeline until the final message arrives. The input area shows typing
+  // state, so users do not need to scroll back to follow a growing bubble.
+  if (message.type === 'assistant' && message.origin === 'stream' && message.isStreaming) {
+    return null;
+  }
+
   if (isSummary && message.summary) {
     return (
       <div data-message-id={message.id}>

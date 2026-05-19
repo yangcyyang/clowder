@@ -723,13 +723,6 @@ export function ChatInput({
 
   return (
     <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
-      {/* F39: Agent running indicator — messages now send immediately (no queue) */}
-      {activeUiReady && (
-        <div className="px-4 pt-2 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-opus-primary)] animate-pulse" />
-          <span className="text-xs text-[var(--color-opus-primary)] font-medium">猫猫正在回复中...</span>
-        </div>
-      )}
 
       {pathCompletion.isOpen && !activeMenu && !showSlashCommands && (
         <PathCompletionMenu

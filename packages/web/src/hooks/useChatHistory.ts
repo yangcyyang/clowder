@@ -505,6 +505,7 @@ export function useChatHistory(threadId: string) {
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing';
+              slockThread?: { branchThreadId: string; replyCount: number };
             };
             timestamp: number;
             editedAt?: number;
@@ -538,7 +539,12 @@ export function useChatHistory(threadId: string) {
               ...(m.metadata ? { metadata: m.metadata } : {}),
               ...(m.origin ? { origin: m.origin } : {}),
               ...(m.thinking ? { thinking: m.thinking } : {}),
-              ...(m.extra?.rich || m.extra?.crossPost || m.extra?.stream || m.extra?.scheduler || m.extra?.systemKind
+              ...(m.extra?.rich ||
+              m.extra?.crossPost ||
+              m.extra?.stream ||
+              m.extra?.scheduler ||
+              m.extra?.systemKind ||
+              m.extra?.slockThread
                 ? {
                     extra: {
                       ...(m.extra.rich ? { rich: m.extra.rich } : {}),
@@ -546,6 +552,7 @@ export function useChatHistory(threadId: string) {
                       ...(m.extra.stream ? { stream: m.extra.stream } : {}),
                       ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
                       ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                      ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
                     },
                   }
                 : {}),
