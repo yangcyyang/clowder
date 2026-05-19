@@ -24,6 +24,7 @@ export function getTextFoldReason(text: string): TextFoldReason | null {
   return null;
 }
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 export function shouldFoldText(_text: string): boolean {
   // Disabled 2026-05-19: always show full message content (no expand/collapse in chat)
   return false;

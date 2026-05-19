@@ -159,10 +159,6 @@ export function ChatInput({
 
   // F108B AC-B7: In whisper mode, check if SELECTED targets are busy (not thread-level).
   // When all whisper targets are idle → show Send button, not Queue.
-  const whisperTargetsAllIdle = useMemo(() => {
-    if (!whisperMode || whisperTargets.size === 0) return false;
-    return ![...whisperTargets].some((catId) => activeCatIds.has(catId));
-  }, [whisperMode, whisperTargets, activeCatIds]);
 
   const [mobileToolbar, setMobileToolbar] = useState(false);
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
@@ -289,12 +285,9 @@ export function ChatInput({
   );
 
   const handleSend = useCallback(() => doSend(undefined), [doSend]);
-  const handleQueueSend = useCallback(() => doSend('queue'), [doSend]);
-  const handleForceSend = useCallback(() => doSend('force'), [doSend]);
   const handlePrimarySend = useCallback(() => {
-    if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
-    else handleSend();
-  }, [handleQueueSend, handleSend, hasActiveInvocation, whisperTargetsAllIdle]);
+    handleSend();
+  }, [handleSend]);
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
@@ -562,9 +555,7 @@ export function ChatInput({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // F39+F108B: Enter while cat running → queue send; whisper to idle targets → normal send
-      if (activeUiReady && !whisperTargetsAllIdle) handleQueueSend();
-      else handleSend();
+      handleSend();
     }
   };
 
@@ -732,12 +723,11 @@ export function ChatInput({
 
   return (
     <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
-      {/* F39: Queue status bar — visible when cat is running */}
+      {/* F39: Agent running indicator — messages now send immediately (no queue) */}
       {activeUiReady && (
         <div className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-opus-primary)] animate-pulse" />
           <span className="text-xs text-[var(--color-opus-primary)] font-medium">猫猫正在回复中...</span>
-          <span className="text-xs text-cafe-muted">继续输入，消息会排队</span>
         </div>
       )}
 
@@ -927,9 +917,7 @@ export function ChatInput({
             placeholder={
               whisperMode
                 ? '悄悄话...'
-                : activeUiReady && !whisperTargetsAllIdle
-                  ? '继续输入，消息会排队...'
-                  : '输入消息 #当前对话'
+                : '输入消息 #当前对话'
             }
             className="max-h-[200px] min-h-[42px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm leading-5 text-cafe-text placeholder:text-cafe-muted focus:outline-none"
             rows={1}
@@ -988,30 +976,12 @@ export function ChatInput({
           </button>
         )}
 
-        {activeUiReady && !whisperTargetsAllIdle && input.trim() && (
-          <button
-            onClick={handleForceSend}
-            disabled={Boolean(disabled || sendTemporarilyDisabled)}
-            className="hidden h-9 w-9 items-center justify-center rounded-[10px] text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-40 md:flex"
-            aria-label="强制发送"
-            title="强制发送 — 中断当前猫猫"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
-
         <button
           onClick={handlePrimarySend}
           disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
           className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
-          title={activeUiReady && !whisperTargetsAllIdle ? '排队发送' : '发送消息'}
-          aria-label={activeUiReady && !whisperTargetsAllIdle ? '排队发送' : 'Send message'}
+          title="发送消息"
+          aria-label="Send message"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 2L11 13" />
