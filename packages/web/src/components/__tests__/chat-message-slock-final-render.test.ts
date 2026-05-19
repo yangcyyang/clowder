@@ -90,5 +90,7 @@ describe('ChatMessage Slock-like final render', () => {
       );
     });
     expect(container.textContent).toContain('partial token text');
+    const messageRow = container.querySelector('[data-message-id="m-stream"]');
+    expect(messageRow?.className).toContain('motion-safe:animate-message-appear');
   });
 });

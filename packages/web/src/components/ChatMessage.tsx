@@ -202,6 +202,8 @@ export function ChatMessage({
 
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
   const isAssistantContinuation = isGrouped;
+  const assistantAppearClass =
+    message.type === 'assistant' && !message.isStreaming ? 'motion-safe:animate-message-appear' : '';
 
   // Slock-like rendering: streaming tokens are buffered in store but hidden from
   // the timeline until the final message arrives. The input area shows typing
@@ -420,7 +422,7 @@ export function ChatMessage({
   return (
     <div
       data-message-id={message.id}
-      className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${isAssistantContinuation ? 'mb-1' : 'mb-4'}`}
+      className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${assistantAppearClass} ${isAssistantContinuation ? 'mb-1' : 'mb-4'}`}
     >
       {catData && !isAssistantContinuation && (
         <button
