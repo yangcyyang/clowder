@@ -25,6 +25,19 @@ const THREAD_PANEL_DEFAULT_WIDTH = 320;
 const THREAD_PANEL_MIN_WIDTH = 280;
 const THREAD_PANEL_MAX_WIDTH = 500;
 
+type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
+
+export function normalizeInlineThreadMessage(message: InlineThreadApiMessage): ChatMessageData {
+  if (!message.isDraft) return message;
+
+  const normalized: InlineThreadApiMessage = {
+    ...message,
+    isStreaming: true,
+  };
+  delete normalized.isDraft;
+  return normalized;
+}
+
 function detectSlashCommand(value: string, cursor: number): string | null {
   if (!value.startsWith('/') || cursor <= 0) return null;
   const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
@@ -66,6 +79,11 @@ export function InlineThreadPanel({
   const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartedAtRef = useRef<number>(0);
+  const pollBaselineCountRef = useRef<number>(0);
+  const latestMessagesRef = useRef<ChatMessageData[]>([]);
+  const mountedRef = useRef(false);
   const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -101,31 +119,67 @@ export function InlineThreadPanel({
     setSlashSelectedIdx(0);
   }, []);
 
-  const loadMessages = useCallback(() => {
-    let cancelled = false;
-    setLoading(true);
+  useEffect(() => {
+    latestMessagesRef.current = messages;
+  }, [messages]);
 
-    apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=60`)
-      .then(async (res) => {
-        if (!res.ok) return { messages: [] };
-        return (await res.json()) as { messages?: ChatMessageData[] };
-      })
-      .then((data) => {
-        if (!cancelled) setMessages(data.messages ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setMessages([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+  const loadMessages = useCallback(async (options?: { showLoading?: boolean }) => {
+    if (options?.showLoading !== false) setLoading(true);
 
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const res = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=60`);
+      if (!res.ok) return [];
+      const data = (await res.json()) as { messages?: ChatMessageData[] };
+      const normalized = (data.messages ?? []).map((message) => normalizeInlineThreadMessage(message));
+      if (mountedRef.current) {
+        latestMessagesRef.current = normalized;
+        setMessages(normalized);
+      }
+      return normalized;
+    } catch {
+      if (mountedRef.current) {
+        latestMessagesRef.current = [];
+        setMessages([]);
+      }
+      return [];
+    } finally {
+      if (mountedRef.current && options?.showLoading !== false) setLoading(false);
+    }
   }, [threadId]);
 
-  useEffect(() => loadMessages(), [loadMessages]);
+  const stopReplyPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    pollStartedAtRef.current = 0;
+    pollBaselineCountRef.current = 0;
+  }, []);
+
+  const startReplyPolling = useCallback(() => {
+    stopReplyPolling();
+    pollStartedAtRef.current = Date.now();
+    pollBaselineCountRef.current = latestMessagesRef.current.length;
+
+    pollTimerRef.current = setInterval(() => {
+      void loadMessages({ showLoading: false }).then((nextMessages) => {
+        const hasNewCompleteMessage =
+          nextMessages.length > pollBaselineCountRef.current && !nextMessages.some((message) => message.isStreaming);
+        const timedOut = Date.now() - pollStartedAtRef.current >= 30_000;
+        if (hasNewCompleteMessage || timedOut) stopReplyPolling();
+      });
+    }, 2000);
+  }, [loadMessages, stopReplyPolling]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadMessages();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [loadMessages]);
+
+  useEffect(() => () => stopReplyPolling(), [stopReplyPolling]);
 
   const replyMessages = useMemo(() => {
     const sourceIndex = messages.findIndex(
@@ -170,7 +224,7 @@ export function InlineThreadPanel({
       setInput('');
       closeMentionPicker();
       onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1);
-      loadMessages();
+      void loadMessages({ showLoading: false }).then(() => startReplyPolling());
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '发送失败');
     } finally {
@@ -184,6 +238,7 @@ export function InlineThreadPanel({
     replyMessages.length,
     sending,
     sourceMessage.id,
+    startReplyPolling,
     threadId,
   ]);
 
@@ -385,7 +440,7 @@ export function InlineThreadPanel({
               onKeyDown={handleInputKeyDown}
               placeholder="回复 Thread..."
               rows={3}
-              className="w-full resize-none rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] px-3 py-2 text-sm text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--color-cafe-accent)]"
+              className="w-full resize-none rounded-[var(--slock-radius-lg)] border border-[var(--slock-border-color)] bg-[var(--clowder-input-bg)] px-3 py-2 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--console-input-stroke)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
             />
           </div>
           <div className="mt-2 flex items-center justify-between">

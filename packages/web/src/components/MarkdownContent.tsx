@@ -69,7 +69,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
       </button>
       <pre
         ref={preRef}
-        className={`bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto text-xs leading-relaxed [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs ${hasLanguage ? 'font-mono leading-5' : 'font-sans leading-relaxed'}`}
+        className={`bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto leading-relaxed [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-xs leading-5' : 'font-sans text-sm leading-relaxed'}`}
       >
         {children}
       </pre>

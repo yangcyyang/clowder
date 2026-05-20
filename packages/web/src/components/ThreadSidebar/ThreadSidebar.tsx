@@ -390,7 +390,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       if (isLegacyBranchThread(thread)) {
         return false;
       }
-      if (thread.isDM) {
+      // In Inbox mode (showUnreadOnly), include DM threads that have unreads.
+      // Otherwise DMs are excluded from the channel list (they appear in the DM section).
+      if (thread.isDM && !showUnreadOnly) {
         return false;
       }
       if (showUnreadOnly && !unreadIds.has(thread.id)) {
@@ -656,7 +658,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             </svg>
             <span className="min-w-0 flex-1 text-left">Saved</span>
             {savedTotal > 0 && (
-              <span className="rounded-full bg-[var(--console-rail-active)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--clowder-sidebar-row-text)]">
+              <span className="text-[10px] font-normal leading-none text-[var(--clowder-sidebar-row-muted)]">
                 {savedTotal > 99 ? '99+' : savedTotal}
               </span>
             )}
@@ -712,7 +714,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             </div>
           )}
 
-          <div className="mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
+          {/* Hide the normal DM section in Inbox mode — unread DMs are shown inline above */}
+          <div className={`mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}>
             <div className="px-3 pb-1 pt-1">
               <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
                 DIRECT MESSAGES

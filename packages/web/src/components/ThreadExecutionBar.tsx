@@ -64,7 +64,7 @@ export function ThreadExecutionBar() {
   if (activeCats.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs border-b border-[var(--color-opus-primary)]/10">
+    <div className="flex items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)] px-4 py-2 text-xs">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
       {activeCats.map(({ catId, startedAt }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--console-cat-fallback)' };
@@ -111,7 +111,7 @@ function CatStatusChip({
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
   return (
-    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50">
+    <span className="flex items-center gap-1.5 rounded-[var(--slock-radius-pill)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1 shadow-sm">
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
       <span className="text-cafe-secondary font-medium">{label}</span>
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>

@@ -141,6 +141,15 @@
   --slock-message-gap: 12px;
   --slock-avatar-size: 32px;
   --slock-density: compact;
+  --slock-input-height-min: 92px;
+  --slock-radius-sm: 6px;
+  --slock-radius-md: 8px;
+  --slock-radius-lg: 12px;
+  --slock-radius-pill: 999px;
+  --slock-space-1: 4px;
+  --slock-space-2: 8px;
+  --slock-space-3: 12px;
+  --slock-space-4: 16px;
 
   --font-size-caption: 0.625rem;
   --font-size-label: 0.6875rem;
@@ -165,6 +174,9 @@
   --clowder-sidebar-row-muted: var(--cafe-text-muted);
   --clowder-section-tracking: 0.08em;
   --clowder-message-hover-ring: rgba(0, 0, 0, 0.1);
+  --clowder-input-bg: var(--console-field-bg);
+  --clowder-action-surface: color-mix(in srgb, var(--console-card-bg) 92%, transparent);
+  --clowder-running-bar-bg: var(--console-card-bg);
   --clowder-markdown-chip-bg: rgba(204, 103, 67, 0.12);
   --clowder-markdown-chip-border: rgba(204, 103, 67, 0.25);
   --clowder-markdown-chip-text: var(--cafe-accent);

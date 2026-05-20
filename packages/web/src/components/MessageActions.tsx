@@ -246,7 +246,7 @@ export function MessageActions({
 
   return (
     <div
-      className="group relative rounded-lg px-3 py-2 transition-shadow hover:ring-1 hover:ring-black/20"
+      className="group relative rounded-[var(--slock-radius-lg)] px-3 py-2 transition-shadow hover:ring-1 hover:ring-[var(--clowder-message-hover-ring)]"
       onContextMenu={(event) => {
         if (!canAct) return;
         event.preventDefault();
@@ -257,7 +257,7 @@ export function MessageActions({
 
       {canAct && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm px-1 py-0.5`}
+          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
         >
           <button
             type="button"

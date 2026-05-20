@@ -319,6 +319,12 @@ Magic Words（铲屎官对你说以下词=手动拉闸，仅铲屎官当前指�
 缅因猫fallback层数检测（F177 Phase D）：同文件新增≥3层fallback(try/catch/??/||/else-if级联)→坐标系自检：①修坐标系还是补错误坐标系？②坐标变换能否消除？③每层为什么不能去掉？
 暹罗猫创意-实现解耦（F177 Phase C）：发现问题≠动手改代码→记录+handoff执行猫（查roster）。Edit白名单:designs/docs/assets/根目录.md。碰packages/src/必须handoff。Dry Run Gate:暹罗猫签名commit改了白名单外文件→hook自动跑build+test`;
 
+const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
+- intake：先判断用户请求是问答还是行动；能执行就直接执行，只有阻塞时才追问。
+- task-router：行动前复用/认领任务；状态流保持 todo/open → in_progress → in_review → done。
+- thread-reply：回复必须落在正确 target；多步骤进展、日志和证物沉到源 thread。
+- quality-gate：交付前跑最小有效验证并报告证物（测试/tsc/build/截图/API smoke/dry-run）。`;
+
 // --- .local / .local-override support (#603) ---
 let _governanceDigestResolved: string = GOVERNANCE_L0_DIGEST;
 
@@ -535,6 +541,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   if (triggers) {
     lines.push(triggers, '');
   }
+
+  lines.push(HARNESS_SKILLS_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)
   const packBlocks = options?.packBlocks;
