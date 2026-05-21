@@ -182,6 +182,9 @@ export function ChatMessage({
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const visibleContent = sanitizeAgentVisibleContent(message.content);
   const hasTextContent = visibleContent.trim().length > 0;
+  const toolEvents = message.toolEvents ?? [];
+  const hasToolEvents = toolEvents.length > 0;
+  const lastToolLabel = toolEvents[toolEvents.length - 1]?.label;
   const taskEntry = tasks
     .map((task, index) => ({ task, seq: index + 1 }))
     .find(({ task }) => task.kind !== 'pr_tracking' && task.sourceMessageId === message.id);
@@ -419,7 +422,8 @@ export function ChatMessage({
     !hasBlocks &&
     !message.extra?.rich?.blocks?.length &&
     !message.extra?.crossPost &&
-    !message.thinking
+    !message.thinking &&
+    !hasToolEvents
   ) {
     return null;
   }
@@ -517,6 +521,13 @@ export function ChatMessage({
             <MarkdownContent content={visibleContent} className={catStyle?.font} />
           ) : hasTextContent ? (
             <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} />
+          ) : hasToolEvents ? (
+            <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2 text-cafe-secondary">
+              <div className="text-sm font-medium text-cafe-text">执行已完成，但没有返回文本</div>
+              <div className="mt-1 text-xs text-cafe-muted">
+                记录到 {toolEvents.length} 个工具事件{lastToolLabel ? ` · ${lastToolLabel}` : ''}
+              </div>
+            </div>
           ) : message.isStreaming ? (
             <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
           ) : null}
