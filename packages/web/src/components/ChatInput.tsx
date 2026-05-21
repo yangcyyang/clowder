@@ -895,9 +895,10 @@ export function ChatInput({
             rows={3}
             disabled={disabled}
           />
-          <div className="hidden items-center justify-between gap-2 px-2 pb-2 md:flex">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <div className="hidden items-center gap-1 md:flex">
               <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
@@ -919,9 +920,9 @@ export function ChatInput({
               </button>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-1">
               <label
-                className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text"
+                className="hidden cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
                 title="发送后创建任务"
               >
                 <input
@@ -938,7 +939,7 @@ export function ChatInput({
                 onClick={() => updateCvoMode(!cvoMode)}
                 aria-pressed={cvoMode}
                 title="先采访：发送后让 Agent 先问 3 个澄清问题"
-                className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                className={`hidden items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors md:flex ${
                   cvoMode
                     ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
                     : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
@@ -946,6 +947,34 @@ export function ChatInput({
               >
                 <span aria-hidden="true">🎯</span>
                 <span className="whitespace-nowrap">先采访</span>
+              </button>
+
+              {activeUiReady && !disabled && onStop && (
+                <button
+                  type="button"
+                  onClick={() => onStop()}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
+                  title="停止生成"
+                  aria-label="Stop generation"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <rect x="4" y="4" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handlePrimarySend}
+                disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                title="发送消息"
+                aria-label="Send message"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 2L11 13" />
+                  <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+                </svg>
               </button>
             </div>
           </div>
@@ -961,31 +990,6 @@ export function ChatInput({
           )}
         </div>
 
-        {activeUiReady && !disabled && onStop && (
-          <button
-            onClick={() => onStop()}
-            className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
-            title="停止生成"
-            aria-label="Stop generation"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <rect x="4" y="4" width="12" height="12" rx="2" />
-            </svg>
-          </button>
-        )}
-
-        <button
-          onClick={handlePrimarySend}
-          disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
-          className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
-          title="发送消息"
-          aria-label="Send message"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 2L11 13" />
-            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-          </svg>
-        </button>
       </div>
 
       {showHistorySearch && (
