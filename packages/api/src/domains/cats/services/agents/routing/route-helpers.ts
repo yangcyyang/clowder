@@ -124,6 +124,63 @@ export interface RouteOptions {
   routeSpan?: import('@opentelemetry/api').Span | undefined;
 }
 
+
+export async function persistSilentCompletionNotice(
+  deps: RouteStrategyDeps,
+  args: {
+    threadId: string;
+    catId: string;
+    displayName?: string;
+    toolCount?: number;
+    provider?: string;
+    model?: string;
+    invocationId?: string;
+  },
+): Promise<boolean> {
+  const displayName = args.displayName ?? args.catId;
+  const source = {
+    connector: 'silent-completion',
+    label: '执行提醒',
+    icon: '⚠️',
+    meta: { presentation: 'system_notice', noticeTone: 'warning' },
+  } as const;
+  const diagnostics = [
+    args.toolCount && args.toolCount > 0 ? `工具调用 ${args.toolCount} 次` : '',
+    args.provider || args.model ? `模型 ${[args.provider, args.model].filter(Boolean).join('/')}` : '',
+    args.invocationId ? `调用 ${args.invocationId.slice(0, 8)}` : '',
+  ].filter(Boolean);
+  const content =
+    `[执行提醒]: ${displayName} 已完成本轮调用，但没有返回可展示文本。` +
+    '这通常是 CLI/模型返回了 thinking、工具事件或空结果；请换一种问法重试，或检查该 Agent 的运行日志。' +
+    (diagnostics.length > 0 ? `\n\n${diagnostics.join(' · ')}` : '');
+
+  try {
+    const stored = await deps.messageStore.append({
+      userId: 'system',
+      catId: null,
+      threadId: args.threadId,
+      content,
+      mentions: [],
+      timestamp: Date.now(),
+      source,
+    });
+    deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+      threadId: args.threadId,
+      message: {
+        id: stored.id,
+        type: 'connector',
+        content: stored.content,
+        source,
+        timestamp: stored.timestamp,
+      },
+    });
+    return true;
+  } catch (err) {
+    log.warn({ err, catId: args.catId, threadId: args.threadId }, 'persist silent completion notice failed');
+    return false;
+  }
+}
+
 export interface IncrementalContextResult {
   contextText: string;
   boundaryId?: string;

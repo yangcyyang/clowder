@@ -31,6 +31,20 @@ function createTextThenErrorService(catId, text, errorMsg) {
   };
 }
 
+function createThinkingOnlyService(catId) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({ type: 'thinking', text: 'I am thinking but will not emit final text.' }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -147,5 +161,24 @@ describe('route-serial error persistence (F5 reload)', () => {
     const errorMsg = yielded.find((m) => m.type === 'error');
     assert.ok(errorMsg, 'error should be yielded to frontend');
     assert.ok(errorMsg.error.includes('init_failure'), 'yielded error should contain error text');
+  });
+
+  it('persists thinking-only completion as visible system notice, not a blank assistant bubble', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps({ opencode: createThinkingOnlyService('opencode') }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opencode'], 'hello', 'user1', 'thread1')) {
+      // drain generator
+    }
+
+    const blankCatAppend = appendCalls.find((m) => m.catId === 'opencode' && m.content === '');
+    assert.equal(blankCatAppend, undefined, 'thinking-only turns should not persist blank assistant bubbles');
+
+    const noticeAppend = appendCalls.find(
+      (m) => m.userId === 'system' && m.catId === null && m.source?.connector === 'silent-completion',
+    );
+    assert.ok(noticeAppend, 'should persist a visible silent-completion notice');
+    assert.ok(noticeAppend.content.includes('没有返回可展示文本'), 'notice should explain that no displayable text was produced');
   });
 });

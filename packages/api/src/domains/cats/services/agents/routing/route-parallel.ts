@@ -50,6 +50,7 @@ import {
   getService,
   getThreadBootcampMemberCount,
   isUserFacingSystemInfoContent,
+  persistSilentCompletionNotice,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldAppendExplicitCurrentMessage,
@@ -858,36 +859,18 @@ export async function* routeParallel(
         }
       } else if (!catHadError.has(msg.catId)) {
         // No text content and no error.
-        // Persist only when there is non-text payload (tool/thinking/rich).
-        // Purely empty turns should not create blank chat bubbles.
+        // Persist assistant bubbles only when there is visible rich/tool payload.
+        // Thinking-only or empty turns get a system notice instead of a blank bubble.
         const meta = catMeta.get(msg.catId);
         const catTools = catToolEvents.get(msg.catId);
         const thinking = catThinking.get(msg.catId);
         const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         const hasRichBlocks = noTextBlocks.length > 0;
         const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
-        const shouldPersistNoTextMessage =
-          hasRichBlocks ||
-          (catTools?.length ?? 0) > 0 ||
-          Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
-        const shouldEmitSilentCompletion = (catTools?.length ?? 0) > 0 && !hasRichBlocks && !sawUserFacingSystemInfo;
+        const shouldPersistNoTextMessage = hasRichBlocks || (catTools?.length ?? 0) > 0;
+        const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
 
-        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
-        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (shouldEmitSilentCompletion) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId: msg.catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${msg.catId} completed with tool calls but no text response.`,
-              toolCount: catTools?.length ?? 0,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-        }
-
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldEmitSilentCompletion) {
+        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
           catProducedOutput = true;
         }
 
@@ -945,7 +928,37 @@ export async function* routeParallel(
               });
             }
           }
-        } else if (!sawUserFacingSystemInfo) {
+        }
+
+        if (shouldPersistSilentNotice) {
+          const persistedNotice = await persistSilentCompletionNotice(deps, {
+            threadId,
+            catId: msg.catId,
+            displayName: catRegistry.tryGet(msg.catId)?.config.displayName,
+            toolCount: catTools?.length ?? 0,
+            provider: meta?.provider,
+            model: meta?.model,
+            invocationId: ownInvId,
+          });
+          if (!persistedNotice) {
+            yield {
+              type: 'system_info' as AgentMessageType,
+              catId: msg.catId,
+              content: JSON.stringify({
+                type: 'silent_completion',
+                detail: `${msg.catId} completed without textual output.`,
+                toolCount: catToolEvents.get(msg.catId)?.length ?? 0,
+                provider: catMeta.get(msg.catId)?.provider,
+                model: catMeta.get(msg.catId)?.model,
+                invocationId: ownInvId,
+              }),
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+          if (!shouldPersistNoTextMessage && deps.draftStore && ownInvId) {
+            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+          }
+        } else if (!shouldPersistNoTextMessage && !sawUserFacingSystemInfo) {
           yield {
             type: 'system_info' as AgentMessageType,
             catId: msg.catId,
