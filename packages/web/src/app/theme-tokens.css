@@ -316,6 +316,71 @@
   --clowder-avatar-quiet-ring: #d0d1d2;
 }
 
+[data-visual-theme="slock"] {
+  --cat-cream-white: #ffffff;
+  --cat-light-sand: #fff9ec;
+  --cat-border-tan: #000000;
+  --cat-deep-ink: #000000;
+  --cat-muted-stone: #8c8c8c;
+  --cat-paw-pink: #f46fa7;
+
+  --cafe-surface: #ffffff;
+  --cafe-surface-elevated: #fff9ec;
+  --cafe-surface-sunken: #fff0a6;
+  --cafe-text: #000000;
+  --cafe-text-secondary: #5f5f5f;
+  --cafe-text-muted: #8c8c8c;
+  --cafe-border: #000000;
+  --cafe-border-subtle: #000000;
+  --cafe-accent: #f46fa7;
+  --cafe-accent-hover: #e95b99;
+  --cafe-accent-foreground: #000000;
+  --cafe-interactive: #000000;
+  --color-cafe-accent: var(--cafe-accent);
+
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+  --border-radius-base: 4px;
+
+  --slock-sidebar-bg: #ffd83d;
+  --slock-border-color: #000000;
+  --slock-input-height-min: 112px;
+  --slock-radius-sm: 0;
+  --slock-radius-md: 0;
+  --slock-radius-lg: 0;
+
+  --clowder-type-panel-title: 28px;
+  --clowder-type-body: 17px;
+  --clowder-type-sender: 20px;
+  --clowder-type-meta: 15px;
+  --clowder-type-section: 14px;
+  --clowder-leading-tight: 1.35;
+  --clowder-leading-body: 1.62;
+  --clowder-sidebar-bg: #fff9ec;
+  --clowder-sidebar-border: #000000;
+  --clowder-sidebar-title: #000000;
+  --clowder-sidebar-row-text: #000000;
+  --clowder-sidebar-row-active-text: #000000;
+  --clowder-sidebar-row-muted: #8c8c8c;
+  --clowder-sidebar-active-bg: #f46fa7;
+  --clowder-sidebar-active-border: #000000;
+  --clowder-sidebar-hover-bg: #fff0a6;
+  --clowder-section-tracking: 0.12em;
+  --clowder-message-hover-ring: #000000;
+  --clowder-input-bg: #ffffff;
+  --clowder-action-surface: #ffffff;
+  --clowder-running-bar-bg: #fff9ec;
+  --clowder-markdown-chip-bg: #fff0a6;
+  --clowder-markdown-chip-border: #000000;
+  --clowder-markdown-chip-text: #000000;
+  --clowder-section-title-bg: #fff0a6;
+  --clowder-sender-user: #000000;
+  --clowder-sender-agent: #000000;
+  --clowder-muted-soft: #8c8c8c;
+  --clowder-avatar-quiet-ring: #000000;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --guide-breathe-animation: none;
@@ -559,4 +624,55 @@
   --clowder-sidebar-hover-bg: #171a20;
   --clowder-muted-soft: #8e8e8e;
   --clowder-avatar-quiet-ring: #2b2f36;
+}
+
+[data-theme="dark"][data-visual-theme="slock"] {
+  --cat-cream-white: #ffffff;
+  --cat-light-sand: #fff9ec;
+  --cat-border-tan: #000000;
+  --cat-deep-ink: #000000;
+  --cat-muted-stone: #8c8c8c;
+  --cat-paw-pink: #f46fa7;
+
+  --cafe-surface: #ffffff;
+  --cafe-surface-elevated: #fff9ec;
+  --cafe-surface-sunken: #fff0a6;
+  --cafe-text: #000000;
+  --cafe-text-secondary: #5f5f5f;
+  --cafe-text-muted: #8c8c8c;
+  --cafe-border: #000000;
+  --cafe-border-subtle: #000000;
+  --cafe-accent: #f46fa7;
+  --cafe-accent-hover: #e95b99;
+  --cafe-accent-foreground: #000000;
+  --cafe-interactive: #000000;
+  --color-cafe-accent: var(--cafe-accent);
+
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+
+  --slock-sidebar-bg: #ffd83d;
+  --slock-border-color: #000000;
+  --slock-input-height-min: 112px;
+  --slock-radius-sm: 0;
+  --slock-radius-md: 0;
+  --slock-radius-lg: 0;
+
+  --clowder-sidebar-bg: #fff9ec;
+  --clowder-sidebar-border: #000000;
+  --clowder-sidebar-title: #000000;
+  --clowder-sidebar-row-text: #000000;
+  --clowder-sidebar-row-active-text: #000000;
+  --clowder-sidebar-row-muted: #8c8c8c;
+  --clowder-sidebar-active-bg: #f46fa7;
+  --clowder-sidebar-active-border: #000000;
+  --clowder-sidebar-hover-bg: #fff0a6;
+  --clowder-message-hover-ring: #000000;
+  --clowder-markdown-chip-bg: #fff0a6;
+  --clowder-markdown-chip-border: #000000;
+  --clowder-markdown-chip-text: #000000;
+  --clowder-section-title-bg: #fff0a6;
+  --clowder-muted-soft: #8c8c8c;
+  --clowder-avatar-quiet-ring: #000000;
 }

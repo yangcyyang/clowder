@@ -233,6 +233,37 @@
   --console-status-connected: #3e6ae1;
 }
 
+[data-visual-theme="slock"] {
+  --console-shell-bg: #ffffff;
+  --console-panel-bg: #fff9ec;
+  --console-card-bg: #ffffff;
+  --console-card-soft-bg: #fff9ec;
+  --console-code-bg: #fff0a6;
+  --console-pill-bg: #fff0a6;
+  --console-border-soft: #000000;
+  --console-border-strong: #000000;
+  --console-shadow: 6px 6px 0 #000000;
+  --console-shadow-soft: 4px 4px 0 #000000;
+  --console-field-bg: #ffffff;
+  --console-active-bg: #f46fa7;
+  --console-hover-bg: #fff0a6;
+  --console-rail-bg: #ffd83d;
+  --console-rail-item: #ffffff;
+  --console-rail-active: #000000;
+  --console-rail-fg: #000000;
+  --console-input-stroke: #000000;
+  --console-button-emphasis: #000000;
+  --console-button-emphasis-hover: #f46fa7;
+  --console-modal-title: #000000;
+  --console-modal-close-bg: #fff0a6;
+  --console-modal-close-fg: #000000;
+  --console-cat-fallback: #000000;
+  --console-status-connected: #00875a;
+  --chat-code-bg: #fff0a6;
+  --chat-code-text: #000000;
+  --chat-code-btn-bg: #fff9ec;
+}
+
 [data-theme="dark"][data-visual-theme="slack"] {
   --console-shell-bg: #1a1d21;
   --console-panel-bg: #222529;
@@ -287,6 +318,37 @@
   --console-modal-close-fg: #c8c9cc;
   --console-cat-fallback: #8e8e8e;
   --console-status-connected: #5c86ff;
+}
+
+[data-theme="dark"][data-visual-theme="slock"] {
+  --console-shell-bg: #ffffff;
+  --console-panel-bg: #fff9ec;
+  --console-card-bg: #ffffff;
+  --console-card-soft-bg: #fff9ec;
+  --console-code-bg: #fff0a6;
+  --console-pill-bg: #fff0a6;
+  --console-border-soft: #000000;
+  --console-border-strong: #000000;
+  --console-shadow: 6px 6px 0 #000000;
+  --console-shadow-soft: 4px 4px 0 #000000;
+  --console-field-bg: #ffffff;
+  --console-active-bg: #f46fa7;
+  --console-hover-bg: #fff0a6;
+  --console-rail-bg: #ffd83d;
+  --console-rail-item: #ffffff;
+  --console-rail-active: #000000;
+  --console-rail-fg: #000000;
+  --console-input-stroke: #000000;
+  --console-button-emphasis: #000000;
+  --console-button-emphasis-hover: #f46fa7;
+  --console-modal-title: #000000;
+  --console-modal-close-bg: #fff0a6;
+  --console-modal-close-fg: #000000;
+  --console-cat-fallback: #000000;
+  --console-status-connected: #00875a;
+  --chat-code-bg: #fff0a6;
+  --chat-code-text: #000000;
+  --chat-code-btn-bg: #fff9ec;
 }
 
 .console-shell {
@@ -575,4 +637,61 @@
   border: 2px solid var(--console-card-bg);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   cursor: pointer;
+}
+
+[data-visual-theme="slock"] .console-activity-rail {
+  border-right: 3px solid #000000;
+}
+
+[data-visual-theme="slock"] .console-activity-button {
+  border: 2px solid #000000;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 3px 3px 0 #000000;
+}
+
+[data-visual-theme="slock"] .console-activity-button:hover {
+  background: #fff0a6;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 #000000;
+}
+
+[data-visual-theme="slock"] .console-activity-button[data-active="true"] {
+  background: #000000;
+  color: #ffd83d;
+}
+
+[data-visual-theme="slock"] .console-panel,
+[data-visual-theme="slock"] .console-shell-panel,
+[data-visual-theme="slock"] .console-shell-panel-soft,
+[data-visual-theme="slock"] .console-card,
+[data-visual-theme="slock"] .console-card-soft,
+[data-visual-theme="slock"] .console-section-shell,
+[data-visual-theme="slock"] .console-code-pane,
+[data-visual-theme="slock"] .console-table-shell,
+[data-visual-theme="slock"] .console-search-field,
+[data-visual-theme="slock"] .console-status-panel {
+  border-color: #000000;
+  border-radius: 0;
+}
+
+[data-visual-theme="slock"] .console-card,
+[data-visual-theme="slock"] .console-section-shell,
+[data-visual-theme="slock"] .console-search-field,
+[data-visual-theme="slock"] .console-status-panel {
+  box-shadow: var(--console-shadow-soft);
+}
+
+[data-visual-theme="slock"] .console-pill,
+[data-visual-theme="slock"] .console-status-chip,
+[data-visual-theme="slock"] .console-nav-icon {
+  border-color: #000000;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 #000000;
+}
+
+[data-visual-theme="slock"] .console-nav-item {
+  border-color: #000000;
+  border-radius: 0;
 }

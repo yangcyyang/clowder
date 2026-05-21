@@ -9,10 +9,10 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
-type VisualTheme = 'claude' | 'slack' | 'tesla';
+type VisualTheme = 'claude' | 'slack' | 'tesla' | 'slock';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
-const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla'];
+const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla', 'slock'];
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -92,13 +92,14 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
   return (
     <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
-      {theme === 'tesla' ? 'T' : theme === 'slack' ? 'S' : 'C'}
+      {theme === 'tesla' ? 'T' : theme === 'slack' ? 'S' : theme === 'slock' ? 'SL' : 'C'}
     </span>
   );
 }
 
 function getVisualThemeLabel(theme: VisualTheme): string {
   if (theme === 'tesla') return 'Tesla';
+  if (theme === 'slock') return 'Slock';
   if (theme === 'slack') return 'Slack';
   return 'Claude';
 }
@@ -135,13 +136,14 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
             key={sec.id}
             type="button"
             onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
-            className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+            className={`console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
               active
                 ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
                 : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
             }`}
             title={sec.label}
             aria-current={active ? 'page' : undefined}
+            data-active={active ? 'true' : 'false'}
           >
             <HubIcon name={sec.icon} className="h-[18px] w-[18px]" />
           </button>
@@ -161,13 +163,14 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
     <button
       type="button"
       onClick={() => onNav('/settings')}
-      className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+      className={`console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
         isSettings
           ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
           : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
       }`}
       title="设置"
       aria-current={isSettings ? 'page' : undefined}
+      data-active={isSettings ? 'true' : 'false'}
       data-guide-id="hub.trigger"
     >
       <SettingsIcon className="h-5 w-5" />
@@ -224,7 +227,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   return (
     <nav
-      className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
+      className={`console-activity-rail flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
       aria-label="主导航"
     >
       {NAV_ITEMS.map((item) => {
@@ -235,13 +238,14 @@ export function ActivityBar({ className }: ActivityBarProps) {
             key={item.id}
             type="button"
             onClick={() => handleNav(item.path)}
-            className={`flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+            className={`console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
               active
                 ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
                 : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
             }`}
             title={item.label}
             aria-current={active ? 'page' : undefined}
+            data-active={active ? 'true' : 'false'}
             data-guide-id={`nav.${item.id}`}
           >
             <Icon className="h-5 w-5" />
@@ -257,17 +261,19 @@ export function ActivityBar({ className }: ActivityBarProps) {
         <button
           type="button"
           onClick={toggleVisualTheme}
-          className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
+          className="console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
           title={mounted ? `当前 ${getVisualThemeLabel(visualTheme)} 风格，点击切换下一套` : '切换视觉风格'}
           aria-label={mounted ? `当前 ${getVisualThemeLabel(visualTheme)} 风格，点击切换下一套` : '切换视觉风格'}
+          data-active="false"
         >
           <VisualThemeIcon theme={mounted ? visualTheme : 'claude'} />
         </button>
         <button
           type="button"
           onClick={toggleTheme}
-          className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
+          className="console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)] transition-all"
           title={mounted && resolvedTheme === 'dark' ? '切换到日间模式' : '切换到夜间模式'}
+          data-active="false"
         >
           {mounted && resolvedTheme === 'dark' ? <MoonIcon className="h-5 w-5" /> : <SunIcon className="h-5 w-5" />}
         </button>
@@ -275,8 +281,9 @@ export function ActivityBar({ className }: ActivityBarProps) {
           fallback={
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] transition-all"
+              className="console-activity-button flex h-10 w-10 items-center justify-center rounded-[9px] bg-[var(--console-rail-item)] transition-all"
               title="设置"
+              data-active="false"
               data-guide-id="hub.trigger"
             >
               <SettingsIcon className="h-5 w-5" />
