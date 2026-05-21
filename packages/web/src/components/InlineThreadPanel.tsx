@@ -406,11 +406,6 @@ export function InlineThreadPanel({
             x
           </button>
         </div>
-        <div
-          className="h-9 flex-shrink-0 border-b border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
-          aria-hidden="true"
-        />
-
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
           <div className="mb-4 border-b border-[var(--slock-border-color)] pb-3">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
@@ -438,9 +433,7 @@ export function InlineThreadPanel({
           />
         )}
 
-        <div
-          className={`flex-shrink-0 p-3 ${hasActiveInvocation ? '' : 'border-t border-[var(--slock-border-color)]'}`}
-        >
+        <div className="flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
           <div className="relative">
             {showMentionPicker && (
