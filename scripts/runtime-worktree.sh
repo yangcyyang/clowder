@@ -32,6 +32,12 @@ Defaults:
 Safety:
   start refuses to kill an active API by default.
   To intentionally restart runtime, set CAT_CAFE_RUNTIME_RESTART_OK=1.
+
+Runtime state sync:
+  Before start/sync, runtime worktree copies required local state from the
+  launcher project root: .env, .cat-cafe/{cat-catalog,accounts,credentials}.json,
+  and missing packages/api/uploads files. Override source with
+  CAT_CAFE_RUNTIME_STATE_SOURCE=/path/to/source.
 EOF
 }
 
@@ -198,24 +204,75 @@ install_runtime_dependencies() {
   pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
 }
 
+sync_runtime_state_file() {
+  local source_file="$1"
+  local target_file="$2"
+  local mode="${3:-}"
+
+  [ -f "$source_file" ] || return 0
+
+  mkdir -p "$(dirname "$target_file")"
+  if [ -f "$target_file" ] && cmp -s "$source_file" "$target_file"; then
+    return 0
+  fi
+
+  if [ -f "$target_file" ]; then
+    cp "$target_file" "$target_file.bak-$(date +%Y%m%d-%H%M%S)" || true
+  fi
+
+  cp "$source_file" "$target_file"
+  if [ -n "$mode" ]; then
+    chmod "$mode" "$target_file" || true
+  fi
+  info "synced runtime state: ${target_file#$RUNTIME_DIR/}"
+}
+
+sync_runtime_uploads() {
+  local source_uploads="$1"
+  local target_uploads="$2"
+
+  [ -d "$source_uploads" ] || return 0
+  mkdir -p "$target_uploads"
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --ignore-existing "$source_uploads/" "$target_uploads/"
+  else
+    (cd "$source_uploads" && find . -type f -print) | while IFS= read -r file; do
+      [ -f "$target_uploads/$file" ] && continue
+      mkdir -p "$(dirname "$target_uploads/$file")"
+      cp "$source_uploads/$file" "$target_uploads/$file"
+    done
+  fi
+}
+
 seed_runtime_config_from_project() {
-  local source_config="$PROJECT_DIR/.cat-cafe"
-  local target_config="$RUNTIME_DIR/.cat-cafe"
+  local source_root="${CAT_CAFE_RUNTIME_STATE_SOURCE:-$PROJECT_DIR}"
+  local source_config target_config
   local file
 
   [ "$RUNTIME_DIR" != "$PROJECT_DIR" ] || return 0
-  [ -d "$source_config" ] || return 0
+
+  source_root="$(abs_path "$source_root")"
+  [ -d "$source_root" ] || {
+    info "runtime state source missing, skip sync: $source_root"
+    return 0
+  }
+
+  source_config="$source_root/.cat-cafe"
+  target_config="$RUNTIME_DIR/.cat-cafe"
+
+  sync_runtime_state_file "$source_root/.env" "$RUNTIME_DIR/.env" 600
 
   for file in cat-catalog.json accounts.json credentials.json; do
     [ -f "$source_config/$file" ] || continue
-    [ ! -e "$target_config/$file" ] || continue
-    mkdir -p "$target_config"
-    cp "$source_config/$file" "$target_config/$file"
     if [ "$file" = "credentials.json" ]; then
-      chmod 600 "$target_config/$file" || true
+      sync_runtime_state_file "$source_config/$file" "$target_config/$file" 600
+    else
+      sync_runtime_state_file "$source_config/$file" "$target_config/$file"
     fi
-    info "seeded runtime config: .cat-cafe/$file"
   done
+
+  sync_runtime_uploads "$source_root/packages/api/uploads" "$RUNTIME_DIR/packages/api/uploads"
 }
 
 ensure_runtime_dependencies() {
