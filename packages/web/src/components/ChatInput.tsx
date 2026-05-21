@@ -895,27 +895,59 @@ export function ChatInput({
             rows={3}
             disabled={disabled}
           />
-          <div className="hidden items-center gap-1 px-2 pb-2 md:flex">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
-              aria-label="上传图片"
-              title="上传图片"
-            >
-              <ImageUploadIcon className="h-[18px] w-[18px]" />
-            </button>
+          <div className="hidden items-center justify-between gap-2 px-2 pb-2 md:flex">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                aria-label="上传图片"
+                title="上传图片"
+              >
+                <ImageUploadIcon className="h-[18px] w-[18px]" />
+              </button>
 
-            <button
-              type="button"
-              onClick={() => attachmentInputRef.current?.click()}
-              disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
-              aria-label="上传文件"
-              title="上传文件"
-            >
-              <AttachIcon className="h-[18px] w-[18px]" />
-            </button>
+              <button
+                type="button"
+                onClick={() => attachmentInputRef.current?.click()}
+                disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                aria-label="上传文件"
+                title="上传文件"
+              >
+                <AttachIcon className="h-[18px] w-[18px]" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text"
+                title="发送后创建任务"
+              >
+                <input
+                  type="checkbox"
+                  checked={sendAsTask}
+                  onChange={(event) => setSendAsTask(event.target.checked)}
+                  className="h-3.5 w-3.5 accent-[var(--console-input-stroke)]"
+                />
+                <span className="whitespace-nowrap">As Task</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => updateCvoMode(!cvoMode)}
+                aria-pressed={cvoMode}
+                title="先采访：发送后让 Agent 先问 3 个澄清问题"
+                className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                  cvoMode
+                    ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
+                    : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+                }`}
+              >
+                <span aria-hidden="true">🎯</span>
+                <span className="whitespace-nowrap">先采访</span>
+              </button>
+            </div>
           </div>
           {ghostSuggestion && !pathCompletion.isOpen && (
             <div
@@ -928,34 +960,6 @@ export function ChatInput({
             </div>
           )}
         </div>
-
-        <label
-          className="hidden h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
-          title="发送后创建任务"
-        >
-          <input
-            type="checkbox"
-            checked={sendAsTask}
-            onChange={(event) => setSendAsTask(event.target.checked)}
-            className="h-3.5 w-3.5 accent-[var(--console-input-stroke)]"
-          />
-          <span className="whitespace-nowrap">As Task</span>
-        </label>
-
-        <button
-          type="button"
-          onClick={() => updateCvoMode(!cvoMode)}
-          aria-pressed={cvoMode}
-          title="先采访：发送后让 Agent 先问 3 个澄清问题"
-          className={`hidden h-9 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors md:flex ${
-            cvoMode
-              ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
-              : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
-          }`}
-        >
-          <span aria-hidden="true">🎯</span>
-          <span className="whitespace-nowrap">先采访</span>
-        </button>
 
         {activeUiReady && !disabled && onStop && (
           <button
