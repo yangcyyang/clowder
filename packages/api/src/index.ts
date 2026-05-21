@@ -3,6 +3,7 @@
  * 后端 API 入口
  */
 
+import './config/load-project-env.js';
 import { join } from 'node:path';
 import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
