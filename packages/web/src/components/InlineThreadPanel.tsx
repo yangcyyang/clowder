@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { type ChatMessage as ChatMessageData } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
@@ -84,6 +84,7 @@ export function InlineThreadPanel({
   const pollBaselineCountRef = useRef<number>(0);
   const latestMessagesRef = useRef<ChatMessageData[]>([]);
   const mountedRef = useRef(false);
+  const hasActiveInvocation = useChatStore((s) => Object.keys(s.activeInvocations ?? {}).length > 0);
   const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -394,7 +395,7 @@ export function InlineThreadPanel({
         className="flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
         style={{ width: panelWidth }}
       >
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4 py-3">
+        <div className="flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4">
           <span className="text-sm font-semibold text-[var(--cafe-text)]">Thread</span>
           <button
             type="button"
@@ -405,6 +406,10 @@ export function InlineThreadPanel({
             x
           </button>
         </div>
+        <div
+          className="h-9 flex-shrink-0 border-b border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
+          aria-hidden="true"
+        />
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
           <div className="mb-4 border-b border-[var(--slock-border-color)] pb-3">
@@ -426,7 +431,16 @@ export function InlineThreadPanel({
           )}
         </div>
 
-        <div className="flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
+        {hasActiveInvocation && (
+          <div
+            className="h-[33px] flex-shrink-0 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)]"
+            aria-hidden="true"
+          />
+        )}
+
+        <div
+          className={`flex-shrink-0 p-3 ${hasActiveInvocation ? '' : 'border-t border-[var(--slock-border-color)]'}`}
+        >
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
           <div className="relative">
             {showMentionPicker && (
