@@ -127,6 +127,38 @@ describe('chatStore multi-thread state', () => {
       expect(useChatStore.getState().messages).toHaveLength(1);
     });
 
+    it('bumps active thread recency when a new message arrives', () => {
+      useChatStore.setState({
+        threads: [
+          {
+            id: 'thread-a',
+            projectPath: 'default',
+            title: 'Thread A',
+            createdBy: 'user',
+            participants: [],
+            createdAt: 500,
+            lastActiveAt: 1000,
+          },
+          {
+            id: 'thread-b',
+            projectPath: 'default',
+            title: 'Thread B',
+            createdBy: 'user',
+            participants: [],
+            createdAt: 500,
+            lastActiveAt: 2000,
+          },
+        ],
+      });
+
+      useChatStore.getState().addMessage({ id: 'm-active', type: 'user', content: 'new', timestamp: 3000 });
+
+      const state = useChatStore.getState();
+      expect(state.threadStates['thread-a']?.lastActivity).toBe(3000);
+      expect(state.threads.find((thread) => thread.id === 'thread-a')?.lastActiveAt).toBe(3000);
+      expect(state.threads.find((thread) => thread.id === 'thread-b')?.lastActiveAt).toBe(2000);
+    });
+
     it('adds to map when thread is not active', () => {
       useChatStore.getState().addMessageToThread('thread-b', makeMsg('m1'));
       // Flat state unchanged
@@ -136,6 +168,43 @@ describe('chatStore multi-thread state', () => {
       expect(ts).toBeDefined();
       expect(ts?.messages).toHaveLength(1);
       expect(ts?.unreadCount).toBe(1);
+    });
+
+    it('bumps background thread recency when a new message arrives', () => {
+      useChatStore.setState({
+        threads: [
+          {
+            id: 'thread-a',
+            projectPath: 'default',
+            title: 'Thread A',
+            createdBy: 'user',
+            participants: [],
+            createdAt: 500,
+            lastActiveAt: 2000,
+          },
+          {
+            id: 'thread-b',
+            projectPath: 'default',
+            title: 'Thread B',
+            createdBy: 'user',
+            participants: [],
+            createdAt: 500,
+            lastActiveAt: 1000,
+          },
+        ],
+      });
+
+      useChatStore.getState().addMessageToThread('thread-b', {
+        id: 'm-bg',
+        type: 'user',
+        content: 'background',
+        timestamp: 4000,
+      });
+
+      const state = useChatStore.getState();
+      expect(state.threadStates['thread-b']?.lastActivity).toBe(4000);
+      expect(state.threads.find((thread) => thread.id === 'thread-b')?.lastActiveAt).toBe(4000);
+      expect(state.threads.find((thread) => thread.id === 'thread-a')?.lastActiveAt).toBe(2000);
     });
 
     it('deduplicates by id', () => {

@@ -177,6 +177,20 @@ function mirrorActiveFlat(
   return mirrorActiveToThreadStates(state, state.currentThreadId, patch);
 }
 
+function messageActivityTime(msg: ChatMessage): number {
+  return msg.deliveredAt ?? msg.timestamp ?? Date.now();
+}
+
+function bumpThreadsLastActiveAt(threads: Thread[], threadId: string, lastActiveAt: number): Thread[] {
+  let changed = false;
+  const next = threads.map((thread) => {
+    if (thread.id !== threadId || lastActiveAt <= thread.lastActiveAt) return thread;
+    changed = true;
+    return { ...thread, lastActiveAt };
+  });
+  return changed ? next : threads;
+}
+
 /** Stamp completion time into threadStates for a given thread.
  *  Centralizes the "real activity just ended" semantic so all invocation-clearing
  *  paths share one definition. Optional `patch` merges extra fields before stamping. */
@@ -1187,7 +1201,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             fireOwnerMentionNotification(newMention);
           }
         }
-        return { messages: result.messages };
+        return {
+          messages: result.messages,
+          threads: bumpThreadsLastActiveAt(state.threads, threadId, deliveredAt),
+          ...mirrorActiveFlat(state, { messages: result.messages, lastActivity: deliveredAt }),
+        };
       }
       const existing = state.threadStates[threadId] || { ...DEFAULT_THREAD_STATE };
       const result = updateMsgs(existing.messages);
@@ -1360,7 +1378,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
           fireOwnerMentionNotification(msg);
         }
-        return { messages };
+        const lastActivity = messageActivityTime(msg);
+        return {
+          messages,
+          threads: bumpThreadsLastActiveAt(state.threads, state.currentThreadId, lastActivity),
+          ...mirrorActiveFlat(state, { messages, lastActivity }),
+        };
       }
 
       const messages = insertOrAppendMessage(state.messages, msg);
@@ -1371,7 +1394,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
         fireOwnerMentionNotification(msg);
       }
-      return { messages };
+      const lastActivity = messageActivityTime(msg);
+      return {
+        messages,
+        threads: bumpThreadsLastActiveAt(state.threads, state.currentThreadId, lastActivity),
+        ...mirrorActiveFlat(state, { messages, lastActivity }),
+      };
     }),
 
   removeMessage: (id) =>
@@ -1983,9 +2011,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
             fireOwnerMentionNotification(msg);
           }
+          const lastActivity = messageActivityTime(msg);
           return {
             messages,
-            ...mirrorActiveToThreadStates(state, threadId, { messages }),
+            threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
+            ...mirrorActiveToThreadStates(state, threadId, { messages, lastActivity }),
           };
         }
 
@@ -1999,9 +2029,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
           fireOwnerMentionNotification(msg);
         }
+        const lastActivity = messageActivityTime(msg);
         return {
           messages,
-          ...mirrorActiveToThreadStates(state, threadId, { messages }),
+          threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
+          ...mirrorActiveToThreadStates(state, threadId, { messages, lastActivity }),
         };
       }
 
@@ -2028,13 +2060,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
         // Cloud review P1: Propagate mention state even on merge
         if (msg.mentionsUser) fireOwnerMentionNotification(msg);
+        const lastActivity = messageActivityTime(msg);
         return {
+          threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
           threadStates: {
             ...state.threadStates,
             [threadId]: {
               ...existing,
               messages: updatedMessages,
               hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
+              lastActivity,
             },
           },
         };
@@ -2043,7 +2078,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // F067 Phase 2: Fire macOS notification for @co-creator mention
       if (msg.mentionsUser) fireOwnerMentionNotification(msg);
 
+      const lastActivity = messageActivityTime(msg);
       return {
+        threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
         threadStates: {
           ...state.threadStates,
           [threadId]: {
@@ -2051,7 +2088,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             messages: insertOrAppendMessage(existing.messages, msg),
             unreadCount: existing.unreadCount + 1,
             hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
-            lastActivity: Date.now(),
+            lastActivity,
           },
         },
       };
