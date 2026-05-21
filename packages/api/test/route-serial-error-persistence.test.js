@@ -45,6 +45,22 @@ function createThinkingOnlyService(catId) {
   };
 }
 
+function createToolOnlyService(catId) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'tool_use',
+        catId,
+        id: 'tool-1',
+        label: 'opencode → write',
+        detail: '{"filePath":"docs/example.md"}',
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -180,5 +196,24 @@ describe('route-serial error persistence (F5 reload)', () => {
     );
     assert.ok(noticeAppend, 'should persist a visible silent-completion notice');
     assert.ok(noticeAppend.content.includes('没有返回可展示文本'), 'notice should explain that no displayable text was produced');
+  });
+
+  it('persists tool-only completion as visible system notice, not a blank assistant bubble', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps({ opencode: createToolOnlyService('opencode') }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opencode'], 'hello', 'user1', 'thread1')) {
+      // drain generator
+    }
+
+    const blankCatAppend = appendCalls.find((m) => m.catId === 'opencode' && m.content === '');
+    assert.equal(blankCatAppend, undefined, 'tool-only turns should not persist blank assistant bubbles');
+
+    const noticeAppend = appendCalls.find(
+      (m) => m.userId === 'system' && m.catId === null && m.source?.connector === 'silent-completion',
+    );
+    assert.ok(noticeAppend, 'should persist a visible silent-completion notice');
+    assert.ok(noticeAppend.content.includes('工具调用 1 次'), 'notice should include tool diagnostics');
   });
 });

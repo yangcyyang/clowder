@@ -1595,11 +1595,11 @@ export async function* routeSerial(
         handoffEmitted = worklist.length;
       } else if (!hadError) {
         // No text content and no error.
-        // Persist assistant bubbles only when there is visible rich/tool payload.
-        // Thinking-only or empty turns get a system notice instead of a blank bubble.
+        // Persist assistant bubbles only when there is visible rich payload.
+        // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
         const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
-        const shouldPersistNoTextMessage = hasRichBlocks || collectedToolEvents.length > 0;
+        const shouldPersistNoTextMessage = hasRichBlocks;
         const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
 
         log.debug(

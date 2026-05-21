@@ -859,15 +859,15 @@ export async function* routeParallel(
         }
       } else if (!catHadError.has(msg.catId)) {
         // No text content and no error.
-        // Persist assistant bubbles only when there is visible rich/tool payload.
-        // Thinking-only or empty turns get a system notice instead of a blank bubble.
+        // Persist assistant bubbles only when there is visible rich payload.
+        // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
         const meta = catMeta.get(msg.catId);
         const catTools = catToolEvents.get(msg.catId);
         const thinking = catThinking.get(msg.catId);
         const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         const hasRichBlocks = noTextBlocks.length > 0;
         const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
-        const shouldPersistNoTextMessage = hasRichBlocks || (catTools?.length ?? 0) > 0;
+        const shouldPersistNoTextMessage = hasRichBlocks;
         const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
 
         if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
