@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
@@ -84,7 +84,6 @@ export function InlineThreadPanel({
   const pollBaselineCountRef = useRef<number>(0);
   const latestMessagesRef = useRef<ChatMessageData[]>([]);
   const mountedRef = useRef(false);
-  const hasActiveInvocation = useChatStore((s) => Object.keys(s.activeInvocations ?? {}).length > 0);
   const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
@@ -426,14 +425,7 @@ export function InlineThreadPanel({
           )}
         </div>
 
-        {hasActiveInvocation && (
-          <div
-            className="h-[33px] flex-shrink-0 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)]"
-            aria-hidden="true"
-          />
-        )}
-
-        <div className="flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
+        <div className="h-[122px] flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
           <div className="relative">
             {showMentionPicker && (
@@ -459,8 +451,8 @@ export function InlineThreadPanel({
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               placeholder="回复 Thread..."
-              rows={3}
-              className="w-full resize-none rounded-[var(--slock-radius-lg)] border border-[var(--slock-border-color)] bg-[var(--clowder-input-bg)] px-3 py-2 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--console-input-stroke)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+              rows={2}
+              className="h-[64px] w-full resize-none rounded-[var(--slock-radius-lg)] border border-[var(--slock-border-color)] bg-[var(--clowder-input-bg)] px-3 py-2 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--console-input-stroke)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
             />
           </div>
           <div className="mt-2 flex items-center justify-between">
