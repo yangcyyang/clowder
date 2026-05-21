@@ -69,6 +69,13 @@ function isSidebarBranchThread(thread: Pick<Thread, 'title'>): boolean {
   return title.includes('(分支)') || title.trim() === '分支对话';
 }
 
+function getDirectThreadCatId(thread: Pick<Thread, 'isDM' | 'preferredCats' | 'participatingCats'>): string | null {
+  const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
+  const catId = directCats?.[0];
+  if (!catId || directCats.length !== 1) return null;
+  return thread.isDM || thread.preferredCats?.length === 1 ? catId : null;
+}
+
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
@@ -327,12 +334,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     const map = new Map<string, Thread>();
     for (const thread of sidebarThreads) {
       if (thread.deletedAt) continue;
-      const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
-      const catId = directCats?.[0];
-      if (!catId || directCats.length !== 1) continue;
-      if (thread.isDM || thread.preferredCats?.length === 1) {
-        map.set(catId, thread);
-      }
+      const catId = getDirectThreadCatId(thread);
+      if (catId) map.set(catId, thread);
     }
     return map;
   }, [sidebarThreads]);
@@ -406,7 +409,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     return sidebarThreads.filter((thread) => {
       // In Inbox mode (showUnreadOnly), include DM threads that have unreads.
       // Otherwise DMs are excluded from the channel list (they appear in the DM section).
-      if (thread.isDM && !showUnreadOnly) {
+      if (getDirectThreadCatId(thread) && !showUnreadOnly) {
         return false;
       }
       if (showUnreadOnly && !unreadIds.has(thread.id)) {
@@ -571,9 +574,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     const ids = new Set<string>();
     for (const thread of sidebarThreads) {
       if (thread.id !== currentThreadId) continue;
-      const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
-      const directCat = directCats?.[0];
-      if (directCats?.length === 1 && directCat) ids.add(directCat);
+      const directCat = getDirectThreadCatId(thread);
+      if (directCat) ids.add(directCat);
     }
     return ids;
   }, [currentThreadId, sidebarThreads]);

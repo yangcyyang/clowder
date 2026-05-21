@@ -18,12 +18,12 @@ const VISIBLE_THREAD = {
   title: '工作处理疑惑',
   projectPath: 'default',
   createdBy: 'default-user',
-  participants: [],
+  participants: [] as string[],
   lastActiveAt: now,
   createdAt: now,
   pinned: false,
   favorited: false,
-  preferredCats: [],
+  preferredCats: [] as string[],
 };
 const BRANCH_WITH_SUFFIX = {
   ...VISIBLE_THREAD,
@@ -35,8 +35,22 @@ const BRANCH_WITH_FALLBACK_TITLE = {
   id: 'thread-branch-fallback',
   title: '分支对话',
 };
+const DIRECT_AGENT_THREAD = {
+  ...VISIBLE_THREAD,
+  id: 'thread-direct-codex',
+  title: 'Codex (GPT-5.5)',
+  preferredCats: ['gpt52'],
+  participatingCats: ['gpt52'],
+  isDM: false,
+};
 
-let storeThreads = [VISIBLE_THREAD, BRANCH_WITH_SUFFIX, BRANCH_WITH_FALLBACK_TITLE];
+type TestThread = typeof VISIBLE_THREAD & {
+  preferredCats: string[];
+  participatingCats?: string[];
+  isDM?: boolean;
+};
+
+let storeThreads: TestThread[] = [VISIBLE_THREAD, BRANCH_WITH_SUFFIX, BRANCH_WITH_FALLBACK_TITLE];
 const mockStore: Record<string, unknown> = {
   get threads() {
     return storeThreads;
@@ -152,5 +166,17 @@ describe('ThreadSidebar branch thread filtering', () => {
     expect(container.textContent).toContain('工作处理疑惑');
     expect(container.textContent).not.toContain('工作处理疑惑 (分支)');
     expect(container.textContent).not.toContain('分支对话');
+  });
+
+  it('keeps single-agent direct threads out of the channel list', async () => {
+    storeThreads = [VISIBLE_THREAD, DIRECT_AGENT_THREAD];
+
+    act(() => {
+      root.render(React.createElement(ThreadSidebar));
+    });
+    await flush();
+
+    expect(container.querySelector('[data-thread-id="thread-visible"]')).not.toBeNull();
+    expect(container.querySelector('[data-thread-id="thread-direct-codex"]')).toBeNull();
   });
 });
