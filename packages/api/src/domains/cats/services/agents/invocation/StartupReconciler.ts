@@ -3,7 +3,7 @@
  *
  * On API startup, sweeps Redis for orphaned invocation records
  * left by a crashed/restarted process. Converges:
- * - running → failed(error=process_restart)
+ * - running → failed(error=process_restart) or requeued recovery
  * - stale queued (> 5min) → failed(error=process_restart)
  * Also clears associated TaskProgress snapshots.
  *
@@ -22,6 +22,8 @@ export interface StartupSweepResult {
   swept: number;
   running: number;
   queued: number;
+  /** Running invocations recovered by requeueing the original user message. */
+  requeued: number;
   taskProgressCleared: number;
   /** Queued user messages made visible after orphan sweep. */
   messagesRecovered: number;
@@ -36,12 +38,33 @@ interface ReconcilerLog {
 
 interface MessageAppender {
   append(msg: AppendMessageInput): unknown;
+  /** Read the original user message so a crashed running invocation can be requeued. */
+  getById?(id: string): { content: string } | null | Promise<{ content: string } | null>;
   /** Mark a queued message as delivered (make visible in timeline). */
   markDelivered?(id: string, deliveredAt: number): unknown;
 }
 
 interface ConnectorMessageBroadcaster {
   broadcastToRoom(room: string, event: string, data: unknown): void;
+}
+
+interface RecoveryQueue {
+  enqueue(input: {
+    threadId: string;
+    userId: string;
+    content: string;
+    source: 'user';
+    targetCats: CatId[];
+    intent: InvocationRecord['intent'];
+    idempotencyKey: string;
+    autoExecute: true;
+    priority: 'urgent';
+  }): { outcome: 'enqueued' | 'full'; entry?: { id: string }; deduped?: boolean };
+  backfillMessageId?(threadId: string, userId: string, entryId: string, messageId: string): void;
+}
+
+interface RecoveryQueueProcessor {
+  tryAutoExecute(threadId: string): Promise<void>;
 }
 
 const RECONCILER_SOURCE: ConnectorSource = {
@@ -61,9 +84,13 @@ export interface StartupReconcilerDeps {
   messageStore?: MessageAppender;
   /** Phase A+: Optional — push real-time WebSocket notification to frontend. */
   socketManager?: ConnectorMessageBroadcaster;
+  /** Slock-like recovery: requeue pre-restart running invocations instead of only failing them. */
+  invocationQueue?: RecoveryQueue;
+  queueProcessor?: RecoveryQueueProcessor;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
+type AffectedThread = { catIds: CatId[]; userId: string; requeued: number };
 
 const STALE_QUEUED_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -85,6 +112,7 @@ export class StartupReconciler {
         swept: 0,
         running: 0,
         queued: 0,
+        requeued: 0,
         taskProgressCleared: 0,
         messagesRecovered: 0,
         notifiedThreads: 0,
@@ -93,7 +121,7 @@ export class StartupReconciler {
     }
 
     const scanStore = store as ScanStore;
-    const affectedThreads = new Map<string, { catIds: CatId[]; userId: string }>();
+    const affectedThreads = new Map<string, AffectedThread>();
     const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt, affectedThreads);
     const queueResult = await this.sweepStaleQueued(scanStore, affectedThreads);
 
@@ -101,24 +129,26 @@ export class StartupReconciler {
 
     const running = runResult.running;
     const queued = queueResult.queued;
+    const requeued = runResult.requeued;
     const taskProgressCleared = runResult.taskProgressCleared;
     const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered;
     const swept = running + queued;
     const durationMs = Date.now() - start;
     this.deps.log.info(
       `[startup-reconciler] Sweep complete: ${swept} orphans (${running} running, ${queued} stale queued), ` +
-        `${taskProgressCleared} task-progress cleared, ${messagesRecovered} messages recovered, ` +
+        `${requeued} requeued, ${taskProgressCleared} task-progress cleared, ${messagesRecovered} messages recovered, ` +
         `${notifiedThreads} threads notified, ${durationMs}ms`,
     );
-    return { swept, running, queued, taskProgressCleared, messagesRecovered, notifiedThreads, durationMs };
+    return { swept, running, queued, requeued, taskProgressCleared, messagesRecovered, notifiedThreads, durationMs };
   }
 
   private async sweepRunning(
     store: ScanStore,
     cutoff: number | undefined,
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<{ running: number; taskProgressCleared: number; messagesRecovered: number }> {
+    affectedThreads: Map<string, AffectedThread>,
+  ): Promise<{ running: number; requeued: number; taskProgressCleared: number; messagesRecovered: number }> {
     let running = 0;
+    let requeued = 0;
     let taskProgressCleared = 0;
     let messagesRecovered = 0;
 
@@ -135,7 +165,12 @@ export class StartupReconciler {
         });
         if (updated) {
           running++;
-          this.trackAffectedThread(affectedThreads, record);
+          const wasRequeued = await this.tryRequeueRunningInvocation(record);
+          if (wasRequeued) {
+            requeued++;
+            await store.update(id, { error: 'process_restart_requeued' });
+          }
+          this.trackAffectedThread(affectedThreads, record, wasRequeued);
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
           // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
           // so already-visible messages won't be re-scored. Only catches the edge case where
@@ -146,12 +181,12 @@ export class StartupReconciler {
         this.deps.log.warn(`[startup-reconciler] Failed to sweep running invocation ${id}: ${String(err)}`);
       }
     }
-    return { running, taskProgressCleared, messagesRecovered };
+    return { running, requeued, taskProgressCleared, messagesRecovered };
   }
 
   private async sweepStaleQueued(
     store: ScanStore,
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
+    affectedThreads: Map<string, AffectedThread>,
   ): Promise<{ queued: number; messagesRecovered: number }> {
     let queued = 0;
     let messagesRecovered = 0;
@@ -169,7 +204,7 @@ export class StartupReconciler {
         });
         if (updated) {
           queued++;
-          this.trackAffectedThread(affectedThreads, record);
+          this.trackAffectedThread(affectedThreads, record, false);
           if (await this.ensureMessageVisible(record)) messagesRecovered++;
         }
       } catch (err) {
@@ -179,25 +214,27 @@ export class StartupReconciler {
     return { queued, messagesRecovered };
   }
 
-  private trackAffectedThread(map: Map<string, { catIds: CatId[]; userId: string }>, record: InvocationRecord): void {
-    const existing = map.get(record.threadId) ?? { catIds: [], userId: record.userId };
+  private trackAffectedThread(map: Map<string, AffectedThread>, record: InvocationRecord, requeued: boolean): void {
+    const existing = map.get(record.threadId) ?? { catIds: [], userId: record.userId, requeued: 0 };
     for (const catId of record.targetCats) {
       if (!existing.catIds.includes(catId)) existing.catIds.push(catId);
     }
+    if (requeued) existing.requeued++;
     map.set(record.threadId, existing);
   }
 
-  private async notifyAffectedThreads(
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<number> {
+  private async notifyAffectedThreads(affectedThreads: Map<string, AffectedThread>): Promise<number> {
     if (affectedThreads.size === 0) return 0;
     const { messageStore, socketManager } = this.deps;
     if (!messageStore && !socketManager) return 0;
 
     let notified = 0;
-    for (const [threadId, { catIds, userId }] of affectedThreads) {
+    for (const [threadId, { catIds, userId, requeued }] of affectedThreads) {
       const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
-      const content = `服务刚重启，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
+      const content =
+        requeued > 0
+          ? `服务刚重启，已自动恢复 ${catLabel} 的 ${requeued} 个进行中请求，正在继续回复；已发送的消息会保留。`
+          : `服务刚重启，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
       let timestamp = Date.now();
@@ -251,6 +288,38 @@ export class StartupReconciler {
       if (persisted || broadcasted) notified++;
     }
     return notified;
+  }
+
+  private async tryRequeueRunningInvocation(record: InvocationRecord): Promise<boolean> {
+    const { invocationQueue, queueProcessor, messageStore } = this.deps;
+    if (!invocationQueue || !queueProcessor || !messageStore?.getById || !record.userMessageId) return false;
+
+    try {
+      const userMessage = await messageStore.getById(record.userMessageId);
+      if (!userMessage) return false;
+
+      const result = invocationQueue.enqueue({
+        threadId: record.threadId,
+        userId: record.userId,
+        content: userMessage.content ?? '',
+        source: 'user',
+        targetCats: record.targetCats,
+        intent: record.intent,
+        idempotencyKey: `restart-requeue:${record.id}`,
+        autoExecute: true,
+        priority: 'urgent',
+      });
+      if (result.outcome !== 'enqueued' || !result.entry) return false;
+
+      invocationQueue.backfillMessageId?.(record.threadId, record.userId, result.entry.id, record.userMessageId);
+      await queueProcessor.tryAutoExecute(record.threadId);
+      return true;
+    } catch (err) {
+      this.deps.log.warn(
+        `[startup-reconciler] Failed to requeue running invocation ${record.id}: ${String(err)}`,
+      );
+      return false;
+    }
   }
 
   private async clearTaskProgress(threadId: string, targetCats: CatId[]): Promise<number> {

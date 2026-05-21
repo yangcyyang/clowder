@@ -195,6 +195,142 @@ describe('StartupReconciler', () => {
     assert.equal(unchanged.status, 'succeeded');
   });
 
+  test('requeues recoverable running records on startup', async () => {
+    const r1 = makeRecord({
+      id: 'recover-1',
+      threadId: 'thread-recover',
+      userId: 'user-recover',
+      status: 'running',
+      userMessageId: 'user-msg-1',
+      targetCats: ['opencode'],
+      intent: 'execute',
+    });
+    store.seed(r1);
+
+    const enqueued = [];
+    const backfilled = [];
+    const autoExecutedThreads = [];
+    const appendedMessages = [];
+    const messageStore = {
+      append(msg) {
+        appendedMessages.push(msg);
+        return { ...msg, id: `notice-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
+      },
+      getById(id) {
+        if (id !== 'user-msg-1') return null;
+        return {
+          id,
+          threadId: 'thread-recover',
+          userId: 'user-recover',
+          catId: null,
+          content: '@opencode 继续整理文档',
+          mentions: ['opencode'],
+          timestamp: Date.now() - 60_000,
+        };
+      },
+      markDelivered(id, deliveredAt) {
+        return { id, deliveryStatus: 'delivered', deliveredAt };
+      },
+    };
+    const invocationQueue = {
+      enqueue(input) {
+        enqueued.push(input);
+        return { outcome: 'enqueued', entry: { id: 'queue-recover-1' } };
+      },
+      backfillMessageId(threadId, userId, entryId, messageId) {
+        backfilled.push({ threadId, userId, entryId, messageId });
+      },
+    };
+    const queueProcessor = {
+      async tryAutoExecute(threadId) {
+        autoExecutedThreads.push(threadId);
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+      invocationQueue,
+      queueProcessor,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.running, 1);
+    assert.equal(result.requeued, 1);
+    assert.equal(enqueued.length, 1, 'should enqueue recovered request once');
+    assert.deepEqual(enqueued[0], {
+      threadId: 'thread-recover',
+      userId: 'user-recover',
+      content: '@opencode 继续整理文档',
+      source: 'user',
+      targetCats: ['opencode'],
+      intent: 'execute',
+      idempotencyKey: 'restart-requeue:recover-1',
+      autoExecute: true,
+      priority: 'urgent',
+    });
+    assert.deepEqual(backfilled, [
+      {
+        threadId: 'thread-recover',
+        userId: 'user-recover',
+        entryId: 'queue-recover-1',
+        messageId: 'user-msg-1',
+      },
+    ]);
+    assert.deepEqual(autoExecutedThreads, ['thread-recover']);
+
+    const updated = await store.get('recover-1');
+    assert.equal(updated.status, 'failed', 'old dead invocation is closed');
+    assert.equal(updated.error, 'process_restart_requeued');
+  });
+
+  test('posts recovered wording when running records are requeued', async () => {
+    store.seed(makeRecord({ id: 'recover-notice', status: 'running', userMessageId: 'user-msg-2' }));
+
+    const appendedMessages = [];
+    const messageStore = {
+      append(msg) {
+        appendedMessages.push(msg);
+        return { ...msg, id: `notice-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
+      },
+      getById() {
+        return { content: '继续生成' };
+      },
+      markDelivered(id, deliveredAt) {
+        return { id, deliveryStatus: 'delivered', deliveredAt };
+      },
+    };
+    const invocationQueue = {
+      enqueue() {
+        return { outcome: 'enqueued', entry: { id: 'queue-recover-notice' } };
+      },
+      backfillMessageId() {},
+    };
+    const queueProcessor = {
+      async tryAutoExecute() {},
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+      invocationQueue,
+      queueProcessor,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.requeued, 1);
+    assert.equal(result.notifiedThreads, 1);
+    assert.equal(appendedMessages.length, 1);
+    assert.ok(appendedMessages[0].content.includes('已自动恢复'));
+    assert.ok(appendedMessages[0].content.includes('正在继续回复'));
+  });
+
   test('clears task progress for swept records', async () => {
     const r1 = makeRecord({ id: 'r1', threadId: 't1', targetCats: ['opus', 'codex'] });
     store.seed(r1);

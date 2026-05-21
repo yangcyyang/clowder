@@ -2072,6 +2072,8 @@ async function main(): Promise<void> {
       processStartAt: PROCESS_START_AT,
       messageStore,
       socketManager: socketManager ?? undefined,
+      invocationQueue,
+      queueProcessor,
     });
     try {
       await reconciler.reconcileOrphans();
