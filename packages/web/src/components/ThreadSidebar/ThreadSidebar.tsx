@@ -99,15 +99,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [isSearchingMessages, setIsSearchingMessages] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [savedViewOpen, setSavedViewOpen] = useState(false);
-  // Channel sort order — persisted in localStorage
-  const [sortOrder, setSortOrder] = useState<'recent' | 'az'>(() => {
-    try {
-      const stored = localStorage.getItem('clowder-channel-sort-order');
-      return stored === 'az' ? 'az' : 'recent';
-    } catch {
-      return 'recent';
-    }
-  });
+  // Channel sort order — SSR-safe: default 'recent', hydrate from localStorage after mount
+  const [sortOrder, setSortOrder] = useState<'recent' | 'az'>('recent');
   const [showSortMenu, setShowSortMenu] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const [savedMessages, setSavedMessages] = useState<SavedMessageSnapshot[]>([]);
@@ -487,6 +480,16 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       return (a.title ?? '未命名对话').localeCompare(b.title ?? '未命名对话', 'zh-Hans-CN');
     });
   }, [flatChannelThreads, sortOrder]);
+
+  // Hydrate sort order from localStorage after mount (avoids SSR hydration mismatch)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('clowder-channel-sort-order');
+      if (stored === 'az') setSortOrder('az');
+    } catch {
+      // localStorage not available
+    }
+  }, []);
 
   // Close sort menu when clicking outside
   useEffect(() => {
