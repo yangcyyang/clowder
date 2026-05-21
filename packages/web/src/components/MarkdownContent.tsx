@@ -63,13 +63,13 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <div className="relative group my-2">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-[10px] bg-[var(--chat-code-btn-bg)] text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--chat-code-bg)] transition-opacity"
+        className="absolute top-2 right-2 z-10 rounded border border-[var(--console-border-soft)] bg-[var(--chat-code-btn-bg)] px-1.5 py-0.5 text-[10px] text-cafe-muted opacity-90 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
       >
         {copied ? '已复制' : '复制'}
       </button>
       <pre
         ref={preRef}
-        className={`bg-[var(--chat-code-bg)] text-[var(--chat-code-text)] rounded-lg p-3 overflow-x-auto leading-relaxed [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-xs leading-5' : 'font-sans text-sm leading-relaxed'}`}
+        className={`rounded-md border border-[var(--console-border-soft)] bg-[var(--chat-code-bg)] px-3 py-2.5 text-[var(--chat-code-text)] overflow-x-auto shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-xs leading-5' : 'font-mono text-[13px] leading-5'}`}
       >
         {children}
       </pre>
@@ -202,6 +202,20 @@ function getTextPrefix(children: ReactNode): string {
     .trimStart();
 }
 
+function getPlainText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => {
+      if (typeof child === 'string' || typeof child === 'number') return String(child);
+      if (isValidElement(child)) {
+        const props = child.props as { children?: ReactNode };
+        return getPlainText(props.children);
+      }
+      return '';
+    })
+    .join('')
+    .trimStart();
+}
+
 function isSectionTitle(children: ReactNode): boolean {
   return SECTION_TITLE_RE.test(getTextPrefix(children));
 }
@@ -298,11 +312,33 @@ const mdComponents: Components = {
       <input type={type} />
     ),
 
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-[3px] border-[var(--console-border-soft)] pl-3 my-2 italic opacity-80">
-      {children}
-    </blockquote>
-  ),
+  blockquote: ({ children }) => {
+    const text = getPlainText(children);
+    const tone = /^[\s>]*(✅|✔|✓|done|完成|已完成|通过)/i.test(text)
+      ? 'success'
+      : /^[\s>]*(⚠|注意|风险|warning|warn|blocked|阻塞)/i.test(text)
+        ? 'warning'
+        : /^[\s>]*(❌|✗|失败|错误|error|failed)/i.test(text)
+          ? 'danger'
+          : 'neutral';
+
+    const toneClass =
+      tone === 'success'
+        ? 'border-l-conn-emerald-text bg-conn-emerald-bg'
+        : tone === 'warning'
+          ? 'border-l-conn-amber-text bg-conn-amber-bg'
+          : tone === 'danger'
+            ? 'border-l-conn-red-text bg-conn-red-bg'
+            : 'border-l-[var(--cafe-accent)] bg-[var(--console-card-soft-bg)]';
+
+    return (
+      <blockquote
+        className={`my-2 rounded-md border border-[var(--console-border-soft)] border-l-4 px-3 py-2 text-[13px] leading-6 text-cafe-secondary ${toneClass} [&_p]:mb-1 [&_p:last-child]:mb-0`}
+      >
+        {children}
+      </blockquote>
+    );
+  },
   a: ({ href, children }) => {
     // Only render as a real link for external URLs (http/https) or vscode:// deep links.
     // Relative paths (e.g. agent-generated file references) would 404 in Next.js — render
