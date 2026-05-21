@@ -64,8 +64,9 @@ function formatMessageExcerpt(content: string): string {
   return `${singleLine.slice(0, 60)}...`;
 }
 
-function isLegacyBranchThread(thread: Pick<Thread, 'title'>): boolean {
-  return (thread.title ?? '').includes('(分支)');
+function isSidebarBranchThread(thread: Pick<Thread, 'title'>): boolean {
+  const title = thread.title ?? '';
+  return title.includes('(分支)') || title.trim() === '分支对话';
 }
 
 function UnreadBadge({ count }: { count: number }) {
@@ -98,6 +99,17 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [isSearchingMessages, setIsSearchingMessages] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [savedViewOpen, setSavedViewOpen] = useState(false);
+  // Channel sort order — persisted in localStorage
+  const [sortOrder, setSortOrder] = useState<'recent' | 'az'>(() => {
+    try {
+      const stored = localStorage.getItem('clowder-channel-sort-order');
+      return stored === 'az' ? 'az' : 'recent';
+    } catch {
+      return 'recent';
+    }
+  });
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
   const [savedMessages, setSavedMessages] = useState<SavedMessageSnapshot[]>([]);
   const [bindWarning, setBindWarning] = useState<string | null>(null);
   // F095 Phase D: Trash bin state
@@ -306,9 +318,21 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, [searchQuery]);
 
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
+  const sidebarThreads = useMemo(() => liveThreads.filter((thread) => !isSidebarBranchThread(thread)), [liveThreads]);
+  const hiddenBranchThreadIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const thread of liveThreads) {
+      if (isSidebarBranchThread(thread)) ids.add(thread.id);
+    }
+    return ids;
+  }, [liveThreads]);
+  const visibleMessageSearchResults = useMemo(
+    () => messageSearchResults.filter((message) => !hiddenBranchThreadIds.has(message.threadId)),
+    [messageSearchResults, hiddenBranchThreadIds],
+  );
   const dmThreadByCatId = useMemo(() => {
     const map = new Map<string, Thread>();
-    for (const thread of liveThreads) {
+    for (const thread of sidebarThreads) {
       if (thread.deletedAt) continue;
       const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
       const catId = directCats?.[0];
@@ -318,7 +342,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       }
     }
     return map;
-  }, [liveThreads]);
+  }, [sidebarThreads]);
   const openDirectMessage = useCallback(
     async (catId: string) => {
       const existing = dmThreadByCatId.get(catId);
@@ -361,35 +385,32 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   );
   const threadTitleById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const thread of liveThreads) {
+    for (const thread of sidebarThreads) {
       map.set(thread.id, getThreadDisplayTitle(thread, thread.id));
     }
     map.set('default', '大厅');
     return map;
-  }, [liveThreads]);
+  }, [sidebarThreads]);
   const unreadIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const thread of threads) {
+    for (const thread of sidebarThreads) {
       const ts = threadStates[thread.id];
       if (ts && ts.unreadCount > 0) {
         ids.add(thread.id);
       }
     }
     return ids;
-  }, [threads, threadStates]);
+  }, [sidebarThreads, threadStates]);
   const unreadTotal = useMemo(() => {
     let total = 0;
-    for (const thread of threads) {
+    for (const thread of sidebarThreads) {
       total += threadStates[thread.id]?.unreadCount ?? 0;
     }
     return total;
-  }, [threads, threadStates]);
+  }, [sidebarThreads, threadStates]);
   const savedTotal = savedMessages.length;
   const filteredThreads = useMemo(() => {
-    return liveThreads.filter((thread) => {
-      if (isLegacyBranchThread(thread)) {
-        return false;
-      }
+    return sidebarThreads.filter((thread) => {
       // In Inbox mode (showUnreadOnly), include DM threads that have unreads.
       // Otherwise DMs are excluded from the channel list (they appear in the DM section).
       if (thread.isDM && !showUnreadOnly) {
@@ -413,7 +434,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         threadId.includes(normalizedQuery)
       );
     });
-  }, [liveThreads, normalizedQuery, showUnreadOnly, unreadIds]);
+  }, [sidebarThreads, normalizedQuery, showUnreadOnly, unreadIds]);
 
   // F072: Mark all threads as read
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
@@ -451,6 +472,39 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     threadGroups.forEach(collect);
     return result;
   }, [threadGroups]);
+
+  const sortedChannelThreads = useMemo(() => {
+    if (sortOrder === 'az') {
+      return [...flatChannelThreads].sort((a, b) => {
+        const aTitle = (a.title ?? '未命名对话').toLowerCase();
+        const bTitle = (b.title ?? '未命名对话').toLowerCase();
+        return aTitle.localeCompare(bTitle, 'zh-Hans-CN');
+      });
+    }
+    return flatChannelThreads;
+  }, [flatChannelThreads, sortOrder]);
+
+  // Close sort menu when clicking outside
+  useEffect(() => {
+    if (!showSortMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setShowSortMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSortMenu]);
+
+  const handleSetSortOrder = (order: 'recent' | 'az') => {
+    setSortOrder(order);
+    setShowSortMenu(false);
+    try {
+      localStorage.setItem('clowder-channel-sort-order', order);
+    } catch {
+      // localStorage not available
+    }
+  };
 
   useEffect(() => {
     const query = debouncedSearchQuery.trim();
@@ -508,15 +562,15 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, [catStatuses, threadStates]);
   const activeDmCatIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const thread of liveThreads) {
+    for (const thread of sidebarThreads) {
       if (thread.id !== currentThreadId) continue;
       const directCats = thread.participatingCats?.length ? thread.participatingCats : thread.preferredCats;
       const directCat = directCats?.[0];
       if (directCats?.length === 1 && directCat) ids.add(directCat);
     }
     return ids;
-  }, [currentThreadId, liveThreads]);
-  const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
+  }, [currentThreadId, sidebarThreads]);
+  const existingProjects = useMemo(() => getProjectPaths(sidebarThreads), [sidebarThreads]);
   const showDefaultThread =
     !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
 
@@ -535,7 +589,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         onClick={() => handleSelect(thread.id)}
         className={`group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 px-3 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
           isActive
-            ? 'border-[var(--cafe-accent)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+            ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
             : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
         }`}
         title={thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
@@ -574,7 +628,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     <>
       <aside
         className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--clowder-sidebar-bg)]`}
-        style={{ boxShadow: '8px 0 24px rgba(43, 33, 26, 0.04)' }}
+        style={{ boxShadow: 'inset -1px 0 0 var(--clowder-sidebar-border)' }}
       >
         <div className="p-3 flex items-center justify-between gap-2">
           <span className="[font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">对话</span>
@@ -673,9 +727,43 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <div className="mt-2 border-t border-[var(--clowder-sidebar-border)] pt-2">
             <div className="px-3 pb-1 pt-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
-                  CHANNEL
-                </span>
+                <div className="relative" ref={sortMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowSortMenu((v) => !v)}
+                    className="flex items-center gap-1 font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)] transition-colors hover:text-[var(--clowder-sidebar-row-active-text)]"
+                    title="排序方式"
+                  >
+                    CHANNELS
+                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M4 5h8a.5.5 0 010 1H4a.5.5 0 010-1zm1 2h6a.5.5 0 010 1H5a.5.5 0 010-1zm1 2h4a.5.5 0 010 1H6a.5.5 0 010-1z" />
+                    </svg>
+                  </button>
+                  {showSortMenu && (
+                    <div className="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-[var(--clowder-sidebar-border)] bg-[var(--cafe-surface)] shadow-md">
+                      {(['recent', 'az'] as const).map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => handleSetSortOrder(opt)}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                            sortOrder === opt
+                              ? 'bg-[var(--clowder-sidebar-active-bg)] font-semibold text-[var(--cafe-accent)]'
+                              : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)]'
+                          }`}
+                        >
+                          {sortOrder === opt && (
+                            <svg className="h-3 w-3 flex-shrink-0 text-[var(--cafe-accent)]" viewBox="0 0 16 16" fill="currentColor">
+                              <path d="M13.354 4.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3-3a.5.5 0 01.708-.708L6 11.293l6.646-6.647a.5.5 0 01.708 0z" />
+                            </svg>
+                          )}
+                          {sortOrder !== opt && <span className="h-3 w-3 flex-shrink-0" />}
+                          <span className="uppercase tracking-wide">{opt === 'recent' ? 'RECENT' : 'A-Z'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowPicker(true)}
@@ -691,7 +779,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             <>
               {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
 
-              {flatChannelThreads.map(renderChannelRow)}
+              {sortedChannelThreads.map(renderChannelRow)}
             </>
           </div>
 
@@ -705,8 +793,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               <div className="space-y-0.5">
                 {isSearchingMessages ? (
                   <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">搜索消息中...</div>
-                ) : messageSearchResults.length > 0 ? (
-                  messageSearchResults.map(renderMessageSearchResult)
+                ) : visibleMessageSearchResults.length > 0 ? (
+                  visibleMessageSearchResults.map(renderMessageSearchResult)
                 ) : (
                   <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">没有匹配的消息</div>
                 )}
@@ -738,7 +826,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       disabled={isCreating}
                       className={`flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
                         isActiveDm
-                          ? 'border-[var(--cafe-accent)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+                          ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
                           : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
                       }`}
                       title={`打开与 ${formatCatName(cat)} 的私信`}
@@ -781,7 +869,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <button
             type="button"
             onClick={handleToggleTrash}
-            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-xl bg-[var(--console-code-bg)] text-xs text-[var(--clowder-sidebar-row-text)] hover:opacity-80 transition-colors"
+            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-md bg-transparent text-xs text-[var(--clowder-sidebar-row-text)] transition-colors hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
             data-testid="trash-bin-toggle"
           >
             <svg

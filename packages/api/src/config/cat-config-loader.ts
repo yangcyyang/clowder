@@ -4,7 +4,7 @@
  * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -57,6 +57,13 @@ const mentionPatternSchema = z.string().min(2).regex(/^@/, 'mentionPattern must 
 
 const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
 
+const assetCardSchema = z.object({
+  path: z.string().min(1),
+  version: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  loadedAt: z.string().min(1).optional(),
+});
+
 const catVariantSchema = z.object({
   id: z.string().min(1),
   catId: z.string().min(1).optional(), // F32-b: variant-level catId
@@ -65,6 +72,7 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
+  assetCard: assetCardSchema.optional(),
   clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
 
   defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
@@ -158,6 +166,7 @@ const catBreedSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(mentionPatternSchema).min(1),
   roleDescription: z.string().min(1),
+  assetCard: assetCardSchema.optional(),
   defaultVariantId: z.string().min(1),
   variants: z.array(catVariantSchema).min(1),
   features: catFeaturesSchema,
@@ -410,6 +419,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       }
 
       const teamStrengths = variant.teamStrengths ?? breed.teamStrengths;
+      const assetCard = variant.assetCard ?? breed.assetCard;
       // R1 fix: null = "explicitly no caution" (don't inherit breed).
       // undefined (omitted) = inherit from breed. ?? treats null as nullish, so use !== undefined.
       const caution = variant.caution !== undefined ? variant.caution : breed.caution;
@@ -431,6 +441,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
+        ...(assetCard != null ? { assetCard } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
@@ -635,6 +646,7 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 let _defaultCatId: CatId | null = null;
 /** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
 let _runtimeDefaultCatId: CatId | null = null;
+let _persistedDefaultCatIdLoaded = false;
 
 function isKnownAvailableDefaultCat(catId: string): boolean {
   const config = getCachedConfig();
@@ -649,6 +661,24 @@ function isKnownAvailableDefaultCat(catId: string): boolean {
   }
 
   return _catIdToBreed.has(catId) && isCatAvailable(catId, config);
+}
+
+function readPersistedDefaultCatId(): string | null {
+  if (_persistedDefaultCatIdLoaded) return null;
+  _persistedDefaultCatIdLoaded = true;
+
+  const envPath = resolve(dirname(DEFAULT_CAT_TEMPLATE_PATH), '.env');
+  if (!existsSync(envPath)) return null;
+
+  try {
+    const envText = readFileSync(envPath, 'utf8');
+    const match = envText.match(/^DEFAULT_CAT_ID=(.*)$/m);
+    const value = match?.[1]?.trim().replace(/^["']|["']$/g, '');
+    return value || null;
+  } catch (err) {
+    log.warn({ err, envPath }, 'Failed to read persisted DEFAULT_CAT_ID');
+    return null;
+  }
 }
 
 /**
@@ -667,6 +697,16 @@ export function getDefaultCatId(): CatId {
     const id = createCatId(envCatId);
     if (isKnownAvailableDefaultCat(id)) return id;
     log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
+  }
+
+  const persistedCatId = readPersistedDefaultCatId();
+  if (persistedCatId) {
+    const id = createCatId(persistedCatId);
+    if (isKnownAvailableDefaultCat(id)) {
+      process.env.DEFAULT_CAT_ID = id;
+      return id;
+    }
+    log.warn({ persistedCatId }, 'Persisted DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
   }
 
   if (_defaultCatId) return _defaultCatId;

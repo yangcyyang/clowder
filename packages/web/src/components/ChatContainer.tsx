@@ -64,7 +64,6 @@ import { PawIcon } from './icons/PawIcon';
 import { KnowledgeCaptureModal } from './KnowledgeCaptureModal';
 import { MessageActions } from './MessageActions';
 import { MobileStatusSheet } from './MobileStatusSheet';
-import { ParallelStatusBar } from './ParallelStatusBar';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { QueuePanel } from './QueuePanel';
 import { RightStatusPanel } from './RightStatusPanel';
@@ -1205,8 +1204,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </button>
           </div>
         )}
-
-        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
 
         {savedMessagesViewOpen ? (
           <div className="flex-1 overflow-hidden">

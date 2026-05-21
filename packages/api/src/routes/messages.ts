@@ -153,6 +153,55 @@ function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | 
   }
 }
 
+async function resolveOutboundThreadMeta(
+  threadId: string,
+  opts: Pick<MessagesRoutesOptions, 'threadStore'>,
+): Promise<{ threadShortId: string; threadTitle?: string; deepLinkUrl?: string } | undefined> {
+  try {
+    const LOOKUP_TIMEOUT_MS = 2000;
+    const thread = opts.threadStore?.get(threadId);
+    if (!thread) return undefined;
+
+    const lookupPromise = Promise.resolve(thread).catch(() => undefined);
+    const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS));
+    const resolved = await Promise.race([lookupPromise, timeout]);
+    if (!resolved) return undefined;
+
+    const frontendBase = resolveFrontendBaseUrl(process.env);
+    return {
+      threadShortId: threadId.slice(0, 15),
+      threadTitle: resolved.title ?? undefined,
+      deepLinkUrl: buildThreadDeepLink(frontendBase, threadId),
+    };
+  } catch {
+    log.warn({ threadId }, '[messages] threadMeta lookup failed');
+    return undefined;
+  }
+}
+
+/**
+ * Sync a human Web message in a connector-bound thread back to the external chat.
+ * For normal Clowder threads OutboundDeliveryHook sees no binding and no-ops.
+ */
+export async function deliverWebUserMessageToConnector(
+  threadId: string,
+  content: string,
+  messageId: string,
+  opts: Pick<MessagesRoutesOptions, 'outboundHook' | 'threadStore'>,
+  logger: typeof log,
+  options?: { visibility?: 'whisper' | undefined },
+): Promise<void> {
+  if (!opts.outboundHook || !content.trim()) return;
+  if (options?.visibility === 'whisper') return;
+
+  const threadMeta = await resolveOutboundThreadMeta(threadId, opts);
+  try {
+    await opts.outboundHook.deliver(threadId, content, undefined, undefined, threadMeta, undefined, messageId);
+  } catch (err) {
+    logger.error({ err, threadId, messageId }, '[messages] Web user outbound delivery failed');
+  }
+}
+
 async function persistA2ARoutingMessage(
   messageStore: IMessageStore,
   msg: { content?: string; timestamp: number },
@@ -247,6 +296,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     let content: string;
     let legacyUserId: string | undefined;
     let threadId: string | undefined;
+    let replyTo: string | undefined;
     let contentBlocks: MessageContent[] | undefined;
     let idempotencyKey: string | undefined;
     // F35: Whisper fields
@@ -263,7 +313,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         reply.status(400);
         return { error: parsed.error };
       }
-      ({ content, userId: legacyUserId, threadId, contentBlocks } = parsed);
+      ({ content, userId: legacyUserId, threadId, replyTo, contentBlocks } = parsed);
       if ('idempotencyKey' in parsed && parsed.idempotencyKey) {
         idempotencyKey = parsed.idempotencyKey;
       }
@@ -283,7 +333,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         reply.status(400);
         return { error: 'Invalid request body', details: parseResult.error.issues };
       }
-      ({ content, userId: legacyUserId, threadId, idempotencyKey } = parseResult.data);
+      ({ content, userId: legacyUserId, threadId, replyTo, idempotencyKey } = parseResult.data);
       deliveryMode = parseResult.data.deliveryMode;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
@@ -303,6 +353,19 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Default to 'default' thread for lobby (prevents global broadcast)
     const resolvedThreadId = threadId ?? 'default';
+
+    let validatedReplyTo: string | undefined;
+    if (replyTo) {
+      const parentMsg = await opts.messageStore.getById(replyTo);
+      if (parentMsg && parentMsg.threadId === resolvedThreadId) {
+        validatedReplyTo = replyTo;
+      } else {
+        log.warn(
+          { replyTo, threadId: resolvedThreadId, parentThreadId: parentMsg?.threadId },
+          '[messages] replyTo rejected: not found or wrong thread',
+        );
+      }
+    }
 
     // F167 L1 AC-A3: user message is a fresh turn — clear any in-flight ping-pong
     // streak on this thread's active worklist (no-op if none).
@@ -540,6 +603,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             threadId: resolvedThreadId,
             idempotencyKey: resolvedIdempotencyKey,
             deliveryStatus: 'queued', // F117: not visible in history/context/mentions until delivered
+            ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
             ...(contentBlocks ? { contentBlocks } : {}),
             ...(whisperVisibility && whisperRecipients
               ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
@@ -551,6 +615,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           if (queueEntryId) {
             opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
           }
+          void deliverWebUserMessageToConnector(resolvedThreadId, content, userMessage.id, opts, log, {
+            visibility: whisperVisibility,
+          });
         } catch (err) {
           const queueEntryId = enqueueResult.entry?.id;
           if (queueEntryId) {
@@ -649,6 +716,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   threadId: resolvedThreadId,
                   idempotencyKey: resolvedIdempotencyKey,
                   deliveryStatus: 'queued',
+                  ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
                   ...(contentBlocks ? { contentBlocks } : {}),
                   ...(whisperVisibility && whisperRecipients
                     ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
@@ -659,6 +727,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 if (queueEntryId) {
                   opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
                 }
+                void deliverWebUserMessageToConnector(resolvedThreadId, content, toctouUserMessage.id, opts, log, {
+                  visibility: whisperVisibility,
+                });
               } catch (err) {
                 const queueEntryId = enqueueResult.entry?.id;
                 if (queueEntryId) {
@@ -714,8 +785,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         if (controller) {
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
+        const duplicateRecord = await Promise.resolve(opts.invocationRecordStore.get(createResult.invocationId)).catch(
+          (error) => {
+            log.warn(
+              { err: error, invocationId: createResult.invocationId },
+              '[messages] Failed to load duplicate invocation record',
+            );
+            return null;
+          },
+        );
         reply.status(200);
-        return { status: 'duplicate', invocationId: createResult.invocationId };
+        return {
+          status: 'duplicate',
+          invocationId: createResult.invocationId,
+          ...(duplicateRecord?.userMessageId ? { userMessageId: duplicateRecord.userMessageId } : {}),
+        };
       }
 
       // Force path: still uses startAll() (preemptive — cancel already happened above)
@@ -748,6 +832,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           mentions: targetCats,
           timestamp: Date.now(),
           threadId: resolvedThreadId,
+          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
           ...(contentBlocks ? { contentBlocks } : {}),
           ...(whisperVisibility && whisperRecipients
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
@@ -757,6 +842,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // ③ Backfill InvocationRecord.userMessageId
         await opts.invocationRecordStore.update(createResult.invocationId, {
           userMessageId: storedUserMessage.id,
+        });
+        void deliverWebUserMessageToConnector(resolvedThreadId, content, storedUserMessage.id, opts, log, {
+          visibility: whisperVisibility,
         });
       } catch (preExecErr) {
         // Release slots — we haven't entered background coroutine yet
@@ -865,6 +953,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(contentBlocks ? { contentBlocks } : {}),
               uploadDir,
               ...(controller?.signal ? { signal: controller.signal } : {}),
+              ...(validatedReplyTo ? { replyToMessageId: storedUserMessage.id } : {}),
               ...(opts.invocationQueue
                 ? {
                     queueHasQueuedMessages: (tid: string) =>
@@ -1468,6 +1557,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // a stale/missing InvocationRecord can be corrected by the active
         // InvocationTracker, while real zombies still expire by DraftStore TTL or
         // explicit completion/cancel cleanup.
+        const recoveredDrafts: typeof activeDrafts = [];
         if (activeDrafts.length > 0 && opts.invocationRecordStore) {
           const invocationRecordStore = opts.invocationRecordStore;
           const orphanDrafts: typeof activeDrafts = [];
@@ -1512,6 +1602,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             if (recordActive || trackerActive) {
               checkedActiveDrafts.push(draft);
+            } else if (
+              record?.status === 'failed' &&
+              record.error === 'process_restart' &&
+              record.threadId === resolvedThreadId &&
+              record.userId === userId
+            ) {
+              // The process died after the route layer had already persisted
+              // streaming content. Surface the recovered draft as a normal
+              // assistant message instead of hiding it and asking the user to
+              // send the same prompt again.
+              recoveredDrafts.push(draft);
             } else {
               orphanDrafts.push(draft);
               orphanDetails.push({
@@ -1539,6 +1640,30 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             };
             request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
           }
+        }
+        recoveredDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
+        if (recoveredDrafts.length > 0) {
+          request.log.info(
+            {
+              threadId: resolvedThreadId,
+              recoveredCount: recoveredDrafts.length,
+              draftIds: recoveredDrafts.map((d) => d.invocationId),
+            },
+            '#134 draft merge: recovered process-restart drafts',
+          );
+        }
+        for (const d of recoveredDrafts) {
+          chatItems.push({
+            id: `recovered-draft-${d.invocationId}`,
+            type: 'assistant',
+            catId: d.catId as string | null,
+            content: d.content,
+            timestamp: d.updatedAt,
+            origin: 'stream',
+            extra: { stream: { invocationId: d.invocationId }, recoveredDraft: { reason: 'process_restart' } },
+            ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
+            ...(d.thinking ? { thinking: d.thinking } : {}),
+          });
         }
         // P2: stable sort by updatedAt for parallel multi-cat drafts
         activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);

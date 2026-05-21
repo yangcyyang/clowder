@@ -197,7 +197,7 @@ export class StartupReconciler {
     let notified = 0;
     for (const [threadId, { catIds, userId }] of affectedThreads) {
       const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
-      const content = `服务刚重启，${catLabel} 的进行中请求已中断，请重新发送。`;
+      const content = `服务刚重启，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
       let timestamp = Date.now();

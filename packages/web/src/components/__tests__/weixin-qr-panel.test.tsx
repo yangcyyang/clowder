@@ -82,6 +82,23 @@ describe('F137 Phase C — WeixinQrPanel', () => {
     expect(container.textContent).toContain('WeChat connected');
   });
 
+  it('syncs to connected state when configured loads asynchronously', async () => {
+    await act(async () => {
+      root.render(React.createElement(WeixinQrPanel, { configured: false }));
+    });
+    await flushEffects();
+
+    expect(queryTestId(container, 'weixin-generate-qr')).not.toBeNull();
+
+    await act(async () => {
+      root.render(React.createElement(WeixinQrPanel, { configured: true }));
+    });
+    await flushEffects();
+
+    expect(queryTestId(container, 'weixin-connected')).not.toBeNull();
+    expect(queryTestId(container, 'weixin-generate-qr')).toBeNull();
+  });
+
   it('fetches QR code on button click and displays image', async () => {
     mockApiFetch.mockResolvedValueOnce(jsonResponse({ qrUrl: 'https://example.com/qr.png', qrPayload: 'abc123' }));
 

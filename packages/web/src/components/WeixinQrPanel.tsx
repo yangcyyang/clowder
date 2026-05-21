@@ -29,6 +29,18 @@ export function WeixinQrPanel({ configured }: { configured: boolean }) {
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
+  useEffect(() => {
+    if (configured) {
+      stopPolling();
+      setQrState('confirmed');
+      setQrUrl(null);
+      setErrorMsg(null);
+      return;
+    }
+
+    setQrState((current) => (current === 'confirmed' ? 'idle' : current));
+  }, [configured, stopPolling]);
+
   const startPolling = useCallback(
     (payload: string) => {
       stopPolling();

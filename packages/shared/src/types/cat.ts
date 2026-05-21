@@ -3,7 +3,7 @@
  * 三只 AI 猫猫的类型定义和配置
  */
 
-import type { CliConfig, ContextBudget } from './cat-breed.js';
+import type { CatAssetCard, CliConfig, ContextBudget } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -51,6 +51,8 @@ export interface CatConfig {
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;
+  /** Local asset-card binding metadata, if this cat was generated from a file. */
+  readonly assetCard?: CatAssetCard;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   readonly defaultModel: string;

@@ -206,6 +206,24 @@ function isSectionTitle(children: ReactNode): boolean {
   return SECTION_TITLE_RE.test(getTextPrefix(children));
 }
 
+function renderOrderedListItemContent(children: ReactNode): ReactNode {
+  const nodes = Children.toArray(children);
+  if (nodes.length === 0) return null;
+
+  const [first, ...rest] = nodes;
+  if (isValidElement(first) && first.type === 'p') {
+    const firstProps = first.props as { children?: ReactNode };
+    return (
+      <>
+        {withMentionsAndLinks(firstProps.children)}
+        {rest}
+      </>
+    );
+  }
+
+  return withMentions(children);
+}
+
 /* ── Markdown component overrides ──────────────────────────── */
 const mdComponents: Components = {
   p: ({ children }) => {
@@ -238,7 +256,31 @@ const mdComponents: Components = {
   ),
 
   ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
+  ol: ({ children, start }) => {
+    const items = Children.toArray(children);
+    let counter = typeof start === 'number' ? start - 1 : 0;
+
+    return (
+      <ol className="mb-2 space-y-0.5 pl-0" style={{ listStyle: 'none' }}>
+        {items.map((item, index) => {
+          if (!isValidElement(item)) return item;
+          counter += 1;
+          const liProps = item.props as { children?: ReactNode; className?: string };
+          const isTaskListItem = liProps.className === 'task-list-item';
+
+          if (isTaskListItem) {
+            return item;
+          }
+
+          return (
+            <li key={item.key ?? index} style={{ listStyle: 'none' }}>
+              {counter}.&nbsp;{renderOrderedListItemContent(liProps.children)}
+            </li>
+          );
+        })}
+      </ol>
+    );
+  },
   li: ({ children, className }) => (
     <li className={className === 'task-list-item' ? 'list-none -ml-5 flex items-start gap-1.5' : undefined}>
       {withMentions(children)}

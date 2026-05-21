@@ -826,6 +826,8 @@ export class AgentRouter {
       persistenceContext?: PersistenceContext;
       /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
       parentInvocationId?: string;
+      /** Same-thread message that stream output should visually reply to. */
+      replyToMessageId?: string;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
     },
@@ -880,6 +882,7 @@ export class AgentRouter {
       completeA2ASlots: options?.completeA2ASlots,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
+      ...(options?.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),

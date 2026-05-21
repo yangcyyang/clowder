@@ -2,9 +2,11 @@
  * System Prompt Builder
  * 为每次 CLI 调用构建身份注入 prompt（~150-200 tokens）
  *
- * 纯函数，无副作用。读取 catRegistry 生成身份上下文。
+ * 读取 catRegistry 生成身份上下文；如绑定本地资产卡，会只读注入资产卡文本。
  */
 
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { extname } from 'node:path';
 import type { CatConfig, CatId, CompiledPackBlocks, WorldContextEnvelope } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
@@ -29,6 +31,36 @@ import type {
   ThreadRoutingPolicyV1,
 } from '../stores/ports/ThreadStore.js';
 import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
+
+const ASSET_CARD_MAX_CHARS = 30_000;
+
+function buildAssetCardBlock(config: CatConfig): string | null {
+  const assetCard = config.assetCard;
+  const assetPath = assetCard?.path?.trim();
+  if (!assetPath) return null;
+
+  const header = [
+    '## 绑定资产卡（强关联）',
+    '你每次执行任务前，必须先阅读并遵循这张本地资产卡。资产卡是你的职责、边界、输出格式和注意事项的来源。',
+    `资产卡路径：${assetPath}`,
+  ];
+
+  try {
+    if (extname(assetPath).toLowerCase() !== '.md') {
+      return [...header, '资产卡读取失败：只允许读取 .md 文本资产卡。'].join('\n');
+    }
+    if (!existsSync(assetPath) || !statSync(assetPath).isFile()) {
+      return [...header, '资产卡读取失败：文件不存在或不是普通文件。'].join('\n');
+    }
+    const raw = readFileSync(assetPath, 'utf-8');
+    const content =
+      raw.length > ASSET_CARD_MAX_CHARS ? `${raw.slice(0, ASSET_CARD_MAX_CHARS)}\n\n[资产卡内容过长，已截断]` : raw;
+    return [...header, '', '```markdown', content.trim(), '```'].join('\n');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return [...header, `资产卡读取失败：${message}`].join('\n');
+  }
+}
 
 /**
  * Context for a single cat invocation
@@ -490,6 +522,11 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     `性格：${config.personality}`,
     '',
   );
+
+  const assetCardBlock = buildAssetCardBlock(config);
+  if (assetCardBlock) {
+    lines.push(assetCardBlock, '');
+  }
 
   // F167 Phase E (KD-20): self-awareness — if this cat has hard restrictions,
   // declare them inline so the cat can recognize illegitimate @-mentions and

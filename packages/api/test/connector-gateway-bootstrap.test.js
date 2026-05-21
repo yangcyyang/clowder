@@ -1,5 +1,8 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { TelegramAdapter } from '../dist/infrastructure/connectors/adapters/TelegramAdapter.js';
 import { startConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
@@ -227,6 +230,31 @@ describe('ConnectorGateway Bootstrap', () => {
       } else {
         process.env.DEFAULT_OWNER_USER_ID = originalEnv;
       }
+    }
+  });
+
+  it('loadConnectorGatewayConfig reads persisted connector token from CAT_CAFE_CONFIG_ROOT .env', async () => {
+    const { loadConnectorGatewayConfig } = await import(
+      '../dist/infrastructure/connectors/connector-gateway-bootstrap.js'
+    );
+    const tmpDir = join(os.tmpdir(), `connector-env-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    writeFileSync(join(tmpDir, '.env'), 'WEIXIN_BOT_TOKEN=tok_from_file\n');
+
+    const originalRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+    const originalToken = process.env.WEIXIN_BOT_TOKEN;
+    try {
+      process.env.CAT_CAFE_CONFIG_ROOT = tmpDir;
+      writeFileSync(join(tmpDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+      delete process.env.WEIXIN_BOT_TOKEN;
+      const config = loadConnectorGatewayConfig();
+      assert.equal(config.weixinBotToken, 'tok_from_file');
+    } finally {
+      if (originalRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+      else process.env.CAT_CAFE_CONFIG_ROOT = originalRoot;
+      if (originalToken === undefined) delete process.env.WEIXIN_BOT_TOKEN;
+      else process.env.WEIXIN_BOT_TOKEN = originalToken;
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 

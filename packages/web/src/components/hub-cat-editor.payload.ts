@@ -102,7 +102,14 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const voiceConfig = buildVoiceConfig(form);
   const voiceConfigPatch: Record<string, unknown> =
     voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};
-  const common = {
+  const assetCardPath = trimText(form.assetCardPath);
+  const assetCardPatch: Record<string, unknown> =
+    assetCardPath.length > 0
+      ? { assetCard: { path: assetCardPath, source: 'local-md' } }
+      : cat?.assetCard
+        ? { assetCard: null as null }
+        : {};
+  const common: Record<string, unknown> = {
     displayName,
     variantLabel: trimText(form.variantLabel),
     nickname: trimText(form.nickname),
@@ -119,6 +126,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     teamStrengths: trimText(form.teamStrengths),
     caution: trimText(form.caution) || null,
     strengths: splitStrengthTags(form.strengths),
+    ...assetCardPatch,
     sessionChain: form.sessionChain === 'true',
     ...contextBudgetPatch,
     ...voiceConfigPatch,

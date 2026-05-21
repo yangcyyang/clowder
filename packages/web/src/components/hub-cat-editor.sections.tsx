@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { apiFetch } from '@/utils/api-client';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
@@ -17,6 +18,14 @@ import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
+type AssetBrowseEntry = { name: string; path: string; isDirectory: boolean };
+type AssetBrowseResult = {
+  current: string;
+  name: string;
+  parent: string | null;
+  homePath: string;
+  entries: AssetBrowseEntry[];
+};
 
 function safeAvatarSrc(value: string): string | null {
   const trimmed = value.trim();
@@ -27,6 +36,133 @@ function safeAvatarSrc(value: string): string | null {
 
 function currentAliasTags(form: HubCatEditorFormState): string[] {
   return splitMentionPatterns(form.mentionPatterns).map(normalizeMentionPattern).filter(Boolean);
+}
+
+function parentPathOf(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const normalized = trimmed.replace(/\\/g, '/');
+  const index = normalized.lastIndexOf('/');
+  if (index <= 0) return undefined;
+  return trimmed.slice(0, index);
+}
+
+function AssetCardFilePicker({
+  initialPath,
+  onPick,
+  onCancel,
+}: {
+  initialPath?: string;
+  onPick: (path: string) => void;
+  onCancel: () => void;
+}) {
+  const [browseResult, setBrowseResult] = useState<AssetBrowseResult | null>(null);
+  const [pathInput, setPathInput] = useState(parentPathOf(initialPath) ?? '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPath = useCallback(async (path?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ includeFiles: 'true', ext: '.md' });
+      if (path?.trim()) params.set('path', path.trim());
+      const response = await apiFetch(`/api/projects/browse?${params.toString()}`);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `浏览失败：${response.status}`);
+      }
+      const result = (await response.json()) as AssetBrowseResult;
+      setBrowseResult(result);
+      setPathInput(result.current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '浏览失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPath(parentPathOf(initialPath));
+  }, [initialPath, loadPath]);
+
+  const entries = browseResult?.entries ?? [];
+
+  return (
+    <div
+      aria-label="Asset Card MD Picker"
+      className="rounded-[14px] border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3"
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input
+          aria-label="Asset Card Browse Path"
+          value={pathInput}
+          onChange={(event) => setPathInput(event.target.value)}
+          className="min-w-0 flex-1 rounded-[9px] border border-transparent bg-[var(--console-card-bg)] px-3 py-1.5 text-[12px] text-cafe-black outline-none transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
+          placeholder="输入目录路径"
+        />
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => void loadPath(pathInput)}
+            className="rounded-[9px] bg-cafe-accent px-3 py-1.5 text-[12px] font-bold text-[var(--cafe-bg)] transition hover:opacity-90"
+          >
+            跳转
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-[9px] bg-[var(--console-card-bg)] px-3 py-1.5 text-[12px] font-bold text-cafe-secondary transition hover:text-cafe"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-cafe-secondary">
+        <span className="truncate" title={browseResult?.current}>
+          当前：{browseResult?.current ?? '加载中'}
+        </span>
+        {browseResult?.parent ? (
+          <button
+            type="button"
+            onClick={() => void loadPath(browseResult.parent ?? undefined)}
+            className="shrink-0 font-bold text-cafe-accent hover:underline"
+          >
+            上一级
+          </button>
+        ) : null}
+      </div>
+
+      {error ? <p className="mt-2 text-[11px] font-semibold text-conn-red-text">{error}</p> : null}
+
+      <div className="mt-2 max-h-56 overflow-y-auto rounded-[10px] bg-[var(--console-card-bg)] p-1">
+        {loading ? <p className="px-2 py-2 text-[12px] text-cafe-secondary">读取中…</p> : null}
+        {!loading && entries.length === 0 ? (
+          <p className="px-2 py-2 text-[12px] text-cafe-secondary">当前目录没有可选择的 Markdown 文件。</p>
+        ) : null}
+        {entries.map((entry) => (
+          <button
+            key={entry.path}
+            type="button"
+            onClick={() => {
+              if (entry.isDirectory) {
+                void loadPath(entry.path);
+                return;
+              }
+              onPick(entry.path);
+            }}
+            className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12px] text-cafe-secondary transition hover:bg-[var(--console-field-bg)] hover:text-cafe"
+          >
+            <span className="w-7 shrink-0 text-center font-mono text-[10px]">{entry.isDirectory ? 'DIR' : 'MD'}</span>
+            <span className="truncate" title={entry.path}>
+              {entry.name}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function IdentitySection({
@@ -203,6 +339,86 @@ export function IdentitySection({
       </div>
 
       <VoiceConfigSection form={form} onChange={onChange} onRefAudioUpload={onRefAudioUpload} />
+    </SectionCard>
+  );
+}
+
+export function AssetCardSection({
+  cat,
+  form,
+  onChange,
+  onReload,
+  reloading = false,
+}: {
+  cat?: CatData | null;
+  form: HubCatEditorFormState;
+  onChange: (patch: FormPatch) => void;
+  onReload?: (path: string) => Promise<void>;
+  reloading?: boolean;
+}) {
+  const assetCard = cat?.assetCard;
+  const loadedAtLabel = assetCard?.loadedAt ? new Date(assetCard.loadedAt).toLocaleString() : '未同步';
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  return (
+    <SectionCard
+      title="资产卡关联"
+      description="绑定本地 Markdown 资产卡。Agent 每次执行前会读取这张卡，作为职责、边界和输出格式的强约束。"
+      data-guide-id="member-editor.asset-card"
+    >
+      <TextField
+        label="本地路径"
+        ariaLabel="Asset Card Path"
+        value={form.assetCardPath ?? ''}
+        onChange={(value) => onChange({ assetCardPath: value })}
+        placeholder="/Users/.../01_需求梳理Agent.md"
+      />
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          aria-label="选择资产卡 MD"
+          onClick={() => setPickerOpen((value) => !value)}
+          className="rounded-[9px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[12px] font-bold text-cafe-secondary transition hover:text-cafe"
+        >
+          选择 MD
+        </button>
+        {cat && onReload ? (
+          <button
+            type="button"
+            aria-label="重新加载资产卡"
+            disabled={reloading || !form.assetCardPath?.trim()}
+            onClick={() => void onReload(form.assetCardPath ?? '')}
+            className="rounded-[9px] bg-cafe-accent px-3 py-1.5 text-[12px] font-bold text-[var(--cafe-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {reloading ? '加载中…' : '重新加载资产卡'}
+          </button>
+        ) : null}
+      </div>
+      {pickerOpen ? (
+        <AssetCardFilePicker
+          initialPath={form.assetCardPath}
+          onPick={(path) => {
+            onChange({ assetCardPath: path });
+            setPickerOpen(false);
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
+      ) : null}
+      <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-[11px] leading-5 text-cafe-secondary">
+        <p>
+          当前状态：
+          {form.assetCardPath?.trim() ? (
+            <span className="font-semibold text-cafe">已关联本地资产卡</span>
+          ) : (
+            <span>未关联</span>
+          )}
+        </p>
+        {assetCard ? (
+          <p className="truncate" title={assetCard.path}>
+            来源：{assetCard.source ?? 'local-md'} · 版本：{assetCard.version ?? '未设置'} · 加载：{loadedAtLabel}
+          </p>
+        ) : null}
+      </div>
     </SectionCard>
   );
 }

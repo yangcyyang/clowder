@@ -501,6 +501,37 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 1, 'GET should not delete non-running drafts');
   });
 
+  it('surfaces process-restart failed draft as recovered assistant message (#134)', async () => {
+    const ts = Date.now();
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-restart',
+      catId: 'opus',
+      content: 'Partial answer persisted before restart',
+      updatedAt: ts,
+    });
+
+    const record = {
+      ...makeInvocationRecord('inv-restart', 'failed', ts),
+      error: 'process_restart',
+    };
+    const app = await buildAppWithInvocationRecords({ 'inv-restart': record });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const recovered = body.messages.find((m) => m.id === 'recovered-draft-inv-restart');
+    assert.ok(recovered, 'Process-restart draft should be visible as a recovered message');
+    assert.equal(recovered.isDraft, undefined, 'Recovered draft should render as a normal completed message');
+    assert.equal(recovered.content, 'Partial answer persisted before restart');
+    assert.equal(recovered.extra?.stream?.invocationId, 'inv-restart');
+  });
+
   for (const status of ['succeeded', 'canceled']) {
     it(`filters draft without deleting it when invocation record is ${status} (F173 hotfix3)`, async () => {
       const ts = Date.now();

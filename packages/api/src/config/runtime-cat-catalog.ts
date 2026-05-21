@@ -1,6 +1,7 @@
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join } from 'node:path';
 import type {
+  CatAssetCard,
   CatBreed,
   CatCafeConfig,
   CatColor,
@@ -28,6 +29,7 @@ export interface RuntimeCatInput {
   color: CatColor;
   mentionPatterns: string[];
   accountRef?: string;
+  assetCard?: CatAssetCard;
   roleDescription: string;
   personality?: string;
   teamStrengths?: string;
@@ -63,6 +65,7 @@ export interface RuntimeCatUpdate {
   color?: CatColor;
   mentionPatterns?: string[];
   accountRef?: string | null;
+  assetCard?: CatAssetCard | null;
   roleDescription?: string;
   personality?: string;
   teamStrengths?: string;
@@ -144,6 +147,29 @@ function validatePersistedCatalog(projectRoot: string): CatCafeConfig {
   return loadCatConfig(join(projectRoot, '.cat-cafe', 'cat-catalog.json'));
 }
 
+function normalizeAssetCard(input: CatAssetCard, previous?: CatAssetCard): CatAssetCard {
+  const assetPath = input.path.trim();
+  if (!assetPath) {
+    throw new Error('assetCard.path is required');
+  }
+  if (extname(assetPath).toLowerCase() !== '.md') {
+    throw new Error('assetCard.path must point to a .md file');
+  }
+  if (!existsSync(assetPath) || !statSync(assetPath).isFile()) {
+    throw new Error(`assetCard.path not found: ${assetPath}`);
+  }
+  return {
+    path: assetPath,
+    ...(input.version?.trim()
+      ? { version: input.version.trim() }
+      : previous?.version
+        ? { version: previous.version }
+        : {}),
+    source: input.source?.trim() || 'local-md',
+    loadedAt: input.loadedAt?.trim() || new Date().toISOString(),
+  };
+}
+
 function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
   const aliasHolders = new Map<string, string>();
   for (const [catId, config] of Object.entries(toAllCatConfigs(catalog))) {
@@ -221,6 +247,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
     color: input.color,
     mentionPatterns: normalizeMentionPatterns(input.catId, input.mentionPatterns),
     roleDescription: input.roleDescription,
+    ...(input.assetCard ? { assetCard: normalizeAssetCard(input.assetCard) } : {}),
     defaultVariantId: variantId,
     ...(input.sessionChain !== undefined ? { features: { sessionChain: input.sessionChain } } : {}),
     variants: [
@@ -374,6 +401,23 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.accountRef = patch.accountRef.trim();
     } else {
       delete variant.accountRef;
+    }
+  }
+  if (patch.assetCard !== undefined) {
+    if (patch.assetCard) {
+      const previousAssetCard = located.isDefaultVariant ? breed.assetCard : variant.assetCard;
+      const normalizedAssetCard = normalizeAssetCard(patch.assetCard, previousAssetCard);
+      if (located.isDefaultVariant) {
+        breed.assetCard = normalizedAssetCard;
+        delete variant.assetCard;
+      } else {
+        variant.assetCard = normalizedAssetCard;
+      }
+    } else if (located.isDefaultVariant) {
+      delete breed.assetCard;
+      delete variant.assetCard;
+    } else {
+      delete variant.assetCard;
     }
   }
   if (patch.personality !== undefined) {

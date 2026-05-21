@@ -364,7 +364,7 @@ export async function* routeSerial(
               count: worklistEntry.streakPair.count,
             }
           : undefined;
-      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId);
+      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId) ?? options.replyToMessageId;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;

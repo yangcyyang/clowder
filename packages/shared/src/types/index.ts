@@ -170,6 +170,7 @@ export type {
   // F136 Phase 4: Account config types
   AccountConfig,
   AccountProtocol,
+  CatAssetCard,
   CatBreed,
   CatCafeConfig,
   CatCafeConfigV1,

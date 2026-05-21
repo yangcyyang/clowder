@@ -197,6 +197,17 @@ export function InlineThreadPanel({
     return messages.filter((msg) => msg.timestamp > sourceMessage.timestamp);
   }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
 
+  const sourceThreadMessageId = useMemo(() => {
+    const sourceInBranch = messages.find(
+      (msg) =>
+        msg.timestamp === sourceMessage.timestamp &&
+        msg.content === sourceMessage.content &&
+        msg.catId === sourceMessage.catId &&
+        msg.type === sourceMessage.type,
+    );
+    return sourceInBranch?.id;
+  }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
+
   useEffect(() => {
     onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length);
   }, [onReplyCountChange, replyMessages.length, sourceMessage.id, threadId]);
@@ -215,6 +226,7 @@ export function InlineThreadPanel({
           content,
           threadId,
           userId: getUserId(),
+          ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
         }),
       });
       if (!res.ok) {
@@ -237,6 +249,7 @@ export function InlineThreadPanel({
     onReplyCountChange,
     replyMessages.length,
     sending,
+    sourceThreadMessageId,
     sourceMessage.id,
     startReplyPolling,
     threadId,

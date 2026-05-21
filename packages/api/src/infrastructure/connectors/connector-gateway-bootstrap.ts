@@ -10,7 +10,7 @@
  * F088 Multi-Platform Chat Gateway
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type CatId, type ConnectorSource, catRegistry } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -19,6 +19,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
 import { resolveServiceEndpoint } from '../../domains/services/service-registry.js';
 import type { ConnectorWebhookHandler, WebhookHandleResult } from '../../routes/connector-webhooks.js';
+import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
 import { getDefaultUploadDir } from '../../utils/upload-paths.js';
 import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { DingTalkAdapter } from './adapters/DingTalkAdapter.js';
@@ -196,31 +197,53 @@ export interface ConnectorGatewayHandle {
 }
 
 export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
+  const persistedEnv = readPersistedConnectorEnv();
   return {
-    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
-    feishuAppId: process.env.FEISHU_APP_ID,
-    feishuAppSecret: process.env.FEISHU_APP_SECRET,
-    feishuVerificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
-    feishuBotOpenId: process.env.FEISHU_BOT_OPEN_ID,
-    feishuAdminOpenIds: process.env.FEISHU_ADMIN_OPEN_IDS,
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? persistedEnv.TELEGRAM_BOT_TOKEN,
+    feishuAppId: process.env.FEISHU_APP_ID ?? persistedEnv.FEISHU_APP_ID,
+    feishuAppSecret: process.env.FEISHU_APP_SECRET ?? persistedEnv.FEISHU_APP_SECRET,
+    feishuVerificationToken: process.env.FEISHU_VERIFICATION_TOKEN ?? persistedEnv.FEISHU_VERIFICATION_TOKEN,
+    feishuBotOpenId: process.env.FEISHU_BOT_OPEN_ID ?? persistedEnv.FEISHU_BOT_OPEN_ID,
+    feishuAdminOpenIds: process.env.FEISHU_ADMIN_OPEN_IDS ?? persistedEnv.FEISHU_ADMIN_OPEN_IDS,
     feishuConnectionMode: process.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook',
-    dingtalkAppKey: process.env.DINGTALK_APP_KEY,
-    dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
-    weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
-    wecomBotId: process.env.WECOM_BOT_ID,
-    wecomBotSecret: process.env.WECOM_BOT_SECRET,
-    wecomCorpId: process.env.WECOM_CORP_ID,
-    wecomAgentId: process.env.WECOM_AGENT_ID,
-    wecomAgentSecret: process.env.WECOM_AGENT_SECRET,
-    wecomToken: process.env.WECOM_TOKEN,
-    wecomEncodingAesKey: process.env.WECOM_ENCODING_AES_KEY,
-    coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
-    whisperUrl: resolveServiceEndpoint('whisper-stt') ?? process.env.WHISPER_URL,
-    connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
-    xiaoyiAk: process.env.XIAOYI_AK,
-    xiaoyiSk: process.env.XIAOYI_SK,
-    xiaoyiAgentId: process.env.XIAOYI_AGENT_ID,
+    dingtalkAppKey: process.env.DINGTALK_APP_KEY ?? persistedEnv.DINGTALK_APP_KEY,
+    dingtalkAppSecret: process.env.DINGTALK_APP_SECRET ?? persistedEnv.DINGTALK_APP_SECRET,
+    weixinBotToken: process.env.WEIXIN_BOT_TOKEN ?? persistedEnv.WEIXIN_BOT_TOKEN,
+    wecomBotId: process.env.WECOM_BOT_ID ?? persistedEnv.WECOM_BOT_ID,
+    wecomBotSecret: process.env.WECOM_BOT_SECRET ?? persistedEnv.WECOM_BOT_SECRET,
+    wecomCorpId: process.env.WECOM_CORP_ID ?? persistedEnv.WECOM_CORP_ID,
+    wecomAgentId: process.env.WECOM_AGENT_ID ?? persistedEnv.WECOM_AGENT_ID,
+    wecomAgentSecret: process.env.WECOM_AGENT_SECRET ?? persistedEnv.WECOM_AGENT_SECRET,
+    wecomToken: process.env.WECOM_TOKEN ?? persistedEnv.WECOM_TOKEN,
+    wecomEncodingAesKey: process.env.WECOM_ENCODING_AES_KEY ?? persistedEnv.WECOM_ENCODING_AES_KEY,
+    coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID ?? persistedEnv.DEFAULT_OWNER_USER_ID,
+    whisperUrl: resolveServiceEndpoint('whisper-stt') ?? process.env.WHISPER_URL ?? persistedEnv.WHISPER_URL,
+    connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR ?? persistedEnv.CONNECTOR_MEDIA_DIR,
+    xiaoyiAk: process.env.XIAOYI_AK ?? persistedEnv.XIAOYI_AK,
+    xiaoyiSk: process.env.XIAOYI_SK ?? persistedEnv.XIAOYI_SK,
+    xiaoyiAgentId: process.env.XIAOYI_AGENT_ID ?? persistedEnv.XIAOYI_AGENT_ID,
   };
+}
+
+function readPersistedConnectorEnv(): Record<string, string> {
+  const envPath = resolve(resolveActiveProjectRoot(), '.env');
+  if (!existsSync(envPath)) return {};
+
+  try {
+    const result: Record<string, string> = {};
+    const text = readFileSync(envPath, 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const key = match[1]!;
+      const raw = match[2]?.trim() ?? '';
+      if (!raw) continue;
+      result[key] = raw.replace(/^["']|["']$/g, '');
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 export async function startConnectorGateway(

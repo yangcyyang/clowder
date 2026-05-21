@@ -47,6 +47,18 @@ export interface CliConfig {
 }
 
 /**
+ * Optional local asset-card binding for a cat.
+ * This is metadata only: runtime uses it to trace where an agent identity came
+ * from, while reload/sync remains an explicit future workflow.
+ */
+export interface CatAssetCard {
+  readonly path: string;
+  readonly version?: string;
+  readonly source?: string;
+  readonly loadedAt?: string;
+}
+
+/**
  * A specific model/config variant within a breed.
  * e.g. ragdoll breed → opus-4.6 variant, opus-4.5 variant
  *
@@ -66,6 +78,8 @@ export interface CatVariant {
   readonly mentionPatterns?: readonly string[];
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
+  /** Local asset-card binding for this specific variant. */
+  readonly assetCard?: CatAssetCard;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   readonly defaultModel: string;
@@ -153,6 +167,8 @@ export interface CatBreed {
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly roleDescription: string;
+  /** Local asset-card binding for this breed; variants can override it. */
+  readonly assetCard?: CatAssetCard;
   readonly defaultVariantId: string;
   readonly variants: readonly CatVariant[];
   /** Per-cat feature flags (optional, all features enabled by default) */

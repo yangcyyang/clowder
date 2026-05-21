@@ -23,8 +23,10 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
           <button
             key={option.id}
             type="button"
-            className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-              idx === selectedIdx ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
+            className={`flex w-full items-center gap-3 border-l-2 py-2 pr-3 pl-[10px] text-left transition-colors ${
+              idx === selectedIdx
+                ? 'border-[var(--cafe-accent)] bg-[var(--console-active-bg)]'
+                : 'border-transparent hover:bg-[var(--console-hover-bg)]'
             }`}
             onMouseEnter={() => onSelectIdx(idx)}
             onMouseDown={(event) => {
@@ -42,7 +44,13 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
               }}
             />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-cafe-text">{option.label}</span>
+              <span
+                className={`block truncate text-sm font-semibold ${
+                  idx === selectedIdx ? 'text-[var(--cafe-accent)]' : 'text-cafe-text'
+                }`}
+              >
+                {option.label}
+              </span>
               <span className="block truncate text-xs leading-[1.45] text-cafe-muted">{option.id}</span>
             </span>
           </button>

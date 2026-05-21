@@ -132,6 +132,16 @@ export function useSendMessage(activeThreadId?: string) {
       const reconcileQueuedResponse = (
         body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
       ) => {
+        if (body?.status === 'duplicate') {
+          // A retry with the same requestId should converge onto the original
+          // user bubble instead of leaving a second optimistic message behind.
+          if (body.userMessageId) {
+            replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
+          } else {
+            removeThreadMessage(threadId, optimisticMessageId);
+          }
+          return true;
+        }
         // Game started in independent thread — remove optimistic message from source
         // and clear loading/invocation flags (game runs in its own thread, source is idle).
         // Always use thread-scoped APIs here: by the time the HTTP response arrives,

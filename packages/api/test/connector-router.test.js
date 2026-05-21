@@ -206,7 +206,7 @@ describe('ConnectorRouter', () => {
     assert.ok(trigger.calls[0].threadId);
   });
 
-  it('routes to last-active cat when no @mention is present', async () => {
+  it('routes to default cat when no @mention is present, even with prior activity', async () => {
     const thread = threadStore.create('owner-1', 'existing');
     bindingStore.bind('feishu', 'chat-last-active', thread.id, 'owner-1');
     threadStore.participantActivity.set(thread.id, [
@@ -217,8 +217,8 @@ describe('ConnectorRouter', () => {
     await router.route('feishu', 'chat-last-active', '继续', 'ext-last-active-1');
 
     assert.equal(trigger.calls.length, 1);
-    assert.equal(trigger.calls[0].catId, 'codex');
-    assert.deepEqual(messageStore.messages[0].mentions, ['codex']);
+    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
   });
 
   it('keeps explicit @mention priority over last-active cat', async () => {

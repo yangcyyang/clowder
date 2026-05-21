@@ -18,6 +18,8 @@ export const sendMessageSchema = z
     userId: z.string().min(1).max(100).optional(),
     mentions: z.array(catIdSchema()).optional(),
     threadId: z.string().min(1).max(100).optional(),
+    /** Same-thread message ID this message replies to. Used by InlineThreadPanel. */
+    replyTo: z.string().min(1).max(100).optional(),
     /** Client-provided idempotency key (UUID). Optional — server generates one if absent. */
     idempotencyKey: z.string().uuid().optional(),
     /** F35: Message visibility. Default 'public'. 'whisper' requires whisperTo. */

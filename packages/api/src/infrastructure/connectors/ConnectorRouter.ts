@@ -434,16 +434,7 @@ export class ConnectorRouter {
     // Parse @-mentions to determine target cat
     const mentionPatterns = this.getMentionPatterns();
     const mentionResult = parseMentions(resolvedText, mentionPatterns, this.opts.defaultCatId);
-    let targetCatId = mentionResult.targetCatId;
-    if (!mentionResult.matched && this.opts.threadStore.getParticipantsWithActivity) {
-      const participants = await this.opts.threadStore.getParticipantsWithActivity(binding.threadId);
-      const lastActive = participants
-        .filter((p) => p.messageCount > 0)
-        .sort((a, b) => b.lastMessageAt - a.lastMessageAt)[0];
-      if (lastActive) {
-        targetCatId = lastActive.catId as CatId;
-      }
-    }
+    const targetCatId = mentionResult.targetCatId;
 
     const storedTimestamp = Date.now();
     const stored = await messageStore.append({

@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, posix, resolve, win32 } from 'node:path';
+import { basename, extname, posix, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
@@ -237,8 +237,15 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     if (!requireTrustedProjectIdentity(request, reply)) {
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
-    const query = request.query as { path?: string };
+    const query = request.query as { path?: string; includeFiles?: string; ext?: string };
     const targetPath = query.path || homedir();
+    const includeFiles = query.includeFiles === 'true';
+    const extensionFilter = query.ext?.trim().toLowerCase();
+    const normalizedExt = extensionFilter
+      ? extensionFilter.startsWith('.')
+        ? extensionFilter
+        : `.${extensionFilter}`
+      : '';
 
     // Validate path: realpath() resolves symlinks, then boundary check
     const validatedPath = await validateProjectPath(targetPath);
@@ -253,7 +260,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const entries = await readdir(validatedPath, { withFileTypes: true });
-      const dirs: ProjectEntry[] = [];
+      const results: ProjectEntry[] = [];
 
       for (const entry of entries) {
         // Skip hidden dirs (., .., .git, .node_modules, etc.)
@@ -267,13 +274,24 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
           try {
             const childReal = await realpath(childPath);
             if (!isUnderAllowedRoot(childReal)) continue;
-            dirs.push({ name: entry.name, path: childReal, isDirectory: true });
+            results.push({ name: entry.name, path: childReal, isDirectory: true });
+          } catch {}
+        } else if (includeFiles && entry.isFile()) {
+          if (normalizedExt && extname(entry.name).toLowerCase() !== normalizedExt) continue;
+          const childPath = resolve(validatedPath, entry.name);
+          try {
+            const childReal = await realpath(childPath);
+            if (!isUnderAllowedRoot(childReal)) continue;
+            results.push({ name: entry.name, path: childReal, isDirectory: false });
           } catch {}
         }
       }
 
-      // Sort alphabetically
-      dirs.sort((a, b) => a.name.localeCompare(b.name));
+      // Sort: directories first, then alphabetically within each group
+      results.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
 
       const parentDir = getProjectBrowseParent(validatedPath);
       const canGoUp = parentDir !== null && isUnderAllowedRoot(parentDir);
@@ -283,7 +301,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
         name: basename(validatedPath),
         parent: canGoUp ? parentDir : null,
         homePath: homedir(),
-        entries: dirs,
+        entries: results,
       };
     } catch (err) {
       reply.status(400);

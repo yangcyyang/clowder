@@ -5,6 +5,7 @@
  */
 
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import {
   type CatConfig,
   CLI_EFFORT_VALUES,
@@ -49,6 +50,13 @@ const contextBudgetSchema = z.object({
   maxContentLengthPerMsg: z.number().int().positive(),
 });
 
+const assetCardSchema = z.object({
+  path: z.string().min(1),
+  version: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  loadedAt: z.string().min(1).optional(),
+});
+
 const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
 const cliSchema = z.object({
   command: z.string().min(1).optional(),
@@ -77,6 +85,7 @@ const baseCatSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
+  assetCard: assetCardSchema.optional(),
   contextBudget: contextBudgetSchema.optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
@@ -130,6 +139,7 @@ const updateCatSchema = z.object({
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   accountRef: z.string().min(1).nullable().optional(),
+  assetCard: assetCardSchema.nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
@@ -158,8 +168,99 @@ const updateCatSchema = z.object({
     .nullable()
     .optional(),
 });
+const reloadAssetCardSchema = z.object({
+  path: z.string().min(1).optional(),
+});
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
+
+function extractAssetCardVersion(content: string): string | undefined {
+  const normalized = content.replace(/[*_`]/g, '');
+  const match = normalized.match(/(?:当前版本|版本|Version)\s*[：:]\s*([vV]?\d+(?:\.\d+){0,4}(?:[-+._\w]*)?)/);
+  return match?.[1]?.trim();
+}
+
+function cleanAssetCardLine(line: string): string {
+  return line
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractAssetCardSection(content: string, keywords: readonly string[]): string | undefined {
+  const lines = content.split(/\r?\n/);
+  let start = -1;
+  let level = 0;
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^(#{2,6})\s+(.+)$/);
+    if (!match) continue;
+    const title = cleanAssetCardLine(match[2] ?? '');
+    if (keywords.some((keyword) => title.includes(keyword))) {
+      start = index + 1;
+      level = match[1]?.length ?? 2;
+      break;
+    }
+  }
+  if (start < 0) return undefined;
+
+  const body: string[] = [];
+  for (let index = start; index < lines.length; index++) {
+    const line = lines[index] ?? '';
+    const heading = line.match(/^(#{2,6})\s+/);
+    if (heading && (heading[1]?.length ?? 6) <= level) break;
+    body.push(line);
+  }
+  const section = body.join('\n').trim();
+  return section.length > 0 ? section : undefined;
+}
+
+function extractAssetCardListItems(section: string | undefined, maxItems: number): string[] {
+  if (!section) return [];
+  const items: string[] = [];
+  for (const line of section.split(/\r?\n/)) {
+    if (!/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) continue;
+    const cleaned = cleanAssetCardLine(line);
+    if (!cleaned || cleaned.includes('[不做事项') || cleaned.includes('...')) continue;
+    items.push(cleaned);
+    if (items.length >= maxItems) break;
+  }
+  return items;
+}
+
+function joinAssetCardSummary(items: readonly string[], fallback?: string): string | undefined {
+  const values = items.map((item) => item.trim()).filter(Boolean);
+  if (values.length > 0) return values.join('；');
+  return fallback?.trim() || undefined;
+}
+
+function extractStructuredFieldsFromAssetCard(content: string): Pick<
+  UpdateCatRequestBody,
+  'roleDescription' | 'personality' | 'teamStrengths' | 'caution'
+> {
+  const coreDuties = extractAssetCardListItems(extractAssetCardSection(content, ['核心职责', '职责']), 6);
+  const skills = extractAssetCardListItems(extractAssetCardSection(content, ['可用技能', '技能']), 8);
+  const notResponsible = extractAssetCardListItems(extractAssetCardSection(content, ['不负责事项', '不负责']), 6);
+  const handoff = extractAssetCardListItems(extractAssetCardSection(content, ['人类接管点', '接管点']), 6);
+  const clarification = extractAssetCardSection(content, ['需求澄清机制', '澄清机制']);
+
+  const roleDescription = joinAssetCardSummary(coreDuties);
+  const teamStrengths = joinAssetCardSummary(skills.length > 0 ? skills : coreDuties);
+  const caution = joinAssetCardSummary([...notResponsible, ...handoff]);
+  const personality =
+    clarification && /澄清|理解度|提问|确认/.test(clarification)
+      ? '先澄清再输出，重视理解度、边界、验收标准和 Owner 确认，避免用猜测替代确认。'
+      : undefined;
+
+  return {
+    ...(roleDescription ? { roleDescription } : {}),
+    ...(personality ? { personality } : {}),
+    ...(teamStrengths ? { teamStrengths } : {}),
+    ...(caution ? { caution } : {}),
+  };
+}
 
 function resolveOperator(raw: unknown): string | null {
   if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
@@ -354,6 +455,7 @@ async function toCatResponse(
     mentionPatterns: cat.mentionPatterns,
     breedId: cat.breedId,
     accountRef: await resolveEffectiveAccountRef(cat),
+    assetCard: cat.assetCard ?? undefined,
     clientId: cat.clientId,
     defaultModel: cat.defaultModel,
     cli: cat.cli,
@@ -529,6 +631,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          assetCard: body.assetCard,
           sessionChain: body.sessionChain,
           clientId: 'antigravity',
           defaultModel: body.defaultModel,
@@ -558,6 +661,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          assetCard: body.assetCard,
           sessionChain: body.sessionChain,
           clientId: body.clientId,
           defaultModel: body.defaultModel,
@@ -711,6 +815,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
+        ...(body.assetCard !== undefined ? { assetCard: body.assetCard } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
@@ -754,6 +859,74 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/not found/i.test(message)) {
+        reply.status(404);
+      } else {
+        reply.status(400);
+      }
+      return { error: message };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/cats/:id/asset-card/reload', async (request, reply) => {
+    const operator = resolveHeaderUserId(request);
+    if (!operator) {
+      reply.status(400);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    const parsed = reloadAssetCardSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+
+    const projectRoot = resolveProjectRoot();
+    const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+    const currentCat = getResolvedCats(projectRoot)[request.params.id] ?? catRegistry.tryGet(request.params.id)?.config;
+    if (!currentCat) {
+      reply.status(404);
+      return { error: `Cat "${request.params.id}" not found` };
+    }
+
+    const assetPath = parsed.data.path?.trim() || currentCat.assetCard?.path?.trim();
+    if (!assetPath) {
+      reply.status(400);
+      return { error: 'assetCard.path is required' };
+    }
+
+    try {
+      const content = await readFile(assetPath, 'utf-8');
+      const managedIdsBefore = getManagedCatalogIds(projectRoot);
+      const version = extractAssetCardVersion(content);
+      const nextAssetCard = {
+        path: assetPath,
+        source: currentCat.assetCard?.source ?? 'local-md',
+        ...(version ? { version } : {}),
+        loadedAt: new Date().toISOString(),
+      };
+      const structuredFields = extractStructuredFieldsFromAssetCard(content);
+      updateRuntimeCat(projectRoot, request.params.id, {
+        assetCard: nextAssetCard,
+        ...structuredFields,
+      });
+      const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
+      await configEventBus.emitChangeAsync({
+        source: 'cat-config',
+        scope: 'domain',
+        changedKeys: [request.params.id],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
+      const cat = resolved[request.params.id];
+      const metadata = buildCatResponseMetadataResolver(projectRoot);
+      return {
+        cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef),
+        assetCard: cat.assetCard,
+        updatedBy: operator,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/not found|no such file/i.test(message)) {
         reply.status(404);
       } else {
         reply.status(400);

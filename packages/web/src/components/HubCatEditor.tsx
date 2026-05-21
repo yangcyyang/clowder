@@ -27,7 +27,7 @@ import {
   toStrategyForm,
   withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
-import { AccountSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
+import { AccountSection, AssetCardSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import type { CatStrategyEntry } from './hub-strategy-types';
@@ -83,6 +83,7 @@ export function HubCatEditor({
   const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [loadingCodexSettings, setLoadingCodexSettings] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [reloadingAssetCard, setReloadingAssetCard] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [codexSettingsError, setCodexSettingsError] = useState<string | null>(null);
@@ -132,6 +133,7 @@ export function HubCatEditor({
     setStrategyBaselineHasOverride(false);
     setCodexSettingsBaseline(null);
     setSelectedTemplateId('custom');
+    setReloadingAssetCard(false);
     setHasUnsavedChanges(false);
   }, [open, cat, draft]);
 
@@ -393,6 +395,36 @@ export function HubCatEditor({
       patchForm({ voiceRefAudio: result.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : '参考音频上传失败');
+    }
+  };
+
+  const handleReloadAssetCard = async (path: string) => {
+    if (!cat || reloadingAssetCard) return;
+    const assetPath = path.trim();
+    if (!assetPath) {
+      setError('请先选择或填写资产卡 Markdown 路径');
+      return;
+    }
+    setReloadingAssetCard(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/cats/${cat.id}/asset-card/reload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: assetPath }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; cat?: { assetCard?: { path?: string } } };
+      if (!res.ok) {
+        setError(payload.error ?? `资产卡重新加载失败 (${res.status})`);
+        return;
+      }
+      const nextPath = payload.cat?.assetCard?.path ?? assetPath;
+      setForm((prev) => ({ ...prev, assetCardPath: nextPath }));
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '资产卡重新加载失败');
+    } finally {
+      setReloadingAssetCard(false);
     }
   };
 
@@ -681,6 +713,13 @@ export function HubCatEditor({
         onChange={patchForm}
         onAvatarUpload={handleAvatarUpload}
         onRefAudioUpload={handleRefAudioUpload}
+      />
+      <AssetCardSection
+        cat={cat}
+        form={form}
+        onChange={patchForm}
+        onReload={handleReloadAssetCard}
+        reloading={reloadingAssetCard}
       />
       <AccountSection
         form={form}

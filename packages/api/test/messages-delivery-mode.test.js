@@ -118,6 +118,67 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationRecordStore.create.mock.calls.length, 1);
   });
 
+  it('immediate replay with same idempotencyKey returns original userMessageId', async () => {
+    const record = {
+      id: 'inv-idem',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      userMessageId: null,
+      targetCats: ['opus'],
+      intent: 'execute',
+      status: 'queued',
+      idempotencyKey: '33333333-3333-4333-8333-333333333333',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    let createCount = 0;
+    deps.invocationRecordStore.create.mock.mockImplementation(async () => {
+      createCount++;
+      return createCount === 1
+        ? { outcome: 'created', invocationId: 'inv-idem' }
+        : { outcome: 'duplicate', invocationId: 'inv-idem' };
+    });
+    deps.invocationRecordStore.get = mock.fn(async () => ({ ...record }));
+    deps.invocationRecordStore.update.mock.mockImplementation(async (_id, data) => {
+      if (data?.userMessageId !== undefined) record.userMessageId = data.userMessageId;
+      if (data?.status !== undefined) record.status = data.status;
+      record.updatedAt = Date.now();
+      return { ...record };
+    });
+    deps.messageStore.append.mock.mockImplementation(async (msg) => ({ id: 'msg-idem-user', ...msg }));
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '会重放但不重复',
+        threadId: 'thread-1',
+        idempotencyKey: '33333333-3333-4333-8333-333333333333',
+      },
+    });
+    assert.equal(first.statusCode, 200);
+    const firstBody = JSON.parse(first.body);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '会重放但不重复',
+        threadId: 'thread-1',
+        idempotencyKey: '33333333-3333-4333-8333-333333333333',
+      },
+    });
+    assert.equal(replay.statusCode, 200);
+    const replayBody = JSON.parse(replay.body);
+
+    assert.equal(deps.messageStore.append.mock.calls.length, 1, 'replay should not append a second user message');
+    assert.equal(firstBody.userMessageId, 'msg-idem-user');
+    assert.equal(replayBody.status, 'duplicate');
+    assert.equal(replayBody.userMessageId, firstBody.userMessageId);
+  });
+
   it('explicit mention queues when the requested cat is already active', async () => {
     deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
       targetCats: ['codex'],
@@ -477,6 +538,85 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(typeof options?.queueHasQueuedMessages, 'function');
     assert.equal(options.queueHasQueuedMessages('thread-1'), true);
     assert.equal(options.queueHasQueuedMessages('thread-x'), false);
+  });
+
+  it('preserves inline thread reply context for user message and agent stream output', async () => {
+    deps.messageStore.getById = mock.fn(async (id) => ({
+      id,
+      threadId: 'branch-thread-1',
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'source',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+    }));
+    deps.messageStore.append.mock.mockImplementation(async (msg) => ({
+      id: msg.catId ? 'agent-reply' : 'user-thread-reply',
+      ...msg,
+    }));
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '@opus thread question',
+        threadId: 'branch-thread-1',
+        replyTo: 'source-copy-in-branch',
+        deliveryMode: 'immediate',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const userAppend = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.equal(userAppend.threadId, 'branch-thread-1');
+    assert.equal(userAppend.replyTo, 'source-copy-in-branch');
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0].arguments[6];
+    assert.equal(routeOptions.replyToMessageId, 'user-thread-reply');
+  });
+
+  it('rejects inline replyTo when the parent message belongs to another thread', async () => {
+    deps.messageStore.getById = mock.fn(async (id) => ({
+      id,
+      threadId: 'main-thread',
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'source',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+    }));
+    deps.messageStore.append.mock.mockImplementation(async (msg) => ({
+      id: msg.catId ? 'agent-reply' : 'user-thread-reply',
+      ...msg,
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '@opus thread question',
+        threadId: 'branch-thread-1',
+        replyTo: 'source-from-main',
+        deliveryMode: 'immediate',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const userAppend = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.equal(userAppend.threadId, 'branch-thread-1');
+    assert.equal(userAppend.replyTo, undefined);
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0].arguments[6];
+    assert.equal(routeOptions.replyToMessageId, undefined);
   });
 
   it('immediate execution schedules continuation when route emits seal capsule and succeeds', async () => {

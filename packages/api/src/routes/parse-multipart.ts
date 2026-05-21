@@ -15,6 +15,7 @@ export type ParsedMultipart =
       content: string;
       userId?: string;
       threadId?: string;
+      replyTo?: string;
       idempotencyKey?: string;
       contentBlocks: MessageContent[];
       visibility?: string;
@@ -70,7 +71,7 @@ export async function parseMultipart(
     return { error: 'Invalid form fields' };
   }
 
-  const { content, userId, threadId, idempotencyKey } = parseResult.data;
+  const { content, userId, threadId, replyTo, idempotencyKey } = parseResult.data;
   const blocks: MessageContent[] = [{ type: 'text', text: content } as TextContent];
 
   if (imageFiles.length > 0) {
@@ -109,6 +110,7 @@ export async function parseMultipart(
     content,
     ...(userId ? { userId } : {}),
     ...(threadId ? { threadId } : {}),
+    ...(replyTo ? { replyTo } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),

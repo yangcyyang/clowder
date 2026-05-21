@@ -22,6 +22,7 @@ import {
   getAllCatIdsFromConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
+  getOwnerUserId,
   isCatAvailable,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
@@ -2484,8 +2485,8 @@ async function main(): Promise<void> {
     threadStore,
     invokeTrigger,
     socketManager,
-    defaultUserId: 'default-user' as const,
-    defaultCatId: 'opus' as CatId,
+    defaultUserId: getOwnerUserId(),
+    defaultCatId: getDefaultCatId(),
     redis: redisClient ?? undefined,
     log: app.log,
     agentRegistry,

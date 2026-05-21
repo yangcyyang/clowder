@@ -33,6 +33,7 @@ export interface HubCatEditorFormState {
   teamStrengths: string;
   caution: string;
   strengths: string;
+  assetCardPath?: string;
   clientId: ClientId;
   accountRef: string;
   defaultModel: string;
@@ -350,6 +351,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     teamStrengths: cat?.teamStrengths ?? createDraft?.templateTeamStrengths ?? '',
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
+    assetCardPath: cat?.assetCard?.path ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',

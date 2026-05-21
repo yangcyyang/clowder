@@ -126,7 +126,11 @@ export function ChatInputMenus({
                 <button
                   key={opt.id}
                   ref={i === selectedIdx ? selectedRef : undefined}
-                  className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-cafe-surface-elevated' : 'hover:bg-cafe-surface-elevated'}`}
+                  className={`w-full border-l-2 py-3 pr-4 pl-[14px] text-left flex items-center gap-3 transition-colors ${
+                    i === selectedIdx
+                      ? 'border-[var(--cafe-accent)] bg-[var(--console-active-bg)]'
+                      : 'border-transparent hover:bg-[var(--console-hover-bg)]'
+                  }`}
                   onMouseEnter={() => onSelectIdx(i)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -149,7 +153,12 @@ export function ChatInputMenus({
                         style={{ backgroundColor: isWorking ? '#eab308' : (opt.color ?? 'var(--console-status-connected)') }}
                         aria-label={isWorking ? '工作中' : '在线'}
                       />
-                      <span className="truncate text-sm font-semibold" style={{ color: opt.color }}>
+                      <span
+                        className={`truncate text-sm font-semibold ${
+                          i === selectedIdx ? 'text-[var(--cafe-accent)]' : ''
+                        }`}
+                        style={i === selectedIdx ? undefined : { color: opt.color }}
+                      >
                         {opt.label}
                       </span>
                     </div>

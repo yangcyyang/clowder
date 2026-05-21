@@ -274,6 +274,33 @@ describe('useSendMessage thread source', () => {
     expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-queued');
   });
 
+  it('reconciles duplicate send response to the original server message id', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'duplicate', userMessageId: 'msg-server-original' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const optimisticUserCall = mockAddMessage.mock.calls[0];
+    const optimisticMessage = optimisticUserCall?.[0] as { id: string };
+    expect(optimisticMessage).toMatchObject({ type: 'user' });
+    expect(mockReplaceThreadMessageId).toHaveBeenCalledWith(
+      'thread-route',
+      optimisticMessage.id,
+      'msg-server-original',
+    );
+    expect(mockRemoveThreadMessage).not.toHaveBeenCalledWith('thread-route', optimisticMessage.id);
+  });
+
   it('uses a valid UUIDv4-shaped idempotencyKey when crypto.randomUUID is unavailable', async () => {
     const originalCrypto = globalThis.crypto;
     Object.defineProperty(globalThis, 'crypto', {

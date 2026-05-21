@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { cleanupStreamingOnFailure, deliverOutboundFromWeb } from '../dist/routes/messages.js';
+import {
+  cleanupStreamingOnFailure,
+  deliverOutboundFromWeb,
+  deliverWebUserMessageToConnector,
+} from '../dist/routes/messages.js';
 
 function noopLog() {
   const noop = () => {};
@@ -401,5 +405,49 @@ describe('cleanupStreamingOnFailure timeout alignment (P1-B regression)', () => 
 
     assert.equal(calls.end.length, 1, 'onStreamEnd should be called after timeout');
     assert.equal(calls.cleanup.length, 1, 'cleanupPlaceholders should be called after timeout');
+  });
+});
+
+describe('deliverWebUserMessageToConnector (task #142)', () => {
+  it('delivers Web human messages to connector-bound threads through outbound hook', async () => {
+    const calls = [];
+    const opts = makeOpts({
+      outboundHook: {
+        async deliver(threadId, content, catId, richBlocks, threadMeta, origin, triggerMessageId) {
+          calls.push({ threadId, content, catId, richBlocks, threadMeta, origin, triggerMessageId });
+        },
+      },
+      threadStore: {
+        get(id) {
+          return Promise.resolve({ id, title: '微信 DM' });
+        },
+      },
+    });
+
+    await deliverWebUserMessageToConnector('thread-weixin', '人工回复', 'msg-human-1', opts, noopLog());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].threadId, 'thread-weixin');
+    assert.equal(calls[0].content, '人工回复');
+    assert.equal(calls[0].catId, undefined);
+    assert.equal(calls[0].triggerMessageId, 'msg-human-1');
+    assert.equal(calls[0].threadMeta.threadTitle, '微信 DM');
+  });
+
+  it('does not deliver whisper messages to external IM', async () => {
+    const calls = [];
+    const opts = makeOpts({
+      outboundHook: {
+        async deliver() {
+          calls.push('deliver');
+        },
+      },
+    });
+
+    await deliverWebUserMessageToConnector('thread-weixin', '悄悄话', 'msg-human-2', opts, noopLog(), {
+      visibility: 'whisper',
+    });
+
+    assert.equal(calls.length, 0);
   });
 });

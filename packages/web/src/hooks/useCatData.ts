@@ -20,6 +20,12 @@ export interface CatData {
   mentionPatterns: string[];
   breedId?: string;
   accountRef?: string;
+  assetCard?: {
+    path: string;
+    version?: string;
+    source?: string;
+    loadedAt?: string;
+  };
   /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
   clientId: string;
   defaultModel: string;
@@ -127,6 +133,7 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       color: cat.color ?? { primary: '#000000', secondary: '#ffffff' },
       mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
       accountRef: cat.accountRef,
+      assetCard: cat.assetCard,
       clientId: cat.clientId ?? 'openai',
       defaultModel: cat.defaultModel ?? '',
       cli: cat.cli,

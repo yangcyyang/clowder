@@ -164,14 +164,15 @@
   --clowder-type-section: 12px;
   --clowder-leading-tight: 1.4;
   --clowder-leading-body: 1.6;
-  --clowder-sidebar-active-bg: #f5f0e8;
-  --clowder-sidebar-hover-bg: #f5f0e8;
-  --clowder-sidebar-bg: var(--console-panel-bg);
-  --clowder-sidebar-border: var(--console-border-soft);
-  --clowder-sidebar-title: var(--cafe-text);
-  --clowder-sidebar-row-text: var(--cafe-text-secondary);
-  --clowder-sidebar-row-active-text: var(--cafe-text);
-  --clowder-sidebar-row-muted: var(--cafe-text-muted);
+  --clowder-sidebar-active-bg: #f5eee6;
+  --clowder-sidebar-active-border: var(--cafe-accent);
+  --clowder-sidebar-hover-bg: #f7f1ea;
+  --clowder-sidebar-bg: #fbf6f0;
+  --clowder-sidebar-border: #e8dacf;
+  --clowder-sidebar-title: #241f1b;
+  --clowder-sidebar-row-text: #4b4038;
+  --clowder-sidebar-row-active-text: #241f1b;
+  --clowder-sidebar-row-muted: #7d7168;
   --clowder-section-tracking: 0.08em;
   --clowder-message-hover-ring: rgba(0, 0, 0, 0.1);
   --clowder-input-bg: var(--console-field-bg);
@@ -183,8 +184,8 @@
   --clowder-section-title-bg: rgba(204, 103, 67, 0.06);
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
-  --clowder-muted-soft: #a0968e;
-  --clowder-avatar-quiet-ring: #ded3c8;
+  --clowder-muted-soft: #9a918a;
+  --clowder-avatar-quiet-ring: #d8cabe;
 
   --guide-overlay-bg: rgba(12, 16, 24, 0.62);
   --guide-cutout-ring: #d4853a;
@@ -261,6 +262,7 @@
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
   --clowder-sidebar-active-bg: #611f69;
+  --clowder-sidebar-active-border: #611f69;
   --clowder-sidebar-hover-bg: rgba(255, 255, 255, 0.08);
   --clowder-muted-soft: #d9bdde;
   --clowder-avatar-quiet-ring: #7c4082;
@@ -308,6 +310,7 @@
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
   --clowder-sidebar-active-bg: #f4f4f4;
+  --clowder-sidebar-active-border: #3e6ae1;
   --clowder-sidebar-hover-bg: #f4f4f4;
   --clowder-muted-soft: #5c5e62;
   --clowder-avatar-quiet-ring: #d0d1d2;
@@ -446,14 +449,15 @@
 }
 
 [data-theme="dark"] {
-  --clowder-sidebar-active-bg: color-mix(in srgb, var(--cafe-accent) 22%, var(--cafe-surface-elevated) 78%);
-  --clowder-sidebar-hover-bg: color-mix(in srgb, var(--cafe-accent) 10%, var(--cafe-surface-elevated) 90%);
-  --clowder-sidebar-bg: var(--console-panel-bg);
-  --clowder-sidebar-border: var(--console-border-soft);
-  --clowder-sidebar-title: var(--cafe-text);
-  --clowder-sidebar-row-text: var(--cafe-text-secondary);
-  --clowder-sidebar-row-active-text: var(--cafe-text);
-  --clowder-sidebar-row-muted: var(--cafe-text-muted);
+  --clowder-sidebar-active-bg: #1a2030;
+  --clowder-sidebar-active-border: #36c5f0;
+  --clowder-sidebar-hover-bg: rgba(255, 255, 255, 0.08);
+  --clowder-sidebar-bg: #090c12;
+  --clowder-sidebar-border: rgba(255, 255, 255, 0.12);
+  --clowder-sidebar-title: #ffffff;
+  --clowder-sidebar-row-text: #d1d2d3;
+  --clowder-sidebar-row-active-text: #ffffff;
+  --clowder-sidebar-row-muted: #a0a4ad;
   --clowder-message-hover-ring: rgba(255, 255, 255, 0.22);
   --clowder-markdown-chip-bg: color-mix(in srgb, var(--cafe-accent) 18%, var(--cafe-surface-elevated) 82%);
   --clowder-markdown-chip-border: color-mix(in srgb, var(--cafe-accent) 34%, var(--cafe-border) 66%);
@@ -505,6 +509,7 @@
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
   --clowder-sidebar-active-bg: #611f69;
+  --clowder-sidebar-active-border: #611f69;
   --clowder-sidebar-hover-bg: rgba(255, 255, 255, 0.08);
   --clowder-muted-soft: #d9bdde;
   --clowder-avatar-quiet-ring: #7c4082;
@@ -550,6 +555,7 @@
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
   --clowder-sidebar-active-bg: #171a20;
+  --clowder-sidebar-active-border: #5c86ff;
   --clowder-sidebar-hover-bg: #171a20;
   --clowder-muted-soft: #8e8e8e;
   --clowder-avatar-quiet-ring: #2b2f36;
