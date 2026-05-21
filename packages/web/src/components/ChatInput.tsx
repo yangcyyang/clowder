@@ -860,31 +860,8 @@ export function ChatInput({
           </svg>
         </button>
 
-        <div className="hidden items-center gap-1 md:flex">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="上传图片"
-            title="上传图片"
-          >
-            <ImageUploadIcon className="h-[18px] w-[18px]" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => attachmentInputRef.current?.click()}
-            disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="上传文件"
-            title="上传文件"
-          >
-            <AttachIcon className="h-[18px] w-[18px]" />
-          </button>
-        </div>
-
         <div
-          className={`group relative flex min-h-[var(--slock-input-height-min)] flex-1 items-start rounded-[var(--slock-radius-lg)] border bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 ${
+          className={`group relative flex min-h-[var(--slock-input-height-min)] flex-1 flex-col rounded-[var(--slock-radius-lg)] border bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 ${
             whisperMode
               ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus-within:ring-conn-amber-text'
               : 'border-[var(--console-input-stroke)] focus-within:ring-[var(--console-input-stroke)]'
@@ -918,6 +895,28 @@ export function ChatInput({
             rows={3}
             disabled={disabled}
           />
+          <div className="hidden items-center gap-1 px-2 pb-2 md:flex">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="上传图片"
+              title="上传图片"
+            >
+              <ImageUploadIcon className="h-[18px] w-[18px]" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => attachmentInputRef.current?.click()}
+              disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="上传文件"
+              title="上传文件"
+            >
+              <AttachIcon className="h-[18px] w-[18px]" />
+            </button>
+          </div>
           {ghostSuggestion && !pathCompletion.isOpen && (
             <div
               data-testid="ghost-suggestion"
