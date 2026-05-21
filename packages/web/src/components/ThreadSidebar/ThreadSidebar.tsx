@@ -481,7 +481,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         return aTitle.localeCompare(bTitle, 'zh-Hans-CN');
       });
     }
-    return flatChannelThreads;
+    return [...flatChannelThreads].sort((a, b) => {
+      const timeDelta = (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0);
+      if (timeDelta !== 0) return timeDelta;
+      return (a.title ?? '未命名对话').localeCompare(b.title ?? '未命名对话', 'zh-Hans-CN');
+    });
   }, [flatChannelThreads, sortOrder]);
 
   // Close sort menu when clicking outside
