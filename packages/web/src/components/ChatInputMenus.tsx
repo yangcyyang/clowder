@@ -155,16 +155,26 @@ export function ChatInputMenus({
                       />
                       <span
                         className={`truncate text-sm font-semibold ${
-                          i === selectedIdx ? 'text-[var(--cafe-accent)]' : ''
+                          i === selectedIdx ? 'text-[var(--console-active-fg)]' : ''
                         }`}
                         style={i === selectedIdx ? undefined : { color: opt.color }}
                       >
                         {opt.label}
                       </span>
                     </div>
-                    <div className="truncate text-xs text-cafe-muted">{opt.desc}</div>
+                    <div
+                      className={`truncate text-xs ${
+                        i === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                      }`}
+                    >
+                      {opt.desc}
+                    </div>
                   </div>
-                  <span className="ml-2 flex-shrink-0 text-right font-mono text-[11px] text-cafe-muted">
+                  <span
+                    className={`ml-2 flex-shrink-0 text-right font-mono text-[11px] ${
+                      i === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                    }`}
+                  >
                     {opt.insert.trim()}
                   </span>
                 </button>

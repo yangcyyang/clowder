@@ -46,12 +46,18 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
             <span className="min-w-0 flex-1">
               <span
                 className={`block truncate text-sm font-semibold ${
-                  idx === selectedIdx ? 'text-[var(--cafe-accent)]' : 'text-cafe-text'
+                  idx === selectedIdx ? 'text-[var(--console-active-fg)]' : 'text-cafe-text'
                 }`}
               >
                 {option.label}
               </span>
-              <span className="block truncate text-xs leading-[1.45] text-cafe-muted">{option.id}</span>
+              <span
+                className={`block truncate text-xs leading-[1.45] ${
+                  idx === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                }`}
+              >
+                {option.id}
+              </span>
             </span>
           </button>
         ))}

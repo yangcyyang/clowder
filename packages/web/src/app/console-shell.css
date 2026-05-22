@@ -11,6 +11,8 @@
   --console-shadow-soft: 0 8px 24px rgba(43, 37, 32, 0.03);
   --console-field-bg: #f0e6dc;
   --console-active-bg: #ead8cd;
+  --console-active-fg: var(--cafe-text);
+  --console-active-muted: var(--cafe-text-secondary);
   --console-hover-bg: #f0e6dc;
   --console-rail-bg: #1a1d21;
   --console-rail-item: transparent;
@@ -111,6 +113,8 @@
   --console-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.24);
   --console-field-bg: #111316;
   --console-active-bg: rgba(54, 197, 240, 0.16);
+  --console-active-fg: var(--cafe-text);
+  --console-active-muted: var(--cafe-text-secondary);
   --console-hover-bg: rgba(255, 255, 255, 0.08);
   --console-rail-bg: #090c12;
   --console-rail-item: #131720;
@@ -246,6 +250,8 @@
   --console-shadow-soft: 4px 4px 0 #000000;
   --console-field-bg: #ffffff;
   --console-active-bg: #f46fa7;
+  --console-active-fg: #000000;
+  --console-active-muted: #2f2f2f;
   --console-hover-bg: #fff0a6;
   --console-rail-bg: #ffd83d;
   --console-rail-item: #ffffff;
@@ -333,6 +339,8 @@
   --console-shadow-soft: 4px 4px 0 #000000;
   --console-field-bg: #ffffff;
   --console-active-bg: #f46fa7;
+  --console-active-fg: #000000;
+  --console-active-muted: #2f2f2f;
   --console-hover-bg: #fff0a6;
   --console-rail-bg: #ffd83d;
   --console-rail-item: #ffffff;
