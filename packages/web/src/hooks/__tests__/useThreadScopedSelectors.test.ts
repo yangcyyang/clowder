@@ -60,6 +60,70 @@ describe('F173 Phase C — selectThreadMessages', () => {
     expect(result).toBe(state.messages);
   });
 
+  it('filters branch-thread messages out of the active main timeline', () => {
+    const state = makeState({
+      currentThreadId: 'main-thread',
+      messages: [
+        { id: 'main-1', threadId: 'main-thread', type: 'user', content: 'main', timestamp: 1 },
+        { id: 'branch-1', threadId: 'branch-thread', type: 'user', content: 'reply', timestamp: 2 },
+        { id: 'legacy-1', type: 'assistant', catId: 'opus', content: 'legacy', timestamp: 3 },
+      ],
+    });
+
+    const result = selectThreadMessages(state, 'main-thread');
+
+    expect(result.map((m) => m.id)).toEqual(['main-1', 'legacy-1']);
+    expect(result).not.toBe(state.messages);
+  });
+
+  it('keeps branch-thread messages visible in their own thread panel', () => {
+    const branchMessages = [
+      { id: 'branch-1', threadId: 'branch-thread', type: 'user' as const, content: 'reply', timestamp: 1 },
+      {
+        id: 'branch-2',
+        threadId: 'branch-thread',
+        type: 'assistant' as const,
+        catId: 'opus',
+        content: 'answer',
+        timestamp: 2,
+      },
+    ];
+    const state = makeState({
+      currentThreadId: 'main-thread',
+      messages: [{ id: 'main-1', threadId: 'main-thread', type: 'user', content: 'main', timestamp: 1 }],
+      threadStates: {
+        'branch-thread': {
+          messages: branchMessages,
+          isLoading: false,
+          isLoadingHistory: false,
+          hasMore: true,
+          hasActiveInvocation: false,
+          activeInvocations: {},
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catInvocations: {},
+          currentGame: null,
+          unreadCount: 0,
+          hasUserMention: false,
+          lastActivity: 0,
+          queue: [],
+          queuePaused: false,
+          queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
+        },
+      },
+    });
+
+    const result = selectThreadMessages(state, 'branch-thread');
+
+    expect(result.map((m) => m.id)).toEqual(['branch-1', 'branch-2']);
+    expect(result).toBe(branchMessages);
+  });
+
   it('returns threadStates messages when threadId !== currentThreadId', () => {
     const otherMessages = [{ id: 'b1', type: 'user' as const, content: 'b', timestamp: 3 }];
     const state = makeState({

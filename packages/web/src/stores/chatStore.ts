@@ -374,6 +374,44 @@ function forwardStoreInvariantViolationsStrict(messages: ChatMessage[], threadId
   }
 }
 
+function stampMessageThreadId(message: ChatMessage, fallbackThreadId: string | null | undefined): ChatMessage {
+  if (message.threadId || !fallbackThreadId) return message;
+  return { ...message, threadId: fallbackThreadId };
+}
+
+function forceMessageThreadId(message: ChatMessage, threadId: string): ChatMessage {
+  return message.threadId === threadId ? message : { ...message, threadId };
+}
+
+function stampMessagesThreadId(messages: ChatMessage[], threadId: string | null | undefined): ChatMessage[] {
+  if (!threadId) return messages;
+  let next: ChatMessage[] | null = null;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (message.threadId) {
+      next?.push(message);
+      continue;
+    }
+    if (!next) next = messages.slice(0, i);
+    next.push({ ...message, threadId });
+  }
+  return next ?? messages;
+}
+
+function forceMessagesThreadId(messages: ChatMessage[], threadId: string): ChatMessage[] {
+  let next: ChatMessage[] | null = null;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (message.threadId === threadId) {
+      next?.push(message);
+      continue;
+    }
+    if (!next) next = messages.slice(0, i);
+    next.push({ ...message, threadId });
+  }
+  return next ?? messages;
+}
+
 function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: ChatMessage[]) {
   const retainedBlobUrls = collectBlobUrls(nextMessages);
   for (const msg of previousMessages) {
@@ -940,6 +978,7 @@ export interface ChatState {
       extra?: Record<string, unknown>;
       origin?: 'stream' | 'callback' | 'briefing';
       editedAt?: number;
+      threadId?: string;
       replyTo?: string;
       replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
       mentionsUser?: boolean;
@@ -1151,6 +1190,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (existingIds.has(sm.id)) continue;
             const incoming: ChatMessage = {
               id: sm.id,
+              threadId: sm.threadId ?? threadId,
               // #607: cat-originated messages (A2A triggers) have catId set
               type: sm.catId ? 'assistant' : 'user',
               content: sm.content,
@@ -1355,12 +1395,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addMessage: (msg) =>
     set((state) => {
-      if (state.messages.some((m) => m.id === msg.id)) return state;
+      const scopedMsg = stampMessageThreadId(msg, state.currentThreadId);
+      if (state.messages.some((m) => m.id === scopedMsg.id)) return state;
 
       // TD112: Store-level dedup — merge if semantic duplicate exists
-      const dupIdx = findAssistantDuplicate(state.messages, msg);
+      const dupIdx = findAssistantDuplicate(state.messages, scopedMsg);
       if (dupIdx >= 0) {
-        const merged = mergeAssistantBubble(state.messages[dupIdx]!, msg);
+        const merged = mergeAssistantBubble(state.messages[dupIdx]!, scopedMsg);
         const messages = [...state.messages];
         messages[dupIdx] = merged;
         recordDebugEvent({
@@ -1369,16 +1410,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
           action: 'merge',
           reason: 'td112_store_dedup',
-          catId: msg.catId,
+          catId: scopedMsg.catId,
           messageId: state.messages[dupIdx]!.id,
-          invocationId: getBubbleInvocationId(msg),
-          origin: msg.origin,
+          invocationId: getBubbleInvocationId(scopedMsg),
+          origin: scopedMsg.origin,
         });
         // P2 fix: propagate mention notification even on merge
-        if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
-          fireOwnerMentionNotification(msg);
+        if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+          fireOwnerMentionNotification(scopedMsg);
         }
-        const lastActivity = messageActivityTime(msg);
+        const lastActivity = messageActivityTime(scopedMsg);
         return {
           messages,
           threads: bumpThreadsLastActiveAt(state.threads, state.currentThreadId, lastActivity),
@@ -1386,15 +1427,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       }
 
-      const messages = insertOrAppendMessage(state.messages, msg);
+      const messages = insertOrAppendMessage(state.messages, scopedMsg);
       if (messages.length > MAX_BLOB_MESSAGES) {
         revokeBlobUrls(messages.slice(0, messages.length - MAX_BLOB_MESSAGES));
       }
       // F067: Notify on active thread when user is not focused
-      if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
-        fireOwnerMentionNotification(msg);
+      if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+        fireOwnerMentionNotification(scopedMsg);
       }
-      const lastActivity = messageActivityTime(msg);
+      const lastActivity = messageActivityTime(scopedMsg);
       return {
         messages,
         threads: bumpThreadsLastActiveAt(state.threads, state.currentThreadId, lastActivity),
@@ -1410,50 +1451,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
   prependHistory: (msgs, hasMore) =>
     set((state) => {
       const existingIds = new Set(state.messages.map((m) => m.id));
-      const newMsgs = msgs.filter((m) => !existingIds.has(m.id));
+      const newMsgs = stampMessagesThreadId(
+        msgs.filter((m) => !existingIds.has(m.id)),
+        state.currentThreadId,
+      );
       return { messages: [...newMsgs, ...state.messages], hasMore };
     }),
 
   replaceMessages: (msgs, hasMore) => {
+    const scopedMsgs = stampMessagesThreadId(msgs, get().currentThreadId);
     // F183 Phase E AC-E2 (砚砚 R2 P1 fix): caller-driven writer must forward
     // post-mutation invariant violations to the diagnostic layer so strict
     // mode (BUBBLE_INVARIANT_STRICT=1 / NEXT_PUBLIC_*=1 / localStorage) can
     // throw on bypass-of-reducer mutations. No-op when strict is off — keeps
     // production hot path free of the O(n) scan.
-    forwardStoreInvariantViolationsStrict(msgs, get().currentThreadId);
+    forwardStoreInvariantViolationsStrict(scopedMsgs, get().currentThreadId);
     set((state) => {
-      revokeRemovedBlobUrls(state.messages, msgs);
-      return { messages: msgs, hasMore };
+      revokeRemovedBlobUrls(state.messages, scopedMsgs);
+      return { messages: scopedMsgs, hasMore };
     });
   },
 
   // F183 Phase B1.7 — see interface comment.
   replaceThreadMessages: (threadId, msgs, hasMore) => {
+    const scopedMsgs = forceMessagesThreadId(msgs, threadId);
     // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as replaceMessages
-    forwardStoreInvariantViolationsStrict(msgs, threadId);
+    forwardStoreInvariantViolationsStrict(scopedMsgs, threadId);
     return set((state) => {
       if (threadId === state.currentThreadId) {
-        revokeRemovedBlobUrls(state.messages, msgs);
+        revokeRemovedBlobUrls(state.messages, scopedMsgs);
         const nextHasMore = hasMore ?? state.hasMore;
         return {
-          messages: msgs,
+          messages: scopedMsgs,
           hasMore: nextHasMore,
-          ...mirrorActiveFlat(state, { messages: msgs, hasMore: nextHasMore }),
+          ...mirrorActiveFlat(state, { messages: scopedMsgs, hasMore: nextHasMore }),
         };
       }
       const baseThreadState = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      revokeRemovedBlobUrls(baseThreadState.messages, msgs);
+      revokeRemovedBlobUrls(baseThreadState.messages, scopedMsgs);
       const nextHasMore = hasMore ?? baseThreadState.hasMore;
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...baseThreadState, messages: msgs, hasMore: nextHasMore },
+          [threadId]: { ...baseThreadState, messages: scopedMsgs, hasMore: nextHasMore },
         },
       };
     });
   },
 
   hydrateThread: (threadId, msgs, hasMore) => {
+    const scopedMsgs = forceMessagesThreadId(msgs, threadId);
     // F173 Phase C Task 5+6+7 — atomic server-authoritative hydration that
     // honors KD-2 (threadStates is the writer source, flat is compat mirror).
     //
@@ -1466,14 +1513,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     //
     // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as the other
     // caller-driven writers. Runs only when strict mode is on.
-    forwardStoreInvariantViolationsStrict(msgs, threadId);
+    forwardStoreInvariantViolationsStrict(scopedMsgs, threadId);
     set((state) => {
       if (threadId === state.currentThreadId) {
-        revokeRemovedBlobUrls(state.messages, msgs);
+        revokeRemovedBlobUrls(state.messages, scopedMsgs);
         return {
-          messages: msgs,
+          messages: scopedMsgs,
           hasMore,
-          ...mirrorActiveFlat(state, { messages: msgs, hasMore }),
+          ...mirrorActiveFlat(state, { messages: scopedMsgs, hasMore }),
         };
       }
       // background hydrate — confined to threadStates, flat untouched.
@@ -1486,11 +1533,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Cloud Codex P2 (PR #1413): revoke blob: URLs dropped by hydration
       // to avoid leaking object URLs (locally uploaded images stay alive
       // until reload otherwise). No-op when prev messages is [].
-      revokeRemovedBlobUrls(baseThreadState.messages, msgs);
+      revokeRemovedBlobUrls(baseThreadState.messages, scopedMsgs);
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...baseThreadState, messages: msgs, hasMore },
+          [threadId]: { ...baseThreadState, messages: scopedMsgs, hasMore },
         },
       };
     });
@@ -1498,7 +1545,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // current — avoids race against a thread switch that already cleared
     // the outgoing thread's IDB snapshot.
     if (get().currentThreadId === threadId) {
-      void saveMessagesSnapshot(threadId, msgs, hasMore).catch(() => {});
+      void saveMessagesSnapshot(threadId, scopedMsgs, hasMore).catch(() => {});
     }
   },
 
@@ -1986,14 +2033,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   /** Add a message to a specific thread (for background thread socket updates) */
   addMessageToThread: (threadId, msg) =>
     set((state) => {
+      const scopedMsg = forceMessageThreadId(msg, threadId);
       // Active thread — delegate to flat state
       if (threadId === state.currentThreadId) {
-        if (state.messages.some((m) => m.id === msg.id)) return state;
+        if (state.messages.some((m) => m.id === scopedMsg.id)) return state;
 
         // TD112: Store-level dedup for active thread
-        const dupIdx = findAssistantDuplicate(state.messages, msg);
+        const dupIdx = findAssistantDuplicate(state.messages, scopedMsg);
         if (dupIdx >= 0) {
-          const merged = mergeAssistantBubble(state.messages[dupIdx]!, msg);
+          const merged = mergeAssistantBubble(state.messages[dupIdx]!, scopedMsg);
           const messages = [...state.messages];
           messages[dupIdx] = merged;
           recordDebugEvent({
@@ -2002,16 +2050,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
             timestamp: Date.now(),
             action: 'merge',
             reason: 'td112_store_dedup_active',
-            catId: msg.catId,
+            catId: scopedMsg.catId,
             messageId: state.messages[dupIdx]!.id,
-            invocationId: getBubbleInvocationId(msg),
-            origin: msg.origin,
+            invocationId: getBubbleInvocationId(scopedMsg),
+            origin: scopedMsg.origin,
           });
           // P2 fix: propagate mention notification even on merge
-          if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
-            fireOwnerMentionNotification(msg);
+          if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+            fireOwnerMentionNotification(scopedMsg);
           }
-          const lastActivity = messageActivityTime(msg);
+          const lastActivity = messageActivityTime(scopedMsg);
           return {
             messages,
             threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
@@ -2019,17 +2067,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
         }
 
-        const messages = insertOrAppendMessage(state.messages, msg);
+        const messages = insertOrAppendMessage(state.messages, scopedMsg);
         if (messages.length > MAX_BLOB_MESSAGES) {
           revokeBlobUrls(messages.slice(0, messages.length - MAX_BLOB_MESSAGES));
         }
         // F067: Notify even on active thread when tab is not focused
         // document.hidden is false when switching macOS apps (only true for tab switch/minimize)
         // document.hasFocus() correctly returns false when another app is in foreground
-        if (msg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
-          fireOwnerMentionNotification(msg);
+        if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+          fireOwnerMentionNotification(scopedMsg);
         }
-        const lastActivity = messageActivityTime(msg);
+        const lastActivity = messageActivityTime(scopedMsg);
         return {
           messages,
           threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
@@ -2039,12 +2087,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Background thread — update map + increment unread
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      if (existing.messages.some((m) => m.id === msg.id)) return state;
+      if (existing.messages.some((m) => m.id === scopedMsg.id)) return state;
 
       // TD112: Store-level dedup for background thread
-      const bgDupIdx = findAssistantDuplicate(existing.messages, msg);
+      const bgDupIdx = findAssistantDuplicate(existing.messages, scopedMsg);
       if (bgDupIdx >= 0) {
-        const merged = mergeAssistantBubble(existing.messages[bgDupIdx]!, msg);
+        const merged = mergeAssistantBubble(existing.messages[bgDupIdx]!, scopedMsg);
         const updatedMessages = [...existing.messages];
         updatedMessages[bgDupIdx] = merged;
         recordDebugEvent({
@@ -2053,14 +2101,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
           action: 'merge',
           reason: 'td112_store_dedup_background',
-          catId: msg.catId,
+          catId: scopedMsg.catId,
           messageId: existing.messages[bgDupIdx]!.id,
-          invocationId: getBubbleInvocationId(msg),
-          origin: msg.origin,
+          invocationId: getBubbleInvocationId(scopedMsg),
+          origin: scopedMsg.origin,
         });
         // Cloud review P1: Propagate mention state even on merge
-        if (msg.mentionsUser) fireOwnerMentionNotification(msg);
-        const lastActivity = messageActivityTime(msg);
+        if (scopedMsg.mentionsUser) fireOwnerMentionNotification(scopedMsg);
+        const lastActivity = messageActivityTime(scopedMsg);
         return {
           threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
           threadStates: {
@@ -2068,7 +2116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             [threadId]: {
               ...existing,
               messages: updatedMessages,
-              hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
+              hasUserMention: existing.hasUserMention || !!scopedMsg.mentionsUser,
               lastActivity,
             },
           },
@@ -2076,18 +2124,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // F067 Phase 2: Fire macOS notification for @co-creator mention
-      if (msg.mentionsUser) fireOwnerMentionNotification(msg);
+      if (scopedMsg.mentionsUser) fireOwnerMentionNotification(scopedMsg);
 
-      const lastActivity = messageActivityTime(msg);
+      const lastActivity = messageActivityTime(scopedMsg);
       return {
         threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
         threadStates: {
           ...state.threadStates,
           [threadId]: {
             ...existing,
-            messages: insertOrAppendMessage(existing.messages, msg),
+            messages: insertOrAppendMessage(existing.messages, scopedMsg),
             unreadCount: existing.unreadCount + 1,
-            hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
+            hasUserMention: existing.hasUserMention || !!scopedMsg.mentionsUser,
             lastActivity,
           },
         },

@@ -47,15 +47,34 @@ const DEFAULT_LIVENESS: ThreadLiveness = {
   targetCats: EMPTY_TARGET_CATS as string[],
 };
 
+function messageBelongsToThread(message: ChatMessage, threadId: string): boolean {
+  return !message.threadId || message.threadId === threadId;
+}
+
+export function filterMessagesForThread(messages: ChatMessage[], threadId: string): ChatMessage[] {
+  let filtered: ChatMessage[] | null = null;
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    if (messageBelongsToThread(message, threadId)) {
+      filtered?.push(message);
+      continue;
+    }
+    if (!filtered) filtered = messages.slice(0, i);
+  }
+  return filtered ?? messages;
+}
+
 /** Pure selector — returns the messages array for a thread, preferring the
  *  flat slice when threadId is current (to keep reference equality with the
- *  source-of-truth and avoid cross-thread dup). */
+ *  source-of-truth and avoid cross-thread dup). Branch-thread replies can
+ *  arrive in the flat list during optimistic/socket races; threadId-marked
+ *  messages are filtered so the main channel shows only its own timeline. */
 export function selectThreadMessages(state: ChatState, threadId: string | null): ChatMessage[] {
   if (!threadId) return EMPTY_MESSAGES as ChatMessage[];
   if (threadId === state.currentThreadId || !state.currentThreadId) {
-    return state.messages ?? (EMPTY_MESSAGES as ChatMessage[]);
+    return filterMessagesForThread(state.messages ?? (EMPTY_MESSAGES as ChatMessage[]), threadId);
   }
-  return state.threadStates?.[threadId]?.messages ?? (EMPTY_MESSAGES as ChatMessage[]);
+  return filterMessagesForThread(state.threadStates?.[threadId]?.messages ?? (EMPTY_MESSAGES as ChatMessage[]), threadId);
 }
 
 /** Pure selector — returns liveness fields for a thread. Defensively

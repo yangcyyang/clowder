@@ -125,6 +125,7 @@ describe('chatStore multi-thread state', () => {
     it('adds to flat state when thread is active', () => {
       useChatStore.getState().addMessageToThread('thread-a', makeMsg('m1'));
       expect(useChatStore.getState().messages).toHaveLength(1);
+      expect(useChatStore.getState().messages[0]?.threadId).toBe('thread-a');
     });
 
     it('bumps active thread recency when a new message arrives', () => {
@@ -167,6 +168,7 @@ describe('chatStore multi-thread state', () => {
       const ts = useChatStore.getState().threadStates['thread-b'];
       expect(ts).toBeDefined();
       expect(ts?.messages).toHaveLength(1);
+      expect(ts?.messages[0]?.threadId).toBe('thread-b');
       expect(ts?.unreadCount).toBe(1);
     });
 

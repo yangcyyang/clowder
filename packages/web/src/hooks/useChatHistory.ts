@@ -237,6 +237,7 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...((preferred.replyPreview ?? fallback.replyPreview)
       ? { replyPreview: preferred.replyPreview ?? fallback.replyPreview }
       : {}),
+    ...((preferred.threadId ?? fallback.threadId) ? { threadId: preferred.threadId ?? fallback.threadId } : {}),
     ...(preferred.mentionsUser || fallback.mentionsUser ? { mentionsUser: true } : {}),
     ...(preferred.isStreaming !== undefined ? { isStreaming: preferred.isStreaming } : {}),
   };
@@ -491,6 +492,7 @@ export function useChatHistory(threadId: string) {
         const historyMsgs = (data.messages ?? []).map(
           (m: {
             id: string;
+            threadId?: string;
             type: string;
             catId?: string;
             content: string;
@@ -522,6 +524,7 @@ export function useChatHistory(threadId: string) {
           }) =>
             ({
               id: m.id,
+              ...(m.threadId ? { threadId: m.threadId } : {}),
               type: (m.type === 'system'
                 ? 'system'
                 : m.summary

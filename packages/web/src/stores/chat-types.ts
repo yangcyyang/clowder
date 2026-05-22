@@ -234,6 +234,12 @@ export interface ConnectorSourceData {
 
 export interface ChatMessage {
   id: string;
+  /**
+   * Canonical thread ownership for read-side filtering. When a branch-thread
+   * message is accidentally present in the active flat list, this marker lets
+   * the main channel hide it while the Thread panel can still render it.
+   */
+  threadId?: string;
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
   /** Visual variant for system messages */
   variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
