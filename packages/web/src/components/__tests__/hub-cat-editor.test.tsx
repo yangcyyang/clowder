@@ -381,6 +381,16 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'codex-sponsor', 'change');
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
+    const effortSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="思考等级"]');
+    expect(Array.from(effortSelect.options).map((option) => option.textContent)).toEqual([
+      '默认（按 Client）',
+      'low — 快速思考',
+      'medium — 标准思考',
+      'high — 深度思考',
+      'xhigh — 超深思考',
+    ]);
+    await changeField(effortSelect, 'high', 'change');
+    expect(container.textContent).not.toContain('CLI Effort');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
@@ -396,6 +406,7 @@ describe('HubCatEditor', () => {
     expect(payload.catId).toMatch(/^cat-[a-z0-9]+$/);
     expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
+    expect(payload.cli).toEqual({ effort: 'high' });
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 

@@ -6,7 +6,6 @@ import {
   CODEX_AUTH_MODE_OPTIONS,
   CODEX_SANDBOX_OPTIONS,
   type CodexRuntimeSettings,
-  getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   SESSION_CHAIN_OPTIONS,
   SESSION_STRATEGY_OPTIONS,
@@ -51,7 +50,6 @@ export function AdvancedRuntimeSection({
     approvalPolicy: 'on-request' as const,
     authMode: 'oauth' as const,
   };
-  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
   const sessionChainEnabled = form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true);
 
   return (
@@ -104,18 +102,6 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ sessionChain: value as HubCatEditorFormState['sessionChain'] })}
           tone="success"
         />
-        {cliEffortOptions ? (
-          <SelectField
-            label="CLI Effort"
-            value={form.cliEffort}
-            options={[
-              { value: '', label: '默认（按 Client）' },
-              ...cliEffortOptions.map((value) => ({ value, label: value })),
-            ]}
-            onChange={(value) => onChange({ cliEffort: value as HubCatEditorFormState['cliEffort'] })}
-            tone="success"
-          />
-        ) : null}
         {form.clientId === 'openai' || form.clientId === 'opencode' ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-cafe">额外 CLI 参数</p>
@@ -130,7 +116,7 @@ export function AdvancedRuntimeSection({
               tone="green"
             />
             <p className="text-[11px] leading-4 text-cafe-muted">
-              每条直接追加到 CLI 命令，不做隐式转换。`CLI Effort` 请优先用上面的结构化字段。参考：
+              每条直接追加到 CLI 命令，不做隐式转换。思考等级请优先用「认证与模型」里的结构化字段。参考：
               {form.clientId === 'opencode' ? (
                 <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">
                   OpenCode CLI

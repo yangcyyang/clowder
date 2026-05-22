@@ -8,6 +8,7 @@ import type { ProfileItem } from './hub-accounts.types';
 import {
   autoSlug,
   CLIENT_OPTIONS,
+  getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   joinTags,
   normalizeMentionPattern,
@@ -25,6 +26,14 @@ type AssetBrowseResult = {
   parent: string | null;
   homePath: string;
   entries: AssetBrowseEntry[];
+};
+
+const CLI_EFFORT_LABELS: Record<string, string> = {
+  low: 'low — 快速思考',
+  medium: 'medium — 标准思考',
+  high: 'high — 深度思考',
+  max: 'max — 最深思考',
+  xhigh: 'xhigh — 超深思考',
 };
 
 function safeAvatarSrc(value: string): string | null {
@@ -722,6 +731,7 @@ export function AccountSection({
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const providerSuggestions = useMemo(() => buildProviderSuggestions(modelOptions), [modelOptions]);
+  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
 
   return (
     <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
@@ -790,6 +800,17 @@ export function AccountSection({
                   : '模型标识符，如 claude-sonnet-4-5'
               }
             />
+            {cliEffortOptions ? (
+              <SelectField
+                label="思考等级"
+                value={form.cliEffort}
+                options={[
+                  { value: '', label: '默认（按 Client）' },
+                  ...cliEffortOptions.map((value) => ({ value, label: CLI_EFFORT_LABELS[value] ?? value })),
+                ]}
+                onChange={(value) => onChange({ cliEffort: value as HubCatEditorFormState['cliEffort'] })}
+              />
+            ) : null}
             {form.clientId === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <>
                 <ComboField
