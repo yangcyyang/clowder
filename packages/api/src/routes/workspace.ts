@@ -19,7 +19,7 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
 import type { FastifyPluginAsync } from 'fastify';
@@ -41,6 +41,7 @@ const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB image preview
 const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
 const MAX_CONTENT_SEARCH_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per searchable text file
+const MAX_FILENAME_RESOLVE_RESULTS = 20;
 
 const CONTENT_SEARCH_EXTENSIONS = new Set([
   '.ts',
@@ -116,6 +117,13 @@ interface WorkspaceSearchResult {
   content: string;
   contextBefore: string;
   contextAfter: string;
+}
+
+interface ResolvedLocalFile {
+  worktreeId: string;
+  path: string;
+  root: string;
+  mtimeMs: number;
 }
 
 async function listWorkspaceFiles(root: string): Promise<string[]> {
@@ -499,6 +507,69 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       reply.status(500);
       return { error: 'Internal error' };
     }
+  });
+
+  // POST /api/workspace/resolve-local-file — resolve an agent-mentioned filename to a workspace file.
+  app.post<{
+    Body: { fileName?: string; limit?: number };
+  }>('/api/workspace/resolve-local-file', async (request, reply) => {
+    const fileName = request.body?.fileName?.trim();
+    if (!fileName) {
+      reply.status(400);
+      return { error: 'fileName required' };
+    }
+    if (fileName.length > 200 || /[/\\\0]/.test(fileName)) {
+      reply.status(400);
+      return { error: 'fileName must be a plain filename' };
+    }
+
+    const limit = Math.min(request.body?.limit ?? MAX_FILENAME_RESOLVE_RESULTS, MAX_FILENAME_RESOLVE_RESULTS);
+    const worktrees = await listWorktrees().catch(() => []);
+    const linkedRoots = await getLinkedRootsAsync();
+    const roots = [...worktrees, ...linkedRoots];
+    registerWorktrees(roots);
+
+    const seen = new Set<string>();
+    const results: ResolvedLocalFile[] = [];
+
+    for (const entry of roots) {
+      if (results.length >= limit) break;
+      const rootKey = `${entry.id}:${entry.root}`;
+      if (seen.has(rootKey)) continue;
+      seen.add(rootKey);
+
+      let files: string[] = [];
+      try {
+        files = await listWorkspaceFiles(entry.root);
+      } catch {
+        continue;
+      }
+
+      for (const fullPath of files) {
+        if (results.length >= limit) break;
+        if (basename(fullPath) !== fileName) continue;
+
+        const relPath = normalizeWorkspaceRelativePath(relative(entry.root, fullPath));
+        if (isDenylisted(relPath)) continue;
+
+        try {
+          const resolved = await resolveWorkspacePath(entry.root, relPath);
+          const fileStat = await stat(resolved);
+          if (!fileStat.isFile()) continue;
+          results.push({
+            worktreeId: entry.id,
+            path: relPath,
+            root: entry.root,
+            mtimeMs: fileStat.mtimeMs,
+          });
+        } catch {
+          // Skip files that fail security or stat checks.
+        }
+      }
+    }
+
+    results.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return { query: fileName, results, totalMatches: results.length, truncated: results.length >= limit };
   });
 
   // GET /api/workspace/diff?worktreeId=&path= — git diff (all changed files or single file)

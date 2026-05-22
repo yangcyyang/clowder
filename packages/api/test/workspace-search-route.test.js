@@ -26,6 +26,7 @@ describe('POST /api/workspace/search', () => {
     mkdirSync(join(testDir, 'docs'), { recursive: true });
     writeFileSync(join(testDir, 'docs', 'exact-match.md'), '# README-A2A-SEARCH\n', 'utf8');
     writeFileSync(join(testDir, 'docs', 'notes.txt'), '猫在 txt 文档里\n', 'utf8');
+    writeFileSync(join(testDir, 'docs', 'AI设计工程化与可控生成-综合分析.html'), '<!doctype html>\n', 'utf8');
     writeFileSync(join(testDir, 'docs', 'huge.md'), '猫 命中\n'.repeat(700000), 'utf8');
 
     previousLinkedRoots = process.env.WORKSPACE_LINKED_ROOTS;
@@ -63,5 +64,19 @@ describe('POST /api/workspace/search', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(body.results.some((result) => result.path === 'docs/notes.txt'));
+  });
+
+  it('resolves a plain local filename inside linked roots', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-local-file',
+      payload: { fileName: 'AI设计工程化与可控生成-综合分析.html' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.totalMatches, 1);
+    assert.equal(body.results[0].worktreeId, WORKTREE_ID);
+    assert.equal(body.results[0].path, 'docs/AI设计工程化与可控生成-综合分析.html');
   });
 });

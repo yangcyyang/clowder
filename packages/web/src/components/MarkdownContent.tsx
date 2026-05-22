@@ -5,6 +5,8 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
+import { apiFetch } from '@/utils/api-client';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
@@ -82,6 +84,8 @@ const PROJECT_ROOT = process.env.NEXT_PUBLIC_PROJECT_ROOT ?? '';
 const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\w.@-]+)+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const REL_PATH_RE = /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
+const LOCAL_FILE_NAME_RE =
+  /(?:^|[\s（(「『【\[])(`?)([^`"'<>/\\|:：\s]+(?:[\s-][^`"'<>/\\|:：\s]+)*\.(?:html?|mdx?|pdf|pptx?|docx?|xlsx?|txt|json|png|jpe?g|svg|webp))(`?)(?=$|[\s，。；;、）)」』】\].,!?！？])/giu;
 
 function linkifyFilePaths(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
@@ -179,6 +183,96 @@ function FilePathLink({
   );
 }
 
+interface ResolvedLocalFile {
+  worktreeId: string;
+  path: string;
+  root: string;
+}
+
+function linkifyLocalFileNames(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+
+  LOCAL_FILE_NAME_RE.lastIndex = 0;
+  while ((m = LOCAL_FILE_NAME_RE.exec(text)) !== null) {
+    const fullMatch = m[0];
+    const leading = fullMatch.match(/^[\s（(「『【\[]/)?.[0] ?? '';
+    const fileName = m[2];
+    if (!fileName) continue;
+
+    const start = m.index + leading.length;
+    if (start > lastIdx) parts.push(text.slice(lastIdx, start));
+    parts.push(<LocalFileNameLink key={`lf${m.index}`} fileName={fileName} />);
+    lastIdx = m.index + fullMatch.length;
+  }
+
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return parts.length > 0 ? parts : [text];
+}
+
+function LocalFileNameLink({ fileName }: { fileName: string }) {
+  const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
+  const addToast = useToastStore((s) => s.addToast);
+
+  const handleClick = useCallback(
+    async (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      try {
+        const res = await apiFetch('/api/workspace/resolve-local-file', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ fileName }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as { results?: ResolvedLocalFile[] };
+        const matches = data.results ?? [];
+        const first = matches[0];
+        if (!first) {
+          addToast({
+            type: 'error',
+            title: '未找到本地文件',
+            message: `没有在已注册 workspace / linked root 中找到 ${fileName}`,
+            duration: 5000,
+          });
+          return;
+        }
+
+        setOpenFile(first.path, null, first.worktreeId);
+        if (matches.length > 1) {
+          addToast({
+            type: 'info',
+            title: '找到多个同名文件',
+            message: `已打开最近修改的 ${fileName}`,
+            duration: 3500,
+          });
+        }
+      } catch {
+        addToast({
+          type: 'error',
+          title: '打开本地文件失败',
+          message: `无法解析 ${fileName}，请确认文件所在目录已加入 workspace / linked root`,
+          duration: 5000,
+        });
+      }
+    },
+    [addToast, fileName, setOpenFile],
+  );
+
+  return (
+    <button
+      type="button"
+      data-local-file-link
+      onClick={handleClick}
+      className="inline rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1 py-0.5 font-mono text-[0.85em] font-semibold text-[var(--clowder-markdown-chip-text)] hover:underline"
+      title={`点击在工作区中查找并打开本地文件\n${fileName}`}
+    >
+      {fileName}
+    </button>
+  );
+}
+
 /** Process string children → @mentions + file path links */
 function withMentionsAndLinks(children: ReactNode): ReactNode {
   return Children.map(children, (child) => {
@@ -187,7 +281,19 @@ function withMentionsAndLinks(children: ReactNode): ReactNode {
     const linked = linkifyFilePaths(child);
     // Second pass: highlight @mentions in remaining text nodes
     return (
-      <>{linked.map((node, i) => (typeof node === 'string' ? <span key={i}>{highlightMentions(node)}</span> : node))}</>
+      <>
+        {linked.map((node, i) => {
+          if (typeof node !== 'string') return node;
+          const localLinked = linkifyLocalFileNames(node);
+          return (
+            <span key={i}>
+              {localLinked.map((localNode, j) =>
+                typeof localNode === 'string' ? <span key={j}>{highlightMentions(localNode)}</span> : localNode,
+              )}
+            </span>
+          );
+        })}
+      </>
     );
   });
 }

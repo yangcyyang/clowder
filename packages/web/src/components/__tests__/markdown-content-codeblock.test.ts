@@ -39,4 +39,10 @@ describe('MarkdownContent file path linking', () => {
     expect(html).not.toContain('vscode://file');
     expect(html).toContain('text-[var(--color-cafe-accent)]');
   });
+
+  it('renders plain generated filenames as local file shortcuts', () => {
+    const html = render('已生成 AI设计工程化与可控生成-综合分析.html，请查看');
+    expect(html).toContain('data-local-file-link');
+    expect(html).toContain('AI设计工程化与可控生成-综合分析.html');
+  });
 });
