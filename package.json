@@ -22,6 +22,7 @@
     "runtime:sync": "./scripts/runtime-worktree.sh sync",
     "runtime:start": "./scripts/runtime-worktree.sh start",
     "runtime:status": "./scripts/runtime-worktree.sh status",
+    "runtime:doctor": "node ./scripts/clowder-runtime-doctor.mjs",
     "redis:user:start": "./scripts/user-redis.sh start",
     "redis:user:stop": "./scripts/user-redis.sh stop",
     "redis:user:status": "./scripts/user-redis.sh status",

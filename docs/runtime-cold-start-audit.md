@@ -45,6 +45,22 @@ pnpm runtime:start
 pnpm runtime:sync
 ```
 
+启动后建议执行一次：
+
+```bash
+pnpm runtime:doctor
+```
+
+这条命令会同时检查：
+
+- 3003 Web 是否启动，且 `cwd` 是否指向当前稳定 worktree。
+- 3004 API 是否启动，且 `cwd` 是否指向当前稳定 worktree。
+- `.env`、`.cat-cafe/cat-catalog.json`、`packages/api/uploads/` 是否存在。
+- `/api/ready`、`/api/cats` 是否可用，Agent 数量是否大于 0。
+- Web 首屏 HTML 是否已注入 `data-visual-theme="slock"`。
+
+如果 doctor 报错，不要只刷新浏览器；优先从当前稳定目录重启完整栈。
+
 ## 当前本机运行约定
 
 - 当前稳定开发/运行目录：`/Users/cy/.slock/worktrees/clowder-ai-slock-like-webui`
