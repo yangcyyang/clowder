@@ -41,6 +41,10 @@ interface OpenCodeAgentServiceOptions {
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
 const ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_BASE_URL_ENV = 'ANTHROPIC_BASE_URL';
+const OPENCODE_FINAL_TEXT_GUARDRAIL =
+  '\n\n[Clowder 输出要求]\n' +
+  '如果你调用了工具读取或检查内容，工具调用结束后必须用中文输出一段可展示的最终回复。' +
+  '不要只把结论放在 thinking 或工具事件里。最终回复至少包含：结论、关键依据、下一步建议。';
 
 export interface OpenCodeEnvDebugSummary {
   mode: 'runtime-config' | 'subscription' | 'direct-env' | 'empty';
@@ -282,6 +286,7 @@ export class OpenCodeAgentService implements AgentService {
 
   private buildArgs(prompt: string, sessionId?: string, model?: string, cliConfigArgs?: readonly string[]): string[] {
     const args = ['run'];
+    const guardedPrompt = `${prompt}${OPENCODE_FINAL_TEXT_GUARDRAIL}`;
 
     // Session resume
     if (sessionId) {
@@ -312,7 +317,7 @@ export class OpenCodeAgentService implements AgentService {
       }
       deduped.push(args[i]);
     }
-    deduped.push(...userParts, prompt);
+    deduped.push(...userParts, guardedPrompt);
 
     return deduped;
   }

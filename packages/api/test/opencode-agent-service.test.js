@@ -211,6 +211,20 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(args[mIdx + 1], 'claude-sonnet-4-6');
   });
 
+  test('appends final-text guardrail to prompt', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('Read this file'));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const promptArg = args.at(-1);
+    assert.ok(promptArg.includes('Read this file'), 'original prompt should be preserved');
+    assert.ok(promptArg.includes('工具调用结束后必须用中文输出'), 'guardrail should require final text');
+  });
+
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

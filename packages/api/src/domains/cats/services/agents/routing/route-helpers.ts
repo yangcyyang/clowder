@@ -152,6 +152,7 @@ export async function persistSilentCompletionNotice(
   const content =
     `[执行提醒]: ${displayName} 已完成本轮调用，但没有返回可展示文本。` +
     '这通常是 CLI/模型返回了 thinking、工具事件或空结果；请换一种问法重试，或检查该 Agent 的运行日志。' +
+    '\n\n建议下一步：直接追问「请总结刚才读取/检查到的内容，并输出结论」。' +
     (diagnostics.length > 0 ? `\n\n${diagnostics.join(' · ')}` : '');
 
   try {

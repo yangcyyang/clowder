@@ -196,6 +196,10 @@ describe('route-serial error persistence (F5 reload)', () => {
     );
     assert.ok(noticeAppend, 'should persist a visible silent-completion notice');
     assert.ok(noticeAppend.content.includes('没有返回可展示文本'), 'notice should explain that no displayable text was produced');
+    assert.ok(
+      noticeAppend.content.includes('请总结刚才读取/检查到的内容'),
+      'notice should suggest a concrete follow-up prompt',
+    );
   });
 
   it('persists tool-only completion as visible system notice, not a blank assistant bubble', async () => {
