@@ -12,6 +12,7 @@ import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 type VisualTheme = 'claude' | 'slack' | 'tesla' | 'slock';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
+const VISUAL_THEME_DEFAULT_MIGRATION_KEY = 'clowder:visual-theme-default:v3';
 const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla', 'slock'];
 const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
@@ -188,12 +189,16 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const [visualTheme, setVisualTheme] = useState<VisualTheme>(DEFAULT_VISUAL_THEME);
 
   useEffect(() => {
+    const hasMigratedDefaultTheme = window.localStorage.getItem(VISUAL_THEME_DEFAULT_MIGRATION_KEY) === '1';
     const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
-    const nextTheme = VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme)
-      ? (storedTheme as VisualTheme)
-      : DEFAULT_VISUAL_THEME;
+    const nextTheme =
+      hasMigratedDefaultTheme && VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme)
+        ? (storedTheme as VisualTheme)
+        : DEFAULT_VISUAL_THEME;
     setVisualTheme(nextTheme);
     document.documentElement.dataset.visualTheme = nextTheme;
+    window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);
+    window.localStorage.setItem(VISUAL_THEME_DEFAULT_MIGRATION_KEY, '1');
     setMounted(true);
   }, []);
 

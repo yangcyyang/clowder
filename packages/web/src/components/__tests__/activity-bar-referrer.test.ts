@@ -56,6 +56,8 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockPush.mockClear();
+    window.localStorage.clear();
+    delete document.documentElement.dataset.visualTheme;
   });
 
   afterEach(() => {
@@ -63,19 +65,19 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     container.remove();
   });
 
-  it('appends ?from=threadId when navigating from /thread/xxx to signals', () => {
+  it('appends ?from=threadId when navigating from /thread/xxx to mission hub', () => {
     React.act(() => {
       root.render(React.createElement(ActivityBar));
     });
 
-    const signalsBtn = container.querySelector('button[title="信号"]') as HTMLElement;
-    expect(signalsBtn).toBeTruthy();
+    const missionBtn = container.querySelector('button[title="任务"]') as HTMLElement;
+    expect(missionBtn).toBeTruthy();
 
     React.act(() => {
-      signalsBtn.click();
+      missionBtn.click();
     });
 
-    expect(mockPush).toHaveBeenCalledWith('/signals?from=thread-abc');
+    expect(mockPush).toHaveBeenCalledWith('/mission-hub?from=thread-abc');
   });
 
   it('appends ?from=threadId when navigating to memory', () => {
@@ -115,12 +117,12 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
       root.render(React.createElement(ActivityBar));
     });
 
-    const signalsBtn = container.querySelector('button[title="信号"]') as HTMLElement;
+    const missionBtn = container.querySelector('button[title="任务"]') as HTMLElement;
     React.act(() => {
-      signalsBtn.click();
+      missionBtn.click();
     });
 
-    expect(mockPush).toHaveBeenCalledWith('/signals');
+    expect(mockPush).toHaveBeenCalledWith('/mission-hub');
   });
 
   it('forwards existing ?from= when cross-hopping between non-thread pages', () => {
@@ -150,5 +152,30 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
       writable: true,
       configurable: true,
     });
+  });
+
+  it('migrates old stored Claude visual theme to Slock once for v3 default', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v2', '1');
+    window.localStorage.setItem('clowder:visual-theme', 'claude');
+
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    expect(document.documentElement.dataset.visualTheme).toBe('slock');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('slock');
+    expect(window.localStorage.getItem('clowder:visual-theme-default:v3')).toBe('1');
+  });
+
+  it('keeps explicit visual theme after v3 default migration is complete', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v3', '1');
+    window.localStorage.setItem('clowder:visual-theme', 'tesla');
+
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    expect(document.documentElement.dataset.visualTheme).toBe('tesla');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('tesla');
   });
 });
