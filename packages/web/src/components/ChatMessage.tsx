@@ -15,6 +15,7 @@ import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { MarkdownContent } from './MarkdownContent';
+import { MetadataBadge } from './MetadataBadge';
 import { MessageReactions } from './MessageReactions';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
@@ -137,6 +138,7 @@ interface ChatMessageProps {
   onSaveEdit?: () => void;
   onCancelEdit?: () => void;
   disableContentCollapse?: boolean;
+  showRuntimeMetadata?: boolean;
 }
 
 export function ChatMessage({
@@ -152,6 +154,7 @@ export function ChatMessage({
   onSaveEdit,
   onCancelEdit,
   disableContentCollapse = false,
+  showRuntimeMetadata = false,
 }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -478,6 +481,11 @@ export function ChatMessage({
               <div className={SCHEDULER_ACCENT_BADGE_CLASS}>
                 <span aria-hidden>⏰</span>
                 <span>定时提醒</span>
+              </div>
+            )}
+            {showRuntimeMetadata && message.metadata && (
+              <div className="w-fit rounded-[var(--slock-radius-pill)] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-0.5">
+                <MetadataBadge metadata={message.metadata} />
               </div>
             )}
             {message.extra?.crossPost &&

@@ -12,7 +12,8 @@ import {
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { type ChatMessage as ChatMessageData } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import type { CatStatusType } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
@@ -25,7 +26,28 @@ const THREAD_PANEL_DEFAULT_WIDTH = 320;
 const THREAD_PANEL_MIN_WIDTH = 280;
 const THREAD_PANEL_MAX_WIDTH = 500;
 
+const THREAD_STATUS_LABELS: Record<CatStatusType, string> = {
+  spawning: '启动中',
+  pending: '排队中',
+  streaming: '回复中',
+  done: '已完成',
+  error: '异常',
+  alive_but_silent: '静默等待',
+  suspected_stall: '疑似卡住',
+};
+
+const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
+  spawning: 'text-[var(--cafe-accent)]',
+  pending: 'text-cafe-secondary',
+  streaming: 'text-conn-emerald-text',
+  done: 'text-conn-emerald-text',
+  error: 'text-conn-red-text',
+  alive_but_silent: 'text-conn-amber-text',
+  suspected_stall: 'text-conn-amber-text',
+};
+
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
+type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
 
 export function normalizeInlineThreadMessage(message: InlineThreadApiMessage): ChatMessageData {
   if (!message.isDraft) return message;
@@ -61,6 +83,7 @@ export function InlineThreadPanel({
   onReplyCountChange,
 }: InlineThreadPanelProps) {
   const { cats } = useCatData();
+  const threadRuntime = useChatStore((state) => state.threadStates[threadId]);
   const [panelWidth, setPanelWidth, resetPanelWidth] = usePersistedState(
     'cat-cafe:inlineThreadPanelWidth',
     THREAD_PANEL_DEFAULT_WIDTH,
@@ -79,12 +102,35 @@ export function InlineThreadPanel({
   const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [queueActiveInvocations, setQueueActiveInvocations] = useState<InlineThreadActiveInvocation[]>([]);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartedAtRef = useRef<number>(0);
   const pollBaselineCountRef = useRef<number>(0);
   const latestMessagesRef = useRef<ChatMessageData[]>([]);
   const mountedRef = useRef(false);
   const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
+  const runtimeCats = useMemo(() => {
+    const storeActiveEntries = Object.values(threadRuntime?.activeInvocations ?? {});
+    const activeEntries = [...storeActiveEntries, ...queueActiveInvocations];
+    const activeCatIds = activeEntries.map((entry) => entry.catId).filter(Boolean);
+    const statusCatIds = Object.entries(threadRuntime?.catStatuses ?? {})
+      .filter(([, status]) => status !== 'done')
+      .map(([catId]) => catId);
+    return Array.from(new Set([...activeCatIds, ...statusCatIds])).map((catId) => {
+      const cat = getCatById(catId);
+      const status = threadRuntime?.catStatuses?.[catId] ?? (activeCatIds.includes(catId) ? 'streaming' : 'pending');
+      const active = activeEntries.find((entry) => entry.catId === catId);
+      return {
+        catId,
+        label: cat?.displayName ?? cat?.name ?? catId,
+        model: cat?.defaultModel ?? '',
+        provider: cat?.provider ?? cat?.clientId ?? '',
+        color: cat?.color.primary ?? 'var(--console-cat-fallback)',
+        status,
+        startedAt: active?.startedAt,
+      };
+    });
+  }, [getCatById, queueActiveInvocations, threadRuntime?.activeInvocations, threadRuntime?.catStatuses]);
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
   }, []);
@@ -147,6 +193,23 @@ export function InlineThreadPanel({
     }
   }, [threadId]);
 
+  const loadQueueRuntime = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/queue`);
+      if (!res.ok) {
+        if (mountedRef.current) setQueueActiveInvocations([]);
+        return [];
+      }
+      const data = (await res.json()) as { activeInvocations?: InlineThreadActiveInvocation[] };
+      const activeInvocations = Array.isArray(data.activeInvocations) ? data.activeInvocations : [];
+      if (mountedRef.current) setQueueActiveInvocations(activeInvocations);
+      return activeInvocations;
+    } catch {
+      if (mountedRef.current) setQueueActiveInvocations([]);
+      return [];
+    }
+  }, [threadId]);
+
   const stopReplyPolling = useCallback(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -162,24 +225,36 @@ export function InlineThreadPanel({
     pollBaselineCountRef.current = latestMessagesRef.current.length;
 
     pollTimerRef.current = setInterval(() => {
-      void loadMessages({ showLoading: false }).then((nextMessages) => {
+      void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(([nextMessages, active]) => {
         const hasNewCompleteMessage =
           nextMessages.length > pollBaselineCountRef.current && !nextMessages.some((message) => message.isStreaming);
-        const timedOut = Date.now() - pollStartedAtRef.current >= 30_000;
-        if (hasNewCompleteMessage || timedOut) stopReplyPolling();
+        const elapsed = Date.now() - pollStartedAtRef.current;
+        const runtimeStillActive = active.length > 0;
+        const timedOutWithoutRuntime = elapsed >= 60_000 && !runtimeStillActive;
+        const hardTimedOut = elapsed >= 5 * 60_000;
+        if ((hasNewCompleteMessage && !runtimeStillActive) || timedOutWithoutRuntime || hardTimedOut) stopReplyPolling();
       });
     }, 2000);
-  }, [loadMessages, stopReplyPolling]);
+  }, [loadMessages, loadQueueRuntime, stopReplyPolling]);
 
   useEffect(() => {
     mountedRef.current = true;
     void loadMessages();
+    void loadQueueRuntime();
     return () => {
       mountedRef.current = false;
     };
-  }, [loadMessages]);
+  }, [loadMessages, loadQueueRuntime]);
 
   useEffect(() => () => stopReplyPolling(), [stopReplyPolling]);
+
+  useEffect(() => {
+    if (runtimeCats.length === 0) return undefined;
+    const timer = setInterval(() => {
+      void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [loadMessages, loadQueueRuntime, runtimeCats.length]);
 
   const replyMessages = useMemo(() => {
     const sourceIndex = messages.findIndex(
@@ -236,7 +311,7 @@ export function InlineThreadPanel({
       setInput('');
       closeMentionPicker();
       onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1);
-      void loadMessages({ showLoading: false }).then(() => startReplyPolling());
+      void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(() => startReplyPolling());
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '发送失败');
     } finally {
@@ -246,6 +321,7 @@ export function InlineThreadPanel({
     closeMentionPicker,
     input,
     loadMessages,
+    loadQueueRuntime,
     onReplyCountChange,
     replyMessages.length,
     sending,
@@ -405,13 +481,42 @@ export function InlineThreadPanel({
             x
           </button>
         </div>
+        {runtimeCats.length > 0 && (
+          <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
+              当前回复
+            </div>
+            {runtimeCats.map((item) => (
+              <div
+                key={item.catId}
+                className="flex min-w-0 items-center gap-2 rounded-[var(--slock-radius-lg)] border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1.5 text-xs"
+              >
+                <span className="h-2 w-2 flex-shrink-0 rounded-full animate-pulse" style={{ backgroundColor: item.color }} />
+                <span className="min-w-0 flex-1 truncate font-semibold text-[var(--cafe-text)]">{item.label}</span>
+                <span className={`flex-shrink-0 font-medium ${THREAD_STATUS_TONE[item.status]}`}>
+                  {THREAD_STATUS_LABELS[item.status]}
+                </span>
+                {(item.model || item.provider) && (
+                  <span className="max-w-[110px] flex-shrink truncate text-[10px] text-[var(--cafe-text-muted)]">
+                    {[item.model, item.provider].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
           <div className="mb-4 border-b border-[var(--slock-border-color)] pb-3">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
               原始消息
             </div>
             <div className="px-1 py-1">
-              <ChatMessage message={sourceMessage} getCatById={getCatById} disableContentCollapse />
+              <ChatMessage
+                message={sourceMessage}
+                getCatById={getCatById}
+                disableContentCollapse
+                showRuntimeMetadata
+              />
             </div>
           </div>
           {loading ? (
@@ -420,7 +525,13 @@ export function InlineThreadPanel({
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
           ) : (
             replyMessages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} getCatById={getCatById} disableContentCollapse />
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                getCatById={getCatById}
+                disableContentCollapse
+                showRuntimeMetadata
+              />
             ))
           )}
         </div>
