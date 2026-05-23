@@ -13,6 +13,7 @@ type VisualTheme = 'claude' | 'slack' | 'tesla' | 'slock';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
 const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla', 'slock'];
+const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -184,11 +185,13 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const { toggleTheme, resolvedTheme } = useCafeTheme();
   const { pinned } = usePinnedSections();
   const [mounted, setMounted] = useState(false);
-  const [visualTheme, setVisualTheme] = useState<VisualTheme>('claude');
+  const [visualTheme, setVisualTheme] = useState<VisualTheme>(DEFAULT_VISUAL_THEME);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
-    const nextTheme = VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme) ? (storedTheme as VisualTheme) : 'claude';
+    const nextTheme = VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme)
+      ? (storedTheme as VisualTheme)
+      : DEFAULT_VISUAL_THEME;
     setVisualTheme(nextTheme);
     document.documentElement.dataset.visualTheme = nextTheme;
     setMounted(true);
@@ -197,7 +200,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const toggleVisualTheme = useCallback(() => {
     setVisualTheme((current) => {
       const currentIndex = VISUAL_THEME_ORDER.indexOf(current);
-      const nextTheme = VISUAL_THEME_ORDER[(currentIndex + 1) % VISUAL_THEME_ORDER.length] ?? 'claude';
+      const nextTheme = VISUAL_THEME_ORDER[(currentIndex + 1) % VISUAL_THEME_ORDER.length] ?? DEFAULT_VISUAL_THEME;
       document.documentElement.dataset.visualTheme = nextTheme;
       window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);
       return nextTheme;
@@ -266,7 +269,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
           aria-label={mounted ? `当前 ${getVisualThemeLabel(visualTheme)} 风格，点击切换下一套` : '切换视觉风格'}
           data-active="false"
         >
-          <VisualThemeIcon theme={mounted ? visualTheme : 'claude'} />
+          <VisualThemeIcon theme={mounted ? visualTheme : DEFAULT_VISUAL_THEME} />
         </button>
         <button
           type="button"
