@@ -61,6 +61,33 @@ lsof -p <PID> | grep ' cwd '
 
 `cwd` 应该指向 `~/.slock/worktrees/clowder-ai-slock-like-webui/packages/web`。
 
+## 当前端口健康检查
+
+Clowder Web 和 API 必须同时运行：
+
+```bash
+lsof -nP -iTCP:3003 -sTCP:LISTEN
+lsof -nP -iTCP:3004 -sTCP:LISTEN
+curl http://localhost:3004/api/ready
+curl http://localhost:3004/api/cats
+```
+
+常见症状：
+
+- 3003 存在、3004 不存在：页面能打开，但 Agent 列表为空、消息发送失败、头像/上传资源可能无法加载。
+- 3003 的 `cwd` 指向旧 Documents 目录：页面样式和功能回到旧版本，Slock 主题、最近修复不会生效。
+- 3004 存在但 `/api/cats` 返回空：优先检查 `.cat-cafe/cat-catalog.json` 是否同步到当前运行目录。
+
+当前本机手动恢复方式：
+
+```bash
+cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+pnpm --filter @cat-cafe/api run start
+pnpm --filter @cat-cafe/web exec next start -p 3003 -H 0.0.0.0
+```
+
+注意：长期建议仍使用 `pnpm runtime:start`，避免只启动前端、漏启动 API。
+
 ## 浏览器本地状态
 
 这些状态存放在 `localStorage` / `sessionStorage`，不是系统能力的唯一来源，丢失后应有默认值：
