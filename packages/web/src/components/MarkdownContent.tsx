@@ -62,16 +62,16 @@ function CodeBlock({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="relative group my-2">
+    <div className="relative group my-3">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 rounded border border-[var(--console-border-soft)] bg-[var(--chat-code-btn-bg)] px-1.5 py-0.5 text-[10px] text-cafe-muted opacity-90 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        className="absolute right-2.5 top-2.5 z-10 rounded-md border border-[var(--chat-code-border)] bg-[var(--chat-code-btn-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--chat-code-btn-text)] shadow-[1px_1px_0_var(--chat-code-border)] transition-transform hover:-translate-y-px"
       >
         {copied ? '已复制' : '复制'}
       </button>
       <pre
         ref={preRef}
-        className={`rounded-md border border-[var(--console-border-soft)] bg-[var(--chat-code-bg)] px-3 py-2.5 text-[var(--chat-code-text)] overflow-x-auto shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-xs leading-5' : 'font-mono text-[13px] leading-5'}`}
+        className={`overflow-x-auto rounded-[10px] border border-[var(--chat-code-border)] bg-[var(--chat-code-bg)] px-4 py-3.5 pr-16 text-[var(--chat-code-text)] shadow-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-[12px] leading-6' : 'font-mono text-[13px] leading-6'}`}
       >
         {children}
       </pre>

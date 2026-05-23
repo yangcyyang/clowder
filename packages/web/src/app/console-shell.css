@@ -89,6 +89,8 @@
   --chat-code-bg: #eee4da;
   --chat-code-text: #4a3d33;
   --chat-code-btn-bg: #e0d4c9;
+  --chat-code-btn-text: #4a3d33;
+  --chat-code-border: #d3c2b2;
   --terminal-text-muted: #888888;
   --terminal-text-dim: #666666;
   --terminal-text-error: #f7768e;
@@ -179,6 +181,8 @@
   --chat-code-bg: #413a50;
   --chat-code-text: #e2e8f0;
   --chat-code-btn-bg: #493a50;
+  --chat-code-btn-text: #e2e8f0;
+  --chat-code-border: #5b506c;
 }
 
 [data-visual-theme="slack"] {
@@ -268,6 +272,8 @@
   --chat-code-bg: #fff0a6;
   --chat-code-text: #000000;
   --chat-code-btn-bg: #fff9ec;
+  --chat-code-btn-text: #000000;
+  --chat-code-border: #000000;
 }
 
 [data-theme="dark"][data-visual-theme="slack"] {
@@ -357,6 +363,8 @@
   --chat-code-bg: #fff0a6;
   --chat-code-text: #000000;
   --chat-code-btn-bg: #fff9ec;
+  --chat-code-btn-text: #000000;
+  --chat-code-border: #000000;
 }
 
 .console-shell {
