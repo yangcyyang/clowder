@@ -24,7 +24,8 @@ import { ResizeHandle } from './workspace/ResizeHandle';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 320;
 const THREAD_PANEL_MIN_WIDTH = 280;
-const THREAD_PANEL_MAX_WIDTH = 500;
+const THREAD_PANEL_FALLBACK_MAX_WIDTH = 720;
+const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.6;
 
 const THREAD_STATUS_LABELS: Record<CatStatusType, string> = {
   spawning: '启动中',
@@ -48,6 +49,15 @@ const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
 
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
+
+function getThreadPanelMaxWidth() {
+  if (typeof window === 'undefined') return THREAD_PANEL_FALLBACK_MAX_WIDTH;
+  return Math.max(THREAD_PANEL_MIN_WIDTH, Math.floor(window.innerWidth * THREAD_PANEL_MAX_VIEWPORT_RATIO));
+}
+
+function clampThreadPanelWidth(width: number) {
+  return Math.min(getThreadPanelMaxWidth(), Math.max(THREAD_PANEL_MIN_WIDTH, width));
+}
 
 export function normalizeInlineThreadMessage(message: InlineThreadApiMessage): ChatMessageData {
   if (!message.isDraft) return message;
@@ -136,10 +146,14 @@ export function InlineThreadPanel({
   }, []);
   const handlePanelResize = useCallback(
     (delta: number) => {
-      setPanelWidth((prev) => Math.min(THREAD_PANEL_MAX_WIDTH, Math.max(THREAD_PANEL_MIN_WIDTH, prev - delta)));
+      setPanelWidth((prev) => clampThreadPanelWidth(prev - delta));
     },
     [setPanelWidth],
   );
+
+  useEffect(() => {
+    setPanelWidth((prev) => clampThreadPanelWidth(prev));
+  }, [setPanelWidth]);
 
   const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
   const filteredCatOptions = useMemo(() => {
