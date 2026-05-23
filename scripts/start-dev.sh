@@ -54,6 +54,10 @@ cd "$PROJECT_DIR"
 echo "🐱 Cat Café 启动"
 echo "================"
 
+if [ "${CAT_CAFE_SKIP_START_PREFLIGHT:-0}" != "1" ] && [ -x "$SCRIPT_DIR/preflight-shared-state.sh" ]; then
+    "$SCRIPT_DIR/preflight-shared-state.sh"
+fi
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'

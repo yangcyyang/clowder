@@ -25,9 +25,14 @@
   - 保障：`runtime-worktree.sh` 会以 `600` 权限同步该文件。
 
 - `packages/api/uploads/`
-  - 作用：保存头像、图片、附件等用户上传内容。
+  - 作用：兼容旧路径，当前应作为 symlink 指向 `~/.cat-cafe/uploads/`。
   - 缺失症状：头像消失、历史图片/附件打开失败。
-  - 保障：默认上传目录固定为 `packages/api/uploads`；`runtime-worktree.sh` 会只补齐缺失文件，不覆盖已有文件。
+  - 保障：默认上传目录已迁到代码树之外的 `~/.cat-cafe/uploads/`；旧路径只保留为指针，避免切换 worktree 后丢头像/附件。
+
+- `~/.cat-cafe/uploads/`
+  - 作用：头像、图片、附件等上传资源的统一真实存储目录。
+  - 缺失症状：头像消失、历史图片/附件打开失败。
+  - 保障：`runtime:doctor` 会检查该目录和 `packages/api/uploads` symlink。
 
 ## Runtime worktree 同步入口
 
@@ -93,6 +98,7 @@ curl http://localhost:3004/api/cats
 - 3003 存在、3004 不存在：页面能打开，但 Agent 列表为空、消息发送失败、头像/上传资源可能无法加载。
 - 3003 的 `cwd` 指向旧 Documents 目录：页面样式和功能回到旧版本，Slock 主题、最近修复不会生效。
 - 3004 存在但 `/api/cats` 返回空：优先检查 `.cat-cafe/cat-catalog.json` 是否同步到当前运行目录。
+- `packages/api/uploads` 不是 symlink 或 `~/.cat-cafe/uploads` 缺失：头像/附件可能随 worktree 切换丢失。
 
 当前本机手动恢复方式：
 

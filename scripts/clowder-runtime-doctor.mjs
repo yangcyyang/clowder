@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +24,11 @@ function readEnvValue(key, fallback) {
 
 const frontendPort = Number(readEnvValue('FRONTEND_PORT', '3003'));
 const apiPort = Number(readEnvValue('API_SERVER_PORT', '3004'));
+const uploadDirSetting = readEnvValue('UPLOAD_DIR', '');
+const effectiveUploadDir =
+  uploadDirSetting === './uploads'
+    ? resolve(projectRoot, 'packages/api/uploads')
+    : resolve((uploadDirSetting || '~/.cat-cafe/uploads').replace(/^~(?=$|\/)/, homedir()));
 
 const results = [];
 
@@ -73,10 +79,16 @@ add(apiCwd.startsWith(projectRoot), 'API 启动目录', apiCwd || '无法识别'
 
 const envPath = resolve(projectRoot, '.env');
 const catalogPath = resolve(projectRoot, '.cat-cafe/cat-catalog.json');
-const uploadsPath = resolve(projectRoot, 'packages/api/uploads');
+const legacyUploadsPath = resolve(projectRoot, 'packages/api/uploads');
+const uploadsPath = effectiveUploadDir;
 add(existsSync(envPath), '.env', existsSync(envPath) ? '存在' : '缺失');
 add(existsSync(catalogPath), '.cat-cafe/cat-catalog.json', existsSync(catalogPath) ? '存在' : '缺失');
-add(existsSync(uploadsPath), 'uploads 目录', existsSync(uploadsPath) ? `${readdirSync(uploadsPath).length} 个条目` : '缺失');
+add(
+  existsSync(legacyUploadsPath) && lstatSync(legacyUploadsPath).isSymbolicLink(),
+  'packages/api/uploads symlink',
+  existsSync(legacyUploadsPath) ? `${legacyUploadsPath} -> ${uploadsPath}` : '缺失',
+);
+add(existsSync(uploadsPath), 'uploads 目录', existsSync(uploadsPath) ? `${readdirSync(uploadsPath).length} 个条目：${uploadsPath}` : `缺失：${uploadsPath}`);
 
 if (existsSync(catalogPath)) {
   try {

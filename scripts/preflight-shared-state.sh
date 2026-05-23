@@ -48,6 +48,12 @@ UNCOMMITTED_SHARED=$(git diff --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\
 STAGED_SHARED=$(git diff --cached --name-only 2>/dev/null | grep -E '^(docs/BACKLOG\.md|cat-template\.json)$' || true)
 
 HAS_PROBLEM=false
+HAS_RUNTIME_WARNING=false
+
+warn_runtime() {
+  echo "⚠️ RUNTIME PREFLIGHT: $*" >&2
+  HAS_RUNTIME_WARNING=true
+}
 
 if [[ -n "$UNPUSHED_SHARED" ]]; then
   echo "" >&2
@@ -67,6 +73,29 @@ if [[ -n "$UNCOMMITTED_SHARED" || -n "$STAGED_SHARED" ]]; then
     echo "请 commit + push 或 git restore 后再继续。" >&2
     HAS_PROBLEM=true
   fi
+fi
+
+# Local runtime resources are intentionally not committed, but Clowder cannot
+# behave correctly without them. Warn early so users do not discover missing
+# Agent roster / avatar files only after the UI has loaded.
+if [[ ! -f "$PROJECT_DIR/.env" ]]; then
+  warn_runtime ".env 缺失：端口、默认 Agent、IM 凭证可能不会生效。"
+fi
+
+if [[ ! -s "$PROJECT_DIR/.cat-cafe/cat-catalog.json" ]]; then
+  warn_runtime ".cat-cafe/cat-catalog.json 缺失：Agent 列表可能为空。"
+fi
+
+if [[ ! -d "$HOME/.cat-cafe/uploads" ]]; then
+  warn_runtime "~/.cat-cafe/uploads 缺失：头像和历史附件可能无法加载。"
+fi
+
+if [[ ! -L "$PROJECT_DIR/packages/api/uploads" ]]; then
+  warn_runtime "packages/api/uploads 不是 symlink；建议指向 ~/.cat-cafe/uploads，避免切换 worktree 后头像丢失。"
+fi
+
+if $HAS_RUNTIME_WARNING; then
+  echo "提示：启动后可运行 pnpm runtime:doctor 做完整检查。" >&2
 fi
 
 if $HAS_PROBLEM; then

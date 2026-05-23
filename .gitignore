@@ -79,8 +79,10 @@ packages/**/package-lock.json
 coverage/
 
 # Uploaded files (keep dir, ignore contents)
+packages/api/uploads
 packages/api/uploads/*
 !packages/api/uploads/.gitkeep
+packages/api/uploads.bak-*/
 /uploads/
 
 # Runtime data (audit logs, etc.)

@@ -130,8 +130,8 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'UPLOAD_DIR',
-    defaultValue: './uploads',
-    description: '文件上传目录',
+    defaultValue: '~/.cat-cafe/uploads',
+    description: '文件上传目录。默认放在代码树之外，避免切换 worktree 后头像/附件丢失',
     category: 'server',
     sensitive: false,
     restartRequired: true,

@@ -1,17 +1,21 @@
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
-const MODULE_DEFAULT_UPLOAD_DIR = resolve(THIS_DIR, '../../uploads');
+const LEGACY_MODULE_UPLOAD_DIR = resolve(THIS_DIR, '../../uploads');
+const SHARED_DEFAULT_UPLOAD_DIR = resolve(homedir(), '.cat-cafe/uploads');
 
 /**
  * Resolve the upload directory.
- * Explicit UPLOAD_DIR keeps the historical cwd-based behavior.
- * Without configuration, default to packages/api/uploads so API routes and
- * connector outbound delivery share the same on-disk truth source.
+ * Explicit UPLOAD_DIR keeps caller-controlled behavior.
+ * Without configuration, default to ~/.cat-cafe/uploads so avatars and
+ * attachments do not disappear when Clowder is started from another worktree.
  */
 export function getDefaultUploadDir(configuredUploadDir?: string): string {
-  return configuredUploadDir ? resolve(configuredUploadDir) : MODULE_DEFAULT_UPLOAD_DIR;
+  if (!configuredUploadDir) return SHARED_DEFAULT_UPLOAD_DIR;
+  if (configuredUploadDir === './uploads') return LEGACY_MODULE_UPLOAD_DIR;
+  return resolve(configuredUploadDir.replace(/^~(?=$|\/)/, homedir()));
 }
 
 const INTERNAL_ROUTE_PREFIXES = ['/uploads/', '/api/connector-media/', '/api/tts/audio/'];
