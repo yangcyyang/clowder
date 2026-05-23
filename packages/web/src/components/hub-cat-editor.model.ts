@@ -10,7 +10,16 @@ import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
 /** clowder-ai#340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
-export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'antigravity' | 'catagent';
+export type ClientId =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'kimi'
+  | 'dare'
+  | 'opencode'
+  | 'pi'
+  | 'antigravity'
+  | 'catagent';
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -94,6 +103,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'kimi', label: 'Kimi' },
   { value: 'dare', label: 'Dare' },
   { value: 'opencode', label: 'OpenCode' },
+  { value: 'pi', label: 'Pi' },
   { value: 'antigravity', label: 'Antigravity' },
   { value: 'catagent', label: 'CatAgent' },
 ];

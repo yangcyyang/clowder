@@ -65,7 +65,17 @@ const cliSchema = z.object({
   effort: cliEffortSchema.nullable().optional(),
 });
 
-const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'catagent']);
+const clientSchema = z.enum([
+  'anthropic',
+  'openai',
+  'google',
+  'kimi',
+  'dare',
+  'antigravity',
+  'opencode',
+  'pi',
+  'catagent',
+]);
 const catIdSchema = z
   .string()
   .min(1)
@@ -304,6 +314,8 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
       return { command: 'dare', outputFormat: 'json' };
     case 'opencode':
       return { command: 'opencode', outputFormat: 'json' };
+    case 'pi':
+      return { command: 'pi', outputFormat: 'json' };
     case 'antigravity':
       return { command: 'antigravity', outputFormat: 'json' };
     case 'a2a':
@@ -416,7 +428,7 @@ async function validateAccountBindingOrThrow(
   if (client === 'antigravity' && trimmedAccountRef) {
     throw new Error('antigravity client does not support accountRef');
   }
-  if (client !== 'antigravity' && !trimmedAccountRef) {
+  if (client !== 'antigravity' && client !== 'pi' && !trimmedAccountRef) {
     throw new Error(`client "${client}" requires a provider binding`);
   }
   if (!trimmedAccountRef) return;

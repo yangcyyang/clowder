@@ -14,6 +14,7 @@ export { DareAgentService } from './agents/providers/DareAgentService.js';
 export { GeminiAgentService } from './agents/providers/GeminiAgentService.js';
 export { KimiAgentService } from './agents/providers/KimiAgentService.js';
 export { OpenCodeAgentService } from './agents/providers/OpenCodeAgentService.js';
+export { PiAgentService } from './agents/providers/PiAgentService.js';
 export { AgentRegistry } from './agents/registry/AgentRegistry.js';
 export type { AgentRouterOptions } from './agents/routing/AgentRouter.js';
 export { AgentRouter } from './agents/routing/AgentRouter.js';

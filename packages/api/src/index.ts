@@ -65,6 +65,7 @@ import {
   KimiAgentService,
   MemoryGovernanceStore,
   OpenCodeAgentService,
+  PiAgentService,
 } from './domains/cats/services/index.js';
 import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
@@ -1056,6 +1057,9 @@ async function main(): Promise<void> {
           break;
         case 'opencode':
           service = new OpenCodeAgentService({ catId });
+          break;
+        case 'pi':
+          service = new PiAgentService({ catId, cliCommand: config.cli?.command });
           break;
         case 'catagent': {
           const { CatAgentService } = await import(

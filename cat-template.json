@@ -800,6 +800,44 @@
           "accountRef": "claude"
         }
       ]
+    },
+    {
+      "id": "pi",
+      "catId": "pi",
+      "name": "Pi",
+      "displayName": "Pi Agent",
+      "nickname": "π",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#E34234",
+        "secondary": "#FDE8E5"
+      },
+      "mentionPatterns": ["@Pi", "@pi", "@皮皮", "@pi-agent"],
+      "roleDescription": "通过本地 pi CLI 接入的多模型编码助手，适合本地代码阅读、文件检索、方案验证和轻量工程任务。",
+      "teamStrengths": "本地 CLI 工具调用、代码阅读、文件检索、方案验证、轻量实现。",
+      "caution": "Pi CLI 具备本地工具能力；高风险操作必须先确认；不应替代专职工程 Agent 做大范围无审查改动。",
+      "defaultVariantId": "pi-default",
+      "variants": [
+        {
+          "id": "pi-default",
+          "clientId": "pi",
+          "defaultModel": "mimo/mimo-v2.5-pro",
+          "mcpSupport": false,
+          "cli": {
+            "command": "/Users/cy/.npm-global/bin/pi",
+            "outputFormat": "json",
+            "defaultArgs": ["--print", "--mode", "json", "--no-context-files"]
+          },
+          "personality": "务实、直接、先读上下文再给结论；涉及删除、批量写入、权限或生产环境操作时必须先确认。",
+          "strengths": ["local-cli", "code-reading", "file-search", "implementation", "verification"],
+          "contextBudget": {
+            "maxPromptTokens": 120000,
+            "maxContextTokens": 96000,
+            "maxMessages": 120,
+            "maxContentLengthPerMsg": 80000
+          }
+        }
+      ]
     }
   ]
 }
