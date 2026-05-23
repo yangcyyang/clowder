@@ -45,6 +45,22 @@ pnpm runtime:start
 pnpm runtime:sync
 ```
 
+## 当前本机运行约定
+
+- 当前稳定开发/运行目录：`/Users/cy/.slock/worktrees/clowder-ai-slock-like-webui`
+- 不建议从旧目录启动 Web：`/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai-slock-like-webui`
+
+原因：这两个目录是独立 worktree/clone。此前主题修复提交到了 `~/.slock/worktrees/...`，但 3003 仍从旧 Documents 目录启动，导致浏览器一直加载旧代码。
+
+如果 3003 又出现“代码已修但页面不生效”，先检查：
+
+```bash
+lsof -nP -iTCP:3003 -sTCP:LISTEN
+lsof -p <PID> | grep ' cwd '
+```
+
+`cwd` 应该指向 `~/.slock/worktrees/clowder-ai-slock-like-webui/packages/web`。
+
 ## 浏览器本地状态
 
 这些状态存放在 `localStorage` / `sessionStorage`，不是系统能力的唯一来源，丢失后应有默认值：

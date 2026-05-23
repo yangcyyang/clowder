@@ -12,6 +12,25 @@ import './globals.css';
 import './console-shell.css';
 import './console-controls.css';
 
+const visualThemeBootstrapScript = `
+(() => {
+  const storageKey = 'clowder:visual-theme';
+  const migrationKey = 'clowder:visual-theme-default:v3';
+  const validThemes = new Set(['claude', 'slack', 'tesla', 'slock']);
+  const defaultTheme = 'slock';
+  try {
+    const migrated = window.localStorage.getItem(migrationKey) === '1';
+    const stored = window.localStorage.getItem(storageKey);
+    const nextTheme = migrated && validThemes.has(stored) ? stored : defaultTheme;
+    document.documentElement.dataset.visualTheme = nextTheme;
+    window.localStorage.setItem(storageKey, nextTheme);
+    window.localStorage.setItem(migrationKey, '1');
+  } catch {
+    document.documentElement.dataset.visualTheme = defaultTheme;
+  }
+})();
+`;
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -40,8 +59,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang="zh-CN" data-visual-theme="slock" suppressHydrationWarning>
       <body className="min-h-screen">
+        <script dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }} />
         <SessionBootstrap />
         <ThemeProvider>
           <ConfirmProvider>
