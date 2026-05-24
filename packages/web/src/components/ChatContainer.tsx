@@ -38,6 +38,7 @@ import {
   setSavedMessagesViewOpen,
 } from '@/utils/saved-messages';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AuthorizationCard } from './AuthorizationCard';
@@ -90,6 +91,19 @@ type InlineThreadReplyState = Record<string, { branchThreadId: string; replyCoun
 type ThreadReplyInfo = InlineThreadReplyState[string] & { newCount?: number };
 type ChannelTab = 'chat' | 'tasks' | 'files';
 const EMPTY_MEMBER_IDS: string[] = [];
+
+function consumeUrlMessageHighlight(): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const messageId = params.get('highlight');
+  if (!messageId) return null;
+
+  params.delete('highlight');
+  const nextSearch = params.toString();
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+  window.history.replaceState(window.history.state, '', nextUrl);
+  return messageId;
+}
 
 function formatPinnedMessagePreview(message: ChatMessageData): string {
   const text = message.content?.trim() || '（无正文）';
@@ -999,14 +1013,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   useEffect(() => {
     if (messages.length === 0) return;
-    const messageId = consumeSavedMessageScrollTarget(threadId);
+    const messageId = consumeUrlMessageHighlight() ?? consumeSavedMessageScrollTarget(threadId);
     if (!messageId) return;
-    window.setTimeout(() => {
-      document.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }, 80);
+    window.setTimeout(() => scrollToMessage(messageId), 80);
   }, [messages.length, threadId]);
 
   const disconnectBottomChromeObserver = useCallback(() => {

@@ -7,6 +7,7 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 import {
   isSavedMessagesViewOpen,
   loadSavedMessages,
@@ -18,7 +19,7 @@ import {
 
 import { CatAvatar } from '../CatAvatar';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
-import { pushThreadRouteWithHistory } from './thread-navigation';
+import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, pushThreadRouteWithHistory } from './thread-navigation';
 import {
   formatRelativeTime,
   getProjectPaths,
@@ -307,6 +308,30 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       }
     },
     [currentThreadId, navigateToThread, onClose],
+  );
+
+  const handleMessageSearchResultSelect = useCallback(
+    (message: MessageSearchResult) => {
+      setSavedMessagesViewOpen(false);
+      setShowUnreadOnly(false);
+      setSearchQuery('');
+      setDebouncedSearchQuery('');
+      setMessageSearchResults([]);
+      useChatStore.getState().clearUnread(message.threadId);
+
+      if (message.threadId === currentThreadId) {
+        window.setTimeout(() => scrollToMessage(message.id), 80);
+      } else if (typeof window !== 'undefined') {
+        const href = `${getThreadHref(message.threadId)}?highlight=${encodeURIComponent(message.id)}`;
+        window.history.pushState({}, '', href);
+        window.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
+      }
+
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        onClose?.();
+      }
+    },
+    [currentThreadId, onClose],
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -623,7 +648,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       <button
         key={message.id}
         type="button"
-        onClick={() => handleSelect(message.threadId)}
+        onClick={() => handleMessageSearchResultSelect(message)}
         className="mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
         title={message.content}
       >
