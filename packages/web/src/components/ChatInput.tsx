@@ -31,11 +31,67 @@ export { threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-draf
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
 const CVO_MODE_STORAGE_KEY = 'cat-cafe:cvoMode';
+const PROMPT_PREFIX_STORAGE_KEY = 'cat-cafe:promptPrefix';
 const CVO_MODE_PREFIX = `[CVO_MODE] 在执行任何操作之前，你必须先以采访者身份问我 3 个问题，帮助澄清需求：
 ① 你希望的最终产物/结果是什么？
 ② 有什么约束条件或不能动的边界？
 ③ 完成的标准是什么，怎样算"做好了"？
 请等我逐一回答后再开始执行。`;
+
+const PROMPT_PREFIX_OPTIONS = [
+  {
+    id: 'none',
+    label: '无前缀',
+    shortLabel: '提示词',
+    description: '直接发送当前输入内容',
+    prefix: '',
+  },
+  {
+    id: 'requirements',
+    label: '需求前置',
+    shortLabel: '需求前置',
+    description: '先问清目标、边界和验收标准',
+    prefix: CVO_MODE_PREFIX,
+  },
+  {
+    id: 'debug',
+    label: '问题排查',
+    shortLabel: '排查',
+    description: '先定位现象、根因、影响面和修复方案',
+    prefix:
+      '[DEBUG_MODE] 请先按问题排查流程处理：明确现象、复现路径、可能根因、影响范围、最小修复方案和验证方式。不要直接给泛泛建议。',
+  },
+  {
+    id: 'plan',
+    label: '方案规划',
+    shortLabel: '规划',
+    description: '输出目标、范围、步骤、风险和验收点',
+    prefix:
+      '[PLAN_MODE] 请先做方案规划：明确目标、边界、执行步骤、依赖、风险、验收标准。优先给可落地的最小方案。',
+  },
+  {
+    id: 'review',
+    label: '代码审查',
+    shortLabel: '审查',
+    description: '优先找 bug、回归风险和缺失测试',
+    prefix:
+      '[REVIEW_MODE] 请以代码审查视角回答：优先指出 bug、行为回归、边界风险和缺失测试，再给修改建议。不要只做总结。',
+  },
+  {
+    id: 'summary',
+    label: '总结提炼',
+    shortLabel: '总结',
+    description: '提炼结论、关键点和下一步行动',
+    prefix:
+      '[SUMMARY_MODE] 请做结构化总结：先给一句核心结论，再提炼关键点、决策、待办和下一步行动。避免长篇复述。',
+  },
+] as const;
+
+type PromptPrefixId = (typeof PROMPT_PREFIX_OPTIONS)[number]['id'];
+
+function isPromptPrefixId(value: string | null): value is PromptPrefixId {
+  return PROMPT_PREFIX_OPTIONS.some((option) => option.id === value);
+}
 
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
@@ -135,24 +191,41 @@ export function ChatInput({
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
   const [sendAsTask, setSendAsTask] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [cvoMode, setCvoMode] = useState(false);
+  const [promptPrefixId, setPromptPrefixId] = useState<PromptPrefixId>('none');
+  const [showPromptPrefixMenu, setShowPromptPrefixMenu] = useState(false);
+  const selectedPromptPrefix = useMemo(
+    () => PROMPT_PREFIX_OPTIONS.find((option) => option.id === promptPrefixId) ?? PROMPT_PREFIX_OPTIONS[0],
+    [promptPrefixId],
+  );
   const activeUiReady = isHydrated && Boolean(hasActiveInvocation);
 
   useEffect(() => {
     setIsHydrated(true);
     try {
-      setCvoMode(window.localStorage.getItem(CVO_MODE_STORAGE_KEY) === '1');
+      const storedPrefix = window.localStorage.getItem(PROMPT_PREFIX_STORAGE_KEY);
+      if (isPromptPrefixId(storedPrefix)) {
+        setPromptPrefixId(storedPrefix);
+        return;
+      }
+      if (window.localStorage.getItem(CVO_MODE_STORAGE_KEY) === '1') {
+        setPromptPrefixId('requirements');
+      }
     } catch {
       // Keep the SSR-safe default when localStorage is unavailable.
     }
   }, []);
 
-  const updateCvoMode = useCallback((next: boolean) => {
-    setCvoMode(next);
+  const updatePromptPrefix = useCallback((next: PromptPrefixId) => {
+    setPromptPrefixId(next);
     if (typeof window === 'undefined') return;
     try {
-      if (next) window.localStorage.setItem(CVO_MODE_STORAGE_KEY, '1');
-      else window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+      if (next === 'none') {
+        window.localStorage.removeItem(PROMPT_PREFIX_STORAGE_KEY);
+        window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(PROMPT_PREFIX_STORAGE_KEY, next);
+        window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+      }
     } catch {
       // LocalStorage is a convenience preference; sending should not depend on it.
     }
@@ -169,6 +242,7 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const gameBtnRef = useRef<HTMLButtonElement>(null);
+  const promptPrefixMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
@@ -220,7 +294,9 @@ export function ChatInput({
         if (trimmed) addHistoryEntry(trimmed);
         const fallbackContent = attachments.length > 0 ? '上传文件' : '上传图片';
         const userContent = trimmed || fallbackContent;
-        const contentToSend = cvoMode ? `${CVO_MODE_PREFIX}\n\n用户原始需求：\n${userContent}` : userContent;
+        const contentToSend = selectedPromptPrefix.prefix
+          ? `${selectedPromptPrefix.prefix}\n\n用户原始需求：\n${userContent}`
+          : userContent;
         const whisper =
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
@@ -234,8 +310,9 @@ export function ChatInput({
         setAttachments([]);
         setShowMentions(false);
         setShowGameMenu(false);
+        setShowPromptPrefixMenu(false);
         setSendAsTask(false);
-        if (cvoMode) updateCvoMode(false);
+        if (selectedPromptPrefix.prefix) updatePromptPrefix('none');
 
         const sendResult = await onSend(contentToSend, sendImages, sendAttachments, whisper, deliveryMode);
         const sentMessageId =
@@ -280,8 +357,8 @@ export function ChatInput({
       addHistoryEntry,
       sendAsTask,
       threadId,
-      cvoMode,
-      updateCvoMode,
+      selectedPromptPrefix,
+      updatePromptPrefix,
     ],
   );
 
@@ -722,6 +799,19 @@ export function ChatInput({
     return () => document.removeEventListener('mousedown', handler);
   }, [activeMenu, closeMenus]);
 
+  useEffect(() => {
+    if (!showPromptPrefixMenu) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!target.isConnected) return;
+      if (promptPrefixMenuRef.current && !promptPrefixMenuRef.current.contains(target)) {
+        setShowPromptPrefixMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPromptPrefixMenu]);
+
   return (
     <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
 
@@ -934,20 +1024,66 @@ export function ChatInput({
                 <span className="whitespace-nowrap">As Task</span>
               </label>
 
-              <button
-                type="button"
-                onClick={() => updateCvoMode(!cvoMode)}
-                aria-pressed={cvoMode}
-                title="先采访：发送后让 Agent 先问 3 个澄清问题"
-                className={`hidden items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors md:flex ${
-                  cvoMode
-                    ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
-                    : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
-                }`}
-              >
-                <span aria-hidden="true">🎯</span>
-                <span className="whitespace-nowrap">先采访</span>
-              </button>
+              <div ref={promptPrefixMenuRef} className="relative hidden md:block">
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeMenus();
+                    setShowPromptPrefixMenu((open) => !open);
+                  }}
+                  aria-haspopup="menu"
+                  aria-expanded={showPromptPrefixMenu}
+                  title="选择发送前自动追加的提示词前缀"
+                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                    selectedPromptPrefix.id !== 'none'
+                      ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
+                      : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+                  }`}
+                >
+                  <span aria-hidden="true">⌁</span>
+                  <span className="whitespace-nowrap">{selectedPromptPrefix.shortLabel}</span>
+                </button>
+
+                {showPromptPrefixMenu && (
+                  <div
+                    role="menu"
+                    className="absolute bottom-full right-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] p-1 shadow-[var(--clowder-shadow-medium)]"
+                    data-testid="prompt-prefix-menu"
+                  >
+                    {PROMPT_PREFIX_OPTIONS.map((option) => {
+                      const selected = option.id === selectedPromptPrefix.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selected}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            updatePromptPrefix(option.id);
+                            setShowPromptPrefixMenu(false);
+                            textareaRef.current?.focus();
+                          }}
+                          className={`flex w-full flex-col rounded-lg border-l-2 px-3 py-2 text-left transition-colors ${
+                            selected
+                              ? 'border-[var(--console-active-fg)] bg-[var(--console-active-bg)] text-[var(--console-active-fg)]'
+                              : 'border-transparent text-cafe-text hover:bg-[var(--console-hover-bg)]'
+                          }`}
+                        >
+                          <span className="text-xs font-semibold">{option.label}</span>
+                          <span
+                            className={`mt-0.5 text-[11px] leading-snug ${
+                              selected ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                            }`}
+                          >
+                            {option.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {activeUiReady && !disabled && onStop && (
                 <button
