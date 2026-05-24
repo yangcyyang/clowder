@@ -9,18 +9,18 @@ function resolveApiBaseUrl() {
   // /uploads/* and same-origin fetches would round-trip through the tunnel.
   const apiPort = Number(process.env.API_SERVER_PORT);
   if (Number.isInteger(apiPort) && apiPort > 0) {
-    return `http://localhost:${apiPort}`;
+    return `http://127.0.0.1:${apiPort}`;
   }
 
   const frontendPort = Number(process.env.FRONTEND_PORT);
   if (Number.isInteger(frontendPort) && frontendPort > 0) {
-    return `http://localhost:${frontendPort + 1}`;
+    return `http://127.0.0.1:${frontendPort + 1}`;
   }
 
   const explicit = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
   if (explicit) return explicit;
 
-  return 'http://localhost:3004';
+  return 'http://127.0.0.1:3004';
 }
 
 const apiBaseUrl = resolveApiBaseUrl();

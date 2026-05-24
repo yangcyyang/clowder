@@ -32,9 +32,9 @@ describe('next.config rewrites', () => {
     await withEnv({}, async (config) => {
       const rewrites = await config.rewrites();
       assert.deepEqual(rewrites, [
-        { source: '/api/:path*', destination: 'http://localhost:3004/api/:path*' },
-        { source: '/socket.io/:path*', destination: 'http://localhost:3004/socket.io/:path*' },
-        { source: '/uploads/:path*', destination: 'http://localhost:3004/uploads/:path*' },
+        { source: '/api/:path*', destination: 'http://127.0.0.1:3004/api/:path*' },
+        { source: '/socket.io/:path*', destination: 'http://127.0.0.1:3004/socket.io/:path*' },
+        { source: '/uploads/:path*', destination: 'http://127.0.0.1:3004/uploads/:path*' },
       ]);
     });
   });
@@ -51,14 +51,14 @@ describe('next.config rewrites', () => {
   it('respects API_SERVER_PORT', async () => {
     await withEnv({ API_SERVER_PORT: '4000' }, async (config) => {
       const rewrites = await config.rewrites();
-      assert.equal(rewrites[0].destination, 'http://localhost:4000/api/:path*');
+      assert.equal(rewrites[0].destination, 'http://127.0.0.1:4000/api/:path*');
     });
   });
 
   it('respects FRONTEND_PORT (API = frontend + 1)', async () => {
     await withEnv({ FRONTEND_PORT: '5000' }, async (config) => {
       const rewrites = await config.rewrites();
-      assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
+      assert.equal(rewrites[0].destination, 'http://127.0.0.1:5001/api/:path*');
     });
   });
 

@@ -14,6 +14,19 @@ function getBrowserLocation(): Location | null {
   return candidate ?? null;
 }
 
+function normalizeLoopbackUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'localhost') {
+      parsed.hostname = '127.0.0.1';
+      return parsed.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // Fall through and keep the original string for non-URL test doubles.
+  }
+  return url;
+}
+
 /** @internal Exported for testing — prefer using `API_URL` constant. */
 export function resolveApiUrl(): string {
   const location = getBrowserLocation();
@@ -31,9 +44,9 @@ export function resolveApiUrl(): string {
     //   - localhost env + remote browser → reverse-proxy users would hit dev's loopback
     //   - cloud env + local browser → would force a Cloudflare Tunnel round-trip for nothing
     const mismatch = (isLocalhostDefault && isRemoteAccess) || (!isLocalhostDefault && isLocalAccess);
-    if (!mismatch) return envUrl;
+    if (!mismatch) return normalizeLoopbackUrl(envUrl);
   }
-  if (typeof window === 'undefined') return 'http://localhost:3004';
+  if (typeof window === 'undefined') return 'http://127.0.0.1:3004';
   const protocol = location?.protocol ?? 'http:';
   const hostname = location?.hostname ?? 'localhost';
   const port = Number(location?.port ?? '') || 0;
@@ -42,7 +55,8 @@ export function resolveApiUrl(): string {
   if (!port) return `${protocol}//${hostname}`;
   // Direct access with explicit port: convention frontendPort + 1 = apiPort
   // (runtime: 3001→3002, alpha: 3011→3012).
-  return `${protocol}//${hostname}:${port + 1}`;
+  const apiHost = hostname === 'localhost' ? '127.0.0.1' : hostname;
+  return `${protocol}//${apiHost}:${port + 1}`;
 }
 export const API_URL = resolveApiUrl();
 
