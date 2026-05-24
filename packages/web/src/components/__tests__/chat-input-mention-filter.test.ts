@@ -70,6 +70,11 @@ describe('detectMenuTrigger filter', () => {
     expect(result).toEqual({ type: 'mention', start: 6, filter: '' });
   });
 
+  it('detects mention directly after non-space characters', () => {
+    const result = detectMenuTrigger('请找@Pi', 5);
+    expect(result).toEqual({ type: 'mention', start: 2, filter: 'Pi' });
+  });
+
   it('supports up to 12 character filter', () => {
     const result = detectMenuTrigger(' @longcatname', 13);
     expect(result).toEqual({ type: 'mention', start: 1, filter: 'longcatname' });
