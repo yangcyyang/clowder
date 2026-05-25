@@ -15,6 +15,10 @@ interface Waiter {
   cleanup: () => void;
 }
 
+export interface SessionMutexAcquireOptions {
+  timeoutMs?: number;
+}
+
 export class SessionMutex {
   /** Currently held locks: sessionId → release resolver */
   private held = new Map<string, { release: () => void }>();
@@ -29,7 +33,7 @@ export class SessionMutex {
    *
    * The returned release function is idempotent (safe to call multiple times).
    */
-  async acquire(sessionId: string, signal?: AbortSignal): Promise<() => void> {
+  async acquire(sessionId: string, signal?: AbortSignal, options?: SessionMutexAcquireOptions): Promise<() => void> {
     // Fast path: check abort before anything
     if (signal?.aborted) {
       throw new Error(`SessionMutex acquire aborted for session ${sessionId}`);
@@ -42,19 +46,23 @@ export class SessionMutex {
 
     // Contention — queue and wait
     return new Promise<() => void>((resolve, reject) => {
-      const onAbort = (): void => {
-        // Remove this waiter from the queue
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const removeWaiter = (): void => {
         const queue = this.waiters.get(sessionId);
         if (queue) {
           const idx = queue.indexOf(waiter);
           if (idx !== -1) queue.splice(idx, 1);
           if (queue.length === 0) this.waiters.delete(sessionId);
         }
+      };
+      const onAbort = (): void => {
+        removeWaiter();
         reject(new Error(`SessionMutex acquire aborted for session ${sessionId}`));
       };
 
       const cleanup = (): void => {
         signal?.removeEventListener('abort', onAbort);
+        if (timer) clearTimeout(timer);
       };
 
       const waiter: Waiter = {
@@ -67,6 +75,14 @@ export class SessionMutex {
       };
 
       signal?.addEventListener('abort', onAbort, { once: true });
+      if (options?.timeoutMs && options.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          removeWaiter();
+          cleanup();
+          reject(new Error(`SessionMutex acquire timeout for session ${sessionId} after ${options.timeoutMs}ms`));
+        }, options.timeoutMs);
+        timer.unref();
+      }
 
       let queue = this.waiters.get(sessionId);
       if (!queue) {

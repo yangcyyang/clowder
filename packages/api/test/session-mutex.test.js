@@ -59,6 +59,18 @@ test('queued acquire rejects when signal is aborted', async () => {
   release1();
 });
 
+test('queued acquire rejects after timeout and does not poison queue', async () => {
+  const mutex = new SessionMutex();
+  const release1 = await mutex.acquire('s1');
+
+  await assert.rejects(mutex.acquire('s1', undefined, { timeoutMs: 10 }), /timeout/i);
+  release1();
+
+  const release2 = await mutex.acquire('s1');
+  assert.equal(typeof release2, 'function');
+  release2();
+});
+
 test('already-aborted signal rejects immediately', async () => {
   const mutex = new SessionMutex();
   const release1 = await mutex.acquire('s1');

@@ -131,6 +131,7 @@ import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './
 
 /** F118: Module-level singleton — guards per-cliSessionId serialization */
 const sessionMutex = new SessionMutex();
+const SESSION_MUTEX_WAIT_TIMEOUT_MS = Number(process.env.CAT_CAFE_SESSION_MUTEX_WAIT_TIMEOUT_MS) || 90_000;
 
 /**
  * F089: Race an async iterator's .next() against an AbortSignal.
@@ -602,7 +603,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F118: Acquire per-cliSessionId mutex to prevent concurrent resume
     if (sessionId) {
       try {
-        sessionMutexRelease = await sessionMutex.acquire(sessionId, signal);
+        sessionMutexRelease = await sessionMutex.acquire(sessionId, signal, {
+          timeoutMs: SESSION_MUTEX_WAIT_TIMEOUT_MS,
+        });
       } catch (err) {
         // Abort while queued is not a runtime error — clean exit
         if (signal?.aborted) {
@@ -618,7 +621,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           didComplete = true; // F118 AC-C5: Abort early exit, not force-return
           return;
         }
-        throw err; // unexpected error — let outer catch handle
+        if (err instanceof Error && /SessionMutex acquire timeout/i.test(err.message)) {
+          log.warn(
+            { threadId, catId, userId, invocationId, sessionId, timeoutMs: SESSION_MUTEX_WAIT_TIMEOUT_MS },
+            'Session mutex wait timed out — starting a fresh CLI session to avoid a stuck invocation',
+          );
+          sessionId = undefined;
+        } else {
+          throw err; // unexpected error — let outer catch handle
+        }
       }
     }
 
