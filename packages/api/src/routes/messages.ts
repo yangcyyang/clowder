@@ -942,6 +942,29 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           });
           void opts.catSupervisor?.markProcessing(targetCats);
 
+          // Task #161: routeExecution 可能要等 CLI 启动 / 模型首 token 才有可见
+          // 内容。这里先广播一个轻量 system_info，让用户立即看到“已接球”。
+          const ackStartedAt = Date.now();
+          for (const catId of targetCats) {
+            opts.socketManager.broadcastAgentMessage(
+              {
+                type: 'system_info',
+                catId,
+                content: JSON.stringify({
+                  type: 'agent_ack',
+                  catId,
+                  invocationId: createResult.invocationId,
+                  targetCats,
+                  intent: intent.intent,
+                  startedAt: ackStartedAt,
+                }),
+                timestamp: ackStartedAt,
+                invocationId: createResult.invocationId,
+              },
+              resolvedThreadId,
+            );
+          }
+
           for await (const msg of router.routeExecution(
             userId,
             content,
