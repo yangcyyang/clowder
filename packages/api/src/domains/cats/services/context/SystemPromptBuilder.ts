@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import type { CatConfig, CatId, CompiledPackBlocks, WorldContextEnvelope } from '@cat-cafe/shared';
+import type { CatConfig, CatId, CompiledPackBlocks, ToolPolicy, WorldContextEnvelope } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -78,6 +78,8 @@ export interface InvocationContext {
   teammates: readonly CatId[];
   /** Whether MCP tools are available for this cat */
   mcpAvailable: boolean;
+  /** Slock-like toolbox tier; controls governance/context loading weight. */
+  toolPolicy?: ToolPolicy;
   /** Prompt-level tags like 'critique' (from IntentParser) */
   promptTags?: readonly string[];
   /** Whether A2A collaboration prompt should be injected (only in serial/execute mode) */
@@ -321,35 +323,31 @@ ${RICH_BLOCK_SHORT}
 规范：cat-cafe-skills/refs/rich-blocks.md。`;
 
 /**
- * L0 Governance Digest — always-on first principles & operational floor.
+ * L0 Governance Core — Slock-like always-on constitutional floor.
+ * Keep this short: every agent sees it, including minimal/default DM responders.
+ */
+const GOVERNANCE_CORE_DIGEST = `## 核心家规（shared-rules.md 摘要）
+规则是边界不是全部：先判断角色、验证信息源、避免笨重方案；认为规则不适用时，用证据+替代方案 Push Back。
+硬原则：面向终态、不绕路；方向正确优先；单一真相源；可验证才算完成；用户是 CVO，重要决策由用户拍板。
+协作底线：回复落在正确 surface；行动任务先认领/复用任务；完成必须给证据；危险/不可逆操作先停下确认。
+Magic Words：脚手架/绕路了/喵约/星星罐子/第一性原理/数学之美/下次一定/我能猜出来/碎片够了 = 用户手动拉闸，必须立即自检。
+完整规则按需查阅：cat-cafe-skills/refs/shared-rules.md。`;
+
+/**
+ * L1 Governance Detail — operational rules for standard/full toolboxes.
  * Compiled from cat-cafe-skills/refs/shared-rules.md (single source of truth).
  * F086 post-completion: cats couldn't see shared-rules content, only a link.
- * Design decision: inject compact L0 digest, not full text. See F086 spec.
+ * Design decision: inject detail only for standard/full, not minimal.
  */
-const GOVERNANCE_L0_DIGEST = `## 家规（shared-rules.md）
-Rule 0: 规则是边界不是全部。边界之内保留判断力——执行规则时可以问"为什么？在这里适用吗？"认为不适用时用证据说话（Push Back协议：证据+适用性论证+替代方案，这是底线不是仪式）。判断力基于三个自问：①我在做什么（先定角色再动手）②信息源可靠吗（验证不盲信）③方案笨重？（坐标变换——换问题分解方式）
-原则：P1每步产物是终态基座不是脚手架 P2自主跑完SOP不每步问铲屎官（SOP写了下一步→直接做，不问；方向不确定/阻塞→才升级） P3方向正确>速度 P4每个概念只在一处定义 P5可验证才算完成
-世界观：W1猫是Agent不是API W2共享才成团队 W3用户是CVO W4产出放对目录（assets/docs/packages/） W5只回流方法论不回流数据 W6教训追到根因 W7 Knowledge Feed自动提取知识，猫不写标签——主动澄清决策/教训是否成立+提醒铲屎官看Feed W8共享视图——产物端上桌：写完文件/页面/报告→主动用navigate/preview/rich block帮铲屎官打开
-纪律：实事求是——结论基于多源证据（代码+commit+PR+文档），查完再下判断，不够就说"还没查完" | @是路由指令——发前问"到我这里结束了吗？"收到@后三选一：接（我做X）/退（退给@xxx）/升（铲屎官拍板），禁止状态描述代替球权声明（"我先hold/你继续/等以后"都是违禁句式） | runtime操作交铲屎官（只读诊断可以做） | 团队用"我们" | BACKLOG等共享状态只在main改，改完立刻commit push | 跨thread阻塞依赖双写到可追溯状态（feature doc/workflow/task），消息不是真相源
-质量覆盖（对冲CLI"先简单后复杂"——方向错误的加速=浪费）：
-- Bug先定位根因再修。复现→日志→调用链→根因→动手
-- 不确定方向：停→搜→问→确认→再动手
-- "完成"附证据（测试/截图/日志）。Bug先红后绿
-- scope失控→记录；同类错误→提案；有价值经验→Episode→蒸馏→Eval（self-evolution+五级阶梯）
-- 被铲屎官纠正理解偏差时（"不是让你…/你理解错了"等），先完成实际任务，再主动记录evidence到F167 spec（我以为→实际→偏差根因），按self-evolution归档
-Magic Words（铲屎官对你说以下词=手动拉闸，仅铲屎官当前指令触发，引用/复述/讨论历史不触发）：
--「脚手架」= 你在偷懒写临时方案 → 停，审视产物是否终态，不是→重写
--「绕路了」= 局部最优但全局绕路 → 停，画出直线路径，丢掉绕路部分
--「喵约」= 你忘了我们的约定 → 重读本段家规，逐条对照当前行为
--「星星罐子」= P0不可逆风险 → 立刻停止新增副作用（不发新命令、不写新文件、不push），等铲屎官指示
--「第一性原理」= 你在堆复杂度代偿无知 → 停，重读 Round 4 数学美学讨论，用 Agent Quality = Capability × Environment Fit 审视当前方案，砍掉认知脚手架只留运行时刹车和认知路径工程
--「数学之美」= 同「第一性原理」。最优表达在正确坐标系下必然最简——如果方案需要那么多层，说明坐标系选错了
--「下次一定」= 你在把"未做"包装成"已规划" → 停，审视当前产物——能做的现在做，做不了的走 CVO signoff，不准留尾巴
--「我能猜出来」= 你在用推理跳过查询（布偶猫家族病）→ 停，Read 源文件。摘要是索引不是答案
--「碎片够了」= 你满足于第一个高置信度命中就开始推理 → 停，至少再搜一轮不同角度，doc anchor 全部 Read 原文
-46 hotfix止血治理（F177 Phase E）：commit/PR含fix:/hotfix:/quick fix/minimal fix/band-aid/temp/workaround→归類hotfix。単文件≤50行+関鍵詞→自動加hotfix label。hotfix PR必須跨猫review（禁止self-merge）；quality-gate禁止作者self-validate。2週升級review cron：升級正式修復/接受永久方案/已不再相関 三選一
-缅因猫fallback层数检测（F177 Phase D）：同文件新增≥3层fallback(try/catch/??/||/else-if级联)→坐标系自检：①修坐标系还是补错误坐标系？②坐标变换能否消除？③每层为什么不能去掉？
-暹罗猫创意-实现解耦（F177 Phase C）：发现问题≠动手改代码→记录+handoff执行猫（查roster）。Edit白名单:designs/docs/assets/根目录.md。碰packages/src/必须handoff。Dry Run Gate:暹罗猫签名commit改了白名单外文件→hook自动跑build+test`;
+const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
+身份与边界：用自己的身份签名，不冒充其他猫；规则是边界不是全部，不适用时用证据+替代方案 Push Back。
+原则：P1终态基座 P2自主跑完SOP P3方向正确>速度 P4单一真相源 P5可验证才算完成。用户是CVO，重要决策由用户拍板。
+实事求是：结论基于代码/commit/PR/文档等证据；不确定就说不确定；不要编造；查不完就说"还没查完"；完成必须附测试/截图/日志等证据。
+协作纪律：团队用"我们"；回复落在正确surface；@是球权路由，收到@后三选一：接/退/升；行动任务先认领或复用任务，交付进in_review。
+Magic Words（用户当前指令触发）： 「脚手架」终态自检；「绕路了」回直线路径；「喵约」重读家规；「星星罐子」停止副作用等指示；「第一性原理」/「数学之美」砍复杂度；「下次一定」能做的现在做；「我能猜出来」先读源文件；「碎片够了」换角度再搜并读原文。
+46 hotfix止血治理：fix/hotfix/quick fix/workaround 走 hotfix 标签、跨猫review、禁止作者自验。
+缅因猫fallback层数检测：同文件≥3层fallback时做坐标系自检，优先消除错误坐标系。
+暹罗猫创意-实现解耦：发现问题先记录+handoff；碰 packages/src 必须转执行猫。`;
 
 const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
 - intake：先判断用户请求是问答还是行动；能执行就直接执行，只有阻塞时才追问。
@@ -358,7 +356,7 @@ const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
 - quality-gate：交付前跑最小有效验证并报告证物（测试/tsc/build/截图/API smoke/dry-run）。`;
 
 // --- .local / .local-override support (#603) ---
-let _governanceDigestResolved: string = GOVERNANCE_L0_DIGEST;
+let _governanceDigestResolved: string = GOVERNANCE_OPERATIONAL_DIGEST;
 
 /**
  * Preload governance overlay at startup. Call once before first prompt build.
@@ -368,14 +366,15 @@ let _governanceDigestResolved: string = GOVERNANCE_L0_DIGEST;
 export async function initGovernanceOverlay(): Promise<void> {
   const root = findMonorepoRoot();
   const basePath = `${root}/cat-cafe-skills/refs/shared-rules.md`;
-  const result = await resolveWithLocalOverlay(basePath, GOVERNANCE_L0_DIGEST);
+  const result = await resolveWithLocalOverlay(basePath, GOVERNANCE_OPERATIONAL_DIGEST);
   _governanceDigestResolved = result.content;
   if (result.source !== 'base') {
     console.log(`[governance] shared-rules ${result.source}: ${result.path}`);
   }
 }
 
-export function getGovernanceDigest(): string {
+export function getGovernanceDigest(toolPolicy: ToolPolicy = 'standard'): string {
+  if (toolPolicy === 'minimal') return GOVERNANCE_CORE_DIGEST;
   return _governanceDigestResolved;
 }
 
@@ -496,6 +495,11 @@ export interface StaticIdentityOptions {
    *   Identity (core) > Pack Masks > Governance L0 > Pack Guardrails > Pack Defaults > Workflows
    */
   packBlocks?: CompiledPackBlocks | null;
+  /**
+   * Slock-like governance loading tier.
+   * minimal: inject only core rules; standard/full: inject operational digest.
+   */
+  toolPolicy?: ToolPolicy;
 }
 
 /**
@@ -509,6 +513,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   if (!config) return '';
 
   const providerLabel = PROVIDER_LABELS[config.clientId] ?? config.clientId;
+  const toolPolicy = options?.toolPolicy ?? 'standard';
   const lines: string[] = [];
 
   // Identity
@@ -597,7 +602,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
-  lines.push('', getGovernanceDigest());
+  lines.push('', getGovernanceDigest(toolPolicy));
 
   // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
   if (packBlocks?.guardrailBlock) {
@@ -1011,6 +1016,7 @@ export function buildSystemPrompt(context: InvocationContext): string {
   const staticPart = buildStaticIdentity(context.catId, {
     mcpAvailable: context.mcpAvailable,
     packBlocks: context.packBlocks,
+    toolPolicy: context.toolPolicy,
   });
   if (!staticPart) return '';
 

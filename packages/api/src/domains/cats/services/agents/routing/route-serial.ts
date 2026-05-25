@@ -399,7 +399,11 @@ export async function* routeSerial(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      const staticIdentity = buildStaticIdentity(catId, {
+        mcpAvailable,
+        packBlocks,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+      });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -480,6 +484,7 @@ export async function* routeSerial(
         chainTotal: worklist.length,
         teammates,
         mcpAvailable,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         a2aEnabled,
         ...(directMessageFrom ? { directMessageFrom } : {}),

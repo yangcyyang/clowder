@@ -1666,6 +1666,25 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('默认行为'), 'Should not inject null defaults');
   });
 
+  test('Slock-like governance: minimal toolbox injects only core shared-rules digest', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', { toolPolicy: 'minimal' });
+
+    assert.ok(prompt.includes('核心家规（shared-rules.md 摘要）'), 'minimal should keep the core governance floor');
+    assert.ok(prompt.includes('完整规则按需查阅'), 'minimal should point to the full source of truth');
+    assert.ok(!prompt.includes('46 hotfix止血治理'), 'minimal should not carry operational governance details');
+    assert.ok(!prompt.includes('缅因猫fallback层数检测'), 'minimal should not carry breed-specific operational audit text');
+  });
+
+  test('Slock-like governance: standard toolbox keeps operational shared-rules digest', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('opus', { toolPolicy: 'standard' });
+
+    assert.ok(prompt.includes('家规（shared-rules.md）'), 'standard should keep the operational governance digest');
+    assert.ok(prompt.includes('46 hotfix止血治理'), 'standard should include operational governance details');
+    assert.ok(prompt.includes('Magic Words'), 'standard should include the full magic word protocol');
+  });
+
   // ── Drift guard: magic words in shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──
   test('GOVERNANCE_L0_DIGEST contains all magic words from shared-rules.md', async () => {
     const { readFileSync } = await import('node:fs');
