@@ -17,6 +17,7 @@ import type { InvocationTracker } from '../../domains/cats/services/agents/invoc
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
+import type { IMessageStore, StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
@@ -30,6 +31,7 @@ export interface ConnectorInvokeTriggerOptions {
   readonly router: AgentRouter;
   readonly socketManager: SocketManager;
   readonly invocationRecordStore: IInvocationRecordStore;
+  readonly messageStore?: IMessageStore;
   readonly invocationTracker: InvocationTracker;
   readonly invocationQueue: InvocationQueue;
   readonly queueProcessor?: QueueProcessor;
@@ -288,12 +290,14 @@ export class ConnectorInvokeTrigger {
 
       // #768: Defer intent_mode broadcast until CLI produces first event.
       let intentModeBroadcast = false;
+      const invocationStartedAt = Date.now();
 
       // ④ Run routeExecution and broadcast each agent message
       const cursorBoundaries = new Map<string, string>();
       const persistenceContext: PersistenceContext = { failed: false, errors: [] };
       const collectedUsage = new Map<string, TokenUsage>();
       const collectedTextParts: string[] = [];
+      const collectedSystemNoticeParts: string[] = [];
 
       // ISSUE-9: Track per-turn content for individual outbound delivery
       // Cloud-P1-4 fix: use ordered array (not Map) to preserve A→B→A turn boundaries
@@ -439,6 +443,10 @@ export class ConnectorInvokeTrigger {
             });
           }
         }
+        if (msg.type === 'system_info' && typeof msg.content === 'string') {
+          const noticeText = extractConnectorVisibleSystemNotice(msg.content);
+          if (noticeText) collectedSystemNoticeParts.push(noticeText);
+        }
         socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
@@ -459,6 +467,24 @@ export class ConnectorInvokeTrigger {
           error: `Connector invoke: message delivered but persistence failed: ${errorDetail}`,
         });
       } else {
+        const generatedVisibleContent =
+          collectedTextParts.length > 0 ||
+          outboundTurns.some((turn) => turn.textParts.length > 0 || (turn.richBlocks && turn.richBlocks.length > 0));
+        if (!generatedVisibleContent) {
+          const fallbackContent = await this.ensureVisibleEmptyResultNotice({
+            threadId,
+            userId,
+            catId,
+            invocationId: createResult.invocationId,
+            invocationStartedAt,
+            systemNoticeParts: collectedSystemNoticeParts,
+          });
+          if (fallbackContent) {
+            collectedTextParts.push(fallbackContent);
+            outboundTurns.push({ catId: catId as string, textParts: [fallbackContent] });
+          }
+        }
+
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'succeeded',
@@ -673,5 +699,106 @@ export class ConnectorInvokeTrigger {
         });
       }
     }
+  }
+
+  private async ensureVisibleEmptyResultNotice(args: {
+    threadId: string;
+    userId: string;
+    catId: CatId;
+    invocationId: string;
+    invocationStartedAt: number;
+    systemNoticeParts: readonly string[];
+  }): Promise<string | undefined> {
+    const messageStore = this.opts.messageStore;
+    const existingNotice = messageStore
+      ? await findRecentSilentNotice(messageStore, args.threadId, args.userId, args.invocationStartedAt)
+      : undefined;
+    if (existingNotice) return existingNotice.content;
+
+    const displayName = String(args.catId);
+    const diagnostics = args.systemNoticeParts
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part, index, arr) => arr.indexOf(part) === index);
+    const content =
+      diagnostics.length > 0
+        ? `[执行提醒]: ${diagnostics.join('\n')}`
+        : `[执行提醒]: ${displayName} 已收到这条外部 IM 消息，但本轮没有返回可展示文本。` +
+          '请重试，或检查该 Agent 的运行日志。';
+
+    if (!messageStore) return content;
+
+    try {
+      const stored = await messageStore.append({
+        userId: 'system',
+        catId: null,
+        threadId: args.threadId,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        source: {
+          connector: 'connector-empty-result',
+          label: '执行提醒',
+          icon: '⚠️',
+          meta: {
+            presentation: 'system_notice',
+            noticeTone: 'warning',
+            catId: args.catId,
+            invocationId: args.invocationId,
+          },
+        },
+      });
+      this.opts.socketManager.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+        threadId: args.threadId,
+        message: {
+          id: stored.id,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          timestamp: stored.timestamp,
+        },
+      });
+    } catch (err) {
+      this.opts.log.warn({ err, threadId: args.threadId }, '[ConnectorInvokeTrigger] empty-result notice append failed');
+    }
+
+    return content;
+  }
+}
+
+async function findRecentSilentNotice(
+  messageStore: IMessageStore,
+  threadId: string,
+  userId: string,
+  since: number,
+): Promise<StoredMessage | undefined> {
+  try {
+    const messages = await messageStore.getByThread(threadId, 50, userId);
+    return [...messages]
+      .reverse()
+      .find(
+        (msg) =>
+          msg.timestamp >= since &&
+          msg.source?.connector &&
+          ['silent-completion', 'connector-empty-result'].includes(msg.source.connector),
+      );
+  } catch {
+    return undefined;
+  }
+}
+
+function extractConnectorVisibleSystemNotice(content: string): string | undefined {
+  try {
+    const parsed = JSON.parse(content) as { type?: unknown; detail?: unknown; message?: unknown; reason?: unknown };
+    if (parsed.type === 'warning' || parsed.type === 'silent_completion' || parsed.type === 'governance_blocked') {
+      const text = [parsed.detail, parsed.message, parsed.reason].find(
+        (value): value is string => typeof value === 'string' && value.trim().length > 0,
+      );
+      return text?.trim();
+    }
+    return undefined;
+  } catch {
+    const trimmed = content.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 }

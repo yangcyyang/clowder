@@ -2169,6 +2169,7 @@ async function main(): Promise<void> {
     router,
     socketManager,
     invocationRecordStore,
+    messageStore,
     invocationTracker,
     invocationQueue,
     queueProcessor,

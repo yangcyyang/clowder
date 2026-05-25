@@ -55,6 +55,31 @@ function mockRouter(opts = {}) {
   };
 }
 
+function mockSilentRouter() {
+  const calls = /** @type {any[]} */ ([]);
+  const ackCalls = /** @type {any[]} */ ([]);
+
+  return {
+    calls,
+    ackCalls,
+    /** @type {any} */
+    router: {
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, _options) {
+        calls.push({ userId, message, threadId, userMessageId, targetCats, intent });
+        yield {
+          type: 'done',
+          catId: targetCats[0],
+          content: '',
+          timestamp: Date.now(),
+        };
+      },
+      async ackCollectedCursors(userId, threadId) {
+        ackCalls.push({ userId, threadId });
+      },
+    },
+  };
+}
+
 function mockSocketManager() {
   const broadcasts = /** @type {any[]} */ ([]);
   const roomBroadcasts = /** @type {any[]} */ ([]);
@@ -73,6 +98,43 @@ function mockSocketManager() {
       },
       emitToUser(userId, event, data) {
         userEmits.push({ userId, event, data });
+      },
+    },
+  };
+}
+
+function mockMessageStore() {
+  let counter = 0;
+  const appends = /** @type {any[]} */ ([]);
+  return {
+    appends,
+    /** @type {any} */
+    store: {
+      async append(input) {
+        counter++;
+        const stored = {
+          id: `msg-${counter}`,
+          threadId: input.threadId ?? 'default',
+          ...input,
+        };
+        appends.push(stored);
+        return stored;
+      },
+      async getByThread(threadId, _limit, userId) {
+        return appends.filter((msg) => msg.threadId === threadId && (!userId || msg.userId === userId || msg.userId === 'system'));
+      },
+    },
+  };
+}
+
+function mockOutboundHook() {
+  const deliveries = /** @type {any[]} */ ([]);
+  return {
+    deliveries,
+    /** @type {any} */
+    hook: {
+      async deliver(threadId, content, catId, richBlocks, threadMeta, explicitBindings, sourceMessageId) {
+        deliveries.push({ threadId, content, catId, richBlocks, threadMeta, explicitBindings, sourceMessageId });
       },
     },
   };
@@ -300,6 +362,34 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     assert.strictEqual(routerMock.calls.length, 1, 'Should auto-dequeue after completion');
     assert.strictEqual(routerMock.calls[0].message, 'Review email content');
+  });
+
+  it('ConnectorInvokeTrigger persists and delivers a visible notice when default cat returns no text', async () => {
+    const silentRouterMock = mockSilentRouter();
+    const messageStoreMock = mockMessageStore();
+    const outboundHookMock = mockOutboundHook();
+    const trigger = new ConnectorInvokeTrigger({
+      router: silentRouterMock.router,
+      socketManager: socketMock.manager,
+      invocationRecordStore: recordMock.store,
+      messageStore: messageStoreMock.store,
+      invocationTracker: trackerMock.tracker,
+      invocationQueue: queue,
+      outboundHook: outboundHookMock.hook,
+      log: noopLog(),
+    });
+
+    const outcome = trigger.trigger('thread-1', /** @type {any} */ ('gpt52'), 'user-1', 'hi', 'msg-weixin-1');
+    assert.strictEqual(outcome, 'dispatched');
+    await settle();
+
+    assert.strictEqual(silentRouterMock.calls.length, 1, 'should invoke default cat');
+    assert.strictEqual(messageStoreMock.appends.length, 1, 'should persist a visible empty-result notice');
+    assert.match(messageStoreMock.appends[0].content, /没有返回可展示文本/);
+    assert.strictEqual(messageStoreMock.appends[0].source.connector, 'connector-empty-result');
+    assert.strictEqual(outboundHookMock.deliveries.length, 1, 'should send fallback notice back to external IM');
+    assert.match(outboundHookMock.deliveries[0].content, /没有返回可展示文本/);
+    assert.strictEqual(silentRouterMock.ackCalls.length, 1, 'cursor should still be acknowledged after visible fallback');
   });
 
   it('E2E: force mode aborts + executes immediately (queue unchanged)', async () => {
