@@ -239,7 +239,7 @@ describe('QueueProcessor', () => {
         (msg) =>
           msg.type === 'system_info' &&
           typeof msg.content === 'string' &&
-          msg.content.includes('"agent_ack"') &&
+          msg.content.includes('已接球') &&
           msg.invocationId === 'inv-stub',
       ),
       'processing should broadcast an immediate agent_ack so UI has no dead-air window',

@@ -843,23 +843,15 @@ export class QueueProcessor {
       }
 
       // Task #161: surface immediate acknowledgement before the CLI/model emits
-      // its first real token/tool event. This matches Slock's "接球" feedback and
-      // removes the dead-air window where the backend is already processing but
-      // the chat surface only shows a long-running status bar.
+      // its first real token/tool event. Keep content plain text so stale/PWA
+      // clients still show a readable receipt instead of raw JSON.
       const startedAt = Date.now();
       for (const catId of targetCats) {
         socketManager.broadcastAgentMessage(
           {
             type: 'system_info',
             catId,
-            content: JSON.stringify({
-              type: 'agent_ack',
-              catId,
-              invocationId,
-              targetCats,
-              intent,
-              startedAt,
-            }),
+            content: `🔍 ${catId} 已接球，正在处理。`,
             timestamp: startedAt,
             invocationId,
           },
