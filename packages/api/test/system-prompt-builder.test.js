@@ -1685,6 +1685,30 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('Magic Words'), 'standard should include the full magic word protocol');
   });
 
+  test('Slock-like governance: magic words trigger shared-rules source context', async () => {
+    const { buildGovernanceSourceContext, detectGovernanceMagicWord, buildInvocationContext } = await import(
+      '../dist/domains/cats/services/context/SystemPromptBuilder.js'
+    );
+
+    assert.equal(detectGovernanceMagicWord('这个方向绕路了'), '绕路了');
+    assert.equal(detectGovernanceMagicWord('普通问候'), null);
+
+    const sourceContext = buildGovernanceSourceContext('喵约，重新对照一下');
+    assert.ok(sourceContext, 'magic word should build source context');
+    assert.ok(sourceContext.includes('家规原文按需参考'), 'should include on-demand source header');
+    assert.ok(sourceContext.includes('触发词：「喵约」'), 'should record matched magic word');
+    assert.ok(sourceContext.includes('shared-rules.md'), 'should point to source of truth');
+
+    const invocation = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      governanceSourceContext: sourceContext,
+    });
+    assert.ok(invocation.includes('家规原文按需参考'), 'invocation should inject source context when provided');
+  });
+
   // ── Drift guard: magic words in shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──
   test('GOVERNANCE_L0_DIGEST contains all magic words from shared-rules.md', async () => {
     const { readFileSync } = await import('node:fs');

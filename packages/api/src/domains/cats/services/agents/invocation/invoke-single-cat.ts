@@ -300,6 +300,9 @@ export interface InvocationParams {
     historyMessages: number;
     loadedBlocks: string[];
     skippedBlocks: string[];
+    governanceTier: 'core' | 'operational';
+    governanceEstimatedTokens: number;
+    governanceSourceInjected: boolean;
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;

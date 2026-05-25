@@ -48,8 +48,11 @@ import {
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
+  buildGovernanceSourceContext,
   buildInvocationContext,
   buildStaticIdentity,
+  getGovernanceDigestEstimatedTokens,
+  getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
@@ -363,6 +366,11 @@ export async function* routeSerial(
       const resolvedToolPolicy = resolveEffectiveToolPolicy(catConfig, message);
       const loadStandardContext = shouldLoadStandardContext(resolvedToolPolicy.toolPolicy);
       const loadFullContext = shouldLoadFullContext(resolvedToolPolicy.toolPolicy);
+      const governanceTier = getGovernanceTierForToolPolicy(resolvedToolPolicy.toolPolicy);
+      const governanceSourceContext = buildGovernanceSourceContext(message);
+      const governanceEstimatedTokens =
+        getGovernanceDigestEstimatedTokens(resolvedToolPolicy.toolPolicy) +
+        (governanceSourceContext ? Math.ceil(governanceSourceContext.length / 4) : 0);
       const effectiveContextBudget = getEffectiveRuntimeContextBudget(catId, resolvedToolPolicy.toolPolicy, {
         isDM: routeThread?.isDM,
         title: routeThread?.title,
@@ -485,6 +493,7 @@ export async function* routeSerial(
         teammates,
         mcpAvailable,
         toolPolicy: resolvedToolPolicy.toolPolicy,
+        ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         a2aEnabled,
         ...(directMessageFrom ? { directMessageFrom } : {}),
@@ -692,6 +701,9 @@ export async function* routeSerial(
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
+        governanceTier,
+        governanceEstimatedTokens,
+        hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
       });
 

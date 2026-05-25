@@ -17,6 +17,7 @@ P3 原文规则       → 用户触发或审计时读取 shared-rules.md
 - `minimal`：只注入 `GOVERNANCE_CORE_DIGEST`
 - `standard`：注入完整 `GOVERNANCE_OPERATIONAL_DIGEST`
 - `full`：注入完整 `GOVERNANCE_OPERATIONAL_DIGEST`，并允许 always_on / signal / guide 等重上下文继续进入
+- 命中 Magic Words 时：按需读取 `cat-cafe-skills/refs/shared-rules.md` 原文，作为本次 invocation 的动态上下文注入。
 
 这和 `toolPolicy` 分层一致：
 
@@ -34,5 +35,15 @@ P3 原文规则       → 用户触发或审计时读取 shared-rules.md
 ## 下一步
 
 - 把 `shared-rules.md` 拆成可机器读取的章节元数据。
-- 在 `contextBudget` 里显式增加 `governanceTier` 与估算 token。
-- 用户说“家规 / 喵约 / 第一性原理”时，允许 Agent 按需读取原文。
+- 对 Magic Words 原文注入做更细的章节定位，而不是当前的截断式原文参考。
+- 后续若 `shared-rules.md` 继续膨胀，需要把角色规则拆到 asset card / skill / pack。
+
+## 运行态诊断
+
+每次 invocation 的 `contextBudget` 会带上：
+
+- `governanceTier`：`core` 或 `operational`
+- `governanceEstimatedTokens`：家规摘要 + 按需原文的估算 token
+- `governanceSourceInjected`：本次是否因 Magic Words 注入了原文
+
+前端 `ThreadExecutionBar` 会显示 `家规:核心` 或 `家规:运营`，hover 可看到更详细的 token 和加载块。

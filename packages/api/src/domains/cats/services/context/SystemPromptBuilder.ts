@@ -80,6 +80,8 @@ export interface InvocationContext {
   mcpAvailable: boolean;
   /** Slock-like toolbox tier; controls governance/context loading weight. */
   toolPolicy?: ToolPolicy;
+  /** Full shared-rules reference, injected only when magic words explicitly trigger it. */
+  governanceSourceContext?: string | null;
   /** Prompt-level tags like 'critique' (from IntentParser) */
   promptTags?: readonly string[];
   /** Whether A2A collaboration prompt should be injected (only in serial/execute mode) */
@@ -333,6 +335,26 @@ const GOVERNANCE_CORE_DIGEST = `## 核心家规（shared-rules.md 摘要）
 Magic Words：脚手架/绕路了/喵约/星星罐子/第一性原理/数学之美/下次一定/我能猜出来/碎片够了 = 用户手动拉闸，必须立即自检。
 完整规则按需查阅：cat-cafe-skills/refs/shared-rules.md。`;
 
+export type GovernanceTier = 'core' | 'operational';
+
+const GOVERNANCE_MAGIC_WORDS = [
+  '脚手架',
+  '绕路了',
+  '喵约',
+  '星星罐子',
+  '第一性原理',
+  '数学之美',
+  '下次一定',
+  '我能猜出来',
+  '碎片够了',
+] as const;
+
+const GOVERNANCE_SOURCE_MAX_CHARS = 18_000;
+
+function roughTokenEstimate(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 /**
  * L1 Governance Detail — operational rules for standard/full toolboxes.
  * Compiled from cat-cafe-skills/refs/shared-rules.md (single source of truth).
@@ -376,6 +398,49 @@ export async function initGovernanceOverlay(): Promise<void> {
 export function getGovernanceDigest(toolPolicy: ToolPolicy = 'standard'): string {
   if (toolPolicy === 'minimal') return GOVERNANCE_CORE_DIGEST;
   return _governanceDigestResolved;
+}
+
+export function getGovernanceTierForToolPolicy(toolPolicy: ToolPolicy): GovernanceTier {
+  return toolPolicy === 'minimal' ? 'core' : 'operational';
+}
+
+export function getGovernanceDigestEstimatedTokens(toolPolicy: ToolPolicy): number {
+  return roughTokenEstimate(getGovernanceDigest(toolPolicy));
+}
+
+export function detectGovernanceMagicWord(message: string): string | null {
+  return GOVERNANCE_MAGIC_WORDS.find((word) => message.includes(word)) ?? null;
+}
+
+export function buildGovernanceSourceContext(message: string): string | null {
+  const matchedWord = detectGovernanceMagicWord(message);
+  if (!matchedWord) return null;
+
+  const root = findMonorepoRoot();
+  const sourcePath = `${root}/cat-cafe-skills/refs/shared-rules.md`;
+  try {
+    const raw = readFileSync(sourcePath, 'utf-8').trim();
+    const content =
+      raw.length > GOVERNANCE_SOURCE_MAX_CHARS
+        ? `${raw.slice(0, GOVERNANCE_SOURCE_MAX_CHARS)}\n\n[shared-rules.md 原文过长，已截断]`
+        : raw;
+    return [
+      '## 家规原文按需参考（shared-rules.md）',
+      `触发词：「${matchedWord}」。这不是常驻上下文，只在用户显式拉闸时注入。`,
+      `来源：${sourcePath}`,
+      '',
+      '```markdown',
+      content,
+      '```',
+    ].join('\n');
+  } catch (err) {
+    const messageText = err instanceof Error ? err.message : String(err);
+    return [
+      '## 家规原文按需参考（shared-rules.md）',
+      `触发词：「${matchedWord}」。`,
+      `读取失败：${messageText}`,
+    ].join('\n');
+  }
 }
 
 /** Per-breed workflow triggers: when to proactively @ other cats.
@@ -855,6 +920,10 @@ export function buildInvocationContext(context: InvocationContext): string {
       lines.push(`Care hint: ${wc.careLoopHint.trigger} → ${wc.careLoopHint.suggestion}`);
     }
     lines.push('');
+  }
+
+  if (context.governanceSourceContext) {
+    lines.push(context.governanceSourceContext, '');
   }
 
   // F163 AC-A3: always_on constitutional knowledge injection (physical, not retrieval)

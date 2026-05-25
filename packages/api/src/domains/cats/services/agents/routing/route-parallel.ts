@@ -25,8 +25,11 @@ import {
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
+  buildGovernanceSourceContext,
   buildInvocationContext,
   buildStaticIdentity,
+  getGovernanceDigestEstimatedTokens,
+  getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
@@ -166,6 +169,11 @@ export async function* routeParallel(
       const resolvedToolPolicy = resolveEffectiveToolPolicy(catConfig, message);
       const loadStandardContext = shouldLoadStandardContext(resolvedToolPolicy.toolPolicy);
       const loadFullContext = shouldLoadFullContext(resolvedToolPolicy.toolPolicy);
+      const governanceTier = getGovernanceTierForToolPolicy(resolvedToolPolicy.toolPolicy);
+      const governanceSourceContext = buildGovernanceSourceContext(message);
+      const governanceEstimatedTokens =
+        getGovernanceDigestEstimatedTokens(resolvedToolPolicy.toolPolicy) +
+        (governanceSourceContext ? Math.ceil(governanceSourceContext.length / 4) : 0);
       const effectiveContextBudget = getEffectiveRuntimeContextBudget(catId, resolvedToolPolicy.toolPolicy, {
         isDM: routeThread?.isDM,
         title: routeThread?.title,
@@ -244,6 +252,7 @@ export async function* routeParallel(
         teammates,
         mcpAvailable,
         toolPolicy: resolvedToolPolicy.toolPolicy,
+        ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
@@ -441,6 +450,9 @@ export async function* routeParallel(
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
+        governanceTier,
+        governanceEstimatedTokens,
+        hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
       });
 

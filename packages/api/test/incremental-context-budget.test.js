@@ -2,12 +2,48 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext, buildRuntimeContextBudgetSnapshot } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
+  test('runtime context budget snapshot exposes governance tier diagnostics', async () => {
+    const budget = getCatContextBudget('opus');
+    const snapshot = buildRuntimeContextBudgetSnapshot({
+      threadId: 'thread-1',
+      toolPolicy: 'minimal',
+      toolPolicySource: 'agent-default',
+      mode: 'serial',
+      prompt: 'hi',
+      staticIdentity: 'identity',
+      historyCount: 0,
+      includedHistoryCount: 0,
+      loadStandardContext: false,
+      loadFullContext: false,
+      hasPackBlocks: false,
+      hasWorldContext: false,
+      hasSessionBootstrap: false,
+      hasSignalArticles: false,
+      hasAlwaysOnDocs: false,
+      hasSopHint: false,
+      hasGuideContext: false,
+      hasMcpInstructions: false,
+      governanceTier: 'core',
+      governanceEstimatedTokens: 120,
+      hasGovernanceSourceContext: true,
+      catBudget: budget,
+    });
+
+    assert.equal(snapshot.governanceTier, 'core');
+    assert.equal(snapshot.governanceEstimatedTokens, 120);
+    assert.equal(snapshot.governanceSourceInjected, true);
+    assert.ok(snapshot.loadedBlocks.includes('governance-core'));
+    assert.ok(snapshot.loadedBlocks.includes('governance-source'));
+  });
+
   test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {
     const budget = getCatContextBudget('opus');
     const overCount = budget.maxMessages + 50;

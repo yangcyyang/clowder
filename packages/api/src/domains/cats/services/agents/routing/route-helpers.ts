@@ -50,6 +50,9 @@ export interface RuntimeContextBudgetSnapshot {
   historyMessages: number;
   loadedBlocks: string[];
   skippedBlocks: string[];
+  governanceTier: 'core' | 'operational';
+  governanceEstimatedTokens: number;
+  governanceSourceInjected: boolean;
   usesFullHistory: boolean;
   maxPromptTokens: number;
   maxContextTokens: number;
@@ -140,9 +143,14 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasSopHint: boolean;
   hasGuideContext: boolean;
   hasMcpInstructions: boolean;
+  governanceTier: 'core' | 'operational';
+  governanceEstimatedTokens: number;
+  hasGovernanceSourceContext: boolean;
   catBudget: ReturnType<typeof getCatContextBudget>;
 }): RuntimeContextBudgetSnapshot {
   const loadedBlocks = ['current-message', 'static-identity'];
+  loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
+  if (input.hasGovernanceSourceContext) loadedBlocks.push('governance-source');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
   if (input.hasWorldContext) loadedBlocks.push('world-context');
@@ -172,6 +180,9 @@ export function buildRuntimeContextBudgetSnapshot(input: {
     historyMessages: includedHistoryCount,
     loadedBlocks,
     skippedBlocks,
+    governanceTier: input.governanceTier,
+    governanceEstimatedTokens: input.governanceEstimatedTokens,
+    governanceSourceInjected: input.hasGovernanceSourceContext,
     usesFullHistory: historyCount > 0 && includedHistoryCount >= historyCount,
     maxPromptTokens: input.catBudget.maxPromptTokens,
     maxContextTokens: input.catBudget.maxContextTokens,

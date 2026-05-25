@@ -37,6 +37,9 @@ export function ThreadExecutionBar() {
         historyMessages: number;
         loadedBlocks: string[];
         skippedBlocks: string[];
+        governanceTier: 'core' | 'operational';
+        governanceEstimatedTokens: number;
+        governanceSourceInjected: boolean;
         usesFullHistory: boolean;
         maxPromptTokens: number;
       };
@@ -135,6 +138,9 @@ function CatStatusChip({
     historyMessages: number;
     loadedBlocks: string[];
     skippedBlocks: string[];
+    governanceTier: 'core' | 'operational';
+    governanceEstimatedTokens: number;
+    governanceSourceInjected: boolean;
     usesFullHistory: boolean;
     maxPromptTokens: number;
   };
@@ -148,6 +154,12 @@ function CatStatusChip({
     toolPolicy === 'minimal' ? '轻量' : toolPolicy === 'full' ? '全量' : toolPolicy === 'standard' ? '标准' : undefined;
   const sourceLabel =
     toolPolicySource === 'user-override' ? '用户指定' : toolPolicySource === 'agent-default' ? '默认' : undefined;
+  const governanceLabel =
+    contextBudget?.governanceTier === 'core'
+      ? '家规:核心'
+      : contextBudget?.governanceTier === 'operational'
+        ? '家规:运营'
+        : undefined;
   const budgetLabel = contextBudget
     ? `${Math.round(contextBudget.estimatedTokens / 1000)}k/${Math.round(contextBudget.maxPromptTokens / 1000)}k · ${contextBudget.historyMessages}条`
     : undefined;
@@ -155,6 +167,9 @@ function CatStatusChip({
     ? [
         `上下文预算：${contextBudget.estimatedTokens} / ${contextBudget.maxPromptTokens} tokens`,
         `历史消息：${contextBudget.historyMessages}${contextBudget.usesFullHistory ? '（全量）' : '（裁剪/摘要）'}`,
+        `家规层级：${contextBudget.governanceTier === 'core' ? '核心摘要' : '运营规则'} · ${contextBudget.governanceEstimatedTokens} tokens${
+          contextBudget.governanceSourceInjected ? ' · 已按需注入原文' : ''
+        }`,
         `加载：${contextBudget.loadedBlocks.join(', ') || '无'}`,
         `跳过：${contextBudget.skippedBlocks.join(', ') || '无'}`,
       ].join('\n')
@@ -170,6 +185,7 @@ function CatStatusChip({
           {sourceLabel ? `·${sourceLabel}` : ''}
         </span>
       ) : null}
+      {governanceLabel ? <span className="text-cafe-muted">{governanceLabel}</span> : null}
       {budgetLabel ? (
         <span className="text-cafe-muted" title={contextTitle}>
           {budgetLabel}
