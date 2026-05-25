@@ -50,6 +50,10 @@ const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
 
+export function shouldShowInlineThreadRuntimeStatus(status: CatStatusType): boolean {
+  return status !== 'done' && status !== 'alive_but_silent';
+}
+
 function getThreadPanelMaxWidth() {
   if (typeof window === 'undefined') return THREAD_PANEL_FALLBACK_MAX_WIDTH;
   return Math.max(THREAD_PANEL_MIN_WIDTH, Math.floor(window.innerWidth * THREAD_PANEL_MAX_VIEWPORT_RATIO));
@@ -124,7 +128,7 @@ export function InlineThreadPanel({
     const activeEntries = [...storeActiveEntries, ...queueActiveInvocations];
     const activeCatIds = activeEntries.map((entry) => entry.catId).filter(Boolean);
     const statusCatIds = Object.entries(threadRuntime?.catStatuses ?? {})
-      .filter(([, status]) => status !== 'done')
+      .filter(([, status]) => shouldShowInlineThreadRuntimeStatus(status))
       .map(([catId]) => catId);
     return Array.from(new Set([...activeCatIds, ...statusCatIds])).map((catId) => {
       const cat = getCatById(catId);

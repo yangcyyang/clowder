@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeInlineThreadMessage } from '@/components/InlineThreadPanel';
+import { normalizeInlineThreadMessage, shouldShowInlineThreadRuntimeStatus } from '@/components/InlineThreadPanel';
 import type { ChatMessage } from '@/stores/chatStore';
 
 describe('InlineThreadPanel streaming normalization', () => {
@@ -32,5 +32,20 @@ describe('InlineThreadPanel streaming normalization', () => {
     } as ChatMessage;
 
     expect(normalizeInlineThreadMessage(finalMessage)).toBe(finalMessage);
+  });
+});
+
+describe('InlineThreadPanel runtime status visibility', () => {
+  it('hides silent/done cats from the thread current-replies strip', () => {
+    expect(shouldShowInlineThreadRuntimeStatus('alive_but_silent')).toBe(false);
+    expect(shouldShowInlineThreadRuntimeStatus('done')).toBe(false);
+  });
+
+  it('keeps actionable runtime statuses visible', () => {
+    expect(shouldShowInlineThreadRuntimeStatus('spawning')).toBe(true);
+    expect(shouldShowInlineThreadRuntimeStatus('pending')).toBe(true);
+    expect(shouldShowInlineThreadRuntimeStatus('streaming')).toBe(true);
+    expect(shouldShowInlineThreadRuntimeStatus('suspected_stall')).toBe(true);
+    expect(shouldShowInlineThreadRuntimeStatus('error')).toBe(true);
   });
 });
