@@ -77,9 +77,9 @@ Slock 的 Agent 运行不是“扫全服务器历史”，而是按当前目标�
 - SOP hint
 - Guide context
 
-## 本轮实现
+## Phase 2 实现
 
-本轮先做“可见性”，不先做激进裁剪。
+Phase 2 先做“可见性”，不先做激进裁剪。
 
 每次 Agent invocation 创建时，后端会把 `contextBudget` 一起下发给前端：
 
@@ -100,11 +100,34 @@ Slock 的 Agent 运行不是“扫全服务器历史”，而是按当前目标�
 
 鼠标悬停在预算标签上，可看到加载/跳过的上下文块明细。
 
-## 后续 Phase 3
+## Phase 3 实现
 
-等运行数据稳定后，再做自动裁剪：
+Phase 3 开始把“成熟秘书”规则落到运行预算层：
 
-- minimal：强制不注入历史，只保留当前消息。
-- standard：只保留当前 thread 摘要 + 最近 N 条。
-- full：允许加载重资料，但必须有 token 上限和质量提示。
-- 运行态如果 `estimatedTokens` 超过阈值，自动降级为摘要模式。
+- minimal：强制不注入历史，只保留当前消息 + 静态身份 + 必要 callback/MCP 指令。
+- standard：从原始大窗口收缩到“最近必要窗口”。
+  - 普通 channel：最多 40 条历史，最多 24k context tokens。
+  - DM / 分支 thread：最多 24 条历史，最多 12k context tokens。
+- full：保留原始大上下文能力，给深度调研、PPT、UI、设计系统等重任务使用。
+
+同时增加默认降级：
+
+- 用户显式写“轻度工具箱 / 标准工具箱 / 重度工具箱”时，以用户指定为准。
+- Agent 默认是 `standard` 时，短问候、短问答会自动降到 `minimal`。
+- 命中“修复 / 代码 / 报错 / 调研 / PPT / 文件 / API / Git”等重任务关键词时，不自动降级。
+
+这让 Clowder 的默认行为更接近 Slock：
+
+```text
+先看当前房间
+短问题少拿材料
+重任务再拿重工具
+```
+
+## 后续 Phase 4
+
+下一步再做摘要化，而不是只做截断：
+
+- thread 中优先注入父消息摘要 + thread 最近回复。
+- 超过阈值的旧历史写入 thread memory，再用摘要续接。
+- 运行态如果 `estimatedTokens` 超过阈值，提示“上下文过重”，并建议切换摘要模式或轻量工具箱。

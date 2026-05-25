@@ -35,6 +35,26 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     );
   });
 
+  test('respects caller-supplied mature-secretary context budget', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 10);
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', undefined, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 2000,
+        maxMessages: 5,
+        maxContentLengthPerMsg: 1000,
+      },
+    });
+
+    const deliveredCount = (result.contextText.match(/\[(\d{16}-\d{6}-[a-f0-9]{8})\]/g) || []).length;
+    assert.ok(deliveredCount <= 5, `Expected caller budget to cap at 5 messages, got ${deliveredCount}`);
+    assert.ok(result.contextText.includes(msgs[msgs.length - 1].id), 'Should keep newest message under caller budget');
+  });
+
   test('caps messages when stale cursor produces large unseen batch', async () => {
     const budget = getCatContextBudget('opus');
     const totalCount = budget.maxMessages + 100;

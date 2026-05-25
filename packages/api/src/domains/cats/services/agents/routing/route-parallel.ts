@@ -5,7 +5,6 @@
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import {
   resolveEffectiveToolPolicy,
@@ -53,6 +52,7 @@ import {
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
   isUserFacingSystemInfoContent,
@@ -166,6 +166,10 @@ export async function* routeParallel(
       const resolvedToolPolicy = resolveEffectiveToolPolicy(catConfig, message);
       const loadStandardContext = shouldLoadStandardContext(resolvedToolPolicy.toolPolicy);
       const loadFullContext = shouldLoadFullContext(resolvedToolPolicy.toolPolicy);
+      const effectiveContextBudget = getEffectiveRuntimeContextBudget(catId, resolvedToolPolicy.toolPolicy, {
+        isDM: routeThread?.isDM,
+        title: routeThread?.title,
+      });
       const teammates = targetCats.filter((id) => id !== catId);
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
@@ -290,7 +294,6 @@ export async function* routeParallel(
       if (incrementalMode && loadStandardContext) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parIncBudget = getCatContextBudget(catId as string);
         const parIncSystemTokens = estimateTokens(
           [staticIdentity, invocationContext, parCatModePromptForBudget, bootstrapCtx, mcpInstructions]
             .filter(Boolean)
@@ -298,8 +301,8 @@ export async function* routeParallel(
         );
         const parIncMessageTokens = estimateTokens(message);
         const parEffectiveContextBudget = Math.min(
-          Math.max(0, parIncBudget.maxPromptTokens - parIncSystemTokens - parIncMessageTokens - 200),
-          parIncBudget.maxContextTokens,
+          Math.max(0, effectiveContextBudget.maxPromptTokens - parIncSystemTokens - parIncMessageTokens - 200),
+          effectiveContextBudget.maxContextTokens,
         );
 
         const inc = await assembleIncrementalContext(
@@ -311,6 +314,7 @@ export async function* routeParallel(
           thinkingMode,
           {
             effectiveMaxContextTokens: parEffectiveContextBudget,
+            contextBudget: effectiveContextBudget,
             canonicalFeatureId: loadFullContext ? sopStageHint?.featureId : undefined,
             threadTitle: routeThread?.title ?? undefined,
           },
@@ -367,7 +371,6 @@ export async function* routeParallel(
         // Per-cat context budget (Phase 4.0)
         let catContextHistory = loadStandardContext ? contextHistory : undefined;
         if (loadStandardContext && history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapCtx in system parts estimate (P2-1)
           const parCatModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -377,17 +380,20 @@ export async function* routeParallel(
               .join('\n'),
           );
           const parPromptTokens = estimateTokens(message);
-          const budgetForContext = Math.max(0, budget.maxPromptTokens - parSystemTokens - parPromptTokens - 200);
+          const budgetForContext = Math.max(
+            0,
+            effectiveContextBudget.maxPromptTokens - parSystemTokens - parPromptTokens - 200,
+          );
           const { contextText, messageCount } = assembleContext(history, {
-            maxMessages: budget.maxMessages,
-            maxContentLength: budget.maxContentLengthPerMsg,
-            maxTotalTokens: Math.min(budgetForContext, budget.maxContextTokens),
+            maxMessages: effectiveContextBudget.maxMessages,
+            maxContentLength: effectiveContextBudget.maxContentLengthPerMsg,
+            maxTotalTokens: Math.min(budgetForContext, effectiveContextBudget.maxContextTokens),
           });
           catContextHistory = contextText || undefined;
           includedHistoryCount = messageCount;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
-          const degradation = detectContextDegradation(history.length, messageCount, budget);
+          const degradation = detectContextDegradation(history.length, messageCount, effectiveContextBudget);
           if (degradation?.degraded) {
             degradationMsgs.push({
               type: 'system_info' as AgentMessageType,
@@ -430,7 +436,7 @@ export async function* routeParallel(
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
-        catBudget: getCatContextBudget(catId as string),
+        catBudget: effectiveContextBudget,
       });
 
       return invokeSingleCat(deps.invocationDeps, {

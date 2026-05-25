@@ -3,7 +3,7 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, MessageContent, RichBlock, RichBlockBase, ToolPolicy } from '@cat-cafe/shared';
+import type { CatId, ContextBudget, MessageContent, RichBlock, RichBlockBase, ToolPolicy } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -53,6 +53,72 @@ export interface RuntimeContextBudgetSnapshot {
   usesFullHistory: boolean;
   maxPromptTokens: number;
   maxContextTokens: number;
+}
+
+export interface RuntimeContextSurfaceHint {
+  isDM?: boolean | undefined;
+  title?: string | null | undefined;
+}
+
+const STANDARD_CONTEXT_BUDGET_CAP: Pick<ContextBudget, 'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'> =
+  {
+    maxContextTokens: 24_000,
+    maxMessages: 40,
+    maxContentLengthPerMsg: 6_000,
+  };
+
+const FOCUSED_SURFACE_CONTEXT_BUDGET_CAP: Pick<
+  ContextBudget,
+  'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'
+> = {
+  maxContextTokens: 12_000,
+  maxMessages: 24,
+  maxContentLengthPerMsg: 4_000,
+};
+
+function isFocusedSurface(surface: RuntimeContextSurfaceHint | undefined): boolean {
+  if (!surface) return false;
+  if (surface.isDM) return true;
+  const title = surface.title?.trim();
+  return Boolean(title && (title.includes('(分支)') || title === '分支对话'));
+}
+
+function capBudget(
+  base: ContextBudget,
+  cap: Pick<ContextBudget, 'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'>,
+): ContextBudget {
+  return {
+    maxPromptTokens: base.maxPromptTokens,
+    maxContextTokens: Math.min(base.maxContextTokens, cap.maxContextTokens),
+    maxMessages: Math.min(base.maxMessages, cap.maxMessages),
+    maxContentLengthPerMsg: Math.min(base.maxContentLengthPerMsg, cap.maxContentLengthPerMsg),
+  };
+}
+
+/**
+ * Slock-like "成熟秘书"预算：
+ * - minimal: 当前消息为主，不带历史窗口
+ * - standard: 只带最近必要窗口，避免普通任务背 160k+ 历史包
+ * - full: 保留原始大上下文能力，给深度调研/工程重任务使用
+ */
+export function getEffectiveRuntimeContextBudget(
+  catId: CatId,
+  policy: ToolPolicy,
+  surface?: RuntimeContextSurfaceHint,
+): ContextBudget {
+  const base = getCatContextBudget(catId as string);
+  if (policy === 'minimal') {
+    return {
+      maxPromptTokens: base.maxPromptTokens,
+      maxContextTokens: 0,
+      maxMessages: 0,
+      maxContentLengthPerMsg: Math.min(base.maxContentLengthPerMsg, 1_500),
+    };
+  }
+  if (policy === 'standard') {
+    return capBudget(base, isFocusedSurface(surface) ? FOCUSED_SURFACE_CONTEXT_BUDGET_CAP : STANDARD_CONTEXT_BUDGET_CAP);
+  }
+  return base;
 }
 
 export function buildRuntimeContextBudgetSnapshot(input: {
@@ -718,6 +784,7 @@ export interface IncrementalContextOptions {
    * so the assembled context + system parts never exceed the model's input limit.
    */
   effectiveMaxContextTokens?: number;
+  contextBudget?: ContextBudget;
   recentFilesTouched?: Array<{ path: string; ops: string[] }>;
   canonicalFeatureId?: string;
   threadTitle?: string;
@@ -879,7 +946,7 @@ export async function assembleIncrementalContext(
 
   // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
   // and stale cursor scenarios where large unseen batches accumulate.
-  const budget = getCatContextBudget(catId as string);
+  const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const wasCapped = relevant.length > budget.maxMessages;
   const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
 
@@ -1016,7 +1083,7 @@ async function assembleSmartWindowContext(
   rankedSources: import('./source-ranking.js').RankedSource[],
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
 ): Promise<IncrementalContextResult> {
-  const budget = getCatContextBudget(catId as string);
+  const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
 
   // 1. Burst detection
