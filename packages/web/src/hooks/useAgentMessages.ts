@@ -359,6 +359,14 @@ export function consumeBackgroundSystemInfo(
       if (targetCatId && invocationId) {
         options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
           invocationId,
+          toolPolicy:
+            parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
+              ? parsed.toolPolicy
+              : undefined,
+          toolPolicySource:
+            parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
+              ? parsed.toolPolicySource
+              : undefined,
           startedAt: Date.now(),
           taskProgress: {
             tasks: [],
@@ -3576,6 +3584,14 @@ export function useAgentMessages() {
             if (targetCatId && invocationId) {
               setCatInvocation(targetCatId, {
                 invocationId,
+                toolPolicy:
+                  parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
+                    ? parsed.toolPolicy
+                    : undefined,
+                toolPolicySource:
+                  parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
+                    ? parsed.toolPolicySource
+                    : undefined,
                 startedAt: Date.now(),
                 taskProgress: {
                   tasks: [],

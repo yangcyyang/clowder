@@ -128,6 +128,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     strengths: splitStrengthTags(form.strengths),
     ...assetCardPatch,
     sessionChain: form.sessionChain === 'true',
+    toolPolicy: form.toolPolicy,
     ...contextBudgetPatch,
     ...voiceConfigPatch,
   };

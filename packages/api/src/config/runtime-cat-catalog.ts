@@ -10,6 +10,7 @@ import type {
   ClientId,
   CoCreatorConfig,
   ContextBudget,
+  ToolPolicy,
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
@@ -39,6 +40,7 @@ export interface RuntimeCatInput {
   clientId: ClientId;
   defaultModel: string;
   mcpSupport: boolean;
+  toolPolicy?: ToolPolicy;
   cli: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
@@ -75,6 +77,7 @@ export interface RuntimeCatUpdate {
   clientId?: ClientId;
   defaultModel?: string;
   mcpSupport?: boolean;
+  toolPolicy?: ToolPolicy | null;
   cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
@@ -259,6 +262,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           : {}),
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
+        ...(input.toolPolicy ? { toolPolicy: input.toolPolicy } : {}),
         cli: input.cli,
         ...(input.accountRef != null && input.accountRef.trim().length > 0
           ? { accountRef: input.accountRef.trim() }
@@ -454,6 +458,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   if (patch.clientId !== undefined) variant.clientId = patch.clientId;
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
+  if (patch.toolPolicy !== undefined) {
+    if (patch.toolPolicy) {
+      variant.toolPolicy = patch.toolPolicy;
+    } else {
+      delete variant.toolPolicy;
+    }
+  }
   if (patch.cli !== undefined) variant.cli = patch.cli;
   if (patch.contextBudget !== undefined) {
     if (patch.contextBudget) {

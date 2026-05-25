@@ -23,6 +23,7 @@ export type ClientId =
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
+export type ToolPolicyValue = 'minimal' | 'standard' | 'full';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type CodexApprovalPolicy = 'untrusted' | 'on-failure' | 'on-request' | 'never';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -46,6 +47,7 @@ export interface HubCatEditorFormState {
   clientId: ClientId;
   accountRef: string;
   defaultModel: string;
+  toolPolicy: ToolPolicyValue;
   commandArgs: string;
   cliConfigArgs: string[];
   cliEffort: CliEffortValue | '';
@@ -111,6 +113,12 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
 export const SESSION_CHAIN_OPTIONS: Array<{ value: SessionChainValue; label: string }> = [
   { value: 'true', label: 'true' },
   { value: 'false', label: 'false' },
+];
+
+export const TOOL_POLICY_OPTIONS: Array<{ value: ToolPolicyValue; label: string }> = [
+  { value: 'minimal', label: '轻量工具箱 — 只保留当前消息' },
+  { value: 'standard', label: '标准工具箱 — 工作区 + 历史摘要' },
+  { value: 'full', label: '全量工具箱 — 重资料 + SOP + 引导上下文' },
 ];
 
 export const SESSION_STRATEGY_OPTIONS: Array<{ value: StrategyType; label: string }> = [
@@ -365,6 +373,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
+    toolPolicy: cat?.toolPolicy ?? 'standard',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: isCliEffortValue(persistedCliEffort) ? persistedCliEffort : '',

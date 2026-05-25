@@ -447,6 +447,8 @@ export interface CompactBoundaryTelemetry {
 export interface CatInvocationInfo {
   sessionId?: string;
   invocationId?: string;
+  toolPolicy?: 'minimal' | 'standard' | 'full';
+  toolPolicySource?: 'agent-default' | 'user-override';
   durationMs?: number;
   startedAt?: number;
   usage?: TokenUsage;
@@ -546,7 +548,16 @@ export interface ThreadState {
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
   /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
-  activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
+  activeInvocations: Record<
+    string,
+    {
+      catId: string;
+      mode: string;
+      startedAt?: number;
+      toolPolicy?: 'minimal' | 'standard' | 'full';
+      toolPolicySource?: 'agent-default' | 'user-override';
+    }
+  >;
   intentMode: 'execute' | 'ideate' | null;
   targetCats: string[];
   catStatuses: Record<string, CatStatusType>;

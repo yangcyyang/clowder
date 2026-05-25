@@ -19,6 +19,7 @@ import type {
   MissionHubSelfClaimScope,
   ReviewPolicy,
   Roster,
+  ToolPolicy,
 } from '@cat-cafe/shared';
 import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -57,6 +58,17 @@ const mentionPatternSchema = z.string().min(2).regex(/^@/, 'mentionPattern must 
 
 const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
 
+const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
+
+const DEFAULT_MINIMAL_TOOLBOX_CATS = new Set(['pi', 'task-intake', 'task-decomposer']);
+const DEFAULT_FULL_TOOLBOX_CATS = new Set(['ppt-designer', 'prototype-designer', 'ui-designer', 'design-harness']);
+
+function defaultToolPolicyForCat(catId: string): ToolPolicy {
+  if (DEFAULT_MINIMAL_TOOLBOX_CATS.has(catId)) return 'minimal';
+  if (DEFAULT_FULL_TOOLBOX_CATS.has(catId)) return 'full';
+  return 'standard';
+}
+
 const assetCardSchema = z.object({
   path: z.string().min(1),
   version: z.string().min(1).optional(),
@@ -77,6 +89,7 @@ const catVariantSchema = z.object({
 
   defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
   mcpSupport: z.boolean(),
+  toolPolicy: toolPolicySchema.optional(),
   cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
@@ -169,6 +182,7 @@ const catBreedSchema = z.object({
   assetCard: assetCardSchema.optional(),
   defaultVariantId: z.string().min(1),
   variants: z.array(catVariantSchema).min(1),
+  toolPolicy: toolPolicySchema.optional(),
   features: catFeaturesSchema,
   teamStrengths: z.string().optional(), // F-Ground-3: breed-level default
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
@@ -445,6 +459,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
+        toolPolicy: variant.toolPolicy ?? breed.toolPolicy ?? defaultToolPolicyForCat(catId),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }

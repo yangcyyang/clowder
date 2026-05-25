@@ -7,6 +7,11 @@ import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import {
+  resolveEffectiveToolPolicy,
+  shouldLoadFullContext,
+  shouldLoadStandardContext,
+} from '../../../../../config/tool-policy.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTE_HAS_A2A_HANDOFF,
@@ -157,13 +162,16 @@ export async function* routeParallel(
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
       const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
+      const resolvedToolPolicy = resolveEffectiveToolPolicy(catConfig, message);
+      const loadStandardContext = shouldLoadStandardContext(resolvedToolPolicy.toolPolicy);
+      const loadFullContext = shouldLoadFullContext(resolvedToolPolicy.toolPolicy);
       const teammates = targetCats.filter((id) => id !== catId);
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       // F129: Load active pack blocks (best-effort)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
-      if (deps.packStore) {
+      if (loadStandardContext && deps.packStore) {
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
@@ -187,7 +195,7 @@ export async function* routeParallel(
             relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
           }[]
         | undefined;
-      if (deps.invocationDeps.signalArticleLookup) {
+      if (loadFullContext && deps.invocationDeps.signalArticleLookup) {
         try {
           const signals = await deps.invocationDeps.signalArticleLookup(threadId);
           if (signals.length > 0) activeSignals = signals;
@@ -202,7 +210,7 @@ export async function* routeParallel(
       // off: skip entirely
       let alwaysOnDocs: readonly { anchor: string; title: string; summary: string }[] | undefined;
       let alwaysOnInjectionMode: 'off' | 'shadow' | 'on' = 'off';
-      if (deps.evidenceStore) {
+      if (loadFullContext && deps.evidenceStore) {
         try {
           const { freezeFlags } = await import('../../../../../domains/memory/f163-types.js');
           const f163Flags = freezeFlags();
@@ -229,12 +237,12 @@ export async function* routeParallel(
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
-        ...(sopStageHint ? { sopStageHint } : {}),
+        ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
-        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
+        ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
       });
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
@@ -250,6 +258,7 @@ export async function* routeParallel(
       // F24 Phase E: Bootstrap context for Session #2+
       let bootstrapCtx = '';
       if (
+        loadStandardContext &&
         isSessionChainEnabled(catId) &&
         deps.invocationDeps.sessionChainStore &&
         deps.invocationDeps.transcriptReader
@@ -276,7 +285,7 @@ export async function* routeParallel(
       }
 
       let prompt: string;
-      if (incrementalMode) {
+      if (incrementalMode && loadStandardContext) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parIncBudget = getCatContextBudget(catId as string);
@@ -300,7 +309,7 @@ export async function* routeParallel(
           thinkingMode,
           {
             effectiveMaxContextTokens: parEffectiveContextBudget,
-            canonicalFeatureId: sopStageHint?.featureId,
+            canonicalFeatureId: loadFullContext ? sopStageHint?.featureId : undefined,
             threadTitle: routeThread?.title ?? undefined,
           },
         );
@@ -353,8 +362,8 @@ export async function* routeParallel(
         prompt = parts.join('\n\n---\n\n');
       } else {
         // Per-cat context budget (Phase 4.0)
-        let catContextHistory = contextHistory;
-        if (history && history.length > 0 && !contextHistory) {
+        let catContextHistory = loadStandardContext ? contextHistory : undefined;
+        if (loadStandardContext && history && history.length > 0 && !contextHistory) {
           const budget = getCatContextBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapCtx in system parts estimate (P2-1)
@@ -410,6 +419,8 @@ export async function* routeParallel(
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
         continuityCapsule,
         isLastCat: false,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+        toolPolicySource: resolvedToolPolicy.source,
       });
     }),
   );

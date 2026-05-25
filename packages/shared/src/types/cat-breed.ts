@@ -12,6 +12,14 @@ import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
 /**
+ * Per-agent toolbox level.
+ * minimal: current message only.
+ * standard: workspace/history context.
+ * full: all heavy reference docs and workflow hints.
+ */
+export type ToolPolicy = 'minimal' | 'standard' | 'full';
+
+/**
  * Per-cat context budget configuration.
  * Controls how much history/context is sent to each cat.
  */
@@ -84,6 +92,8 @@ export interface CatVariant {
   readonly clientId: ClientId;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
+  /** Runtime toolbox level for context/tool loading. */
+  readonly toolPolicy?: ToolPolicy;
   readonly cli: CliConfig;
   /** F127: explicit CLI args for bridge-style members such as Antigravity. */
   readonly commandArgs?: readonly string[];
@@ -171,6 +181,8 @@ export interface CatBreed {
   readonly assetCard?: CatAssetCard;
   readonly defaultVariantId: string;
   readonly variants: readonly CatVariant[];
+  /** Breed-level default toolbox level; variant can override. */
+  readonly toolPolicy?: ToolPolicy;
   /** Per-cat feature flags (optional, all features enabled by default) */
   readonly features?: CatFeatures;
   /** F-Ground-3: Human-readable strengths for teammate roster (breed default) */

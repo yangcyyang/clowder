@@ -3,7 +3,7 @@
  * 三只 AI 猫猫的类型定义和配置
  */
 
-import type { CatAssetCard, CliConfig, ContextBudget } from './cat-breed.js';
+import type { CatAssetCard, CliConfig, ContextBudget, ToolPolicy } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -58,6 +58,8 @@ export interface CatConfig {
   readonly clientId: ClientId;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
+  /** Context/tool loading policy for this cat. */
+  readonly toolPolicy?: ToolPolicy;
   readonly cli?: CliConfig;
   readonly commandArgs?: readonly string[];
   readonly contextBudget?: ContextBudget;

@@ -14,6 +14,7 @@ import {
   normalizeMentionPattern,
   splitMentionPatterns,
   splitStrengthTags,
+  TOOL_POLICY_OPTIONS,
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
@@ -811,6 +812,12 @@ export function AccountSection({
                 onChange={(value) => onChange({ cliEffort: value as HubCatEditorFormState['cliEffort'] })}
               />
             ) : null}
+            <SelectField
+              label="工具箱等级"
+              value={form.toolPolicy}
+              options={TOOL_POLICY_OPTIONS}
+              onChange={(value) => onChange({ toolPolicy: value as HubCatEditorFormState['toolPolicy'] })}
+            />
             {form.clientId === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <>
                 <ComboField

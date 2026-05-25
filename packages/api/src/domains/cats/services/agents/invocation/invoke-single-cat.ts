@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { type CatId, type ContextHealth, catRegistry, type MessageContent } from '@cat-cafe/shared';
+import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   resolveBuiltinClientForProvider,
@@ -285,6 +285,10 @@ export interface InvocationParams {
   readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
   /** #502 PR2: structured route control state to persist on threshold seal. */
   readonly continuityCapsule?: RouteStateContinuityCapsule;
+  /** Effective toolbox level for this invocation. */
+  readonly toolPolicy?: ToolPolicy;
+  /** Whether toolbox level came from the agent default or a user message override. */
+  readonly toolPolicySource?: 'agent-default' | 'user-override';
 }
 
 /**
@@ -343,7 +347,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   yield {
     type: 'system_info' as const,
     catId,
-    content: JSON.stringify({ type: 'invocation_created', invocationId }),
+    content: JSON.stringify({
+      type: 'invocation_created',
+      invocationId,
+      ...(params.toolPolicy ? { toolPolicy: params.toolPolicy } : {}),
+      ...(params.toolPolicySource ? { toolPolicySource: params.toolPolicySource } : {}),
+    }),
     timestamp: Date.now(),
   };
 

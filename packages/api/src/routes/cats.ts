@@ -12,6 +12,7 @@ import {
   type CliConfig,
   type ClientId,
   type ContextBudget,
+  type ToolPolicy,
   catRegistry,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
@@ -58,6 +59,7 @@ const assetCardSchema = z.object({
 });
 
 const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
+const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
 const cliSchema = z.object({
   command: z.string().min(1).optional(),
   outputFormat: z.string().min(1).optional(),
@@ -97,6 +99,7 @@ const baseCatSchema = z.object({
   accountRef: z.string().min(1).optional(),
   assetCard: assetCardSchema.optional(),
   contextBudget: contextBudgetSchema.optional(),
+  toolPolicy: toolPolicySchema.optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -151,6 +154,7 @@ const updateCatSchema = z.object({
   accountRef: z.string().min(1).nullable().optional(),
   assetCard: assetCardSchema.nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
+  toolPolicy: toolPolicySchema.nullable().optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -471,6 +475,7 @@ async function toCatResponse(
     clientId: cat.clientId,
     defaultModel: cat.defaultModel,
     cli: cat.cli,
+    toolPolicy: cat.toolPolicy,
     contextBudget: cat.contextBudget,
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
@@ -638,6 +643,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
+          toolPolicy: body.toolPolicy,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -668,6 +674,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
+          toolPolicy: body.toolPolicy,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -829,6 +836,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
         ...(body.assetCard !== undefined ? { assetCard: body.assetCard } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
+        ...(body.toolPolicy !== undefined ? { toolPolicy: body.toolPolicy } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),

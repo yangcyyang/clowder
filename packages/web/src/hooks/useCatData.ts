@@ -29,6 +29,7 @@ export interface CatData {
   /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
   clientId: string;
   defaultModel: string;
+  toolPolicy?: 'minimal' | 'standard' | 'full';
   cli?: {
     command?: string;
     outputFormat?: string;
@@ -136,6 +137,10 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       assetCard: cat.assetCard,
       clientId: cat.clientId ?? 'openai',
       defaultModel: cat.defaultModel ?? '',
+      toolPolicy:
+        cat.toolPolicy === 'minimal' || cat.toolPolicy === 'standard' || cat.toolPolicy === 'full'
+          ? cat.toolPolicy
+          : undefined,
       cli: cat.cli,
       avatar: cat.avatar ?? '',
       roleDescription: cat.roleDescription ?? '',

@@ -664,7 +664,7 @@ export interface ChatState {
   /** Whether the thread has an active invocation (broader than isLoading — stays true during A2A chains) */
   hasActiveInvocation: boolean;
   /** F108: Per-invocation slot tracking — key=invocationId, value=slot info */
-  activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
+  activeInvocations: ThreadState['activeInvocations'];
   intentMode: 'execute' | 'ideate' | null;
   targetCats: string[];
   catStatuses: Record<string, CatStatusType>;
@@ -741,7 +741,13 @@ export interface ChatState {
   setThreadHasDraft: (threadId: string, hasDraft: boolean) => void;
   setHasActiveInvocation: (v: boolean) => void;
   /** F108: Register a new active invocation slot */
-  addActiveInvocation: (invocationId: string, catId: string, mode: string, startedAt?: number) => void;
+  addActiveInvocation: (
+    invocationId: string,
+    catId: string,
+    mode: string,
+    startedAt?: number,
+    meta?: Pick<CatInvocationInfo, 'toolPolicy' | 'toolPolicySource'>,
+  ) => void;
   /** F108: Remove an active invocation slot; derives hasActiveInvocation */
   removeActiveInvocation: (invocationId: string) => void;
   /** F108: Clear all active invocations (timeout/error/stop recovery) */
@@ -916,6 +922,7 @@ export interface ChatState {
     catId: string,
     mode: string,
     startedAt?: number,
+    meta?: Pick<CatInvocationInfo, 'toolPolicy' | 'toolPolicySource'>,
   ) => void;
   /** F108: Remove an active invocation from a thread; derives hasActiveInvocation */
   removeThreadActiveInvocation: (threadId: string, invocationId: string) => void;
@@ -1654,11 +1661,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { hasActiveInvocation: v, ...mirrorActiveFlat(state, { hasActiveInvocation: v }) };
     }),
   /** F108: Register a new active invocation slot */
-  addActiveInvocation: (invocationId, catId, mode, startedAt?) =>
+  addActiveInvocation: (invocationId, catId, mode, startedAt?, meta?) =>
     set((state) => {
       const activeInvocations = {
         ...state.activeInvocations,
-        [invocationId]: { catId, mode, startedAt: startedAt ?? Date.now() },
+        [invocationId]: { catId, mode, startedAt: startedAt ?? Date.now(), ...meta },
       };
       return {
         activeInvocations,
@@ -1811,7 +1818,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...state.catInvocations,
         [catId]: { ...state.catInvocations[catId], ...info },
       };
-      return { catInvocations, ...mirrorActiveFlat(state, { catInvocations }) };
+      const invocationId = info.invocationId;
+      const existingSlot = invocationId ? state.activeInvocations[invocationId] : undefined;
+      const activeInvocations =
+        invocationId && existingSlot
+          ? {
+              ...state.activeInvocations,
+              [invocationId]: {
+                ...existingSlot,
+                ...(info.toolPolicy ? { toolPolicy: info.toolPolicy } : {}),
+                ...(info.toolPolicySource ? { toolPolicySource: info.toolPolicySource } : {}),
+              },
+            }
+          : state.activeInvocations;
+      return { catInvocations, activeInvocations, ...mirrorActiveFlat(state, { catInvocations, activeInvocations }) };
     }),
 
   setMessageUsage: (messageId, usage) =>
@@ -2236,9 +2256,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...state.catInvocations,
           [catId]: { ...state.catInvocations[catId], ...info },
         };
+        const invocationId = info.invocationId;
+        const existingSlot = invocationId ? state.activeInvocations[invocationId] : undefined;
+        const activeInvocations =
+          invocationId && existingSlot
+            ? {
+                ...state.activeInvocations,
+                [invocationId]: {
+                  ...existingSlot,
+                  ...(info.toolPolicy ? { toolPolicy: info.toolPolicy } : {}),
+                  ...(info.toolPolicySource ? { toolPolicySource: info.toolPolicySource } : {}),
+                },
+              }
+            : state.activeInvocations;
         return {
           catInvocations,
-          ...mirrorActiveToThreadStates(state, threadId, { catInvocations }),
+          activeInvocations,
+          ...mirrorActiveToThreadStates(state, threadId, { catInvocations, activeInvocations }),
         };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
@@ -2251,6 +2285,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...existing.catInvocations,
               [catId]: { ...existing.catInvocations[catId], ...info },
             },
+            activeInvocations:
+              info.invocationId && existing.activeInvocations[info.invocationId]
+                ? {
+                    ...existing.activeInvocations,
+                    [info.invocationId]: {
+                      ...existing.activeInvocations[info.invocationId],
+                      ...(info.toolPolicy ? { toolPolicy: info.toolPolicy } : {}),
+                      ...(info.toolPolicySource ? { toolPolicySource: info.toolPolicySource } : {}),
+                    },
+                  }
+                : existing.activeInvocations,
             lastActivity: Date.now(),
           },
         },
@@ -2348,13 +2393,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }),
 
   /** F108: Add an active invocation to a thread (background or active) */
-  addThreadActiveInvocation: (threadId, invocationId, catId, mode, startedAt?) =>
+  addThreadActiveInvocation: (threadId, invocationId, catId, mode, startedAt?, meta?) =>
     set((state) => {
       const ts = startedAt ?? Date.now();
       if (threadId === state.currentThreadId) {
         const activeInvocations = {
           ...state.activeInvocations,
-          [invocationId]: { catId, mode, startedAt: ts },
+          [invocationId]: { catId, mode, startedAt: ts, ...meta },
         };
         return {
           activeInvocations,
@@ -2365,7 +2410,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
       const activeInvocations = {
         ...existing.activeInvocations,
-        [invocationId]: { catId, mode, startedAt: ts },
+        [invocationId]: { catId, mode, startedAt: ts, ...meta },
       };
       return {
         threadStates: {

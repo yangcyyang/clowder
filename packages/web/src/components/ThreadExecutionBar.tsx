@@ -17,11 +17,21 @@ export function ThreadExecutionBar() {
   const activeCats = Object.values(activeInvocations ?? {}).reduce(
     (acc, inv) => {
       if (!acc.some((c) => c.catId === inv.catId)) {
-        acc.push({ catId: inv.catId, startedAt: inv.startedAt ?? Date.now() });
+        acc.push({
+          catId: inv.catId,
+          startedAt: inv.startedAt ?? Date.now(),
+          toolPolicy: inv.toolPolicy,
+          toolPolicySource: inv.toolPolicySource,
+        });
       }
       return acc;
     },
-    [] as Array<{ catId: string; startedAt: number }>,
+    [] as Array<{
+      catId: string;
+      startedAt: number;
+      toolPolicy?: 'minimal' | 'standard' | 'full';
+      toolPolicySource?: 'agent-default' | 'user-override';
+    }>,
   );
 
   // Build display info from cat-config (dynamic, not hardcoded)
@@ -66,7 +76,7 @@ export function ThreadExecutionBar() {
   return (
     <div className="flex items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)] px-4 py-2 text-xs">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-      {activeCats.map(({ catId, startedAt }) => {
+      {activeCats.map(({ catId, startedAt, toolPolicy, toolPolicySource }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--console-cat-fallback)' };
         return (
           <CatStatusChip
@@ -75,6 +85,8 @@ export function ThreadExecutionBar() {
             label={info.label}
             color={info.color}
             startedAt={startedAt}
+            toolPolicy={toolPolicy}
+            toolPolicySource={toolPolicySource}
             onStop={handleStopCat}
           />
         );
@@ -97,23 +109,37 @@ function CatStatusChip({
   label,
   color,
   startedAt,
+  toolPolicy,
+  toolPolicySource,
   onStop,
 }: {
   catId: string;
   label: string;
   color: string;
   startedAt: number;
+  toolPolicy?: 'minimal' | 'standard' | 'full';
+  toolPolicySource?: 'agent-default' | 'user-override';
   onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const policyLabel =
+    toolPolicy === 'minimal' ? '轻量' : toolPolicy === 'full' ? '全量' : toolPolicy === 'standard' ? '标准' : undefined;
+  const sourceLabel =
+    toolPolicySource === 'user-override' ? '用户指定' : toolPolicySource === 'agent-default' ? '默认' : undefined;
 
   return (
     <span className="flex items-center gap-1.5 rounded-[var(--slock-radius-pill)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1 shadow-sm">
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
       <span className="text-cafe-secondary font-medium">{label}</span>
+      {policyLabel ? (
+        <span className="text-cafe-muted">
+          {policyLabel}
+          {sourceLabel ? `·${sourceLabel}` : ''}
+        </span>
+      ) : null}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
       <button
         type="button"

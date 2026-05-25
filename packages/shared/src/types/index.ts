@@ -187,6 +187,7 @@ export type {
   ReviewPolicy,
   Roster,
   RosterEntry,
+  ToolPolicy,
 } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
