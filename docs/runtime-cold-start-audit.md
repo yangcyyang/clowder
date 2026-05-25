@@ -36,13 +36,14 @@
 
 ## Runtime worktree 同步入口
 
-生产/稳定运行建议用：
+本机稳定运行建议用 `tmux` 承载完整启动命令：
 
 ```bash
-pnpm runtime:start
+tmux new-session -d -s clowder-runtime \
+  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 ```
 
-它会在启动前执行 `runtime-worktree.sh` 的同步逻辑，把 `.env`、关键 `.cat-cafe` 文件和 uploads 从启动源同步到 runtime worktree。
+这样 3003 Web 和 3004 API 都由同一个持久会话管理，不会因为 Codex/Claude 的一次性执行会话结束而只剩前端、API 消失。
 
 如需只同步不启动：
 
@@ -104,11 +105,13 @@ curl http://localhost:3004/api/cats
 
 ```bash
 cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
-pnpm --filter @cat-cafe/api run start
-pnpm --filter @cat-cafe/web exec next start -p 3003 -H 0.0.0.0
+tmux kill-session -t clowder-runtime 2>/dev/null || true
+tmux new-session -d -s clowder-runtime \
+  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
+pnpm runtime:doctor
 ```
 
-注意：长期建议仍使用 `pnpm runtime:start`，避免只启动前端、漏启动 API。
+注意：不要只启动前端，或用一次性 shell 直接跑 `node dist/index.js` 后离开；这会导致页面仍可打开，但 `/api/cats` 失败、Direct Messages 显示“暂无 Agent”。
 
 ## 浏览器本地状态
 

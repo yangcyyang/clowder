@@ -20,13 +20,14 @@ cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
 
 ## 2. 标准启动方式
 
-优先使用完整启动：
+优先使用 `tmux` 持久会话启动完整栈，避免 Agent/终端会话结束时把 API 带停：
 
 ```bash
-pnpm start:direct -- --daemon
+tmux new-session -d -s clowder-runtime \
+  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 ```
 
-如果只是当前手动调试，也可以分别启动：
+如果只是当前手动调试，也可以分别启动，但不要把它当成稳定运行方式：
 
 ```bash
 pnpm --filter @cat-cafe/api run start
@@ -34,6 +35,7 @@ pnpm --filter @cat-cafe/web exec next start -p 3003 -H 0.0.0.0
 ```
 
 关键要求：**3003 Web 和 3004 API 必须都在**。只启动 3003 不算启动成功。
+不要用一次性 shell/PTY 直接跑 `node dist/index.js` 后就离开；这种进程可能随着执行会话结束而退出，表现为页面还在、Agent/DM 列表消失。
 
 ## 3. 启动后体检
 
@@ -129,7 +131,9 @@ ls -ld packages/api/uploads
 ```bash
 cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
 pnpm --filter @cat-cafe/api run build
-pnpm start:direct -- --daemon
+tmux kill-session -t clowder-runtime 2>/dev/null || true
+tmux new-session -d -s clowder-runtime \
+  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 pnpm runtime:doctor
 ```
 
