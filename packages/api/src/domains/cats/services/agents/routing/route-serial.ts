@@ -85,6 +85,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   getService,
@@ -534,6 +535,7 @@ export async function* routeSerial(
       }
 
       let deliveryBoundaryId: string | undefined;
+      let includedHistoryCount = 0;
       if (incrementalMode && loadStandardContext) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
@@ -567,6 +569,7 @@ export async function* routeSerial(
           },
         );
         deliveryBoundaryId = inc.boundaryId;
+        includedHistoryCount = inc.contextText ? history?.length ?? 0 : 0;
         if (inc.degradation) {
           yield {
             type: 'system_info' as AgentMessageType,
@@ -634,6 +637,7 @@ export async function* routeSerial(
             maxTotalTokens: Math.min(budgetForContext, budget.maxContextTokens),
           });
           catContextHistory = contextText || undefined;
+          includedHistoryCount = messageCount;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
           const degradation = detectContextDegradation(history.length, messageCount, budget);
@@ -645,6 +649,8 @@ export async function* routeSerial(
               timestamp: Date.now(),
             } as AgentMessage;
           }
+        } else if (catContextHistory) {
+          includedHistoryCount = history?.length ?? 0;
         }
 
         const catModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -656,6 +662,27 @@ export async function* routeSerial(
           prompt = `${catContextHistory}\n\n---\n\n${prompt}`;
         }
       }
+      const runtimeContextBudget = buildRuntimeContextBudgetSnapshot({
+        threadId,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+        toolPolicySource: resolvedToolPolicy.source,
+        mode: 'serial',
+        prompt,
+        staticIdentity,
+        historyCount: history?.length ?? 0,
+        includedHistoryCount,
+        loadStandardContext,
+        loadFullContext,
+        hasPackBlocks: Boolean(packBlocks),
+        hasWorldContext: Boolean(worldContext),
+        hasSessionBootstrap: Boolean(bootstrapContext),
+        hasSignalArticles: Boolean(activeSignals?.length),
+        hasAlwaysOnDocs: Boolean(alwaysOnDocs?.length && alwaysOnInjectionMode === 'on'),
+        hasSopHint: Boolean(loadFullContext && sopStageHint),
+        hasGuideContext: Boolean(loadFullContext && guideCtx),
+        hasMcpInstructions: Boolean(mcpInstructions),
+        catBudget: getCatContextBudget(catId as string),
+      });
 
       let textContent = '';
       const thinkingChunks: string[] = [];
@@ -729,6 +756,7 @@ export async function* routeSerial(
         isLastCat: false,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         toolPolicySource: resolvedToolPolicy.source,
+        contextBudget: runtimeContextBudget,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
         if (signal?.aborted) break;

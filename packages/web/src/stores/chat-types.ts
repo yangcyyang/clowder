@@ -449,6 +449,20 @@ export interface CatInvocationInfo {
   invocationId?: string;
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
+  contextBudget?: {
+    surface: 'thread';
+    threadId: string;
+    toolPolicy: 'minimal' | 'standard' | 'full';
+    toolPolicySource: 'agent-default' | 'user-override';
+    mode: 'serial' | 'parallel';
+    estimatedTokens: number;
+    historyMessages: number;
+    loadedBlocks: string[];
+    skippedBlocks: string[];
+    usesFullHistory: boolean;
+    maxPromptTokens: number;
+    maxContextTokens: number;
+  };
   durationMs?: number;
   startedAt?: number;
   usage?: TokenUsage;
@@ -556,6 +570,7 @@ export interface ThreadState {
       startedAt?: number;
       toolPolicy?: 'minimal' | 'standard' | 'full';
       toolPolicySource?: 'agent-default' | 'user-override';
+      contextBudget?: CatInvocationInfo['contextBudget'];
     }
   >;
   intentMode: 'execute' | 'ideate' | null;

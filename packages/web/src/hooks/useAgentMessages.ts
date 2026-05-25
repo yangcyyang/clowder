@@ -154,6 +154,32 @@ function safeJsonPreview(value: unknown, maxLength: number): string {
   }
 }
 
+function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const parsed = value as CatInvocationInfo['contextBudget'];
+  if (
+    !parsed ||
+    (parsed.toolPolicy !== 'minimal' && parsed.toolPolicy !== 'standard' && parsed.toolPolicy !== 'full') ||
+    (parsed.toolPolicySource !== 'user-override' && parsed.toolPolicySource !== 'agent-default')
+  ) {
+    return undefined;
+  }
+  return {
+    surface: 'thread',
+    threadId: typeof parsed.threadId === 'string' ? parsed.threadId : '',
+    toolPolicy: parsed.toolPolicy,
+    toolPolicySource: parsed.toolPolicySource,
+    mode: parsed.mode === 'parallel' ? 'parallel' : 'serial',
+    estimatedTokens: Number(parsed.estimatedTokens) || 0,
+    historyMessages: Number(parsed.historyMessages) || 0,
+    loadedBlocks: Array.isArray(parsed.loadedBlocks) ? parsed.loadedBlocks.filter((item): item is string => typeof item === 'string') : [],
+    skippedBlocks: Array.isArray(parsed.skippedBlocks) ? parsed.skippedBlocks.filter((item): item is string => typeof item === 'string') : [],
+    usesFullHistory: Boolean(parsed.usesFullHistory),
+    maxPromptTokens: Number(parsed.maxPromptTokens) || 0,
+    maxContextTokens: Number(parsed.maxContextTokens) || 0,
+  };
+}
+
 function findLatestActiveInvocationIdForCat(
   activeInvocations: Record<string, { catId: string; mode: string }> | undefined,
   catId: string,
@@ -367,6 +393,7 @@ export function consumeBackgroundSystemInfo(
             parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
               ? parsed.toolPolicySource
               : undefined,
+          contextBudget: parseContextBudget(parsed.contextBudget),
           startedAt: Date.now(),
           taskProgress: {
             tasks: [],
@@ -3592,6 +3619,7 @@ export function useAgentMessages() {
                   parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
                     ? parsed.toolPolicySource
                     : undefined,
+                contextBudget: parseContextBudget(parsed.contextBudget),
                 startedAt: Date.now(),
                 taskProgress: {
                   tasks: [],

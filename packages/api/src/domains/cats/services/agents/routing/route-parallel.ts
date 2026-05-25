@@ -50,6 +50,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   getService,
@@ -285,6 +286,7 @@ export async function* routeParallel(
       }
 
       let prompt: string;
+      let includedHistoryCount = 0;
       if (incrementalMode && loadStandardContext) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -314,6 +316,7 @@ export async function* routeParallel(
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
+        includedHistoryCount = inc.contextText ? history?.length ?? 0 : 0;
         if (inc.degradation) {
           degradationMsgs.push({
             type: 'system_info' as AgentMessageType,
@@ -381,6 +384,7 @@ export async function* routeParallel(
             maxTotalTokens: Math.min(budgetForContext, budget.maxContextTokens),
           });
           catContextHistory = contextText || undefined;
+          includedHistoryCount = messageCount;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
           const degradation = detectContextDegradation(history.length, messageCount, budget);
@@ -392,6 +396,8 @@ export async function* routeParallel(
               timestamp: Date.now(),
             } as AgentMessage);
           }
+        } else if (catContextHistory) {
+          includedHistoryCount = history?.length ?? 0;
         }
 
         const parCatModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -405,6 +411,27 @@ export async function* routeParallel(
           prompt = message;
         }
       }
+      const runtimeContextBudget = buildRuntimeContextBudgetSnapshot({
+        threadId,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+        toolPolicySource: resolvedToolPolicy.source,
+        mode: 'parallel',
+        prompt,
+        staticIdentity,
+        historyCount: history?.length ?? 0,
+        includedHistoryCount,
+        loadStandardContext,
+        loadFullContext,
+        hasPackBlocks: Boolean(packBlocks),
+        hasWorldContext: false,
+        hasSessionBootstrap: Boolean(bootstrapCtx),
+        hasSignalArticles: Boolean(activeSignals?.length),
+        hasAlwaysOnDocs: Boolean(alwaysOnDocs?.length && alwaysOnInjectionMode === 'on'),
+        hasSopHint: Boolean(loadFullContext && sopStageHint),
+        hasGuideContext: Boolean(loadFullContext && guideCtx),
+        hasMcpInstructions: Boolean(mcpInstructions),
+        catBudget: getCatContextBudget(catId as string),
+      });
 
       return invokeSingleCat(deps.invocationDeps, {
         catId,
@@ -421,6 +448,7 @@ export async function* routeParallel(
         isLastCat: false,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         toolPolicySource: resolvedToolPolicy.source,
+        contextBudget: runtimeContextBudget,
       });
     }),
   );

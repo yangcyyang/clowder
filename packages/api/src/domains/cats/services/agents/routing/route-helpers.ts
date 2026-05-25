@@ -3,7 +3,7 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
+import type { CatId, MessageContent, RichBlock, RichBlockBase, ToolPolicy } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -38,6 +38,78 @@ import { rankArtifactSources } from './source-ranking.js';
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
 export interface RouteBroadcaster {
   broadcastToRoom(room: string, event: string, data: unknown): void;
+}
+
+export interface RuntimeContextBudgetSnapshot {
+  surface: 'thread';
+  threadId: string;
+  toolPolicy: ToolPolicy;
+  toolPolicySource: 'agent-default' | 'user-override';
+  mode: 'serial' | 'parallel';
+  estimatedTokens: number;
+  historyMessages: number;
+  loadedBlocks: string[];
+  skippedBlocks: string[];
+  usesFullHistory: boolean;
+  maxPromptTokens: number;
+  maxContextTokens: number;
+}
+
+export function buildRuntimeContextBudgetSnapshot(input: {
+  threadId: string;
+  toolPolicy: ToolPolicy;
+  toolPolicySource: 'agent-default' | 'user-override';
+  mode: 'serial' | 'parallel';
+  prompt: string;
+  staticIdentity?: string;
+  historyCount?: number;
+  includedHistoryCount?: number;
+  loadStandardContext: boolean;
+  loadFullContext: boolean;
+  hasPackBlocks: boolean;
+  hasWorldContext: boolean;
+  hasSessionBootstrap: boolean;
+  hasSignalArticles: boolean;
+  hasAlwaysOnDocs: boolean;
+  hasSopHint: boolean;
+  hasGuideContext: boolean;
+  hasMcpInstructions: boolean;
+  catBudget: ReturnType<typeof getCatContextBudget>;
+}): RuntimeContextBudgetSnapshot {
+  const loadedBlocks = ['current-message', 'static-identity'];
+  if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
+  if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
+  if (input.hasWorldContext) loadedBlocks.push('world-context');
+  if (input.hasSessionBootstrap) loadedBlocks.push('session-bootstrap');
+  if (input.hasSignalArticles) loadedBlocks.push('signal-articles');
+  if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
+  if (input.hasSopHint) loadedBlocks.push('sop-hint');
+  if (input.hasGuideContext) loadedBlocks.push('guide-context');
+
+  const skippedBlocks: string[] = [];
+  if (!input.loadStandardContext) {
+    skippedBlocks.push('pack-blocks', 'world-context', 'session-bootstrap');
+  }
+  if (!input.loadFullContext) {
+    skippedBlocks.push('signal-articles', 'always-on-docs', 'sop-hint', 'guide-context');
+  }
+
+  const historyCount = Math.max(0, input.historyCount ?? 0);
+  const includedHistoryCount = Math.max(0, input.includedHistoryCount ?? 0);
+  return {
+    surface: 'thread',
+    threadId: input.threadId,
+    toolPolicy: input.toolPolicy,
+    toolPolicySource: input.toolPolicySource,
+    mode: input.mode,
+    estimatedTokens: estimateTokens([input.staticIdentity, input.prompt].filter(Boolean).join('\n\n')),
+    historyMessages: includedHistoryCount,
+    loadedBlocks,
+    skippedBlocks,
+    usesFullHistory: historyCount > 0 && includedHistoryCount >= historyCount,
+    maxPromptTokens: input.catBudget.maxPromptTokens,
+    maxContextTokens: input.catBudget.maxContextTokens,
+  };
 }
 
 /** Dependencies shared across route strategies */

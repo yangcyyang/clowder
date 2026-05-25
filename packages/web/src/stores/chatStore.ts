@@ -746,7 +746,7 @@ export interface ChatState {
     catId: string,
     mode: string,
     startedAt?: number,
-    meta?: Pick<CatInvocationInfo, 'toolPolicy' | 'toolPolicySource'>,
+    meta?: Pick<CatInvocationInfo, 'toolPolicy' | 'toolPolicySource' | 'contextBudget'>,
   ) => void;
   /** F108: Remove an active invocation slot; derives hasActiveInvocation */
   removeActiveInvocation: (invocationId: string) => void;
@@ -1828,6 +1828,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...existingSlot,
                 ...(info.toolPolicy ? { toolPolicy: info.toolPolicy } : {}),
                 ...(info.toolPolicySource ? { toolPolicySource: info.toolPolicySource } : {}),
+                ...(info.contextBudget ? { contextBudget: info.contextBudget } : {}),
               },
             }
           : state.activeInvocations;
@@ -2266,6 +2267,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   ...existingSlot,
                   ...(info.toolPolicy ? { toolPolicy: info.toolPolicy } : {}),
                   ...(info.toolPolicySource ? { toolPolicySource: info.toolPolicySource } : {}),
+                  ...(info.contextBudget ? { contextBudget: info.contextBudget } : {}),
                 },
               }
             : state.activeInvocations;

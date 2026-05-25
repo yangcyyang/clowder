@@ -289,6 +289,21 @@ export interface InvocationParams {
   readonly toolPolicy?: ToolPolicy;
   /** Whether toolbox level came from the agent default or a user message override. */
   readonly toolPolicySource?: 'agent-default' | 'user-override';
+  /** Runtime context-budget diagnostics shown in the execution bar. */
+  readonly contextBudget?: {
+    surface: 'thread';
+    threadId: string;
+    toolPolicy: ToolPolicy;
+    toolPolicySource: 'agent-default' | 'user-override';
+    mode: 'serial' | 'parallel';
+    estimatedTokens: number;
+    historyMessages: number;
+    loadedBlocks: string[];
+    skippedBlocks: string[];
+    usesFullHistory: boolean;
+    maxPromptTokens: number;
+    maxContextTokens: number;
+  };
 }
 
 /**
@@ -352,6 +367,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       invocationId,
       ...(params.toolPolicy ? { toolPolicy: params.toolPolicy } : {}),
       ...(params.toolPolicySource ? { toolPolicySource: params.toolPolicySource } : {}),
+      ...(params.contextBudget ? { contextBudget: params.contextBudget } : {}),
     }),
     timestamp: Date.now(),
   };

@@ -22,6 +22,7 @@ export function ThreadExecutionBar() {
           startedAt: inv.startedAt ?? Date.now(),
           toolPolicy: inv.toolPolicy,
           toolPolicySource: inv.toolPolicySource,
+          contextBudget: inv.contextBudget,
         });
       }
       return acc;
@@ -31,6 +32,14 @@ export function ThreadExecutionBar() {
       startedAt: number;
       toolPolicy?: 'minimal' | 'standard' | 'full';
       toolPolicySource?: 'agent-default' | 'user-override';
+      contextBudget?: {
+        estimatedTokens: number;
+        historyMessages: number;
+        loadedBlocks: string[];
+        skippedBlocks: string[];
+        usesFullHistory: boolean;
+        maxPromptTokens: number;
+      };
     }>,
   );
 
@@ -76,7 +85,7 @@ export function ThreadExecutionBar() {
   return (
     <div className="flex items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)] px-4 py-2 text-xs">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-      {activeCats.map(({ catId, startedAt, toolPolicy, toolPolicySource }) => {
+      {activeCats.map(({ catId, startedAt, toolPolicy, toolPolicySource, contextBudget }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--console-cat-fallback)' };
         return (
           <CatStatusChip
@@ -87,6 +96,7 @@ export function ThreadExecutionBar() {
             startedAt={startedAt}
             toolPolicy={toolPolicy}
             toolPolicySource={toolPolicySource}
+            contextBudget={contextBudget}
             onStop={handleStopCat}
           />
         );
@@ -111,6 +121,7 @@ function CatStatusChip({
   startedAt,
   toolPolicy,
   toolPolicySource,
+  contextBudget,
   onStop,
 }: {
   catId: string;
@@ -119,6 +130,14 @@ function CatStatusChip({
   startedAt: number;
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
+  contextBudget?: {
+    estimatedTokens: number;
+    historyMessages: number;
+    loadedBlocks: string[];
+    skippedBlocks: string[];
+    usesFullHistory: boolean;
+    maxPromptTokens: number;
+  };
   onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -129,6 +148,17 @@ function CatStatusChip({
     toolPolicy === 'minimal' ? '轻量' : toolPolicy === 'full' ? '全量' : toolPolicy === 'standard' ? '标准' : undefined;
   const sourceLabel =
     toolPolicySource === 'user-override' ? '用户指定' : toolPolicySource === 'agent-default' ? '默认' : undefined;
+  const budgetLabel = contextBudget
+    ? `${Math.round(contextBudget.estimatedTokens / 1000)}k/${Math.round(contextBudget.maxPromptTokens / 1000)}k · ${contextBudget.historyMessages}条`
+    : undefined;
+  const contextTitle = contextBudget
+    ? [
+        `上下文预算：${contextBudget.estimatedTokens} / ${contextBudget.maxPromptTokens} tokens`,
+        `历史消息：${contextBudget.historyMessages}${contextBudget.usesFullHistory ? '（全量）' : '（裁剪/摘要）'}`,
+        `加载：${contextBudget.loadedBlocks.join(', ') || '无'}`,
+        `跳过：${contextBudget.skippedBlocks.join(', ') || '无'}`,
+      ].join('\n')
+    : undefined;
 
   return (
     <span className="flex items-center gap-1.5 rounded-[var(--slock-radius-pill)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1 shadow-sm">
@@ -138,6 +168,11 @@ function CatStatusChip({
         <span className="text-cafe-muted">
           {policyLabel}
           {sourceLabel ? `·${sourceLabel}` : ''}
+        </span>
+      ) : null}
+      {budgetLabel ? (
+        <span className="text-cafe-muted" title={contextTitle}>
+          {budgetLabel}
         </span>
       ) : null}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
