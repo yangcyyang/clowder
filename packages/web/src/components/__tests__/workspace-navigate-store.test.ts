@@ -101,8 +101,8 @@ describe('shouldAcceptNavigate (threadId-based session isolation)', () => {
     expect(shouldAcceptNavigate('thread-abc', 'thread-xyz')).toBe(false);
   });
 
-  it('accepts when event has no threadId (legacy/global)', () => {
-    expect(shouldAcceptNavigate('thread-abc', undefined)).toBe(true);
+  it('rejects when event has no threadId while session is thread-scoped', () => {
+    expect(shouldAcceptNavigate('thread-abc', undefined)).toBe(false);
   });
 
   it('accepts when session has no threadId', () => {

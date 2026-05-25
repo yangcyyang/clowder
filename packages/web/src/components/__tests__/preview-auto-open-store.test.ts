@@ -60,8 +60,8 @@ describe('shouldAcceptAutoOpen (room scope filter)', () => {
   });
 
   // Session has NO worktreeId → accept global only
-  it('accepts global event when session has no worktreeId', () => {
-    expect(shouldAcceptAutoOpen(null, undefined, 'thread-a', undefined)).toBe(true);
+  it('rejects global event without threadId even when session has no worktreeId', () => {
+    expect(shouldAcceptAutoOpen(null, undefined, 'thread-a', undefined)).toBe(false);
   });
 
   it('rejects worktree-scoped event when session has no worktreeId', () => {

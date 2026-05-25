@@ -3,7 +3,9 @@ import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 
 export function shouldAcceptNavigate(sessionThreadId: string | null, eventThreadId: string | undefined): boolean {
-  if (!eventThreadId) return true;
+  // Auto navigation is a side effect. Require explicit thread ownership when
+  // we are inside a thread so legacy/global events cannot open the wrong panel.
+  if (!eventThreadId) return !sessionThreadId;
   if (!sessionThreadId) return true;
   return eventThreadId === sessionThreadId;
 }

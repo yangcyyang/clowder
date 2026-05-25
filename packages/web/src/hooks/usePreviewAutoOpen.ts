@@ -12,7 +12,10 @@ export function shouldAcceptAutoOpen(
   sessionThreadId: string,
   eventThreadId: string | undefined,
 ): boolean {
-  if (eventThreadId && eventThreadId !== sessionThreadId) {
+  // Auto-open can steal focus and resize the chat. Treat events without an
+  // explicit threadId as legacy/global broadcasts and reject them for thread
+  // pages, otherwise previews from another task can open this panel.
+  if (!eventThreadId || eventThreadId !== sessionThreadId) {
     return false;
   }
   if (sessionWorktreeId) {
