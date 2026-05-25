@@ -235,16 +235,6 @@ describe('QueueProcessor', () => {
 
     const broadcasts = deps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
     assert.ok(
-      broadcasts.some(
-        (msg) =>
-          msg.type === 'system_info' &&
-          typeof msg.content === 'string' &&
-          msg.content.includes('已接球') &&
-          msg.invocationId === 'inv-stub',
-      ),
-      'processing should broadcast an immediate agent_ack so UI has no dead-air window',
-    );
-    assert.ok(
       broadcasts.some((msg) => msg.type === 'text' && msg.content === 'before cancel'),
       'pre-cancel text should be broadcast',
     );

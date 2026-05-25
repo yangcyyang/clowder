@@ -842,23 +842,6 @@ export class QueueProcessor {
         });
       }
 
-      // Task #161: surface immediate acknowledgement before the CLI/model emits
-      // its first real token/tool event. Keep content plain text so stale/PWA
-      // clients still show a readable receipt instead of raw JSON.
-      const startedAt = Date.now();
-      for (const catId of targetCats) {
-        socketManager.broadcastAgentMessage(
-          {
-            type: 'system_info',
-            catId,
-            content: `🔍 ${catId} 已接球，正在处理。`,
-            timestamp: startedAt,
-            invocationId,
-          },
-          threadId,
-        );
-      }
-
       // 7. Route execution
       const persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> } = {};
       const collectedTextParts: string[] = [];

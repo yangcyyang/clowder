@@ -51,14 +51,6 @@ export function formatVisibleSystemInfo(parsed: Record<string, unknown>): Visibl
     };
   }
 
-  if (parsed?.type === 'agent_ack') {
-    const catId = typeof parsed.catId === 'string' ? parsed.catId : 'Agent';
-    return {
-      content: `🔍 ${catId} 已接球，正在处理。`,
-      variant: 'info',
-    };
-  }
-
   if (parsed?.type === 'a2a_pingpong_terminated') {
     return formatPingpongTerminated(parsed);
   }
