@@ -352,14 +352,18 @@ describe('agent hook routes', () => {
     await assert.rejects(readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
   });
 
-  it('browser requests require a real session before hook sync can write files', async () => {
-    const unauthorized = await app.inject({
+  it('allows trusted local browser requests to sync hooks even when SameSite cookies are absent', async () => {
+    const localBrowser = await app.inject({
       method: 'POST',
       url: '/api/agent-hooks/sync',
       headers: { origin: 'http://localhost:3003', host: 'localhost:3003' },
     });
-    assert.equal(unauthorized.statusCode, 401);
-    await assert.rejects(readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
+    assert.equal(localBrowser.statusCode, 200);
+    const localHooksJson = JSON.parse(await readFile(join(targetRoot, '.codex', 'hooks.json'), 'utf8'));
+    assert.equal(
+      localHooksJson.hooks.SessionStart[0].hooks[0].command,
+      bashCmd(join(targetRoot, '.claude', 'hooks', 'session-start-recall.sh')),
+    );
 
     const authorized = await app.inject({
       method: 'POST',

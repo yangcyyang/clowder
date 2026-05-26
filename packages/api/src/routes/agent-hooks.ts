@@ -14,9 +14,15 @@ function nonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveStrictAgentHookUserId(request: FastifyRequest): string | null {
+function resolveAgentHookUserId(request: FastifyRequest): string | null {
   const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
-  return fromSession;
+  if (fromSession) return fromSession;
+
+  // Local browser sessions can lose SameSite cookies when the app is opened on
+  // localhost while the API is normalized to 127.0.0.1. Hook routes are already
+  // restricted to loopback hosts; allow that local browser surface to recover.
+  if (isTrustedLocalBrowserRequest(request)) return 'default-user';
+  return null;
 }
 
 function isLoopbackRequest(request: FastifyRequest): boolean {
@@ -62,6 +68,11 @@ function hasTrustedLocalOrigin(value: unknown): boolean {
   return isLoopbackHost(originHostName(origin));
 }
 
+function hasExplicitTrustedLocalOrigin(value: unknown): boolean {
+  const origin = nonEmptyString(value);
+  return !!origin && isLoopbackHost(originHostName(origin));
+}
+
 function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
   if (!isLoopbackRequest(request)) return false;
 
@@ -69,6 +80,15 @@ function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
   if (!isLoopbackHost(host)) return false;
 
   return hasTrustedLocalOrigin(request.headers.origin);
+}
+
+function isTrustedLocalBrowserRequest(request: FastifyRequest): boolean {
+  if (!isLoopbackRequest(request)) return false;
+
+  const host = headerHostName(request.headers.host);
+  if (!isLoopbackHost(host)) return false;
+
+  return hasExplicitTrustedLocalOrigin(request.headers.origin);
 }
 
 function resolveOptions(options: AgentHooksRouteOptions, request: FastifyRequest) {
@@ -82,7 +102,7 @@ function resolveOptions(options: AgentHooksRouteOptions, request: FastifyRequest
 
 export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = async (app, options) => {
   app.get('/api/agent-hooks/status', async (request, reply) => {
-    const userId = resolveStrictAgentHookUserId(request);
+    const userId = resolveAgentHookUserId(request);
     if (!userId) {
       reply.status(401);
       return { error: 'Session identity required for browser requests' };
@@ -98,7 +118,7 @@ export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = asyn
   });
 
   app.post('/api/agent-hooks/sync', async (request, reply) => {
-    const userId = resolveStrictAgentHookUserId(request);
+    const userId = resolveAgentHookUserId(request);
     if (!userId) {
       reply.status(401);
       return { error: 'Session identity required for browser requests' };
