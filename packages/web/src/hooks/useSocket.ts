@@ -22,6 +22,28 @@ import { reconnectGame } from './useGameReconnect';
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
 import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
+type InvocationPhase =
+  | 'queued'
+  | 'context_building'
+  | 'runtime_starting'
+  | 'first_token_waiting'
+  | 'tool_calling'
+  | 'persisting'
+  | 'done';
+
+type ActiveInvocationSlots = Record<
+  string,
+  {
+    catId: string;
+    mode: string;
+    startedAt?: number;
+    toolPolicy?: 'minimal' | 'standard' | 'full';
+    toolPolicySource?: 'agent-default' | 'user-override';
+    contextBudget?: import('../stores/chat-types').CatInvocationInfo['contextBudget'];
+    phase?: InvocationPhase;
+  }
+>;
+
 interface AgentMessage {
   type: string;
   catId: string;
@@ -668,6 +690,53 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
       }
     });
+
+    socket.on(
+      'invocation_phase',
+      (data: { threadId: string; invocationId: string; phase: InvocationPhase; targetCats?: string[] }) => {
+        const updateSlots = (slots: ActiveInvocationSlots) => {
+          const next = { ...slots };
+          let changed = false;
+          for (const [slotId, slot] of Object.entries(next)) {
+            if (slotId !== data.invocationId && !slotId.startsWith(`${data.invocationId}-`)) continue;
+            next[slotId] = { ...slot, phase: data.phase };
+            changed = true;
+          }
+          return changed ? next : slots;
+        };
+
+        useChatStore.setState((state) => {
+          if (data.threadId === state.currentThreadId) {
+            const activeInvocations = updateSlots(state.activeInvocations);
+            const existing = state.threadStates[data.threadId];
+            return {
+              activeInvocations,
+              ...(existing
+                ? {
+                    threadStates: {
+                      ...state.threadStates,
+                      [data.threadId]: {
+                        ...existing,
+                        activeInvocations,
+                        hasActiveInvocation: Object.keys(activeInvocations).length > 0 || existing.hasActiveInvocation,
+                      },
+                    },
+                  }
+                : {}),
+            };
+          }
+          const existing = state.threadStates[data.threadId];
+          if (!existing) return state;
+          const activeInvocations = updateSlots(existing.activeInvocations);
+          return {
+            threadStates: {
+              ...state.threadStates,
+              [data.threadId]: { ...existing, activeInvocations },
+            },
+          };
+        });
+      },
+    );
 
     socket.on('task_created', (task: Record<string, unknown>) => {
       callbacksRef.current.onTaskCreated?.(task);

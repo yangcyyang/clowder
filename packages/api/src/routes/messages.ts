@@ -890,6 +890,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, {
             status: 'running',
+            phase: 'context_building',
           });
 
           // #768: intent_mode deferred to first CLI event (avoid "replying" when CLI never starts)
@@ -940,7 +941,22 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             targetCats,
             invocationId: createResult.invocationId,
           });
+          await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'runtime_starting' });
+          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
+            threadId: resolvedThreadId,
+            invocationId: createResult.invocationId,
+            targetCats,
+            phase: 'runtime_starting',
+          });
           void opts.catSupervisor?.markProcessing(targetCats);
+
+          await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'first_token_waiting' });
+          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
+            threadId: resolvedThreadId,
+            invocationId: createResult.invocationId,
+            targetCats,
+            phase: 'first_token_waiting',
+          });
 
           for await (const msg of router.routeExecution(
             userId,
@@ -976,6 +992,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           )) {
             if (controller?.signal.aborted) {
               break;
+            }
+            if (msg.type === 'tool_use') {
+              await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'tool_calling' });
+              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
+                threadId: resolvedThreadId,
+                invocationId: createResult.invocationId,
+                targetCats,
+                phase: 'tool_calling',
+              });
             }
             // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
             if (!intentModeBroadcast) {
@@ -1077,6 +1102,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
+              phase: 'done',
             });
             // Bugfix: silent-exit P2 — only broadcast diagnostic when preempted by
             // a newer invocation (reason='preempted'). User-initiated cancel already
@@ -1107,6 +1133,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
+              phase: 'done',
               error: `Message delivered but persistence failed: ${errorDetail}`,
             });
             opts.socketManager.broadcastAgentMessage(
@@ -1135,16 +1162,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // F070: Governance gate blocked — mark as failed with errorCode for retry
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
+              phase: 'done',
               error: governanceErrorCode,
             });
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {
+            await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'persisting' });
+            opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
+              threadId: resolvedThreadId,
+              invocationId: createResult.invocationId,
+              targetCats,
+              phase: 'persisting',
+            });
             // ADR-008 S3: ack cursors before marking succeeded so that if ack
             // throws, the catch block sees running→failed (valid transition).
             await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
 
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'succeeded',
+              phase: 'done',
               ...(collectedUsage.size > 0
                 ? {
                     usageByCat: Object.fromEntries(collectedUsage),
@@ -1210,6 +1246,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
+              phase: 'done',
             });
             // F148 fix: ack cursors for cats that completed before the exception
             if (cursorBoundaries.size > 0) {
@@ -1235,6 +1272,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             const errorMsg = normalizeErrorMessage(err);
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
+              phase: 'done',
               error: errorMsg,
             });
             opts.socketManager.broadcastAgentMessage(

@@ -39,7 +39,7 @@ redis.call('SET', KEYS[1], ARGV[1], 'EX', ${IDEMPOTENCY_TTL_SECONDS})
 redis.call('HSET', KEYS[2],
   'id', ARGV[1], 'threadId', ARGV[2], 'userId', ARGV[3],
   'targetCats', ARGV[4], 'intent', ARGV[5],
-  'idempotencyKey', ARGV[6], 'status', 'queued',
+  'idempotencyKey', ARGV[6], 'status', 'queued', 'phase', 'queued',
   'userMessageId', '', 'error', '',
   'createdAt', ARGV[7], 'updatedAt', ARGV[7])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
@@ -165,6 +165,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const pairs: string[] = [];
     pairs.push('updatedAt', String(Date.now()));
     if (input.status !== undefined) pairs.push('status', input.status);
+    if (input.phase !== undefined) pairs.push('phase', input.phase);
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
@@ -300,6 +301,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       targetCats: safeParseArray(data.targetCats) as CatId[],
       intent: (data.intent as 'execute' | 'ideate') ?? 'execute',
       status: (data.status as InvocationStatus) ?? 'queued',
+      phase: (data.phase as InvocationRecord['phase']) ?? 'queued',
       idempotencyKey: data.idempotencyKey!,
       ...(hasError ? { error: errorValue } : {}),
       ...(usageByCat ? { usageByCat } : {}),

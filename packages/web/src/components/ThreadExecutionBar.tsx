@@ -14,15 +14,17 @@ export function ThreadExecutionBar() {
   const [, setTick] = useState(0);
 
   // Extract unique active cats from invocations
-  const activeCats = Object.values(activeInvocations ?? {}).reduce(
+  const activeCats = Object.entries(activeInvocations ?? {}).reduce(
     (acc, inv) => {
-      if (!acc.some((c) => c.catId === inv.catId)) {
+      const [, slot] = inv;
+      if (!acc.some((c) => c.catId === slot.catId)) {
         acc.push({
-          catId: inv.catId,
-          startedAt: inv.startedAt ?? Date.now(),
-          toolPolicy: inv.toolPolicy,
-          toolPolicySource: inv.toolPolicySource,
-          contextBudget: inv.contextBudget,
+          catId: slot.catId,
+          startedAt: slot.startedAt ?? Date.now(),
+          toolPolicy: slot.toolPolicy,
+          toolPolicySource: slot.toolPolicySource,
+          contextBudget: slot.contextBudget,
+          phase: slot.phase,
         });
       }
       return acc;
@@ -32,6 +34,7 @@ export function ThreadExecutionBar() {
       startedAt: number;
       toolPolicy?: 'minimal' | 'standard' | 'full';
       toolPolicySource?: 'agent-default' | 'user-override';
+      phase?: InvocationPhase;
       contextBudget?: {
         estimatedTokens: number;
         historyMessages: number;
@@ -88,7 +91,7 @@ export function ThreadExecutionBar() {
   return (
     <div className="flex items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)] px-4 py-2 text-xs">
       <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-      {activeCats.map(({ catId, startedAt, toolPolicy, toolPolicySource, contextBudget }) => {
+      {activeCats.map(({ catId, startedAt, toolPolicy, toolPolicySource, phase, contextBudget }) => {
         const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--console-cat-fallback)' };
         return (
           <CatStatusChip
@@ -99,6 +102,7 @@ export function ThreadExecutionBar() {
             startedAt={startedAt}
             toolPolicy={toolPolicy}
             toolPolicySource={toolPolicySource}
+            phase={phase}
             contextBudget={contextBudget}
             onStop={handleStopCat}
           />
@@ -124,6 +128,7 @@ function CatStatusChip({
   startedAt,
   toolPolicy,
   toolPolicySource,
+  phase,
   contextBudget,
   onStop,
 }: {
@@ -133,6 +138,7 @@ function CatStatusChip({
   startedAt: number;
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
+  phase?: InvocationPhase;
   contextBudget?: {
     estimatedTokens: number;
     historyMessages: number;
@@ -160,6 +166,7 @@ function CatStatusChip({
       : contextBudget?.governanceTier === 'operational'
         ? '家规:运营'
         : undefined;
+  const phaseLabel = getPhaseLabel(phase);
   const budgetLabel = contextBudget
     ? `${Math.round(contextBudget.estimatedTokens / 1000)}k/${Math.round(contextBudget.maxPromptTokens / 1000)}k · ${contextBudget.historyMessages}条`
     : undefined;
@@ -186,6 +193,7 @@ function CatStatusChip({
         </span>
       ) : null}
       {governanceLabel ? <span className="text-cafe-muted">{governanceLabel}</span> : null}
+      {phaseLabel ? <span className="text-cafe-muted">{phaseLabel}</span> : null}
       {budgetLabel ? (
         <span className="text-cafe-muted" title={contextTitle}>
           {budgetLabel}
@@ -208,4 +216,34 @@ function CatStatusChip({
       </button>
     </span>
   );
+}
+
+type InvocationPhase =
+  | 'queued'
+  | 'context_building'
+  | 'runtime_starting'
+  | 'first_token_waiting'
+  | 'tool_calling'
+  | 'persisting'
+  | 'done';
+
+function getPhaseLabel(phase: InvocationPhase | undefined): string | undefined {
+  switch (phase) {
+    case 'queued':
+      return '排队';
+    case 'context_building':
+      return '组上下文';
+    case 'runtime_starting':
+      return '启动模型';
+    case 'first_token_waiting':
+      return '等首 token';
+    case 'tool_calling':
+      return '工具调用';
+    case 'persisting':
+      return '写回';
+    case 'done':
+      return '完成';
+    default:
+      return undefined;
+  }
 }

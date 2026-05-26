@@ -276,7 +276,14 @@ export interface BackgroundStoreLike {
   setThreadLoading: (threadId: string, loading: boolean) => void;
   setThreadHasActiveInvocation: (threadId: string, active: boolean) => void;
   /** F108: Add an active invocation slot to a thread */
-  addThreadActiveInvocation: (threadId: string, invocationId: string, catId: string, mode: string) => void;
+  addThreadActiveInvocation: (
+    threadId: string,
+    invocationId: string,
+    catId: string,
+    mode: string,
+    startedAt?: number,
+    meta?: Pick<CatInvocationInfo, 'toolPolicy' | 'toolPolicySource' | 'contextBudget' | 'phase'>,
+  ) => void;
   /** F108: Remove an active invocation slot from a thread */
   removeThreadActiveInvocation: (threadId: string, invocationId: string) => void;
   updateThreadCatStatus: (threadId: string, catId: string, status: CatStatusType) => void;

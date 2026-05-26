@@ -766,10 +766,30 @@ export class QueueProcessor {
       // 4. Mark running
       await invocationRecordStore.update(invocationId, {
         status: 'running',
+        phase: 'runtime_starting',
+      });
+
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'spawn_started', {
+        threadId,
+        targetCats,
+        invocationId,
+      });
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'invocation_phase', {
+        threadId,
+        invocationId,
+        targetCats,
+        phase: 'runtime_starting',
       });
 
       // 5. intent_mode deferred to first CLI event (#768: avoid "replying" when CLI never starts)
       let intentModeBroadcast = false;
+      await invocationRecordStore.update(invocationId, { phase: 'first_token_waiting' });
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'invocation_phase', {
+        threadId,
+        invocationId,
+        targetCats,
+        phase: 'first_token_waiting',
+      });
 
       // 6. Emit queue_updated (processing)
       socketManager.emitToUser(userId, 'queue_updated', {
@@ -934,6 +954,15 @@ export class QueueProcessor {
         if (controller.signal.aborted) {
           break;
         }
+        if (msg.type === 'tool_use') {
+          await invocationRecordStore.update(invocationId, { phase: 'tool_calling' });
+          socketManager.broadcastToRoom(`thread:${threadId}`, 'invocation_phase', {
+            threadId,
+            invocationId,
+            targetCats,
+            phase: 'tool_calling',
+          });
+        }
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {
           socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
@@ -1042,15 +1071,23 @@ export class QueueProcessor {
         if (cursorBoundaries.size > 0) {
           await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
         }
-        await invocationRecordStore.update(invocationId, { status: 'canceled' });
+        await invocationRecordStore.update(invocationId, { status: 'canceled', phase: 'done' });
         finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
         return finalStatus;
       }
 
       // 9. Ack cursors + mark succeeded
+      await invocationRecordStore.update(invocationId, { phase: 'persisting' });
+      socketManager.broadcastToRoom(`thread:${threadId}`, 'invocation_phase', {
+        threadId,
+        invocationId,
+        targetCats,
+        phase: 'persisting',
+      });
       await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
       await invocationRecordStore.update(invocationId, {
         status: 'succeeded',
+        phase: 'done',
       });
 
       finalStatus = 'succeeded';
@@ -1088,6 +1125,7 @@ export class QueueProcessor {
         if (invocationId) {
           await invocationRecordStore.update(invocationId, {
             status: 'failed',
+            phase: 'done',
             error: errMsg,
           });
         }

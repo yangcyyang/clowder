@@ -43,6 +43,7 @@ describe('InvocationRecordStore', () => {
     const record = store.get(invocationId);
     assert.ok(record);
     assert.equal(record.status, 'queued');
+    assert.equal(record.phase, 'queued');
     assert.equal(record.userMessageId, null);
     assert.equal(record.threadId, 'thread-1');
     assert.equal(record.userId, 'user-1');
@@ -136,8 +137,9 @@ describe('InvocationRecordStore', () => {
     // Small delay to ensure updatedAt changes
     await new Promise((r) => setTimeout(r, 5));
 
-    const updated = store.update(invocationId, { status: 'running' });
+    const updated = store.update(invocationId, { status: 'running', phase: 'runtime_starting' });
     assert.equal(updated.status, 'running');
+    assert.equal(updated.phase, 'runtime_starting');
     assert.ok(updated.updatedAt >= before.updatedAt);
   });
 

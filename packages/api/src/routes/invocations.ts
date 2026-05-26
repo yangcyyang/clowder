@@ -55,10 +55,59 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       targetCats: record.targetCats,
       intent: record.intent,
       status: record.status,
+      phase: record.phase,
       ...(record.error ? { error: record.error } : {}),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
+  });
+
+  // POST /api/invocations/:id/cancel — cancel a running invocation by record id.
+  app.post<{ Params: { id: string } }>('/api/invocations/:id/cancel', async (request, reply) => {
+    const { id } = request.params;
+    const record = await opts.invocationRecordStore.get(id);
+
+    if (!record) {
+      reply.status(404);
+      return { error: 'Invocation not found', code: 'INVOCATION_NOT_FOUND' };
+    }
+
+    if (record.status === 'succeeded' || record.status === 'canceled') {
+      return { ok: true, cancelled: false, status: record.status };
+    }
+
+    for (const catId of record.targetCats) {
+      opts.invocationTracker.cancel(record.threadId, catId, record.userId, 'user_cancel');
+      opts.queueProcessor?.clearPause(record.threadId, catId);
+      opts.queueProcessor?.releaseSlot(record.threadId, catId);
+    }
+    await opts.invocationRecordStore.update(id, { status: 'canceled', phase: 'done' });
+
+    opts.socketManager.broadcastAgentMessage(
+      {
+        type: 'system_info',
+        catId: record.targetCats[0] ?? getDefaultCatId(),
+        content: '⏹ 已取消',
+        timestamp: Date.now(),
+      },
+      record.threadId,
+    );
+    for (const catId of record.targetCats) {
+      opts.socketManager.broadcastAgentMessage(
+        {
+          type: 'done',
+          catId,
+          isFinal: true,
+          timestamp: Date.now(),
+        },
+        record.threadId,
+      );
+      opts.queueProcessor?.onInvocationComplete(record.threadId, catId, 'canceled_by_user').catch(() => {
+        /* best-effort */
+      });
+    }
+
+    return { ok: true, cancelled: true, status: 'canceled' };
   });
 
   // POST /api/invocations/:id/retry — retry failed/queued invocation (ADR-008 S2)
@@ -134,6 +183,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
     // Also clears stale error from previous failure (P2 fix)
     const claimed = await opts.invocationRecordStore.update(id, {
       status: 'running',
+      phase: 'context_building',
       error: '',
       expectedStatus: snapshotStatus,
     });
@@ -168,10 +218,18 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
 
       try {
+        await opts.invocationRecordStore.update(id, { phase: 'runtime_starting' });
+        opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'invocation_phase', {
+          threadId: record.threadId,
+          invocationId: id,
+          targetCats: record.targetCats,
+          phase: 'runtime_starting',
+        });
         opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'intent_mode', {
           threadId: record.threadId,
           mode: intent.intent,
           targetCats: record.targetCats,
+          invocationId: id,
         });
 
         // ADR-008 S3: collect cursor boundaries; ack only after succeeded
@@ -180,6 +238,14 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         const persistenceContext: PersistenceContext = { failed: false, errors: [] };
         // F070: track governance block errorCode (mirror messages.ts)
         let governanceErrorCode: string | undefined;
+
+        await opts.invocationRecordStore.update(id, { phase: 'first_token_waiting' });
+        opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'invocation_phase', {
+          threadId: record.threadId,
+          invocationId: id,
+          targetCats: record.targetCats,
+          phase: 'first_token_waiting',
+        });
 
         for await (const msg of opts.router.routeExecution(
           record.userId,
@@ -205,6 +271,15 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             parentInvocationId: id,
           },
         )) {
+          if (msg.type === 'tool_use') {
+            await opts.invocationRecordStore.update(id, { phase: 'tool_calling' });
+            opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'invocation_phase', {
+              threadId: record.threadId,
+              invocationId: id,
+              targetCats: record.targetCats,
+              phase: 'tool_calling',
+            });
+          }
           if (msg.type === 'done' && msg.errorCode) {
             governanceErrorCode = msg.errorCode;
           }
@@ -219,6 +294,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
+            phase: 'done',
             error: `Message delivered but persistence failed: ${errorDetail}`,
           });
           opts.socketManager.broadcastAgentMessage(
@@ -233,14 +309,22 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         } else if (governanceErrorCode) {
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
+            phase: 'done',
             error: governanceErrorCode,
           });
         } else {
+          await opts.invocationRecordStore.update(id, { phase: 'persisting' });
+          opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'invocation_phase', {
+            threadId: record.threadId,
+            invocationId: id,
+            targetCats: record.targetCats,
+            phase: 'persisting',
+          });
           // ADR-008 S3: ack cursors before marking succeeded so that if ack
           // throws, the catch block sees running→failed (valid transition).
           await opts.router.ackCollectedCursors(record.userId, record.threadId, cursorBoundaries);
 
-          await opts.invocationRecordStore.update(id, { status: 'succeeded' });
+          await opts.invocationRecordStore.update(id, { status: 'succeeded', phase: 'done' });
           finalStatus = 'succeeded';
         }
       } catch (err) {
@@ -248,6 +332,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         await opts.invocationRecordStore.update(id, {
           status: 'failed',
+          phase: 'done',
           error: errorMsg,
         });
         opts.socketManager.broadcastAgentMessage(

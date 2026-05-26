@@ -15,6 +15,16 @@ import { isValidTransition } from './invocation-state-machine.js';
 /** InvocationRecord lifecycle statuses */
 export type InvocationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
+/** User-visible invocation execution phase. */
+export type InvocationPhase =
+  | 'queued'
+  | 'context_building'
+  | 'runtime_starting'
+  | 'first_token_waiting'
+  | 'tool_calling'
+  | 'persisting'
+  | 'done';
+
 /**
  * A single invocation record tracking the lifecycle of a cat invocation.
  */
@@ -27,6 +37,8 @@ export interface InvocationRecord {
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   status: InvocationStatus;
+  /** Current execution phase for UI progress. */
+  phase: InvocationPhase;
   /** Idempotency key (client-provided or server-generated, always present) */
   idempotencyKey: string;
   /** Error message when status is 'failed' */
@@ -58,6 +70,7 @@ export interface CreateResult {
 /** Fields that can be updated on an InvocationRecord */
 export interface UpdateInvocationInput {
   status?: InvocationStatus;
+  phase?: InvocationPhase;
   userMessageId?: string | null;
   error?: string;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
@@ -131,6 +144,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       targetCats: [...input.targetCats],
       intent: input.intent,
       status: 'queued',
+      phase: 'queued',
       idempotencyKey: input.idempotencyKey,
       createdAt: now,
       updatedAt: now,
@@ -167,6 +181,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     }
 
     if (input.status !== undefined) record.status = input.status;
+    if (input.phase !== undefined) record.phase = input.phase;
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
     if (input.error !== undefined) record.error = input.error;
     if (input.usageByCat !== undefined) {

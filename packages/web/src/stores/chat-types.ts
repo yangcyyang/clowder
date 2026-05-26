@@ -447,6 +447,7 @@ export interface CompactBoundaryTelemetry {
 export interface CatInvocationInfo {
   sessionId?: string;
   invocationId?: string;
+  phase?: InvocationPhase;
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
   contextBudget?: {
@@ -494,6 +495,15 @@ export interface LivenessWarningSnapshot {
   processAlive: boolean;
   receivedAt: number;
 }
+
+export type InvocationPhase =
+  | 'queued'
+  | 'context_building'
+  | 'runtime_starting'
+  | 'first_token_waiting'
+  | 'tool_calling'
+  | 'persisting'
+  | 'done';
 
 /** F118 Phase C AC-C3: Timeout diagnostics data from CLI */
 export interface TimeoutDiagnostics {
@@ -574,6 +584,7 @@ export interface ThreadState {
       toolPolicy?: 'minimal' | 'standard' | 'full';
       toolPolicySource?: 'agent-default' | 'user-override';
       contextBudget?: CatInvocationInfo['contextBudget'];
+      phase?: InvocationPhase;
     }
   >;
   intentMode: 'execute' | 'ideate' | null;
