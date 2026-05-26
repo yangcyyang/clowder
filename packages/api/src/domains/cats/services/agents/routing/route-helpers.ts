@@ -384,6 +384,12 @@ export interface AgentIntentSnapshot {
   recentMessages: AgentIntentSnapshotMessage[];
 }
 
+export interface AgentStageGate {
+  stage: NonNullable<AgentIntentSnapshot['stage']>;
+  mode: 'hold-for-confirmation' | 'resume-after-approval';
+  instruction: string;
+}
+
 const ACTION_INTENT_RE = /(修复|推进|执行|构建|导出|检查|排查|改造|写入|备份|push|提交|实现|处理|你来做|帮我做|开始做|继续做)/i;
 const CORRECTION_INTENT_RE =
   /(先别|别急|等等|暂停|停止|不要做|先不做|不是这个|换方向|先讨论|先确认|先看方案|先给.*方案|确认后再执行)/i;
@@ -451,11 +457,44 @@ export function buildAgentIntentSnapshot(
     supersededMessageIds:
       intentType === 'correction' ? recentMessages.slice(0, -1).map((m) => m.id).slice(-5) : [],
     requiresTask: intentType === 'action',
-    requiresUserConfirmation: intentType === 'stage-input',
+    requiresUserConfirmation: intentType === 'stage-input' || intentType === 'correction',
     stage: inferIntentStage(combinedContent),
     toolPolicyHint: inferToolPolicyHint(intentType, combinedContent),
     recentMessages,
   };
+}
+
+export function buildAgentStageGate(snapshot: AgentIntentSnapshot | undefined): AgentStageGate | undefined {
+  if (!snapshot) return undefined;
+  const stage = snapshot.stage ?? 'unknown';
+  if (snapshot.requiresUserConfirmation) {
+    return {
+      stage,
+      mode: 'hold-for-confirmation',
+      instruction:
+        'Do not execute the next irreversible stage yet. First summarize the buffered inputs, state what will happen next, and ask the user to confirm before generating, exporting, writing files, or changing code.',
+    };
+  }
+  if (snapshot.intentType === 'approval') {
+    return {
+      stage,
+      mode: 'resume-after-approval',
+      instruction:
+        'The latest user message is an approval signal. Continue the next stage only if the recent thread messages contain a clear pending stage; otherwise ask one concise clarification question.',
+    };
+  }
+  return undefined;
+}
+
+export function formatAgentStageGate(gate: AgentStageGate | undefined): string {
+  if (!gate) return '';
+  return [
+    '[Agent Stage Gate]',
+    `mode: ${gate.mode}`,
+    `stage: ${gate.stage}`,
+    `instruction: ${gate.instruction}`,
+    '[/Agent Stage Gate]',
+  ].join('\n');
 }
 
 export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefined): string {
@@ -464,6 +503,7 @@ export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefi
     .slice(-5)
     .map((m) => `- id=${m.id} ${m.type}: ${m.content}`)
     .join('\n');
+  const stageGateText = formatAgentStageGate(buildAgentStageGate(snapshot));
   const superseded =
     snapshot.supersededMessageIds.length > 0 ? snapshot.supersededMessageIds.join(', ') : 'none';
   return [
@@ -480,7 +520,10 @@ export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefi
     'Recent user messages:',
     recentLines,
     '[/Agent Inbox Snapshot]',
-  ].join('\n');
+    stageGateText,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**

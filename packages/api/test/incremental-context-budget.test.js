@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
-const { assembleIncrementalContext, buildRuntimeContextBudgetSnapshot } = await import(
+const { assembleIncrementalContext, buildAgentStageGate, buildRuntimeContextBudgetSnapshot } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
 );
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -31,10 +31,58 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.ok(result.contextText.includes('intentType: correction'));
     assert.ok(result.contextText.includes('latestInstruction: 先给方案，我确认后再执行'));
     assert.ok(result.contextText.includes('requiresTask: no'));
+    assert.ok(result.contextText.includes('requiresUserConfirmation: yes'));
+    assert.ok(result.contextText.includes('[Agent Stage Gate]'));
+    assert.ok(result.contextText.includes('mode: hold-for-confirmation'));
     assert.ok(result.contextText.includes('supersededMessageIds:'));
     assert.equal(result.intentSnapshot?.intentType, 'correction');
     assert.equal(result.intentSnapshot?.latestMessageId, latest.id);
     assert.ok(result.intentSnapshot?.supersededMessageIds.length);
+  });
+
+  test('adds stage gate for stage-input messages and holds before execution', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const latest = messageStore.append(mockMsg({ content: '大纲里增加一页竞品对比，然后调整章节顺序' }));
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 2000,
+        maxMessages: 10,
+        maxContentLengthPerMsg: 1000,
+      },
+    });
+
+    assert.equal(result.intentSnapshot?.intentType, 'stage-input');
+    assert.equal(result.intentSnapshot?.requiresUserConfirmation, true);
+    assert.equal(result.intentSnapshot?.stage, 'outline');
+    assert.ok(result.contextText.includes('[Agent Stage Gate]'));
+    assert.ok(result.contextText.includes('mode: hold-for-confirmation'));
+    assert.ok(result.contextText.includes('Do not execute the next irreversible stage yet'));
+  });
+
+  test('stage gate resumes only after explicit approval intent', async () => {
+    const gate = buildAgentStageGate({
+      surface: 'thread',
+      messageCount: 2,
+      intentType: 'approval',
+      latestInstruction: '确认',
+      latestMessageId: 'msg-2',
+      supersededMessageIds: [],
+      requiresTask: false,
+      requiresUserConfirmation: false,
+      stage: 'plan',
+      toolPolicyHint: 'minimal',
+      recentMessages: [
+        { id: 'msg-1', type: 'stage-input', content: '策划稿调整一下' },
+        { id: 'msg-2', type: 'approval', content: '确认' },
+      ],
+    });
+
+    assert.equal(gate?.mode, 'resume-after-approval');
+    assert.equal(gate?.stage, 'plan');
   });
 
   test('keeps Agent Inbox Snapshot when effective context budget is zero', async () => {
