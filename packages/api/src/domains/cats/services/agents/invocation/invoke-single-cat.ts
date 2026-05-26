@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -99,6 +99,18 @@ export function getOpenCodeKnownModels(): Set<string> {
     _openCodeKnownModels = new Set();
   }
   return _openCodeKnownModels;
+}
+
+function resolveClowderCliEnv(hostProjectRoot: string): Record<string, string> {
+  const binDir = join(hostProjectRoot, 'bin');
+  const cliPath = join(binDir, 'clowder');
+  if (!existsSync(cliPath)) return {};
+
+  const existingPath = process.env.PATH ?? '';
+  return {
+    CLOWDER_CLI_PATH: cliPath,
+    PATH: [binDir, existingPath].filter(Boolean).join(':'),
+  };
 }
 
 /** @internal Exposed for tests */
@@ -358,6 +370,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     : invocationAc.signal;
 
   log.info({ invocationId, catId, threadId, userId }, 'Created invocation');
+  const hostProjectRoot = findMonorepoRoot(process.cwd());
 
   // F22 R2 P1-1: Expose invocationId to caller (route-serial/parallel) so they can
   // use it for RichBlockBuffer.consume() instead of getLatestId() which is wrong
@@ -386,6 +399,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // "missing required parameter". Inject the live threadId so prompt template
     // can resolve to a concrete value.
     CAT_CAFE_THREAD_ID: threadId,
+    ...resolveClowderCliEnv(hostProjectRoot),
     ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
   };
 
@@ -401,7 +415,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didComplete = false;
   let didResetRestoreFailures = false;
   let openCodeRuntimeConfigPath: string | undefined;
-  const hostProjectRoot = findMonorepoRoot(process.cwd());
 
   // === CAT_INVOKED 审计 (fire-and-forget, 缅因猫 review P2-3) ===
   auditLog

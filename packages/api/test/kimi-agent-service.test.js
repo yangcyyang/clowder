@@ -326,6 +326,12 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
       JSON.stringify({
         mcpServers: {
           filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+          'probe-off': { command: 'echo', args: ['ok'] },
+          'cat-cafe-collab': {
+            command: 'node',
+            args: ['collab.js'],
+            env: { CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}' },
+          },
         },
       }),
       'utf8',
@@ -350,6 +356,8 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
     const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
     assert.ok(mcpConfig.mcpServers['cat-cafe']);
     assert.ok(mcpConfig.mcpServers.filesystem);
+    assert.equal(mcpConfig.mcpServers['probe-off'], undefined);
+    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'], undefined);
     assert.equal(mcpConfig.mcpServers['cat-cafe'].command, 'node');
     assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
     assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');

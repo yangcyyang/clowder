@@ -645,10 +645,10 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   lines.push(
     '## Clowder CLI 工作纪律',
-    '如果你的运行环境可以执行 shell，可使用 `clowder`（或仓库根目录 `./bin/clowder`）操作当前 Clowder：',
-    '- 收到需要实际处理的任务：先 `clowder task claim --message-id <messageId>` 或 `clowder task claim --task <taskId>`。',
-    '- 完成后等待人工验收：`clowder task update --task <taskId> --status in_review`（会映射为 Clowder 的等待验收态）。',
-    '- 需要回写当前 thread：`clowder message send --target "$CAT_CAFE_THREAD_ID"`，正文走 stdin。',
+    '如果你的运行环境可以执行 shell，可使用 Clowder CLI 操作当前 Clowder；命令前先设 `CLI="${CLOWDER_CLI_PATH:-clowder}"`，没有 `clowder` 时再用仓库根目录 `./bin/clowder`。',
+    '- 收到需要实际处理的任务：先 `$CLI task claim --message-id <messageId>` 或 `$CLI task claim --task <taskId>`。',
+    '- 完成后等待人工验收：`$CLI task update --task <taskId> --status in_review`（会映射为 Clowder 的等待验收态）。',
+    '- 需要回写当前 thread：`$CLI message send --target "$CAT_CAFE_THREAD_ID"`，正文走 stdin。',
     '纯讨论/解释不需要 claim；不要为了 @ 队友而使用 message send，A2A 仍按上面的行首 @ 规则。',
     '',
   );

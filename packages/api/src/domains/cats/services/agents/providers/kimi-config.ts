@@ -23,6 +23,19 @@ export const CAT_CAFE_CALLBACK_ENV_KEYS = [
 ];
 
 const KIMI_CONTEXT_TAIL_BYTES = 64 * 1024;
+const MANAGED_KIMI_MCP_SERVER_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+
+function shouldCarryExistingMcpServer(name: string): boolean {
+  // Project-level probe servers are diagnostics artifacts. They often exit
+  // immediately (for example `echo ok`), and Kimi treats that as a hard MCP
+  // startup failure before the agent can answer.
+  if (name.startsWith('probe-')) return false;
+
+  // The invocation path injects a fresh cat-cafe server with live callback
+  // credentials. Carrying old managed entries can leave literal ${...}
+  // placeholders in the runtime config and make Kimi fail before first token.
+  return !MANAGED_KIMI_MCP_SERVER_NAMES.has(name);
+}
 
 function normalizeKimiApiBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim();
@@ -262,7 +275,11 @@ export function writeMcpConfigFile(
   }
   const currentServers =
     config.mcpServers && typeof config.mcpServers === 'object' && !Array.isArray(config.mcpServers)
-      ? { ...(config.mcpServers as Record<string, unknown>) }
+      ? Object.fromEntries(
+          Object.entries(config.mcpServers as Record<string, unknown>).filter(([name]) =>
+            shouldCarryExistingMcpServer(name),
+          ),
+        )
       : {};
   const catCafeEnv = Object.fromEntries(
     CAT_CAFE_CALLBACK_ENV_KEYS.map((key) => [key, callbackEnv[key]]).filter(([, value]) => Boolean(value)),
