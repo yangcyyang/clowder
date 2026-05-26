@@ -436,11 +436,9 @@ export function buildGovernanceSourceContext(message: string): string | null {
     ].join('\n');
   } catch (err) {
     const messageText = err instanceof Error ? err.message : String(err);
-    return [
-      '## 家规原文按需参考（shared-rules.md）',
-      `触发词：「${matchedWord}」。`,
-      `读取失败：${messageText}`,
-    ].join('\n');
+    return ['## 家规原文按需参考（shared-rules.md）', `触发词：「${matchedWord}」。`, `读取失败：${messageText}`].join(
+      '\n',
+    );
   }
 }
 
@@ -566,6 +564,11 @@ export interface StaticIdentityOptions {
    * minimal: inject only core rules; standard/full: inject operational digest.
    */
   toolPolicy?: ToolPolicy;
+  /**
+   * Slock-like cross-session memory for this specific cat.
+   * Loaded from .cat-cafe/memory/{catId}.md and injected as durable preferences/context.
+   */
+  agentMemoryContext?: string | null;
 }
 
 /**
@@ -679,6 +682,20 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
   lines.push('', getGovernanceDigest(toolPolicy));
+
+  const agentMemory = options?.agentMemoryContext?.trim();
+  if (agentMemory) {
+    lines.push(
+      '',
+      '## Agent Memory（跨会话记忆）',
+      '以下是你的持久记忆，用于记住用户偏好、长期项目上下文、已验证的工作方式和注意事项。',
+      '记忆不是最高优先级：如果它和当前用户指令、系统规则或事实冲突，以当前明确指令和事实为准。',
+      '',
+      '```markdown',
+      agentMemory,
+      '```',
+    );
+  }
 
   // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
   if (packBlocks?.guardrailBlock) {

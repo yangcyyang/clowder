@@ -68,6 +68,8 @@ import {
   PiAgentService,
 } from './domains/cats/services/index.js';
 import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
+import { startAgentReminderScheduler } from './domains/cats/services/reminders/AgentReminderScheduler.js';
+import { AgentReminderStore } from './domains/cats/services/reminders/AgentReminderStore.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
@@ -101,6 +103,7 @@ import { PreviewGateway } from './domains/preview/preview-gateway.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
@@ -119,7 +122,6 @@ import {
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
-import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
@@ -129,6 +131,7 @@ import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
   agentHooksRoutes,
+  agentMemoryRoutes,
   auditRoutes,
   authorizationRoutes,
   backlogRoutes,
@@ -175,6 +178,7 @@ import {
   refluxRoutes,
   registerCallbackAuthDebugRoute,
   registerCallbackDocsRoutes,
+  remindersRoutes,
   resolutionRoutes,
   rulesRoutes,
   servicesRoutes,
@@ -1264,6 +1268,20 @@ async function main(): Promise<void> {
   });
   socketManager.setQueueProcessor(queueProcessor);
 
+  const reminderStore = new AgentReminderStore();
+  const stopReminderScheduler = startAgentReminderScheduler({
+    store: reminderStore,
+    messageStore,
+    threadStore,
+    invocationQueue,
+    queueProcessor,
+    socketManager,
+    log: app.log,
+  });
+  app.addHook('onClose', async () => {
+    stopReminderScheduler();
+  });
+
   // F101: Game engine store (created early so messages route can intercept /game commands)
   const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
   const f101GameStore = redis ? new RedisGameStore(redis) : undefined;
@@ -1350,6 +1368,8 @@ async function main(): Promise<void> {
     socketManager,
     threadStore,
   });
+  await app.register(agentMemoryRoutes);
+  await app.register(remindersRoutes, { reminderStore });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
     await app.register(guideActionRoutes, {

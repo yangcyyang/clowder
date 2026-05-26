@@ -130,3 +130,55 @@ Clowder 当前已经复刻了前三层中的一部分：
 ### 风险 3：规则膨胀
 
 `shared-rules.md` 原文只能按 Magic Words 或审计场景读取，不允许重新变成所有 Agent 常驻全文。
+
+## task #179：MEMORY 与提醒唤醒闭环
+
+### 跨会话记忆
+
+Clowder 现在对齐 Slock 的 `MEMORY.md` 思路：每个 Agent 有一份独立持久记忆，位置为：
+
+```text
+.cat-cafe/memory/{catId}.md
+```
+
+运行时会在 `route-serial` / `route-parallel` 里读取当前 `catId` 的 memory 文件，作为 `Agent Memory（跨会话记忆）` 注入 `buildStaticIdentity()`。这保证：
+
+- 页面刷新、API 重启后仍能读回。
+- 不依赖当前 thread 历史。
+- 每个 Agent 记忆隔离，避免 Codex/Kimi/Pi 互相污染。
+
+CLI/API：
+
+```bash
+clowder memory read --cat gpt52
+clowder memory write --cat gpt52 --text "# Codex Memory\n..."
+PATCH /api/cats/:catId/memory
+```
+
+### 提醒 / 唤醒
+
+Clowder 现在新增本地提醒存储：
+
+```text
+.cat-cafe/reminders.json
+```
+
+提醒到期后，API scheduler 会做两件事：
+
+1. 在目标 thread 写入一条 `Clowder Reminder` 系统提示消息。
+2. 把目标 Agent enqueue 到 invocation queue，并 `tryAutoExecute()` 自动唤醒。
+
+CLI/API：
+
+```bash
+clowder reminder schedule --target default --cat gpt52 --time 10m --msg "检查这件事"
+clowder reminder list --cat gpt52
+clowder reminder cancel --id <reminderId>
+POST /api/reminders
+```
+
+### 当前边界
+
+- 这是本地 runtime 级能力，不是多设备云端提醒。
+- reminder scheduler 随 API 进程运行；API 不运行时不会触发，到期后下次 tick 会补触发。
+- memory 写入目前是显式 API/CLI，不做模型自动总结写入，避免未审核记忆污染。

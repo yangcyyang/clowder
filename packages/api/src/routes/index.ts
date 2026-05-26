@@ -1,5 +1,6 @@
 export { accountsRoutes } from './accounts.js';
 export { agentHooksRoutes } from './agent-hooks.js';
+export { agentMemoryRoutes } from './agent-memory.js';
 export { auditRoutes } from './audit.js';
 export { authorizationRoutes } from './authorization.js';
 export { backlogRoutes } from './backlog.js';
@@ -49,6 +50,7 @@ export { queueRoutes } from './queue.js';
 export { quotaRoutes } from './quota.js';
 export { reflectRoutes } from './reflect.js';
 export { refluxRoutes } from './reflux-routes.js';
+export { remindersRoutes } from './reminders.js';
 export { resolutionRoutes } from './resolution-routes.js';
 export { rulesRoutes } from './rules.js';
 export { servicesRoutes } from './services.js';

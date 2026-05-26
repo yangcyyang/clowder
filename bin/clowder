@@ -21,6 +21,13 @@ function usage() {
   clowder message check
   clowder message search --query <query> [--limit <n>]
 
+  clowder memory read [--cat <catId>]
+  clowder memory write [--cat <catId>] [--text <markdown>]
+
+  clowder reminder schedule --target <threadId> --time <iso|10m|1h> --msg <message> [--cat <catId>]
+  clowder reminder list [--cat <catId>] [--status scheduled|fired|canceled]
+  clowder reminder cancel --id <reminderId>
+
 Environment:
   CLOWDER_API_URL          API base URL, default ${DEFAULT_API_URL}
   CAT_CAFE_API_URL         Invocation API base URL fallback
@@ -94,6 +101,21 @@ function shortId(id) {
 function oneLine(text, max = 120) {
   const flat = String(text || '').replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function parseFireAt(raw) {
+  const value = String(raw || '').trim();
+  if (!value) throw new Error('Missing --time');
+  const relative = value.match(/^(\d+)(s|m|h|d)$/i);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unit = relative[2].toLowerCase();
+    const unitMs = unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+    return Date.now() + amount * unitMs;
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid --time "${raw}". Use ISO time or relative form like 10m.`);
+  return parsed;
 }
 
 async function request(path, options = {}) {
@@ -238,6 +260,18 @@ function printMessages(messages) {
   }
 }
 
+function printReminders(reminders) {
+  if (reminders.length === 0) {
+    console.log('No reminders.');
+    return;
+  }
+  for (const item of reminders) {
+    console.log(
+      `${shortId(item.id)} [${item.status}] @${item.catId} ${new Date(item.fireAt).toISOString()} ${item.threadId}: ${oneLine(item.message, 120)}`,
+    );
+  }
+}
+
 async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   const [domain, action] = positional;
@@ -323,6 +357,55 @@ async function main() {
       const limit = Number(flags.limit || 20);
       const data = await request(`/api/messages/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(limit)}`);
       printMessages(Array.isArray(data?.messages) ? data.messages : []);
+      return;
+    }
+  }
+
+  if (domain === 'memory') {
+    const catId = String(flags.cat || flags['cat-id'] || actorCatId());
+    if (action === 'read') {
+      const record = await request(`/api/cats/${encodeURIComponent(catId)}/memory`);
+      console.log(record.content || `No memory for ${catId}.`);
+      return;
+    }
+    if (action === 'write') {
+      const content = flags.text ? String(flags.text) : await readStdin();
+      const record = await request(`/api/cats/${encodeURIComponent(catId)}/memory`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content }),
+      });
+      console.log(`Wrote memory for ${record.catId}: ${record.path}`);
+      return;
+    }
+  }
+
+  if (domain === 'reminder') {
+    if (action === 'schedule') {
+      const catId = String(flags.cat || flags['cat-id'] || actorCatId());
+      const threadId = normalizeThreadId(flags.target || flags.channel || flags.thread);
+      const message = String(flags.msg || flags.message || flags.text || '');
+      if (!message.trim()) throw new Error('Missing --msg');
+      const reminder = await request('/api/reminders', {
+        method: 'POST',
+        body: JSON.stringify({ catId, threadId, message, fireAt: parseFireAt(flags.time || flags.at) }),
+      });
+      console.log(`Scheduled reminder ${shortId(reminder.id)} for @${reminder.catId} at ${new Date(reminder.fireAt).toISOString()}`);
+      return;
+    }
+    if (action === 'list') {
+      const params = new URLSearchParams();
+      if (flags.cat || flags['cat-id']) params.set('catId', String(flags.cat || flags['cat-id']));
+      if (flags.status) params.set('status', String(flags.status));
+      const qs = params.toString();
+      const data = await request(`/api/reminders${qs ? `?${qs}` : ''}`);
+      printReminders(Array.isArray(data?.reminders) ? data.reminders : []);
+      return;
+    }
+    if (action === 'cancel') {
+      const id = String(flags.id || '');
+      if (!id) throw new Error('Missing --id');
+      const reminder = await request(`/api/reminders/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+      console.log(`Canceled reminder ${shortId(reminder.id)} [${reminder.status}]`);
       return;
     }
   }

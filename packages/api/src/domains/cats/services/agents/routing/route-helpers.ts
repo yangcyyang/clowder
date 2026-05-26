@@ -119,7 +119,10 @@ export function getEffectiveRuntimeContextBudget(
     };
   }
   if (policy === 'standard') {
-    return capBudget(base, isFocusedSurface(surface) ? FOCUSED_SURFACE_CONTEXT_BUDGET_CAP : STANDARD_CONTEXT_BUDGET_CAP);
+    return capBudget(
+      base,
+      isFocusedSurface(surface) ? FOCUSED_SURFACE_CONTEXT_BUDGET_CAP : STANDARD_CONTEXT_BUDGET_CAP,
+    );
   }
   return base;
 }
@@ -143,6 +146,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasSopHint: boolean;
   hasGuideContext: boolean;
   hasMcpInstructions: boolean;
+  hasAgentMemory: boolean;
   governanceTier: 'core' | 'operational';
   governanceEstimatedTokens: number;
   hasGovernanceSourceContext: boolean;
@@ -151,6 +155,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   const loadedBlocks = ['current-message', 'static-identity'];
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
   if (input.hasGovernanceSourceContext) loadedBlocks.push('governance-source');
+  if (input.hasAgentMemory) loadedBlocks.push('agent-memory');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
   if (input.hasWorldContext) loadedBlocks.push('world-context');
@@ -272,7 +277,6 @@ export interface RouteOptions {
   /** F153 Phase E: Root route span — invocation spans become children of this. */
   routeSpan?: import('@opentelemetry/api').Span | undefined;
 }
-
 
 export async function persistSilentCompletionNotice(
   deps: RouteStrategyDeps,

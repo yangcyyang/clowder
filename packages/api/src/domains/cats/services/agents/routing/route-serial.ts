@@ -71,6 +71,7 @@ import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuit
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
@@ -407,10 +408,12 @@ export async function* routeSerial(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
+      const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
         packBlocks,
         toolPolicy: resolvedToolPolicy.toolPolicy,
+        agentMemoryContext,
       });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
@@ -587,7 +590,7 @@ export async function* routeSerial(
           },
         );
         deliveryBoundaryId = inc.boundaryId;
-        includedHistoryCount = inc.contextText ? history?.length ?? 0 : 0;
+        includedHistoryCount = inc.contextText ? (history?.length ?? 0) : 0;
         if (inc.degradation) {
           yield {
             type: 'system_info' as AgentMessageType,
@@ -701,6 +704,7 @@ export async function* routeSerial(
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
+        hasAgentMemory: Boolean(agentMemoryContext),
         governanceTier,
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
