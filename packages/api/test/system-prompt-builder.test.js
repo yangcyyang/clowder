@@ -1548,6 +1548,17 @@ describe('SystemPromptBuilder', () => {
     assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
   });
 
+  test('static identity includes Slock-like execution audit gates', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex');
+    assert.ok(prompt.includes('Slock-like 执行闭环审计'), 'prompt must include execution audit section');
+    assert.ok(prompt.includes('Intake Gate'), 'prompt must require claim/reuse before action');
+    assert.ok(prompt.includes('Evidence Gate'), 'prompt must require delivery evidence');
+    assert.ok(prompt.includes('Status Gate'), 'prompt must require in_review/BLOCKED status consistency');
+    assert.ok(prompt.includes('状态回复 ≠ 交付'), 'prompt must reject status-only delivery');
+    assert.ok(prompt.includes('没有证据'), 'prompt must reject evidence-free completion');
+  });
+
   // ─── F129 Pack Block Injection ──────────────────────────────────────
 
   test('F129: buildStaticIdentity injects all pack blocks', async () => {

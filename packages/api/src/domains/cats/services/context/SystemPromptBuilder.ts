@@ -378,6 +378,13 @@ const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
 - thread-reply：回复必须落在正确 target；多步骤进展、日志和证物沉到源 thread。
 - quality-gate：交付前跑最小有效验证并报告证物（测试/tsc/build/截图/API smoke/dry-run）。`;
 
+const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
+行动任务必须走三道门：
+1. Intake Gate：用户要求推进/修复/执行/构建/导出/备份/push/检查/排查/改造时，先 claim 或复用任务，再动手。
+2. Evidence Gate：交付前必须有证据，例如 commit hash、改动文件、测试命令、build 结果、截图、API smoke、导出文件路径之一；没有证据就不能说完成。
+3. Status Gate：有证据后把任务切到 in_review 等用户验收；做不了就明确 BLOCKED + 缺什么，不允许用“我会继续/正在处理/下一步”冒充交付。
+审计口径：状态回复 ≠ 交付；计划 ≠ 执行；没有证据的 done/in_review 都是不合格。`;
+
 // --- .local / .local-override support (#603) ---
 let _governanceDigestResolved: string = GOVERNANCE_OPERATIONAL_DIGEST;
 
@@ -667,6 +674,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   }
 
   lines.push(HARNESS_SKILLS_SECTION, '');
+  lines.push(EXECUTION_AUDIT_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)
   const packBlocks = options?.packBlocks;
