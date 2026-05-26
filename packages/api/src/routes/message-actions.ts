@@ -38,6 +38,30 @@ const editBodySchema = z.object({
 });
 
 export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOptions> = async (app, opts) => {
+  // GET /api/messages/:id — fetch one message for CLI/task workflows.
+  app.get<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
+    const { id } = request.params;
+    const msg = await opts.messageStore.getById(id);
+    if (!msg) {
+      reply.status(404);
+      return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
+    }
+
+    return {
+      id: msg.id,
+      threadId: msg.threadId,
+      userId: msg.userId,
+      catId: msg.catId,
+      content: msg.content,
+      mentions: msg.mentions,
+      timestamp: msg.timestamp,
+      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+      ...(msg.origin ? { origin: msg.origin } : {}),
+      ...(msg.editedAt ? { editedAt: msg.editedAt } : {}),
+      ...(msg.deletedAt ? { deletedAt: msg.deletedAt } : {}),
+    };
+  });
+
   // DELETE /api/messages/:id — soft or hard delete a single message
   app.delete<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
     const parseResult = deleteBodySchema.safeParse(request.body);

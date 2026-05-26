@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "三只 AI 猫猫的协作空间",
+  "bin": {
+    "clowder": "./bin/clowder"
+  },
   "scripts": {
     "init": "./scripts/init-cafe.sh",
     "gate": "bash ./scripts/pre-merge-check.sh",

@@ -1,0 +1,329 @@
+#!/usr/bin/env node
+/**
+ * Minimal Clowder CLI for agent work discipline.
+ *
+ * Scope: task + message core commands, intentionally aligned with the
+ * frequently used subset of the Slock CLI.
+ */
+
+const DEFAULT_API_URL = 'http://127.0.0.1:3004';
+
+function usage() {
+  console.log(`Usage:
+  clowder task list --channel <threadId>
+  clowder task create --channel <threadId> --title <title> [--why <why>]
+  clowder task claim --task <taskId|n> [--channel <threadId>]
+  clowder task claim --message-id <messageId>
+  clowder task update --task <taskId|n> --status <status> [--channel <threadId>]
+
+  clowder message send --target <threadId> [--text <content>]
+  clowder message read --channel <threadId> [--limit <n>]
+  clowder message check
+  clowder message search --query <query> [--limit <n>]
+
+Environment:
+  CLOWDER_API_URL          API base URL, default ${DEFAULT_API_URL}
+  CAT_CAFE_API_URL         Invocation API base URL fallback
+  CAT_CAFE_THREAD_ID       Current thread fallback
+  CAT_CAFE_CAT_ID          Current agent/cat fallback
+  CAT_CAFE_INVOCATION_ID   Callback auth for agent message send
+  CAT_CAFE_CALLBACK_TOKEN  Callback auth for agent message send
+  CAT_CAFE_AGENT_KEY_SECRET Agent-key auth for agent message send
+`);
+}
+
+function parseArgs(argv) {
+  const positional = [];
+  const flags = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) {
+      positional.push(arg);
+      continue;
+    }
+    const eq = arg.indexOf('=');
+    if (eq > 2) {
+      flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+      continue;
+    }
+    const key = arg.slice(2);
+    const next = argv[i + 1];
+    if (next && !next.startsWith('--')) {
+      flags[key] = next;
+      i++;
+    } else {
+      flags[key] = true;
+    }
+  }
+  return { positional, flags };
+}
+
+function apiBase() {
+  return (process.env.CLOWDER_API_URL || process.env.CAT_CAFE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+}
+
+function actorCatId() {
+  return process.env.CLOWDER_CAT_ID || process.env.CAT_CAFE_CAT_ID || 'gpt52';
+}
+
+function normalizeThreadId(value) {
+  const raw = value || process.env.CAT_CAFE_THREAD_ID || 'default';
+  return String(raw).replace(/^#/, '');
+}
+
+function normalizeStatus(raw) {
+  const value = String(raw || '').trim().toLowerCase().replace(/-/g, '_');
+  if (value === 'todo') return 'todo';
+  if (value === 'doing' || value === 'in_progress' || value === 'progress') return 'doing';
+  if (value === 'blocked' || value === 'in_review' || value === 'review') return 'blocked';
+  if (value === 'done' || value === 'completed' || value === 'complete') return 'done';
+  throw new Error(`Unsupported status "${raw}". Use todo/doing/blocked/done or aliases in_progress/in_review.`);
+}
+
+function shortId(id) {
+  return String(id).slice(0, 8);
+}
+
+function oneLine(text, max = 120) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+async function request(path, options = {}) {
+  const res = await fetch(`${apiBase()}${path}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { 'content-type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+  if (!res.ok) {
+    const detail = typeof body === 'string' ? body : JSON.stringify(body);
+    throw new Error(`HTTP ${res.status} ${res.statusText}: ${detail}`);
+  }
+  return body;
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function listTasks(threadId) {
+  const data = await request(`/api/tasks?threadId=${encodeURIComponent(threadId)}`);
+  return Array.isArray(data?.tasks) ? data.tasks : [];
+}
+
+async function resolveTaskId(ref, threadId) {
+  if (!ref) throw new Error('Missing --task');
+  const value = String(ref);
+  if (threadId) {
+    const tasks = await listTasks(threadId);
+    if (/^\d+$/.test(value)) {
+      const idx = Number(value) - 1;
+      if (!tasks[idx]) throw new Error(`Task #${value} not found in ${threadId}`);
+      return tasks[idx].id;
+    }
+    const hit = tasks.find((task) => task.id === value || task.id.startsWith(value));
+    if (hit) return hit.id;
+  }
+  return value;
+}
+
+async function getMessageById(id) {
+  return request(`/api/messages/${encodeURIComponent(id)}`);
+}
+
+async function claimTaskById(taskId, threadId) {
+  const resolvedTaskId = await resolveTaskId(taskId, threadId);
+  return request(`/api/tasks/${encodeURIComponent(resolvedTaskId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ownerCatId: actorCatId(), status: 'doing' }),
+  });
+}
+
+async function claimTaskByMessageId(messageId) {
+  const msg = await getMessageById(messageId);
+  const threadId = msg.threadId;
+  const tasks = await listTasks(threadId);
+  let task = tasks.find((item) => item.sourceMessageId === msg.id || item.sourceMessageId === messageId);
+  if (!task) {
+    task = await request('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        threadId,
+        title: oneLine(msg.content || `Follow up ${shortId(msg.id)}`, 180),
+        why: `Created from message ${msg.id}`,
+        createdBy: actorCatId(),
+        ownerCatId: actorCatId(),
+        sourceMessageId: msg.id,
+      }),
+    });
+  }
+  return request(`/api/tasks/${encodeURIComponent(task.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ownerCatId: actorCatId(), status: 'doing' }),
+  });
+}
+
+async function sendAgentMessage(threadId, content) {
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error('Message content is empty');
+
+  const agentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
+  if (agentKeySecret) {
+    return request('/api/callbacks/post-message', {
+      method: 'POST',
+      headers: { 'x-agent-key-secret': agentKeySecret },
+      body: JSON.stringify({ threadId, content: trimmed }),
+    });
+  }
+
+  const invocationId = process.env.CAT_CAFE_INVOCATION_ID;
+  const callbackToken = process.env.CAT_CAFE_CALLBACK_TOKEN;
+  if (invocationId && callbackToken) {
+    return request('/api/callbacks/post-message', {
+      method: 'POST',
+      body: JSON.stringify({ invocationId, callbackToken, threadId, content: trimmed }),
+    });
+  }
+
+  if (process.env.CLOWDER_ALLOW_USER_MESSAGE_SEND === '1') {
+    return request('/api/messages', {
+      method: 'POST',
+      body: JSON.stringify({ threadId, content: trimmed, userId: process.env.CAT_CAFE_USER_ID || 'default-user' }),
+    });
+  }
+
+  throw new Error(
+    'message send requires callback env (CAT_CAFE_INVOCATION_ID + CAT_CAFE_CALLBACK_TOKEN) or CAT_CAFE_AGENT_KEY_SECRET. Set CLOWDER_ALLOW_USER_MESSAGE_SEND=1 only for manual user-message testing.',
+  );
+}
+
+function printTasks(tasks) {
+  if (tasks.length === 0) {
+    console.log('No tasks.');
+    return;
+  }
+  for (const [idx, task] of tasks.entries()) {
+    const owner = task.ownerCatId ? ` owner=${task.ownerCatId}` : '';
+    console.log(`#${idx + 1} ${shortId(task.id)} [${task.status}]${owner} ${task.title}`);
+  }
+}
+
+function printMessages(messages) {
+  if (messages.length === 0) {
+    console.log('No messages.');
+    return;
+  }
+  for (const msg of messages) {
+    const time = msg.timestamp ? new Date(msg.timestamp).toISOString() : '';
+    const sender = msg.catId ? `@${msg.catId}` : msg.type || 'user';
+    console.log(`${shortId(msg.id)} ${time} ${sender}: ${oneLine(msg.content, 180)}`);
+  }
+}
+
+async function main() {
+  const { positional, flags } = parseArgs(process.argv.slice(2));
+  const [domain, action] = positional;
+  if (!domain || flags.help || domain === 'help') {
+    usage();
+    return;
+  }
+
+  if (domain === 'task') {
+    if (action === 'list') {
+      const threadId = normalizeThreadId(flags.channel || flags.thread);
+      printTasks(await listTasks(threadId));
+      return;
+    }
+    if (action === 'create') {
+      const threadId = normalizeThreadId(flags.channel || flags.thread);
+      if (!flags.title) throw new Error('Missing --title');
+      const task = await request('/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId,
+          title: String(flags.title),
+          why: String(flags.why || ''),
+          createdBy: actorCatId(),
+          ownerCatId: flags.claim ? actorCatId() : undefined,
+        }),
+      });
+      console.log(`Created task ${shortId(task.id)} [${task.status}] ${task.title}`);
+      return;
+    }
+    if (action === 'claim') {
+      const task = flags['message-id']
+        ? await claimTaskByMessageId(String(flags['message-id']))
+        : await claimTaskById(String(flags.task || ''), flags.channel || flags.thread ? normalizeThreadId(flags.channel || flags.thread) : undefined);
+      console.log(`Claimed task ${shortId(task.id)} [${task.status}] owner=${task.ownerCatId} ${task.title}`);
+      return;
+    }
+    if (action === 'update' || action === 'done') {
+      const status = action === 'done' ? 'done' : normalizeStatus(flags.status);
+      const threadId = flags.channel || flags.thread ? normalizeThreadId(flags.channel || flags.thread) : undefined;
+      const taskId = await resolveTaskId(String(flags.task || ''), threadId);
+      const task = await request(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      console.log(`Updated task ${shortId(task.id)} [${task.status}] ${task.title}`);
+      return;
+    }
+  }
+
+  if (domain === 'message') {
+    if (action === 'send') {
+      const threadId = normalizeThreadId(flags.target || flags.channel || flags.thread);
+      const content = flags.text ? String(flags.text) : await readStdin();
+      const result = await sendAgentMessage(threadId, content);
+      const id = result?.messageId || result?.id || result?.storedMessage?.id || result?.status || 'sent';
+      console.log(`Message sent to ${threadId}: ${id}`);
+      return;
+    }
+    if (action === 'read') {
+      const threadId = normalizeThreadId(flags.channel || flags.thread);
+      const limit = Number(flags.limit || 20);
+      const data = await request(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=${encodeURIComponent(limit)}`);
+      printMessages(Array.isArray(data?.messages) ? data.messages : []);
+      return;
+    }
+    if (action === 'check') {
+      const data = await request('/api/threads');
+      const threads = Array.isArray(data?.threads) ? data.threads : [];
+      const unread = threads.filter((thread) => Number(thread.unreadCount || 0) > 0 || thread.hasUserMention);
+      if (unread.length === 0) {
+        console.log('No unread threads.');
+        return;
+      }
+      for (const thread of unread) {
+        console.log(`${thread.id} unread=${thread.unreadCount || 0}${thread.hasUserMention ? ' mention' : ''} ${thread.title || ''}`);
+      }
+      return;
+    }
+    if (action === 'search') {
+      const query = String(flags.query || flags.q || '');
+      if (!query) throw new Error('Missing --query');
+      const limit = Number(flags.limit || 20);
+      const data = await request(`/api/messages/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(limit)}`);
+      printMessages(Array.isArray(data?.messages) ? data.messages : []);
+      return;
+    }
+  }
+
+  throw new Error(`Unknown command: ${[domain, action].filter(Boolean).join(' ')}`);
+}
+
+main().catch((err) => {
+  console.error(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+  process.exitCode = 1;
+});

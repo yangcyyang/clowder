@@ -197,6 +197,31 @@ describe('Read path filtering (skip soft-deleted)', () => {
 
 // --- Integration: API endpoints ---
 
+describe('GET /api/messages/:id', () => {
+  it('returns a single message for CLI workflows', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const msgs = seedMessages(messageStore);
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages/${msgs[1].id}`,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.id, msgs[1].id);
+    assert.equal(body.threadId, 'thread-sd');
+    assert.equal(body.content, 'message 1');
+
+    await app.close();
+  });
+});
+
 describe('DELETE /api/messages/:id (soft delete)', () => {
   it('soft deletes a message and returns 200', async () => {
     const messageStore = new MessageStore();
