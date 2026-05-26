@@ -308,7 +308,7 @@ export async function* routeParallel(
 
       let prompt: string;
       let includedHistoryCount = 0;
-      if (incrementalMode && loadStandardContext) {
+      if (incrementalMode) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parIncSystemTokens = estimateTokens(

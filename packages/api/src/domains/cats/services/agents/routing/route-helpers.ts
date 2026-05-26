@@ -15,7 +15,7 @@ import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import { isDelivered, type IMessageStore, type StoredMessage, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
@@ -358,6 +358,129 @@ export interface IncrementalContextResult {
   };
   /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
   navigationHeader?: string;
+  /** Slock-like Agent Inbox snapshot for latest user intent in the current surface. */
+  intentSnapshot?: AgentIntentSnapshot;
+}
+
+export type AgentIntentType = 'discussion' | 'action' | 'correction' | 'approval' | 'stage-input';
+
+export interface AgentIntentSnapshotMessage {
+  id: string;
+  type: AgentIntentType;
+  content: string;
+}
+
+export interface AgentIntentSnapshot {
+  surface: 'thread';
+  messageCount: number;
+  intentType: AgentIntentType;
+  latestInstruction: string;
+  latestMessageId?: string;
+  supersededMessageIds: string[];
+  requiresTask: boolean;
+  requiresUserConfirmation: boolean;
+  stage?: 'requirement' | 'outline' | 'plan' | 'draft' | 'export' | 'unknown';
+  toolPolicyHint: ToolPolicy;
+  recentMessages: AgentIntentSnapshotMessage[];
+}
+
+const ACTION_INTENT_RE = /(修复|推进|执行|构建|导出|检查|排查|改造|写入|备份|push|提交|实现|处理|你来做|帮我做|开始做|继续做)/i;
+const CORRECTION_INTENT_RE =
+  /(先别|别急|等等|暂停|停止|不要做|先不做|不是这个|换方向|先讨论|先确认|先看方案|先给.*方案|确认后再执行)/i;
+const APPROVAL_INTENT_RE = /^(ok|OK|确认|可以|同意|按这个|开始吧|开始做吧|继续|推进吧|执行吧)[。！!\s]*$/i;
+const STAGE_INPUT_RE = /(补充|资料|材料|需求|大纲|策划稿|布局|排版|设计稿|初稿|调整|修改|改成|换成)/i;
+
+function classifyIntent(content: string): AgentIntentType {
+  const normalized = content.trim();
+  if (!normalized) return 'discussion';
+  if (CORRECTION_INTENT_RE.test(normalized)) return 'correction';
+  if (APPROVAL_INTENT_RE.test(normalized)) return 'approval';
+  if (ACTION_INTENT_RE.test(normalized)) return 'action';
+  if (STAGE_INPUT_RE.test(normalized)) return 'stage-input';
+  return 'discussion';
+}
+
+function inferIntentStage(content: string): AgentIntentSnapshot['stage'] {
+  if (/(需求|诉求|追问|调研|确认需求)/.test(content)) return 'requirement';
+  if (/(大纲|目录|章节)/.test(content)) return 'outline';
+  if (/(策划稿|页面策划|封面|目录页|内容页)/.test(content)) return 'plan';
+  if (/(初稿|设计稿|布局|排版|卡片|HTML|SVG)/i.test(content)) return 'draft';
+  if (/(导出|PPTX|下载|产物)/i.test(content)) return 'export';
+  return 'unknown';
+}
+
+function inferToolPolicyHint(intentType: AgentIntentType, content: string): ToolPolicy {
+  if (/(PPT|设计|调研|资料|Design|Figma|HTML|SVG)/i.test(content)) return 'full';
+  if (intentType === 'action') return 'standard';
+  return 'minimal';
+}
+
+function truncateIntentLine(content: string, limit = 180): string {
+  const normalized = sanitizeInjectedContent(content).replace(/\s+/g, ' ').trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 1)}…`;
+}
+
+export function buildAgentIntentSnapshot(
+  messages: readonly StoredMessage[],
+  currentUserMessageId?: string,
+): AgentIntentSnapshot | undefined {
+  const userMessages = messages.filter(
+    (m) => m.catId === null && m.userId !== 'system' && !m.deletedAt && isDelivered(m),
+  );
+  if (userMessages.length === 0) return undefined;
+
+  const recentSource = userMessages.slice(-20);
+  const recentMessages = recentSource.map((m) => ({
+    id: m.id,
+    type: classifyIntent(m.content),
+    content: truncateIntentLine(m.content),
+  }));
+  const latest = recentMessages[recentMessages.length - 1]!;
+  const current = currentUserMessageId ? recentMessages.find((m) => m.id === currentUserMessageId) : undefined;
+  const selected = latest ?? current;
+  const combinedContent = recentMessages.map((m) => m.content).join('\n');
+  const intentType = selected.type;
+
+  return {
+    surface: 'thread',
+    messageCount: userMessages.length,
+    intentType,
+    latestInstruction: selected.content,
+    latestMessageId: selected.id,
+    supersededMessageIds:
+      intentType === 'correction' ? recentMessages.slice(0, -1).map((m) => m.id).slice(-5) : [],
+    requiresTask: intentType === 'action',
+    requiresUserConfirmation: intentType === 'stage-input',
+    stage: inferIntentStage(combinedContent),
+    toolPolicyHint: inferToolPolicyHint(intentType, combinedContent),
+    recentMessages,
+  };
+}
+
+export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefined): string {
+  if (!snapshot) return '';
+  const recentLines = snapshot.recentMessages
+    .slice(-5)
+    .map((m) => `- id=${m.id} ${m.type}: ${m.content}`)
+    .join('\n');
+  const superseded =
+    snapshot.supersededMessageIds.length > 0 ? snapshot.supersededMessageIds.join(', ') : 'none';
+  return [
+    '[Agent Inbox Snapshot]',
+    'Scope: current thread only. Treat this as the latest user intent before acting.',
+    `intentType: ${snapshot.intentType}`,
+    `latestInstruction: ${snapshot.latestInstruction}`,
+    `requiresTask: ${snapshot.requiresTask ? 'yes' : 'no'}`,
+    `requiresUserConfirmation: ${snapshot.requiresUserConfirmation ? 'yes' : 'no'}`,
+    `stage: ${snapshot.stage ?? 'unknown'}`,
+    `toolPolicyHint: ${snapshot.toolPolicyHint}`,
+    `supersededMessageIds: ${superseded}`,
+    'Rule: later correction/approval messages override earlier instructions in this same thread.',
+    'Recent user messages:',
+    recentLines,
+    '[/Agent Inbox Snapshot]',
+  ].join('\n');
 }
 
 /**
@@ -839,6 +962,8 @@ export async function assembleIncrementalContext(
     if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
     return true;
   });
+  const intentSnapshot = buildAgentIntentSnapshot(relevant, currentUserMessageId);
+  const intentSnapshotText = formatAgentIntentSnapshot(intentSnapshot);
 
   // F35 fix: detect when the current message was present but filtered out by visibility
   // (e.g. whisper not intended for this cat). Must NOT fallback-inject in that case.
@@ -949,6 +1074,8 @@ export async function assembleIncrementalContext(
       cursor,
       options,
       navigationHeader,
+      intentSnapshot,
+      intentSnapshotText,
       baton,
       activeTasks,
       recentArtifacts,
@@ -963,21 +1090,29 @@ export async function assembleIncrementalContext(
   // and stale cursor scenarios where large unseen batches accumulate.
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const wasCapped = relevant.length > budget.maxMessages;
-  const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
+  const capped = budget.maxMessages <= 0 ? [] : wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
 
   // Metadata must be based on the FINAL capped set, not pre-cap `relevant`
   const includesCurrentUserMessage = Boolean(currentUserMessageId && capped.some((m) => m.id === currentUserMessageId));
 
   if (capped.length === 0) {
+    const contextText = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
     return cursor
       ? {
-          contextText: navigationHeader,
+          contextText,
           boundaryId: cursor,
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
+          intentSnapshot,
         }
-      : { contextText: navigationHeader, includesCurrentUserMessage, currentMessageFilteredOut, navigationHeader };
+      : {
+          contextText,
+          includesCurrentUserMessage,
+          currentMessageFilteredOut,
+          navigationHeader,
+          intentSnapshot,
+        };
   }
 
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -1001,12 +1136,13 @@ export async function assembleIncrementalContext(
     const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
     const zeroBoundaryId = capped[capped.length - 1]?.id;
     return {
-      contextText: navigationHeader,
+      contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId: zeroBoundaryId,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: zeroBudgetDegradation,
       navigationHeader,
+      intentSnapshot,
     };
   }
 
@@ -1041,19 +1177,22 @@ export async function assembleIncrementalContext(
     : includesCurrentUserMessage;
 
   if (finalCapped.length === 0) {
+    const contextText = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
     return cursor
       ? {
-          contextText: navigationHeader,
+          contextText,
           boundaryId: cursor,
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
+          intentSnapshot,
         }
       : {
-          contextText: navigationHeader,
+          contextText,
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
+          intentSnapshot,
         };
   }
 
@@ -1067,13 +1206,15 @@ export async function assembleIncrementalContext(
   }
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;
+  const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
   return {
-    contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    contextText: `${contextHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
     navigationHeader,
+    intentSnapshot,
   };
 }
 
@@ -1092,6 +1233,8 @@ async function assembleSmartWindowContext(
   _cursor: string | undefined,
   options: IncrementalContextOptions | undefined,
   navigationHeader: string,
+  intentSnapshot: AgentIntentSnapshot | undefined,
+  intentSnapshotText: string,
   baton: import('./navigation-context.js').BatonContext | null,
   activeTasks: import('./navigation-context.js').TaskSummary[],
   recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
@@ -1259,11 +1402,12 @@ async function assembleSmartWindowContext(
 
   if (effectiveTokenBudget <= 0) {
     return {
-      contextText: '',
+      contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
+      intentSnapshot,
     };
   }
 
@@ -1331,11 +1475,12 @@ async function assembleSmartWindowContext(
     // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
     if (totalTokens() > effectiveTokenBudget) {
       return {
-        contextText: '',
+        contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
         boundaryId,
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
         degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+        intentSnapshot,
       };
     }
 
@@ -1357,19 +1502,21 @@ async function assembleSmartWindowContext(
     currentUserMessageId && finalBurstMsgs.some((m) => m.id === currentUserMessageId),
   );
 
+  const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
   const contextText =
     sections.length > 0
-      ? `${navigationHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
-      : '';
+      ? `${contextHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      : contextHeader;
 
   // Final hard cap: envelope overhead may push total over budget
   if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
     return {
-      contextText: '',
+      contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+      intentSnapshot,
     };
   }
 
@@ -1392,5 +1539,6 @@ async function assembleSmartWindowContext(
       ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
     navigationHeader,
+    intentSnapshot,
   };
 }

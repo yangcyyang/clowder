@@ -10,6 +10,56 @@ const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stor
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
+  test('injects Agent Inbox Snapshot with latest correction intent', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    messageStore.append(mockMsg({ content: '开始做这个 PPT Agent 改造' }));
+    messageStore.append(mockMsg({ content: '等等，先别做，我们先讨论方案' }));
+    const latest = messageStore.append(mockMsg({ content: '先给方案，我确认后再执行' }));
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 2000,
+        maxMessages: 10,
+        maxContentLengthPerMsg: 1000,
+      },
+    });
+
+    assert.ok(result.contextText.includes('[Agent Inbox Snapshot]'));
+    assert.ok(result.contextText.includes('intentType: correction'));
+    assert.ok(result.contextText.includes('latestInstruction: 先给方案，我确认后再执行'));
+    assert.ok(result.contextText.includes('requiresTask: no'));
+    assert.ok(result.contextText.includes('supersededMessageIds:'));
+    assert.equal(result.intentSnapshot?.intentType, 'correction');
+    assert.equal(result.intentSnapshot?.latestMessageId, latest.id);
+    assert.ok(result.intentSnapshot?.supersededMessageIds.length);
+  });
+
+  test('keeps Agent Inbox Snapshot when effective context budget is zero', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const latest = messageStore.append(mockMsg({ content: '帮我检查一下这个 thread 为什么不回复' }));
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 0,
+        maxMessages: 0,
+        maxContentLengthPerMsg: 1000,
+      },
+      effectiveMaxContextTokens: 0,
+    });
+
+    assert.ok(result.contextText.includes('[Agent Inbox Snapshot]'));
+    assert.ok(result.contextText.includes('intentType: action'));
+    assert.ok(result.contextText.includes('requiresTask: yes'));
+    assert.ok(!result.contextText.includes('[对话历史增量'), 'Zero budget should not include history block');
+    assert.equal(result.includesCurrentUserMessage, false);
+  });
+
   test('runtime context budget snapshot exposes governance tier diagnostics', async () => {
     const budget = getCatContextBudget('opus');
     const snapshot = buildRuntimeContextBudgetSnapshot({

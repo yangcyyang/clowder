@@ -557,7 +557,7 @@ export async function* routeSerial(
 
       let deliveryBoundaryId: string | undefined;
       let includedHistoryCount = 0;
-      if (incrementalMode && loadStandardContext) {
+      if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
 
