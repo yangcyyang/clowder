@@ -108,6 +108,7 @@ export class TaskStore implements ITaskStore {
       userId: input.userId,
       sourceMessageId: input.sourceMessageId,
       sourceSummaryId: input.sourceSummaryId,
+      taskThreadId: input.taskThreadId,
       evidence: input.evidence,
     };
 
@@ -207,6 +208,8 @@ export class TaskStore implements ITaskStore {
       ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
+      ...(input.sourceMessageId !== undefined ? { sourceMessageId: input.sourceMessageId } : {}),
+      ...(input.taskThreadId !== undefined ? { taskThreadId: input.taskThreadId } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
       ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
       updatedAt: Date.now(),

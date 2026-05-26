@@ -78,6 +78,7 @@ export class RedisTaskStore implements ITaskStore {
       userId: input.userId,
       sourceMessageId: input.sourceMessageId,
       sourceSummaryId: input.sourceSummaryId,
+      taskThreadId: input.taskThreadId,
       evidence: input.evidence,
     };
 
@@ -136,6 +137,7 @@ export class RedisTaskStore implements ITaskStore {
         userId: input.userId,
         sourceMessageId: input.sourceMessageId,
         sourceSummaryId: input.sourceSummaryId,
+        taskThreadId: input.taskThreadId,
         evidence: input.evidence,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
@@ -192,6 +194,7 @@ export class RedisTaskStore implements ITaskStore {
         userId: input.userId,
         sourceMessageId: input.sourceMessageId,
         sourceSummaryId: input.sourceSummaryId,
+        taskThreadId: input.taskThreadId,
         evidence: input.evidence,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
@@ -216,6 +219,7 @@ export class RedisTaskStore implements ITaskStore {
       automationState: input.automationState ?? existing.automationState,
       sourceMessageId: input.sourceMessageId ?? existing.sourceMessageId,
       sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
+      taskThreadId: input.taskThreadId ?? existing.taskThreadId,
       evidence: input.evidence ?? existing.evidence,
       updatedAt: now,
     };
@@ -274,6 +278,8 @@ export class RedisTaskStore implements ITaskStore {
       ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
+      ...(input.sourceMessageId !== undefined ? { sourceMessageId: input.sourceMessageId } : {}),
+      ...(input.taskThreadId !== undefined ? { taskThreadId: input.taskThreadId } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
       ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
       updatedAt: Date.now(),
@@ -491,6 +497,7 @@ export class RedisTaskStore implements ITaskStore {
       userId: task.userId ?? '',
       sourceMessageId: task.sourceMessageId ?? '',
       sourceSummaryId: task.sourceSummaryId ?? '',
+      taskThreadId: task.taskThreadId ?? '',
     };
     if (task.automationState) {
       out.automationState = JSON.stringify(task.automationState);
@@ -517,6 +524,7 @@ export class RedisTaskStore implements ITaskStore {
       userId: data.userId || undefined,
       sourceMessageId: data.sourceMessageId || undefined,
       sourceSummaryId: data.sourceSummaryId || undefined,
+      taskThreadId: data.taskThreadId || undefined,
     };
     let task = base;
     if (data.automationState) {

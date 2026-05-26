@@ -389,46 +389,36 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   );
   const handleOpenTaskThread = useCallback(
     async (task: TaskItem) => {
-      if (!task.sourceMessageId) {
-        addToast({
-          type: 'info',
-          title: '任务未绑定源消息',
-          message: '这个任务还没有可打开的 Thread。请从消息转任务，或后续补齐 task thread 绑定。',
-          duration: 3600,
-        });
-        return;
-      }
-
-      const cachedMessage = messages.find((message) => message.id === task.sourceMessageId);
-      if (cachedMessage) {
-        await openInlineThreadFromMessage(cachedMessage);
-        return;
-      }
-
       try {
-        const res = await apiFetch(`/api/messages/${encodeURIComponent(task.sourceMessageId)}`);
+        const res = await apiFetch(`/api/tasks/${encodeURIComponent(task.id)}/thread`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: getUserId() }),
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as {
-          id: string;
           threadId?: string;
-          userId?: string | null;
-          catId?: string | null;
-          content: string;
-          mentions?: string[];
-          timestamp: number;
-          editedAt?: number;
-          origin?: unknown;
+          sourceMessage?: {
+            id: string;
+            threadId?: string;
+            catId?: string | null;
+            content: string;
+            timestamp: number;
+            editedAt?: number;
+            origin?: unknown;
+          };
         };
+        if (!data.threadId || !data.sourceMessage) throw new Error('Missing task thread payload');
         const sourceMessage: ChatMessageData = {
-          id: data.id,
-          threadId: data.threadId ?? task.threadId,
-          type: data.catId ? 'assistant' : data.origin ? 'connector' : 'user',
-          catId: data.catId ?? undefined,
-          content: data.content,
-          timestamp: data.timestamp,
-          ...(data.editedAt ? { editedAt: data.editedAt } : {}),
+          id: data.sourceMessage.id,
+          threadId: data.sourceMessage.threadId ?? data.threadId,
+          type: data.sourceMessage.catId ? 'assistant' : data.sourceMessage.origin ? 'connector' : 'user',
+          catId: data.sourceMessage.catId ?? undefined,
+          content: data.sourceMessage.content,
+          timestamp: data.sourceMessage.timestamp,
+          ...(data.sourceMessage.editedAt ? { editedAt: data.sourceMessage.editedAt } : {}),
         };
-        await openInlineThreadFromMessage(sourceMessage);
+        openInlineThread({ threadId: data.threadId, sourceMessage });
       } catch {
         addToast({
           type: 'error',
@@ -438,7 +428,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [addToast, messages, openInlineThreadFromMessage],
+    [addToast, openInlineThread],
   );
   useEffect(() => {
     clearInlineThreadCloseTimer();

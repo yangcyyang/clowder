@@ -86,6 +86,8 @@ export interface TaskItem {
   readonly sourceMessageId?: string;
   /** Source summary ID for traceability (4-A feature) */
   readonly sourceSummaryId?: string;
+  /** Dedicated discussion thread for this task, Slock-style task thread. */
+  readonly taskThreadId?: string;
   /** Human-visible delivery evidence for task acceptance. */
   readonly evidence?: TaskEvidence;
 }
@@ -98,6 +100,7 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   userId?: string;
   sourceMessageId?: string;
   sourceSummaryId?: string;
+  taskThreadId?: string;
   evidence?: TaskEvidence;
 };
 
@@ -107,6 +110,8 @@ export type UpdateTaskInput = {
   ownerCatId?: CatId | null;
   status?: TaskStatus;
   why?: string;
+  sourceMessageId?: string;
+  taskThreadId?: string;
   automationState?: AutomationState;
   evidence?: TaskEvidence;
 };
