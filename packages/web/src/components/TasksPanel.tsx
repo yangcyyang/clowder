@@ -150,6 +150,7 @@ interface TaskCardViewProps {
   onDraftChange: (taskId: string, key: keyof Omit<TaskEvidence, 'updatedAt'>, value: string) => void;
   onSaveEvidence: (taskId: string) => void;
   onCycleStatus: (task: TaskItem) => void;
+  onOpenThread?: (task: TaskItem) => void;
   saveError: string | null;
 }
 
@@ -162,6 +163,7 @@ function TaskCardView({
   onDraftChange,
   onSaveEvidence,
   onCycleStatus,
+  onOpenThread,
   saveError,
 }: TaskCardViewProps) {
   const evidence = task.evidence;
@@ -169,7 +171,19 @@ function TaskCardView({
   const meta = TASK_STATUS_META[task.status] ?? TASK_STATUS_META.todo;
 
   return (
-    <article className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5">
+    <article
+      className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5"
+      role={onOpenThread ? 'button' : undefined}
+      tabIndex={onOpenThread ? 0 : undefined}
+      title={onOpenThread ? '打开任务 Thread' : undefined}
+      onClick={() => onOpenThread?.(task)}
+      onKeyDown={(event) => {
+        if (!onOpenThread) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onOpenThread(task);
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{task.id.slice(0, 6)}</div>
@@ -181,7 +195,10 @@ function TaskCardView({
           type="button"
           className={`shrink-0 rounded-full border-2 px-2 py-0.5 text-[10px] font-black transition hover:brightness-95 ${meta.badge}`}
           title={`切换到 ${TASK_STATUS_LABELS[meta.next]}`}
-          onClick={() => onCycleStatus(task)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCycleStatus(task);
+          }}
         >
           ✎ {TASK_STATUS_LABELS[task.status]}
         </button>
@@ -216,14 +233,20 @@ function TaskCardView({
         <button
           type="button"
           className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-2.5 py-1 text-[11px] font-black text-[var(--task-ink)] shadow-[2px_2px_0_#111] transition hover:-translate-y-0.5"
-          onClick={() => onToggleEvidence(task)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleEvidence(task);
+          }}
         >
           证物 {evidenceCount}/5
         </button>
       </div>
 
       {expanded && (
-        <div className="mt-3 rounded-xl border-2 border-[var(--task-ink)] bg-[var(--task-control)] p-3">
+        <div
+          className="mt-3 rounded-xl border-2 border-[var(--task-ink)] bg-[var(--task-control)] p-3"
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-xs font-black text-[var(--task-ink)]">交付证物</div>
@@ -253,7 +276,10 @@ function TaskCardView({
               type="button"
               className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-3 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={saving}
-              onClick={() => onSaveEvidence(task.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSaveEvidence(task.id);
+              }}
             >
               {saving ? '保存中...' : '保存证物'}
             </button>
@@ -274,9 +300,10 @@ function EmptyColumn({ status }: { status: TaskStatus }) {
 
 interface TasksPanelProps {
   threadId: string;
+  onOpenTaskThread?: (task: TaskItem) => void;
 }
 
-export function TasksPanel({ threadId }: TasksPanelProps) {
+export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -396,6 +423,7 @@ export function TasksPanel({ threadId }: TasksPanelProps) {
     onDraftChange: updateEvidenceDraft,
     onSaveEvidence: (taskId: string) => void saveEvidence(taskId),
     onCycleStatus: (task: TaskItem) => void cycleTaskStatus(task),
+    onOpenThread: onOpenTaskThread,
   };
 
   return (

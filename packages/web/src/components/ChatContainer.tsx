@@ -28,7 +28,7 @@ import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
-import { useTaskStore } from '@/stores/taskStore';
+import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import {
@@ -343,13 +343,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   useEffect(() => {
     return () => clearInlineThreadCloseTimer();
   }, [clearInlineThreadCloseTimer]);
-  const handleOpenInlineThread = useCallback(
-    async (messageId: string) => {
-      const sourceMessage = messages.find((message) => message.id === messageId);
-      if (!sourceMessage) return;
-
+  const openInlineThreadFromMessage = useCallback(
+    async (sourceMessage: ChatMessageData) => {
       setStatusPanelOpen(false);
-      const existing = inlineThreadReplies[messageId] ?? sourceMessage.extra?.slockThread;
+      const existing = inlineThreadReplies[sourceMessage.id] ?? sourceMessage.extra?.slockThread;
       if (existing) {
         clearUnread(existing.branchThreadId);
         openInlineThread({ threadId: existing.branchThreadId, sourceMessage });
@@ -357,29 +354,91 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       }
 
       try {
-        const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/branch`, {
+        const sourceThreadId = sourceMessage.threadId ?? threadId;
+        const res = await apiFetch(`/api/threads/${encodeURIComponent(sourceThreadId)}/branch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fromMessageId: messageId, userId: getUserId() }),
+          body: JSON.stringify({ fromMessageId: sourceMessage.id, userId: getUserId() }),
         });
         if (!res.ok) {
-          openInlineThread({ threadId, sourceMessage });
+          openInlineThread({ threadId: sourceThreadId, sourceMessage });
           return;
         }
         const data = (await res.json()) as { threadId?: string };
-        const branchThreadId = data.threadId ?? threadId;
+        const branchThreadId = data.threadId ?? sourceThreadId;
         openInlineThread({ threadId: branchThreadId, sourceMessage });
-        handleInlineThreadReplyCountChange(messageId, branchThreadId, 0);
+        handleInlineThreadReplyCountChange(sourceMessage.id, branchThreadId, 0);
         const threadsRes = await apiFetch('/api/threads');
         if (threadsRes.ok) {
           const threadsData = (await threadsRes.json()) as { threads: Thread[] };
           setThreads(threadsData.threads);
         }
       } catch {
-        openInlineThread({ threadId, sourceMessage });
+        openInlineThread({ threadId: sourceMessage.threadId ?? threadId, sourceMessage });
       }
     },
-    [clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, messages, openInlineThread, setThreads, threadId],
+    [clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, openInlineThread, setThreads, threadId],
+  );
+  const handleOpenInlineThread = useCallback(
+    async (messageId: string) => {
+      const sourceMessage = messages.find((message) => message.id === messageId);
+      if (!sourceMessage) return;
+      await openInlineThreadFromMessage(sourceMessage);
+    },
+    [messages, openInlineThreadFromMessage],
+  );
+  const handleOpenTaskThread = useCallback(
+    async (task: TaskItem) => {
+      if (!task.sourceMessageId) {
+        addToast({
+          type: 'info',
+          title: '任务未绑定源消息',
+          message: '这个任务还没有可打开的 Thread。请从消息转任务，或后续补齐 task thread 绑定。',
+          duration: 3600,
+        });
+        return;
+      }
+
+      const cachedMessage = messages.find((message) => message.id === task.sourceMessageId);
+      if (cachedMessage) {
+        await openInlineThreadFromMessage(cachedMessage);
+        return;
+      }
+
+      try {
+        const res = await apiFetch(`/api/messages/${encodeURIComponent(task.sourceMessageId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          id: string;
+          threadId?: string;
+          userId?: string | null;
+          catId?: string | null;
+          content: string;
+          mentions?: string[];
+          timestamp: number;
+          editedAt?: number;
+          origin?: unknown;
+        };
+        const sourceMessage: ChatMessageData = {
+          id: data.id,
+          threadId: data.threadId ?? task.threadId,
+          type: data.catId ? 'assistant' : data.origin ? 'connector' : 'user',
+          catId: data.catId ?? undefined,
+          content: data.content,
+          timestamp: data.timestamp,
+          ...(data.editedAt ? { editedAt: data.editedAt } : {}),
+        };
+        await openInlineThreadFromMessage(sourceMessage);
+      } catch {
+        addToast({
+          type: 'error',
+          title: '打开任务 Thread 失败',
+          message: '未能读取任务关联消息，请刷新后重试。',
+          duration: 3600,
+        });
+      }
+    },
+    [addToast, messages, openInlineThreadFromMessage],
   );
   useEffect(() => {
     clearInlineThreadCloseTimer();
@@ -1347,7 +1406,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           </div>
         ) : activeTab === 'tasks' ? (
           <div className="flex-1 overflow-hidden">
-            <TasksPanel threadId={threadId} />
+            <TasksPanel threadId={threadId} onOpenTaskThread={handleOpenTaskThread} />
           </div>
         ) : (
           <div className="flex-1 overflow-hidden">
