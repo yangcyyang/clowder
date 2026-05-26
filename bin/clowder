@@ -77,7 +77,14 @@ function normalizeStatus(raw) {
   if (value === 'doing' || value === 'in_progress' || value === 'progress') return 'doing';
   if (value === 'blocked' || value === 'in_review' || value === 'review') return 'blocked';
   if (value === 'done' || value === 'completed' || value === 'complete') return 'done';
-  throw new Error(`Unsupported status "${raw}". Use todo/doing/blocked/done or aliases in_progress/in_review.`);
+  throw new Error(`Unsupported status "${raw}". Use todo/in_progress/in_review/done.`);
+}
+
+function displayStatus(status) {
+  const value = String(status || '').trim().toLowerCase();
+  if (value === 'doing') return 'in_progress';
+  if (value === 'blocked') return 'in_review';
+  return value || 'unknown';
 }
 
 function shortId(id) {
@@ -215,7 +222,7 @@ function printTasks(tasks) {
   }
   for (const [idx, task] of tasks.entries()) {
     const owner = task.ownerCatId ? ` owner=${task.ownerCatId}` : '';
-    console.log(`#${idx + 1} ${shortId(task.id)} [${task.status}]${owner} ${task.title}`);
+    console.log(`#${idx + 1} ${shortId(task.id)} [${displayStatus(task.status)}]${owner} ${task.title}`);
   }
 }
 
@@ -258,25 +265,25 @@ async function main() {
           ownerCatId: flags.claim ? actorCatId() : undefined,
         }),
       });
-      console.log(`Created task ${shortId(task.id)} [${task.status}] ${task.title}`);
+      console.log(`Created task ${shortId(task.id)} [${displayStatus(task.status)}] ${task.title}`);
       return;
     }
     if (action === 'claim') {
       const task = flags['message-id']
         ? await claimTaskByMessageId(String(flags['message-id']))
-        : await claimTaskById(String(flags.task || ''), flags.channel || flags.thread ? normalizeThreadId(flags.channel || flags.thread) : undefined);
-      console.log(`Claimed task ${shortId(task.id)} [${task.status}] owner=${task.ownerCatId} ${task.title}`);
+        : await claimTaskById(String(flags.task || ''), normalizeThreadId(flags.channel || flags.thread));
+      console.log(`Claimed task ${shortId(task.id)} [${displayStatus(task.status)}] owner=${task.ownerCatId} ${task.title}`);
       return;
     }
     if (action === 'update' || action === 'done') {
       const status = action === 'done' ? 'done' : normalizeStatus(flags.status);
-      const threadId = flags.channel || flags.thread ? normalizeThreadId(flags.channel || flags.thread) : undefined;
+      const threadId = normalizeThreadId(flags.channel || flags.thread);
       const taskId = await resolveTaskId(String(flags.task || ''), threadId);
       const task = await request(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      console.log(`Updated task ${shortId(task.id)} [${task.status}] ${task.title}`);
+      console.log(`Updated task ${shortId(task.id)} [${displayStatus(task.status)}] ${task.title}`);
       return;
     }
   }
