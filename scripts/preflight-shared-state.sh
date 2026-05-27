@@ -9,12 +9,13 @@
 #   - cat-template.json
 #
 # Exit codes:
-#   0 = clean
-#   1 = 有未 push 的共享状态 commit，必须先 push
+#   0 = clean or warning-only
+#   1 = 有未提交的共享状态修改，必须先 commit/restore
 
 set -euo pipefail
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+UNPUSHED_WAIT_SECONDS="${CAT_CAFE_PREFLIGHT_UNPUSHED_WAIT_SECONDS:-5}"
 cd "$PROJECT_DIR" || exit 0
 
 BRANCH=$(git branch --show-current 2>/dev/null)
@@ -49,6 +50,7 @@ STAGED_SHARED=$(git diff --cached --name-only 2>/dev/null | grep -E '^(docs/BACK
 
 HAS_PROBLEM=false
 HAS_RUNTIME_WARNING=false
+HAS_UNPUSHED_WARNING=false
 
 warn_runtime() {
   echo "⚠️ RUNTIME PREFLIGHT: $*" >&2
@@ -57,11 +59,12 @@ warn_runtime() {
 
 if [[ -n "$UNPUSHED_SHARED" ]]; then
   echo "" >&2
-  echo "🚨 PREFLIGHT: 有共享状态文件 commit 了但没 push！" >&2
+  echo "⚠️ PREFLIGHT: 有共享状态文件 commit 了但没 push。" >&2
   echo "未 push 的文件：" >&2
   echo "$UNPUSHED_SHARED" | sed 's/^/  - /' >&2
-  echo "请立刻 git push，否则其他猫的修改可能被覆盖。" >&2
-  HAS_PROBLEM=true
+  echo "建议尽快 git push，避免其他猫基于旧状态继续工作。" >&2
+  echo "本次按 warning-only 继续启动；未提交修改仍会硬阻断。" >&2
+  HAS_UNPUSHED_WARNING=true
 fi
 
 if [[ -n "$UNCOMMITTED_SHARED" || -n "$STAGED_SHARED" ]]; then
@@ -72,6 +75,13 @@ if [[ -n "$UNCOMMITTED_SHARED" || -n "$STAGED_SHARED" ]]; then
     echo "$ALL_DIRTY" | sed 's/^/  - /' >&2
     echo "请 commit + push 或 git restore 后再继续。" >&2
     HAS_PROBLEM=true
+  fi
+fi
+
+if $HAS_UNPUSHED_WARNING && ! $HAS_PROBLEM; then
+  if [[ "$UNPUSHED_WAIT_SECONDS" =~ ^[0-9]+$ && "$UNPUSHED_WAIT_SECONDS" -gt 0 ]]; then
+    echo "继续启动前等待 ${UNPUSHED_WAIT_SECONDS}s，给操作者取消/切换窗口的时间..." >&2
+    sleep "$UNPUSHED_WAIT_SECONDS"
   fi
 fi
 
