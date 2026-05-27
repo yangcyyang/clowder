@@ -185,6 +185,41 @@
   --chat-code-border: #5b506c;
 }
 
+[data-visual-theme="claude"] {
+  --console-shell-bg: #fbf7f0;
+  --console-panel-bg: #f3eadf;
+  --console-card-bg: #fffaf4;
+  --console-card-soft-bg: #f0e8dd;
+  --console-code-bg: #f0e8dd;
+  --console-pill-bg: #f3dfc7;
+  --console-border-soft: #e4d5c4;
+  --console-border-strong: #d2bda7;
+  --console-shadow: 0 12px 30px rgba(64, 42, 22, 0.06);
+  --console-shadow-soft: 0 8px 20px rgba(64, 42, 22, 0.04);
+  --console-field-bg: #fffaf4;
+  --console-active-bg: #f3dfc7;
+  --console-active-fg: #2d251c;
+  --console-active-muted: #6b5e50;
+  --console-hover-bg: #fff3e3;
+  --console-rail-bg: #2d251c;
+  --console-rail-item: rgba(255, 250, 244, 0.08);
+  --console-rail-active: #d97706;
+  --console-rail-fg: #f4eee7;
+  --console-input-stroke: #d97706;
+  --console-button-emphasis: #7c3f08;
+  --console-button-emphasis-hover: #9a4f08;
+  --console-modal-title: #7c3f08;
+  --console-modal-close-bg: #f0e8dd;
+  --console-modal-close-fg: #6b5e50;
+  --console-cat-fallback: #9b8d7c;
+  --console-status-connected: #15803d;
+  --chat-code-bg: #f0e8dd;
+  --chat-code-text: #2d251c;
+  --chat-code-btn-bg: #e4d5c4;
+  --chat-code-btn-text: #2d251c;
+  --chat-code-border: #d2bda7;
+}
+
 [data-visual-theme="slack"] {
   --console-shell-bg: #ffffff;
   --console-panel-bg: #ffffff;
@@ -365,6 +400,41 @@
   --chat-code-btn-bg: #fff9ec;
   --chat-code-btn-text: #000000;
   --chat-code-border: #000000;
+}
+
+[data-theme="dark"][data-visual-theme="claude"] {
+  --console-shell-bg: #171310;
+  --console-panel-bg: #171310;
+  --console-card-bg: #211a15;
+  --console-card-soft-bg: #171310;
+  --console-code-bg: #0f0c0a;
+  --console-pill-bg: rgba(245, 158, 11, 0.14);
+  --console-border-soft: #3b3027;
+  --console-border-strong: #5a4635;
+  --console-shadow: 0 18px 46px rgba(0, 0, 0, 0.32);
+  --console-shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.22);
+  --console-field-bg: #0f0c0a;
+  --console-active-bg: #3a2a18;
+  --console-active-fg: #f4eee7;
+  --console-active-muted: #c8b8a6;
+  --console-hover-bg: #211a15;
+  --console-rail-bg: #0f0c0a;
+  --console-rail-item: rgba(244, 238, 231, 0.08);
+  --console-rail-active: #f59e0b;
+  --console-rail-fg: #f4eee7;
+  --console-input-stroke: #f59e0b;
+  --console-button-emphasis: #f59e0b;
+  --console-button-emphasis-hover: #fbbf24;
+  --console-modal-title: #fbbf24;
+  --console-modal-close-bg: #211a15;
+  --console-modal-close-fg: #c8b8a6;
+  --console-cat-fallback: #8f7f6e;
+  --console-status-connected: #22c55e;
+  --chat-code-bg: #0f0c0a;
+  --chat-code-text: #f4eee7;
+  --chat-code-btn-bg: #211a15;
+  --chat-code-btn-text: #f4eee7;
+  --chat-code-border: #3b3027;
 }
 
 .console-shell {

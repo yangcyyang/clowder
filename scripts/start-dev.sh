@@ -1092,6 +1092,29 @@ build_packages() {
     fi
 }
 
+ensure_native_modules_compatible() {
+    echo ""
+    echo -e "${CYAN}检查 native modules...${NC}"
+
+    # Node 版本切换后，better-sqlite3 这类原生模块可能还能留在 node_modules，
+    # 但运行时 ABI 已经不兼容。这里在 API 启动前显式探测，避免服务静默崩溃。
+    if run_in_dir "$PROJECT_DIR/packages/api" node -e "require('better-sqlite3')" >/dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ better-sqlite3 native module 可加载${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}  ⚠ better-sqlite3 native module 不兼容，自动重新编译...${NC}"
+    run_logged_step "better-sqlite3 重编译" 8 pnpm rebuild better-sqlite3
+
+    if run_in_dir "$PROJECT_DIR/packages/api" node -e "require('better-sqlite3')" >/dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ better-sqlite3 重编译完成${NC}"
+        return 0
+    fi
+
+    echo -e "${RED}  ✗ better-sqlite3 重编译后仍无法加载，请检查 Node/pnpm 环境${NC}" >&2
+    exit 1
+}
+
 configure_mcp_server_path() {
     export CAT_CAFE_MCP_SERVER_PATH="${CAT_CAFE_MCP_SERVER_PATH:-$PROJECT_DIR/packages/mcp-server/dist/index.js}"
 
@@ -1276,6 +1299,10 @@ main() {
         echo ""
         echo -e "${YELLOW}跳过构建 (--quick 模式)${NC}"
     fi
+
+    # 3.5. 原生模块兼容性自检。即使 --quick 也必须执行，否则 Node ABI
+    #      变化时 API 可能启动即崩，表现为 Agent/主题/功能“没加载进来”。
+    ensure_native_modules_compatible
 
     # 4. 检查外部依赖
     echo ""

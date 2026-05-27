@@ -220,6 +220,56 @@
   --notice-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+[data-visual-theme="claude"] {
+  --cat-cream-white: #fbf7f0;
+  --cat-light-sand: #fffaf4;
+  --cat-border-tan: #e4d5c4;
+  --cat-deep-ink: #2d251c;
+  --cat-muted-stone: #6b5e50;
+  --cat-paw-pink: #d97706;
+
+  --cafe-surface: #fbf7f0;
+  --cafe-surface-elevated: #fffaf4;
+  --cafe-surface-sunken: #f0e8dd;
+  --cafe-text: #2d251c;
+  --cafe-text-secondary: #6b5e50;
+  --cafe-text-muted: #9b8d7c;
+  --cafe-border: #e4d5c4;
+  --cafe-border-subtle: #ede2d5;
+  --cafe-accent: #d97706;
+  --cafe-accent-hover: #b45309;
+  --cafe-accent-foreground: #fffaf4;
+  --cafe-interactive: #7c3f08;
+  --color-cafe-accent: var(--cafe-accent);
+
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+
+  --clowder-sidebar-bg: #fbf7f0;
+  --clowder-sidebar-border: #e4d5c4;
+  --clowder-sidebar-title: #2d251c;
+  --clowder-sidebar-row-text: #4b3f33;
+  --clowder-sidebar-row-active-text: #2d251c;
+  --clowder-sidebar-row-muted: #8a7a68;
+  --clowder-sidebar-active-bg: #f3dfc7;
+  --clowder-sidebar-active-border: #d97706;
+  --clowder-sidebar-hover-bg: #fff3e3;
+  --clowder-section-tracking: 0.08em;
+  --clowder-message-hover-ring: rgba(217, 119, 6, 0.2);
+  --clowder-input-bg: #fffaf4;
+  --clowder-action-surface: #fffaf4;
+  --clowder-running-bar-bg: #fbf7f0;
+  --clowder-markdown-chip-bg: rgba(217, 119, 6, 0.1);
+  --clowder-markdown-chip-border: rgba(217, 119, 6, 0.24);
+  --clowder-markdown-chip-text: #9a4f08;
+  --clowder-section-title-bg: rgba(217, 119, 6, 0.08);
+  --clowder-sender-user: var(--cafe-text);
+  --clowder-sender-agent: var(--cafe-text);
+  --clowder-muted-soft: #8a7a68;
+  --clowder-avatar-quiet-ring: #e4d5c4;
+}
+
 [data-visual-theme="slack"] {
   --cat-cream-white: #ffffff;
   --cat-light-sand: #f4ede4;
@@ -532,6 +582,55 @@
   --clowder-sender-agent: var(--cafe-text);
   --clowder-muted-soft: #8a8194;
   --clowder-avatar-quiet-ring: #2b3344;
+}
+
+[data-theme="dark"][data-visual-theme="claude"] {
+  --cat-cream-white: #171310;
+  --cat-light-sand: #211a15;
+  --cat-border-tan: #3b3027;
+  --cat-deep-ink: #f4eee7;
+  --cat-muted-stone: #c8b8a6;
+  --cat-paw-pink: #f59e0b;
+
+  --cafe-surface: #171310;
+  --cafe-surface-elevated: #211a15;
+  --cafe-surface-sunken: #0f0c0a;
+  --cafe-text: #f4eee7;
+  --cafe-text-secondary: #c8b8a6;
+  --cafe-text-muted: #8f7f6e;
+  --cafe-border: #3b3027;
+  --cafe-border-subtle: #2a211b;
+  --cafe-accent: #f59e0b;
+  --cafe-accent-hover: #fbbf24;
+  --cafe-accent-foreground: #171310;
+  --cafe-interactive: #f59e0b;
+  --color-cafe-accent: var(--cafe-accent);
+
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+
+  --clowder-sidebar-bg: #171310;
+  --clowder-sidebar-border: #3b3027;
+  --clowder-sidebar-title: #f4eee7;
+  --clowder-sidebar-row-text: #d8c7b5;
+  --clowder-sidebar-row-active-text: #f4eee7;
+  --clowder-sidebar-row-muted: #9d8c7b;
+  --clowder-sidebar-active-bg: #3a2a18;
+  --clowder-sidebar-active-border: #f59e0b;
+  --clowder-sidebar-hover-bg: #211a15;
+  --clowder-message-hover-ring: rgba(245, 158, 11, 0.26);
+  --clowder-input-bg: #0f0c0a;
+  --clowder-action-surface: #211a15;
+  --clowder-running-bar-bg: #171310;
+  --clowder-markdown-chip-bg: rgba(245, 158, 11, 0.14);
+  --clowder-markdown-chip-border: rgba(245, 158, 11, 0.3);
+  --clowder-markdown-chip-text: #fbbf24;
+  --clowder-section-title-bg: rgba(245, 158, 11, 0.1);
+  --clowder-sender-user: var(--cafe-text);
+  --clowder-sender-agent: var(--cafe-text);
+  --clowder-muted-soft: #9d8c7b;
+  --clowder-avatar-quiet-ring: #3b3027;
 }
 
 [data-theme="dark"][data-visual-theme="slack"] {
