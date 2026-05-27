@@ -191,6 +191,7 @@
       "variants": [
         {
           "id": "opus-default",
+          "catId": "opus",
           "clientId": "anthropic",
           "defaultModel": "claude-opus-4-6",
           "mcpSupport": true,
@@ -323,6 +324,7 @@
       "variants": [
         {
           "id": "codex-default",
+          "catId": "codex",
           "clientId": "openai",
           "defaultModel": "gpt-5.3-codex",
           "mcpSupport": true,
@@ -466,6 +468,7 @@
       "variants": [
         {
           "id": "gemini-default",
+          "catId": "gemini",
           "clientId": "google",
           "defaultModel": "gemini-3.1-pro-preview",
           "mcpSupport": true,
@@ -565,6 +568,7 @@
       "variants": [
         {
           "id": "dare-default",
+          "catId": "dare",
           "clientId": "dare",
           "defaultModel": "z-ai/glm-4.7",
           "mcpSupport": false,
@@ -606,6 +610,7 @@
       "variants": [
         {
           "id": "antigravity-gemini",
+          "catId": "antigravity",
           "variantLabel": "Gemini",
           "clientId": "antigravity",
           "defaultModel": "gemini-3.1-pro",
@@ -684,6 +689,7 @@
       "variants": [
         {
           "id": "opencode-default",
+          "catId": "opencode",
           "clientId": "opencode",
           "defaultModel": "opencode/minimax-m2.5-free",
           "mcpSupport": true,
@@ -731,6 +737,7 @@
       "variants": [
         {
           "id": "kimi-default",
+          "catId": "kimi",
           "clientId": "kimi",
           "defaultModel": "kimi-code/kimi-for-coding",
           "mcpSupport": true,
@@ -820,6 +827,7 @@
       "variants": [
         {
           "id": "pi-default",
+          "catId": "pi",
           "clientId": "pi",
           "defaultModel": "mimo/mimo-v2.5-pro",
           "mcpSupport": false,
