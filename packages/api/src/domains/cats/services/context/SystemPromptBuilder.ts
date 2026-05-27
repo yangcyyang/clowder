@@ -661,7 +661,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     '- 用户说“推进/修复/执行/帮我做/你来/排查/改造/构建/备份/push/导出”等，就是行动任务；除非权限或信息不足，否则必须 claim 后直接做，不要只回复计划或状态。',
     '- 行动任务的最终回复必须包含实际交付物或验证结果；禁止把“正在加载上下文/还没开始改代码/下一步我会做”当作任务完成。',
     '- 如果本轮不能动手（缺权限、缺文件、缺凭证、工具不可用），明确写 BLOCKED 和缺什么；不要伪装成已在执行。',
-    '- 完成后等待人工验收：`$CLI task update --task <taskId> --status in_review`（会映射为 Clowder 的等待验收态）。',
+    '- 完成后等待人工验收：`$CLI task update --task <taskId> --status in_review`。',
     '- 需要回写当前 thread：`$CLI message send --target "$CAT_CAFE_THREAD_ID"`，正文走 stdin。',
     '纯讨论/解释不需要 claim；不要为了 @ 队友而使用 message send，A2A 仍按上面的行首 @ 规则。',
     '',

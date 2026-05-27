@@ -51,6 +51,14 @@ describe('TaskCard', () => {
   it('applies blocked highlight styles', async () => {
     const { TaskCard } = await import('../TaskCard');
     const html = renderToStaticMarkup(<TaskCard task={makeTask({ status: 'blocked' })} onStatusChange={vi.fn()} />);
+    expect(html).toContain('阻塞中');
+    expect(html).toContain('border-l-conn-red-text');
+  });
+
+  it('applies in_review highlight styles', async () => {
+    const { TaskCard } = await import('../TaskCard');
+    const html = renderToStaticMarkup(<TaskCard task={makeTask({ status: 'in_review' })} onStatusChange={vi.fn()} />);
+    expect(html).toContain('待验收');
     expect(html).toContain('border-l-cafe-accent');
   });
 

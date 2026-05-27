@@ -12,7 +12,8 @@ type TaskBoardStyle = CSSProperties & Record<string, string>;
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: 'TODO',
   doing: 'IN PROGRESS',
-  blocked: 'IN REVIEW',
+  in_review: 'IN REVIEW',
+  blocked: 'BLOCKED',
   done: 'DONE',
 };
 
@@ -35,13 +36,19 @@ const TASK_STATUS_META: Record<
     chip: 'border-[var(--task-doing)] bg-[var(--task-doing-bg)] text-[var(--task-doing-text)]',
     badge: 'border-[var(--task-doing)] bg-[var(--task-doing-soft)] text-[var(--task-doing-text)]',
     dot: 'bg-[var(--task-doing)]',
-    next: 'blocked',
+    next: 'in_review',
   },
-  blocked: {
+  in_review: {
     chip: 'border-[var(--task-review)] bg-[var(--task-review-bg)] text-[var(--task-review-text)]',
     badge: 'border-[var(--task-review)] bg-[var(--task-review-soft)] text-[var(--task-review-text)]',
     dot: 'bg-[var(--task-review)]',
     next: 'done',
+  },
+  blocked: {
+    chip: 'border-[var(--task-blocked)] bg-[var(--task-blocked-bg)] text-[var(--task-blocked-text)]',
+    badge: 'border-[var(--task-blocked)] bg-[var(--task-blocked-soft)] text-[var(--task-blocked-text)]',
+    dot: 'bg-[var(--task-blocked)]',
+    next: 'doing',
   },
   done: {
     chip: 'border-[var(--task-done)] bg-[var(--task-done-bg)] text-[var(--task-done-text)]',
@@ -81,6 +88,10 @@ const taskBoardStyle: TaskBoardStyle = {
   '--task-review-bg': '#f0eaff',
   '--task-review-soft': '#f8f5ff',
   '--task-review-text': '#5940aa',
+  '--task-blocked': '#ff6b4a',
+  '--task-blocked-bg': '#ffe8df',
+  '--task-blocked-soft': '#fff4ef',
+  '--task-blocked-text': '#9a321a',
   '--task-done': '#6ccf8d',
   '--task-done-bg': '#e7f8ec',
   '--task-done-soft': '#f1fff5',
@@ -90,7 +101,8 @@ const taskBoardStyle: TaskBoardStyle = {
 const BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; title: string }> = [
   { status: 'todo', title: 'TODO' },
   { status: 'doing', title: 'IN PROGRESS' },
-  { status: 'blocked', title: 'IN REVIEW' },
+  { status: 'in_review', title: 'IN REVIEW' },
+  { status: 'blocked', title: 'BLOCKED' },
   { status: 'done', title: 'DONE' },
 ];
 

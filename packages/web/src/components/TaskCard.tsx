@@ -4,18 +4,20 @@ import type { TaskItem } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { CatAvatar } from './CatAvatar';
 
-type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
 
 const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   todo: 'doing',
-  doing: 'blocked',
-  blocked: 'done',
+  doing: 'in_review',
+  in_review: 'done',
+  blocked: 'doing',
   done: 'todo',
 };
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
   doing: '进行中',
+  in_review: '待验收',
   blocked: '阻塞中',
   done: '已完成',
 };
@@ -27,6 +29,11 @@ const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: 
     pillBg: 'bg-cafe-crosspost/10 text-cafe-crosspost',
   },
   blocked: {
+    text: 'text-conn-red-text',
+    border: 'border-l-conn-red-text',
+    pillBg: 'bg-conn-red-bg text-conn-red-text',
+  },
+  in_review: {
     text: 'text-cafe-accent',
     border: 'border-l-cafe-accent',
     pillBg: 'bg-cafe-accent/10 text-cafe-accent',

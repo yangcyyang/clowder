@@ -9,7 +9,7 @@
 
 import type { CatId } from './ids.js';
 
-export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+export type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
 
 /**
  * Task kind discriminator (#320).

@@ -57,6 +57,7 @@ function sanitizeAgentVisibleContent(content: string): string {
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
   doing: '进行中',
+  in_review: '待验收',
   blocked: '阻塞',
   done: '完成',
 };
@@ -64,6 +65,7 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 const TASK_BADGE_CLASS: Record<TaskStatus, string> = {
   todo: 'bg-[var(--cafe-accent)]/15 text-[var(--cafe-accent)] ring-[var(--cafe-accent)]/25',
   doing: 'bg-cafe-crosspost/15 text-cafe-crosspost ring-cafe-crosspost/25',
+  in_review: 'bg-cafe-accent/15 text-cafe-accent ring-cafe-accent/25',
   blocked: 'bg-conn-amber-bg text-conn-amber-text ring-conn-amber-text/25',
   done: 'bg-conn-emerald-bg text-conn-emerald-text ring-conn-emerald-ring',
 };

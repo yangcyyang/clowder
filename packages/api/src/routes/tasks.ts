@@ -24,7 +24,7 @@ export interface TasksRoutesOptions {
   socketManager: SocketManager;
 }
 
-const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
+const VALID_STATUSES = ['todo', 'doing', 'in_review', 'blocked', 'done'] as const;
 
 /** createdBy accepts any registered catId OR 'user' */
 const createdBySchema = z.union([catIdSchema(), z.literal('user')]);

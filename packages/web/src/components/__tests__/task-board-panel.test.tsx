@@ -18,9 +18,10 @@ function makeTasks(): TaskItem[] {
   };
   return [
     { ...base, id: '1', title: 'Doing task', status: 'doing' },
-    { ...base, id: '2', title: 'Blocked task', status: 'blocked' },
+    { ...base, id: '2', title: 'Review task', status: 'in_review' },
     { ...base, id: '3', title: 'Todo task', status: 'todo' },
     { ...base, id: '4', title: 'Done task', status: 'done' },
+    { ...base, id: '5', title: 'Blocked task', status: 'blocked' },
   ];
 }
 
@@ -47,11 +48,11 @@ describe('TaskBoardPanel', () => {
     }
   });
 
-  it('renders four status sections in correct order: doing, blocked, todo, done', async () => {
+  it('renders five status sections in correct order: doing, in_review, blocked, todo, done', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
     const html = renderToStaticMarkup(<TaskBoardPanel />);
-    const sections = ['进行中', '阻塞中', '待办', '已完成'];
+    const sections = ['进行中', '待验收', '阻塞中', '待办', '已完成'];
     for (const label of sections) {
       expect(html).toContain(label);
     }
@@ -61,11 +62,12 @@ describe('TaskBoardPanel', () => {
     }
   });
 
-  it('shows doing and blocked task items (expanded by default)', async () => {
+  it('shows doing, in_review, and blocked task items (expanded by default)', async () => {
     mockTasks = makeTasks();
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
     const html = renderToStaticMarkup(<TaskBoardPanel />);
     expect(html).toContain('Doing task');
+    expect(html).toContain('Review task');
     expect(html).toContain('Blocked task');
   });
 
@@ -105,7 +107,7 @@ describe('TaskBoardPanel', () => {
     // Simulate user having previously expanded todo section
     localStorage.setItem(
       'taskboard-collapsed',
-      JSON.stringify({ todo: false, done: true, doing: false, blocked: false }),
+      JSON.stringify({ todo: false, done: true, doing: false, in_review: false, blocked: false }),
     );
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
     const html = renderToStaticMarkup(<TaskBoardPanel />);

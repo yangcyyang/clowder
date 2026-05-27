@@ -201,6 +201,25 @@ describe('Tasks Routes', () => {
     assert.equal(events[1].event, 'task_updated');
   });
 
+  test('PATCH accepts in_review as a first-class status', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { status: 'in_review' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().status, 'in_review');
+  });
+
   test('PATCH updates delivery evidence and broadcasts', async () => {
     const app = await createApp();
     const createRes = await app.inject({

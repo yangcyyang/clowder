@@ -56,7 +56,7 @@ describe('formatTaskSnapshot', () => {
     assert.ok(result.includes('▸')); // focus marker on doing task
   });
 
-  it('sorts by priority: doing > blocked > todo > done', () => {
+  it('sorts by priority: doing > in_review > blocked > todo > done', () => {
     const tasks = [
       {
         id: 't1',
@@ -102,13 +102,26 @@ describe('formatTaskSnapshot', () => {
         createdAt: 1000,
         updatedAt: 2000,
       },
+      {
+        id: 't5',
+        threadId: 'th1',
+        title: 'Review task',
+        ownerCatId: 'codex',
+        status: 'in_review',
+        why: '',
+        createdBy: 'user',
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
     ];
     const result = formatTaskSnapshot(tasks);
     const lines = result.split('\n').filter((l) => l.includes('['));
     const doingIdx = lines.findIndex((l) => l.includes('Doing task'));
+    const reviewIdx = lines.findIndex((l) => l.includes('Review task'));
     const blockedIdx = lines.findIndex((l) => l.includes('Blocked task'));
     const todoIdx = lines.findIndex((l) => l.includes('Todo task'));
-    assert.ok(doingIdx < blockedIdx, 'doing before blocked');
+    assert.ok(doingIdx < reviewIdx, 'doing before in_review');
+    assert.ok(reviewIdx < blockedIdx, 'in_review before blocked');
     assert.ok(blockedIdx < todoIdx, 'blocked before todo');
   });
 
@@ -183,7 +196,7 @@ describe('formatTaskSnapshot', () => {
     }
     const result = formatTaskSnapshot(tasks);
     // Count only actual task lines (status in brackets), not header/footer
-    const taskLines = result.split('\n').filter((l) => /^\s*[▸ ] \[(doing|blocked|todo|done)\]/.test(l));
+    const taskLines = result.split('\n').filter((l) => /^\s*[▸ ] \[(doing|in_review|blocked|todo|done)\]/.test(l));
     assert.ok(taskLines.length <= 10, `Expected <=10 task lines, got ${taskLines.length}`);
   });
 

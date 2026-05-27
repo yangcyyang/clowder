@@ -4,7 +4,7 @@
  *
  * Design decisions (KD-6, KD-7 from F065 spec):
  * - Compact list format, not prose
- * - Priority sort: doing > blocked > todo > done
+ * - Priority sort: doing > in_review > blocked > todo > done
  * - Max 8 open + 2 done tasks displayed
  * - Title truncated to 80 chars, why to 120 chars
  * - Content treated as data block (injection defense)
@@ -14,9 +14,10 @@ import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
 
 const STATUS_PRIORITY: Record<TaskStatus, number> = {
   doing: 0,
-  blocked: 1,
-  todo: 2,
-  done: 3,
+  in_review: 1,
+  blocked: 2,
+  todo: 3,
+  done: 4,
 };
 
 const MAX_OPEN = 8;
@@ -57,7 +58,7 @@ export function formatTaskSnapshot(tasks: readonly TaskItem[]): string {
   if (tasks.length === 0) return '';
 
   // Count by status
-  const counts: Record<TaskStatus, number> = { doing: 0, blocked: 0, todo: 0, done: 0 };
+  const counts: Record<TaskStatus, number> = { doing: 0, in_review: 0, blocked: 0, todo: 0, done: 0 };
   for (const t of tasks) counts[t.status]++;
 
   // Sort by priority, then by updatedAt descending within same priority
@@ -68,7 +69,7 @@ export function formatTaskSnapshot(tasks: readonly TaskItem[]): string {
     return b.updatedAt - a.updatedAt;
   });
 
-  // Split into open (doing/blocked/todo) and done
+  // Split into open (doing/in_review/blocked/todo) and done
   const open = sorted.filter((t) => t.status !== 'done').slice(0, MAX_OPEN);
   const done = sorted.filter((t) => t.status === 'done').slice(0, MAX_DONE);
   const display = [...open, ...done];
@@ -76,6 +77,7 @@ export function formatTaskSnapshot(tasks: readonly TaskItem[]): string {
   // Header with counts
   const countParts: string[] = [];
   if (counts.doing > 0) countParts.push(`${counts.doing} doing`);
+  if (counts.in_review > 0) countParts.push(`${counts.in_review} in_review`);
   if (counts.blocked > 0) countParts.push(`${counts.blocked} blocked`);
   if (counts.todo > 0) countParts.push(`${counts.todo} todo`);
   if (counts.done > 0) countParts.push(`${counts.done} done`);
@@ -94,8 +96,11 @@ export function formatTaskSnapshot(tasks: readonly TaskItem[]): string {
     lines.push('');
   }
 
-  // Find focus task (first doing, else first blocked)
-  const focusId = display.find((t) => t.status === 'doing')?.id ?? display.find((t) => t.status === 'blocked')?.id;
+  // Find focus task (first doing, else in_review, else blocked)
+  const focusId =
+    display.find((t) => t.status === 'doing')?.id ??
+    display.find((t) => t.status === 'in_review')?.id ??
+    display.find((t) => t.status === 'blocked')?.id;
 
   for (const t of display) {
     const isFocus = t.id === focusId;

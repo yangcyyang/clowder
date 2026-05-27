@@ -10,6 +10,7 @@ const STORAGE_KEY = 'taskboard-collapsed';
 
 const SECTIONS = [
   { key: 'doing', label: '进行中', icon: '◉', defaultCollapsed: false },
+  { key: 'in_review', label: '待验收', icon: '◇', defaultCollapsed: false },
   { key: 'blocked', label: '阻塞中', icon: '⊘', defaultCollapsed: false },
   { key: 'todo', label: '待办', icon: '○', defaultCollapsed: true },
   { key: 'done', label: '已完成', icon: '●', defaultCollapsed: true },
@@ -19,9 +20,10 @@ type SectionKey = (typeof SECTIONS)[number]['key'];
 
 const SECTION_STYLES: Record<SectionKey, { text: string; border: string; sectionBg: string }> = {
   doing: { text: 'text-cafe-crosspost', border: 'border-l-cafe-crosspost', sectionBg: '' },
+  in_review: { text: 'text-cafe-accent', border: 'border-l-cafe-accent', sectionBg: '' },
   blocked: {
-    text: 'text-cafe-accent',
-    border: 'border-l-cafe-accent',
+    text: 'text-conn-red-text',
+    border: 'border-l-conn-red-text',
     sectionBg: 'bg-conn-red-bg dark:bg-conn-red-bg/20',
   },
   todo: { text: 'text-cafe-muted', border: 'border-l-cafe-muted', sectionBg: '' },
@@ -29,7 +31,7 @@ const SECTION_STYLES: Record<SectionKey, { text: string; border: string; section
 };
 
 function getDefaultCollapsed(): Record<SectionKey, boolean> {
-  const defaults: Record<SectionKey, boolean> = { doing: false, blocked: false, todo: true, done: true };
+  const defaults: Record<SectionKey, boolean> = { doing: false, in_review: false, blocked: false, todo: true, done: true };
   if (typeof window === 'undefined') return defaults;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
