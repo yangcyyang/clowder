@@ -1098,7 +1098,8 @@ ensure_native_modules_compatible() {
 
     # Node 版本切换后，better-sqlite3 这类原生模块可能还能留在 node_modules，
     # 但运行时 ABI 已经不兼容。这里在 API 启动前显式探测，避免服务静默崩溃。
-    if run_in_dir "$PROJECT_DIR/packages/api" node -e "require('better-sqlite3')" >/dev/null 2>&1; then
+    local sqlite_probe="const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.close();"
+    if run_in_dir "$PROJECT_DIR/packages/api" node -e "$sqlite_probe" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ better-sqlite3 native module 可加载${NC}"
         return 0
     fi
@@ -1106,7 +1107,7 @@ ensure_native_modules_compatible() {
     echo -e "${YELLOW}  ⚠ better-sqlite3 native module 不兼容，自动重新编译...${NC}"
     run_logged_step "better-sqlite3 重编译" 8 pnpm rebuild better-sqlite3
 
-    if run_in_dir "$PROJECT_DIR/packages/api" node -e "require('better-sqlite3')" >/dev/null 2>&1; then
+    if run_in_dir "$PROJECT_DIR/packages/api" node -e "$sqlite_probe" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ better-sqlite3 重编译完成${NC}"
         return 0
     fi
