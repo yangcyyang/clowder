@@ -428,6 +428,8 @@ REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 CLEANUP_RUNNING=false
 MANAGED_PIDS=()
+REDIS_LIVENESS_PID=""
+REDIS_LIVENESS_INTERVAL_SECONDS=${REDIS_LIVENESS_INTERVAL_SECONDS:-10}
 DAEMON_STATE_DIR="${HOME}/.cat-cafe"
 DAEMON_PID_FILE="${DAEMON_STATE_DIR}/daemon.pid"
 DAEMON_LOG_PATH_FILE="${DAEMON_STATE_DIR}/daemon.log-path"
@@ -1037,6 +1039,51 @@ print_redis_runtime_info() {
     [ -n "$appendonly" ] && echo "    - appendonly:$appendonly"
 }
 
+start_redis_daemon() {
+    maybe_quarantine_stale_aof_dir
+    redis-server \
+        --port "$REDIS_PORT" \
+        --bind 127.0.0.1 \
+        --dir "$REDIS_DATA_DIR" \
+        --dbfilename "$REDIS_DBFILE" \
+        --save "3600 1 300 100 60 10000" \
+        --appendonly yes \
+        --appendfilename "appendonly.aof" \
+        --appendfsync everysec \
+        --daemonize yes \
+        --pidfile "$REDIS_PIDFILE" \
+        --logfile "$REDIS_LOGFILE" \
+        >/dev/null 2>&1
+}
+
+start_redis_liveness_monitor() {
+    [ "$USE_REDIS" = true ] || return 0
+    [ -n "$REDIS_URL" ] || return 0
+    command -v redis-cli >/dev/null 2>&1 || return 0
+    command -v redis-server >/dev/null 2>&1 || return 0
+    [ -z "$REDIS_LIVENESS_PID" ] || return 0
+
+    (
+        exec </dev/null
+        while true; do
+            sleep "$REDIS_LIVENESS_INTERVAL_SECONDS"
+            if redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1; then
+                continue
+            fi
+
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Redis 健康检查失败，尝试重启端口 $REDIS_PORT..." >&2
+            if start_redis_daemon && sleep 1 && redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Redis 已恢复 (端口 $REDIS_PORT)" >&2
+            else
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Redis 自动重启失败，请检查 $REDIS_LOGFILE" >&2
+            fi
+        done
+    ) &
+    REDIS_LIVENESS_PID=$!
+    register_managed_pid "$REDIS_LIVENESS_PID"
+    echo -e "${GREEN}  ✓ Redis 健康守护已启用 (${REDIS_LIVENESS_INTERVAL_SECONDS}s)${NC}"
+}
+
 run_in_dir() {
     local dir="$1"
     shift
@@ -1151,20 +1198,7 @@ setup_storage() {
 
     echo -e "${YELLOW}  ⚠ Redis 未运行，尝试在端口 $REDIS_PORT 启动...${NC}"
     if command -v redis-server &> /dev/null; then
-        maybe_quarantine_stale_aof_dir
-        redis-server \
-            --port "$REDIS_PORT" \
-            --bind 127.0.0.1 \
-            --dir "$REDIS_DATA_DIR" \
-            --dbfilename "$REDIS_DBFILE" \
-            --save "3600 1 300 100 60 10000" \
-            --appendonly yes \
-            --appendfilename "appendonly.aof" \
-            --appendfsync everysec \
-            --daemonize yes \
-            --pidfile "$REDIS_PIDFILE" \
-            --logfile "$REDIS_LOGFILE" \
-            >/dev/null 2>&1 || true
+        start_redis_daemon || true
         sleep 1
         if redis-cli -p "$REDIS_PORT" ping &> /dev/null; then
             echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"
@@ -1309,6 +1343,7 @@ main() {
     echo ""
     echo -e "${CYAN}检查依赖...${NC}"
     setup_storage
+    start_redis_liveness_monitor
     configure_mcp_server_path
     echo "  数据保留 (秒): message=${MESSAGE_TTL_SECONDS} thread=${THREAD_TTL_SECONDS} task=${TASK_TTL_SECONDS} summary=${SUMMARY_TTL_SECONDS}"
     echo "  注: 0 表示永久保留（不自动过期）"
