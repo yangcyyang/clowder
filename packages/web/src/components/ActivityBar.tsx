@@ -9,11 +9,11 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
-type VisualTheme = 'claude' | 'slack' | 'tesla' | 'slock';
+type VisualTheme = 'claude' | 'slack' | 'slockv1' | 'slock' | 'kami';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
-const VISUAL_THEME_DEFAULT_MIGRATION_KEY = 'clowder:visual-theme-default:v3';
-const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla', 'slock'];
+const VISUAL_THEME_DEFAULT_MIGRATION_KEY = 'clowder:visual-theme-default:v4';
+const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'slockv1', 'slock', 'kami'];
 const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
 const NAV_ITEMS = [
@@ -92,18 +92,35 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 }
 
 function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
+  const label =
+    theme === 'slockv1'
+      ? 'V1'
+      : theme === 'kami'
+        ? 'K'
+        : theme === 'slack'
+          ? 'S'
+          : theme === 'slock'
+            ? 'SL'
+            : 'C';
+
   return (
     <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
-      {theme === 'tesla' ? 'T' : theme === 'slack' ? 'S' : theme === 'slock' ? 'SL' : 'C'}
+      {label}
     </span>
   );
 }
 
 function getVisualThemeLabel(theme: VisualTheme): string {
-  if (theme === 'tesla') return 'Tesla';
+  if (theme === 'kami') return 'KAMI';
+  if (theme === 'slockv1') return 'Slock v1';
   if (theme === 'slock') return 'Slock';
   if (theme === 'slack') return 'Slack';
   return 'Claude';
+}
+
+function normalizeVisualTheme(theme: string | null): VisualTheme {
+  if (theme === 'tesla') return 'slockv1';
+  return VISUAL_THEME_ORDER.includes(theme as VisualTheme) ? (theme as VisualTheme) : DEFAULT_VISUAL_THEME;
 }
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
@@ -191,10 +208,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
   useEffect(() => {
     const hasMigratedDefaultTheme = window.localStorage.getItem(VISUAL_THEME_DEFAULT_MIGRATION_KEY) === '1';
     const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
-    const nextTheme =
-      hasMigratedDefaultTheme && VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme)
-        ? (storedTheme as VisualTheme)
-        : DEFAULT_VISUAL_THEME;
+    const nextTheme = hasMigratedDefaultTheme ? normalizeVisualTheme(storedTheme) : DEFAULT_VISUAL_THEME;
     setVisualTheme(nextTheme);
     document.documentElement.dataset.visualTheme = nextTheme;
     window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);
@@ -235,7 +249,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   return (
     <nav
-      className={`console-activity-rail flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
+      className={`console-activity-rail flex w-[var(--slock-rail-width)] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
       aria-label="主导航"
     >
       {NAV_ITEMS.map((item) => {

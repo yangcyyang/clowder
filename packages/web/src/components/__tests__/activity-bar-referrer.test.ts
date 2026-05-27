@@ -154,8 +154,8 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     });
   });
 
-  it('migrates old stored Claude visual theme to Slock once for v3 default', () => {
-    window.localStorage.setItem('clowder:visual-theme-default:v2', '1');
+  it('migrates old stored Claude visual theme to Slock once for v4 default', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v3', '1');
     window.localStorage.setItem('clowder:visual-theme', 'claude');
 
     React.act(() => {
@@ -164,18 +164,42 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
 
     expect(document.documentElement.dataset.visualTheme).toBe('slock');
     expect(window.localStorage.getItem('clowder:visual-theme')).toBe('slock');
-    expect(window.localStorage.getItem('clowder:visual-theme-default:v3')).toBe('1');
+    expect(window.localStorage.getItem('clowder:visual-theme-default:v4')).toBe('1');
   });
 
-  it('keeps explicit visual theme after v3 default migration is complete', () => {
-    window.localStorage.setItem('clowder:visual-theme-default:v3', '1');
+  it('keeps explicit Slock v1 visual theme after v4 default migration is complete', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v4', '1');
+    window.localStorage.setItem('clowder:visual-theme', 'slockv1');
+
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    expect(document.documentElement.dataset.visualTheme).toBe('slockv1');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('slockv1');
+  });
+
+  it('keeps explicit KAMI visual theme after v4 default migration is complete', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v4', '1');
+    window.localStorage.setItem('clowder:visual-theme', 'kami');
+
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    expect(document.documentElement.dataset.visualTheme).toBe('kami');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('kami');
+  });
+
+  it('migrates legacy Tesla visual theme to Slock v1', () => {
+    window.localStorage.setItem('clowder:visual-theme-default:v4', '1');
     window.localStorage.setItem('clowder:visual-theme', 'tesla');
 
     React.act(() => {
       root.render(React.createElement(ActivityBar));
     });
 
-    expect(document.documentElement.dataset.visualTheme).toBe('tesla');
-    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('tesla');
+    expect(document.documentElement.dataset.visualTheme).toBe('slockv1');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('slockv1');
   });
 });

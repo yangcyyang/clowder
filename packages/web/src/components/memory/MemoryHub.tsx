@@ -15,7 +15,7 @@ interface MemoryHubProps {
 
 function RecallPreview() {
   return (
-    <div className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+    <div className="slock-panel-frame flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-[18px] bg-[var(--console-card-bg)] p-[18px] shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
       <p className="text-[13px] leading-[1.4] text-cafe">
         猫猫调用 search_evidence 时，这里展示 query、命中证据和引用状态。
       </p>
@@ -30,7 +30,7 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
   const isFeed = activeTab === 'feed';
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="memory-hub">
-      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-[18px] px-9 py-8">
+      <div className="slock-page-frame flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 gap-[18px] px-9 py-8">
         <header className="flex items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold text-cafe">记忆</h1>

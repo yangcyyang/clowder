@@ -15,13 +15,14 @@ import './console-controls.css';
 const visualThemeBootstrapScript = `
 (() => {
   const storageKey = 'clowder:visual-theme';
-  const migrationKey = 'clowder:visual-theme-default:v3';
-  const validThemes = new Set(['claude', 'slack', 'tesla', 'slock']);
+  const migrationKey = 'clowder:visual-theme-default:v4';
+  const validThemes = new Set(['claude', 'slack', 'slockv1', 'slock', 'kami']);
   const defaultTheme = 'slock';
   try {
     const migrated = window.localStorage.getItem(migrationKey) === '1';
     const stored = window.localStorage.getItem(storageKey);
-    const nextTheme = migrated && validThemes.has(stored) ? stored : defaultTheme;
+    const normalizedStored = stored === 'tesla' ? 'slockv1' : stored;
+    const nextTheme = migrated && validThemes.has(normalizedStored) ? normalizedStored : defaultTheme;
     document.documentElement.dataset.visualTheme = nextTheme;
     window.localStorage.setItem(storageKey, nextTheme);
     window.localStorage.setItem(migrationKey, '1');

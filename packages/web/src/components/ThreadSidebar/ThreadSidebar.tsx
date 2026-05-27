@@ -80,7 +80,7 @@ function getDirectThreadCatId(thread: Pick<Thread, 'isDM' | 'preferredCats' | 'p
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
-    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
+    <span className="slock-unread-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
       {count > 99 ? '99+' : count}
     </span>
   );
@@ -620,8 +620,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         key={thread.id}
         type="button"
         data-thread-id={thread.id}
+        data-active={isActive ? 'true' : 'false'}
         onClick={() => handleSelect(thread.id)}
-        className={`group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 px-3 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
+        className={`slock-channel-row group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 px-3 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
           isActive
             ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
             : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
@@ -649,7 +650,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         key={message.id}
         type="button"
         onClick={() => handleMessageSearchResultSelect(message)}
-        className="mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
+        className="slock-sidebar-search-result mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
         title={message.content}
       >
         <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-[var(--clowder-sidebar-row-muted)]">{threadTitle}</span>
@@ -661,17 +662,17 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   return (
     <>
       <aside
-        className={`${className ?? 'w-60'} flex flex-col h-full bg-[var(--clowder-sidebar-bg)]`}
+        className={`slock-thread-sidebar ${className ?? 'w-60'} flex flex-col h-full bg-[var(--clowder-sidebar-bg)]`}
         style={{ boxShadow: 'inset -1px 0 0 var(--clowder-sidebar-border)' }}
       >
-        <div className="p-3 flex items-center justify-between gap-2">
-          <span className="[font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">对话</span>
+        <div className="slock-thread-sidebar-header p-3 flex items-center justify-between gap-2">
+          <span className="slock-thread-sidebar-title [font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">对话</span>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => setShowPicker(true)}
               disabled={isCreating}
-              className="console-button-primary text-xs px-2 py-1 disabled:opacity-40"
+              className="slock-sidebar-new-button console-button-primary text-xs px-2 py-1 disabled:opacity-40"
               data-guide-id="sidebar.new-thread"
             >
               {isCreating ? '...' : '+ 新对话'}
@@ -683,12 +684,12 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <div className="px-3 py-1.5 bg-conn-amber-bg/60 text-[10px] text-conn-amber-text">{bindWarning}</div>
         )}
 
-        <div className="px-3 py-2">
+        <div className="slock-sidebar-search-wrap px-3 py-2">
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索对话、项目或 ID..."
-            className="console-form-input w-full text-xs"
+            className="slock-sidebar-search-input console-form-input w-full text-xs"
           />
           {unreadIds.size > 0 && (
             <button
@@ -704,10 +705,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         </div>
 
         {/* Slock-style quick nav */}
-        <div className="space-y-0.5 px-2 py-1">
+        <div className="slock-sidebar-quicknav space-y-0.5 px-2 py-1">
           <button
             type="button"
-            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
+            data-active={showUnreadOnly ? 'true' : 'false'}
+            className={`slock-sidebar-row w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
               showUnreadOnly
                 ? 'bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
                 : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
@@ -730,7 +732,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </button>
           <button
             type="button"
-            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
+            data-active={savedViewOpen ? 'true' : 'false'}
+            className={`slock-sidebar-row w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
               savedViewOpen
                 ? 'bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
                 : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
@@ -758,17 +761,18 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             <div className="text-center py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">加载中...</div>
           )}
 
-          <div className="mt-2 border-t border-[var(--clowder-sidebar-border)] pt-2">
+          <div className="slock-sidebar-section mt-2 border-t border-[var(--clowder-sidebar-border)] pt-2">
             <div className="px-3 pb-1 pt-1">
               <div className="flex items-center justify-between gap-2">
                 <div className="relative" ref={sortMenuRef}>
                   <button
                     type="button"
                     onClick={() => setShowSortMenu((v) => !v)}
-                    className="flex items-center gap-1 font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)] transition-colors hover:text-[var(--clowder-sidebar-row-active-text)]"
+                    className="slock-sidebar-section-title flex items-center gap-1 font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)] transition-colors hover:text-[var(--clowder-sidebar-row-active-text)]"
                     title="排序方式"
                   >
                     CHANNELS
+                    <span className="slock-sidebar-section-count">{sortedChannelThreads.length + (showDefaultThread ? 1 : 0)}</span>
                     <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor">
                       <path d="M4 5h8a.5.5 0 010 1H4a.5.5 0 010-1zm1 2h6a.5.5 0 010 1H5a.5.5 0 010-1zm1 2h4a.5.5 0 010 1H6a.5.5 0 010-1z" />
                     </svg>
@@ -801,7 +805,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                 <button
                   type="button"
                   onClick={() => setShowPicker(true)}
-                  className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--clowder-sidebar-row-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
+                  className="slock-sidebar-section-action flex h-5 w-5 items-center justify-center rounded-md text-[var(--clowder-sidebar-row-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
                   aria-label="新增频道"
                   title="新增频道"
                 >
@@ -818,7 +822,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </div>
 
           {normalizedQuery.length > 0 && (
-            <div className="mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
+            <div className="slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
             <div className="px-3 pb-1 pt-1">
               <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
                 MESSAGES
@@ -837,7 +841,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           )}
 
           {/* Hide the normal DM section in Inbox mode — unread DMs are shown inline above */}
-          <div className={`mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}>
+          <div className={`slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}>
             <div className="px-3 pb-1 pt-1">
               <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
                 DIRECT MESSAGES
@@ -858,7 +862,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       type="button"
                       onClick={() => void openDirectMessage(cat.id)}
                       disabled={isCreating}
-                      className={`flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
+                      data-active={isActiveDm ? 'true' : 'false'}
+                      className={`slock-sidebar-row flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
                         isActiveDm
                           ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
                           : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
@@ -899,11 +904,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         </div>
 
         {/* F095 Phase D: Trash bin section — styled as Pencil Sidebar Utility Row */}
-        <div className="px-3 pb-3">
+        <div className="slock-sidebar-trash px-3 pb-3">
           <button
             type="button"
             onClick={handleToggleTrash}
-            className="flex w-full items-center gap-2 h-9 px-2.5 rounded-md bg-transparent text-xs text-[var(--clowder-sidebar-row-text)] transition-colors hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
+            className="slock-sidebar-row flex w-full items-center gap-2 h-9 px-2.5 rounded-md bg-transparent text-xs text-[var(--clowder-sidebar-row-text)] transition-colors hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
             data-testid="trash-bin-toggle"
           >
             <svg

@@ -42,14 +42,16 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="console-shell flex h-screen h-dvh overflow-hidden">
       {/* Left: ActivityBar */}
-      <Suspense fallback={<div className="w-12 flex-shrink-0" aria-hidden="true" />}>
+      <Suspense fallback={<div className="w-[var(--slock-rail-width)] flex-shrink-0" aria-hidden="true" />}>
         <ActivityBar />
       </Suspense>
 
       {/* Middle: ThreadSidebar + Main Content */}
       <div className="flex flex-1 min-w-0 overflow-hidden">
         {!hideThreadSidebar && (
-          <Suspense fallback={<div className="hidden md:block w-[260px] flex-shrink-0" aria-hidden="true" />}>
+          <Suspense
+            fallback={<div className="hidden md:block w-[var(--slock-sidebar-width)] flex-shrink-0" aria-hidden="true" />}
+          >
             <div
               className="hidden md:block flex-shrink-0 border-r border-[var(--slock-border-color)]"
               style={{ width: sidebarWidth }}

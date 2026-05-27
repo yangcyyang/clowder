@@ -951,7 +951,7 @@ export function ChatInput({
         </button>
 
         <div
-          className={`group relative flex min-h-[var(--slock-input-height-min)] flex-1 flex-col rounded-[var(--slock-radius-lg)] border bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 ${
+          className={`slock-composer-frame group relative flex min-h-[var(--slock-input-height-min)] flex-1 flex-col rounded-[var(--slock-radius-lg)] border bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 ${
             whisperMode
               ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus-within:ring-conn-amber-text'
               : 'border-[var(--console-input-stroke)] focus-within:ring-[var(--console-input-stroke)]'
@@ -991,7 +991,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="上传图片"
                 title="上传图片"
               >
@@ -1002,7 +1002,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => attachmentInputRef.current?.click()}
                 disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="上传文件"
                 title="上传文件"
               >
@@ -1012,7 +1012,7 @@ export function ChatInput({
 
             <div className="ml-auto flex items-center gap-1">
               <label
-                className="hidden cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
+                className="slock-inline-control hidden cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
                 title="发送后创建任务"
               >
                 <input
@@ -1034,7 +1034,7 @@ export function ChatInput({
                   aria-haspopup="menu"
                   aria-expanded={showPromptPrefixMenu}
                   title="选择发送前自动追加的提示词前缀"
-                  className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                  className={`slock-inline-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
                     selectedPromptPrefix.id !== 'none'
                       ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
                       : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
@@ -1089,7 +1089,7 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => onStop()}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
+                  className="slock-tool-button slock-stop-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-stop)] text-[var(--cafe-surface)] transition-colors hover:opacity-80"
                   title="停止生成"
                   aria-label="Stop generation"
                 >
@@ -1103,7 +1103,7 @@ export function ChatInput({
                 type="button"
                 onClick={handlePrimarySend}
                 disabled={Boolean(disabled || sendTemporarilyDisabled || !input.trim())}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
                 title="发送消息"
                 aria-label="Send message"
               >

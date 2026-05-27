@@ -3,7 +3,7 @@
 export function MissionHub() {
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="mission-hub">
-      <div className="flex flex-1 flex-col m-3 mt-2 rounded-2xl bg-[var(--console-card-bg)] shadow-[var(--console-shadow-soft)] overflow-hidden">
+      <div className="slock-page-frame flex flex-1 flex-col m-3 mt-2 rounded-2xl bg-[var(--console-card-bg)] shadow-[var(--console-shadow-soft)] overflow-hidden">
         <header className="flex items-center gap-3 border-b border-[var(--console-border-soft)] px-5 py-3">
           <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
         </header>

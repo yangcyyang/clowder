@@ -248,67 +248,102 @@
   --console-status-connected: #2bac76;
 }
 
-[data-visual-theme="tesla"] {
+[data-visual-theme="slockv1"] {
   --console-shell-bg: #ffffff;
-  --console-panel-bg: #ffffff;
+  --console-panel-bg: #fffaef;
   --console-card-bg: #ffffff;
-  --console-card-soft-bg: #f4f4f4;
-  --console-code-bg: #f4f4f4;
-  --console-pill-bg: #eeeeee;
-  --console-border-soft: #eeeeee;
-  --console-border-strong: #d0d1d2;
-  --console-shadow: none;
-  --console-shadow-soft: none;
+  --console-card-soft-bg: #fffaef;
+  --console-code-bg: #111827;
+  --console-pill-bg: #fff4cf;
+  --console-border-soft: #141111;
+  --console-border-strong: #141111;
+  --console-shadow: 4px 4px 0 #141111;
+  --console-shadow-soft: 2px 2px 0 #141111;
   --console-field-bg: #ffffff;
-  --console-active-bg: #f4f4f4;
-  --console-hover-bg: #f4f4f4;
-  --console-rail-bg: #ffffff;
-  --console-rail-item: #ffffff;
-  --console-rail-active: #f4f4f4;
-  --console-rail-fg: #171a20;
-  --console-input-stroke: #3e6ae1;
-  --console-button-emphasis: #171a20;
-  --console-button-emphasis-hover: #393c41;
-  --console-modal-title: #171a20;
-  --console-modal-close-bg: #f4f4f4;
-  --console-modal-close-fg: #393c41;
-  --console-cat-fallback: #8e8e8e;
-  --console-status-connected: #3e6ae1;
+  --console-active-bg: #fe7da8;
+  --console-hover-bg: #fff4cf;
+  --console-rail-bg: #ffd440;
+  --console-rail-item: #ffd440;
+  --console-rail-active: #ffffff;
+  --console-rail-fg: #141111;
+  --console-input-stroke: #141111;
+  --console-button-emphasis: #fe7da8;
+  --console-button-emphasis-hover: #ff8db7;
+  --console-modal-title: #141111;
+  --console-modal-close-bg: #ffffff;
+  --console-modal-close-fg: #141111;
+  --console-cat-fallback: #ffd440;
+  --console-status-connected: #a9d877;
 }
 
 [data-visual-theme="slock"] {
-  --console-shell-bg: #ffffff;
-  --console-panel-bg: #fff9ec;
-  --console-card-bg: #ffffff;
-  --console-card-soft-bg: #fff9ec;
-  --console-code-bg: #fff0a6;
-  --console-pill-bg: #fff0a6;
-  --console-border-soft: #000000;
-  --console-border-strong: #000000;
-  --console-shadow: 6px 6px 0 #000000;
-  --console-shadow-soft: 4px 4px 0 #000000;
-  --console-field-bg: #ffffff;
-  --console-active-bg: #f46fa7;
-  --console-active-fg: #000000;
+  --console-shell-bg: var(--slock-white);
+  --console-panel-bg: var(--slock-cream);
+  --console-card-bg: var(--slock-white);
+  --console-card-soft-bg: var(--slock-cream);
+  --console-code-bg: var(--slock-warm-yellow);
+  --console-pill-bg: var(--slock-warm-yellow);
+  --console-border-soft: var(--slock-ink);
+  --console-border-strong: var(--slock-ink);
+  --console-shadow: var(--slock-shadow);
+  --console-shadow-soft: var(--slock-shadow-soft);
+  --console-field-bg: var(--slock-white);
+  --console-active-bg: var(--slock-pink-active);
+  --console-active-fg: var(--slock-ink);
   --console-active-muted: #2f2f2f;
-  --console-hover-bg: #fff0a6;
-  --console-rail-bg: #ffd83d;
-  --console-rail-item: #ffffff;
-  --console-rail-active: #000000;
-  --console-rail-fg: #000000;
-  --console-input-stroke: #000000;
-  --console-button-emphasis: #000000;
-  --console-button-emphasis-hover: #f46fa7;
-  --console-modal-title: #000000;
-  --console-modal-close-bg: #fff0a6;
-  --console-modal-close-fg: #000000;
-  --console-cat-fallback: #000000;
-  --console-status-connected: #00875a;
-  --chat-code-bg: #fff0a6;
-  --chat-code-text: #000000;
-  --chat-code-btn-bg: #fff9ec;
-  --chat-code-btn-text: #000000;
-  --chat-code-border: #000000;
+  --console-hover-bg: var(--slock-warm-yellow);
+  --console-rail-bg: var(--slock-rail-yellow);
+  --console-rail-item: var(--slock-white);
+  --console-rail-active: var(--slock-ink);
+  --console-rail-fg: var(--slock-ink);
+  --console-input-stroke: var(--slock-ink);
+  --console-button-emphasis: var(--slock-ink);
+  --console-button-emphasis-hover: var(--slock-pink-active);
+  --console-modal-title: var(--slock-ink);
+  --console-modal-close-bg: var(--slock-warm-yellow);
+  --console-modal-close-fg: var(--slock-ink);
+  --console-cat-fallback: var(--slock-ink);
+  --console-status-connected: var(--slock-success);
+  --chat-code-bg: var(--slock-warm-yellow);
+  --chat-code-text: var(--slock-ink);
+  --chat-code-btn-bg: var(--slock-cream);
+  --chat-code-btn-text: var(--slock-ink);
+  --chat-code-border: var(--slock-ink);
+}
+
+[data-visual-theme="kami"] {
+  --console-shell-bg: #f5f4ed;
+  --console-panel-bg: #f5f4ed;
+  --console-card-bg: #faf9f5;
+  --console-card-soft-bg: #f5f4ed;
+  --console-code-bg: #faf9f5;
+  --console-pill-bg: #eef2f7;
+  --console-border-soft: #e8e6dc;
+  --console-border-strong: #d0dce9;
+  --console-shadow: 0 4pt 24pt rgba(0, 0, 0, 0.05);
+  --console-shadow-soft: 0 1px 0 #e8e6dc;
+  --console-field-bg: #faf9f5;
+  --console-active-bg: #e4ecf5;
+  --console-active-fg: #141413;
+  --console-active-muted: #3d3d3a;
+  --console-hover-bg: #faf9f5;
+  --console-rail-bg: #141413;
+  --console-rail-item: transparent;
+  --console-rail-active: #1b365d;
+  --console-rail-fg: #faf9f5;
+  --console-input-stroke: #1b365d;
+  --console-button-emphasis: #1b365d;
+  --console-button-emphasis-hover: #2d5a8a;
+  --console-modal-title: #1b365d;
+  --console-modal-close-bg: #e8e6dc;
+  --console-modal-close-fg: #3d3d3a;
+  --console-cat-fallback: #6b6a64;
+  --console-status-connected: #1b365d;
+  --chat-code-bg: #faf9f5;
+  --chat-code-text: #141413;
+  --chat-code-btn-bg: #e8e6dc;
+  --chat-code-btn-text: #141413;
+  --chat-code-border: #e8e6dc;
 }
 
 [data-theme="dark"][data-visual-theme="slack"] {
@@ -339,67 +374,102 @@
   --console-status-connected: #36c5f0;
 }
 
-[data-theme="dark"][data-visual-theme="tesla"] {
+[data-theme="dark"][data-visual-theme="slockv1"] {
   --console-shell-bg: #0f1115;
-  --console-panel-bg: #0f1115;
+  --console-panel-bg: #141111;
   --console-card-bg: #171a20;
-  --console-card-soft-bg: #20242a;
-  --console-code-bg: #090b0f;
-  --console-pill-bg: #20242a;
-  --console-border-soft: #2b2f36;
-  --console-border-strong: #3a3f48;
-  --console-shadow: none;
-  --console-shadow-soft: none;
-  --console-field-bg: #090b0f;
-  --console-active-bg: #171a20;
-  --console-hover-bg: #171a20;
-  --console-rail-bg: #0f1115;
-  --console-rail-item: #0f1115;
-  --console-rail-active: #171a20;
-  --console-rail-fg: #f4f4f4;
-  --console-input-stroke: #5c86ff;
-  --console-button-emphasis: #f4f4f4;
-  --console-button-emphasis-hover: #ffffff;
-  --console-modal-title: #f4f4f4;
-  --console-modal-close-bg: #171a20;
-  --console-modal-close-fg: #c8c9cc;
-  --console-cat-fallback: #8e8e8e;
-  --console-status-connected: #5c86ff;
+  --console-card-soft-bg: #241f1b;
+  --console-code-bg: #090807;
+  --console-pill-bg: rgba(255, 212, 64, 0.16);
+  --console-border-soft: #ffd440;
+  --console-border-strong: #ffd440;
+  --console-shadow: 4px 4px 0 #ffd440;
+  --console-shadow-soft: 2px 2px 0 #ffd440;
+  --console-field-bg: #090807;
+  --console-active-bg: #fe7da8;
+  --console-hover-bg: #241f1b;
+  --console-rail-bg: #ffd440;
+  --console-rail-item: #ffd440;
+  --console-rail-active: #141111;
+  --console-rail-fg: #141111;
+  --console-input-stroke: #ffd440;
+  --console-button-emphasis: #fe7da8;
+  --console-button-emphasis-hover: #ff9abe;
+  --console-modal-title: #fffaf0;
+  --console-modal-close-bg: #241f1b;
+  --console-modal-close-fg: #ffd440;
+  --console-cat-fallback: #ffd440;
+  --console-status-connected: #a9d877;
 }
 
 [data-theme="dark"][data-visual-theme="slock"] {
-  --console-shell-bg: #ffffff;
-  --console-panel-bg: #fff9ec;
-  --console-card-bg: #ffffff;
-  --console-card-soft-bg: #fff9ec;
-  --console-code-bg: #fff0a6;
-  --console-pill-bg: #fff0a6;
-  --console-border-soft: #000000;
-  --console-border-strong: #000000;
-  --console-shadow: 6px 6px 0 #000000;
-  --console-shadow-soft: 4px 4px 0 #000000;
-  --console-field-bg: #ffffff;
-  --console-active-bg: #f46fa7;
-  --console-active-fg: #000000;
+  --console-shell-bg: var(--slock-white);
+  --console-panel-bg: var(--slock-cream);
+  --console-card-bg: var(--slock-white);
+  --console-card-soft-bg: var(--slock-cream);
+  --console-code-bg: var(--slock-warm-yellow);
+  --console-pill-bg: var(--slock-warm-yellow);
+  --console-border-soft: var(--slock-ink);
+  --console-border-strong: var(--slock-ink);
+  --console-shadow: var(--slock-shadow);
+  --console-shadow-soft: var(--slock-shadow-soft);
+  --console-field-bg: var(--slock-white);
+  --console-active-bg: var(--slock-pink-active);
+  --console-active-fg: var(--slock-ink);
   --console-active-muted: #2f2f2f;
-  --console-hover-bg: #fff0a6;
-  --console-rail-bg: #ffd83d;
-  --console-rail-item: #ffffff;
-  --console-rail-active: #000000;
-  --console-rail-fg: #000000;
-  --console-input-stroke: #000000;
-  --console-button-emphasis: #000000;
-  --console-button-emphasis-hover: #f46fa7;
-  --console-modal-title: #000000;
-  --console-modal-close-bg: #fff0a6;
-  --console-modal-close-fg: #000000;
-  --console-cat-fallback: #000000;
-  --console-status-connected: #00875a;
-  --chat-code-bg: #fff0a6;
-  --chat-code-text: #000000;
-  --chat-code-btn-bg: #fff9ec;
-  --chat-code-btn-text: #000000;
-  --chat-code-border: #000000;
+  --console-hover-bg: var(--slock-warm-yellow);
+  --console-rail-bg: var(--slock-rail-yellow);
+  --console-rail-item: var(--slock-white);
+  --console-rail-active: var(--slock-ink);
+  --console-rail-fg: var(--slock-ink);
+  --console-input-stroke: var(--slock-ink);
+  --console-button-emphasis: var(--slock-ink);
+  --console-button-emphasis-hover: var(--slock-pink-active);
+  --console-modal-title: var(--slock-ink);
+  --console-modal-close-bg: var(--slock-warm-yellow);
+  --console-modal-close-fg: var(--slock-ink);
+  --console-cat-fallback: var(--slock-ink);
+  --console-status-connected: var(--slock-success);
+  --chat-code-bg: var(--slock-warm-yellow);
+  --chat-code-text: var(--slock-ink);
+  --chat-code-btn-bg: var(--slock-cream);
+  --chat-code-btn-text: var(--slock-ink);
+  --chat-code-border: var(--slock-ink);
+}
+
+[data-theme="dark"][data-visual-theme="kami"] {
+  --console-shell-bg: #141413;
+  --console-panel-bg: #141413;
+  --console-card-bg: #242421;
+  --console-card-soft-bg: #1f1f1c;
+  --console-code-bg: #0f0f0e;
+  --console-pill-bg: #242421;
+  --console-border-soft: #504e49;
+  --console-border-strong: #6b6a64;
+  --console-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+  --console-shadow-soft: 0 1px 0 #3d3d3a;
+  --console-field-bg: #0f0f0e;
+  --console-active-bg: #1b365d;
+  --console-active-fg: #f5f4ed;
+  --console-active-muted: #d9d6cb;
+  --console-hover-bg: #242421;
+  --console-rail-bg: #0f0f0e;
+  --console-rail-item: transparent;
+  --console-rail-active: #1b365d;
+  --console-rail-fg: #f5f4ed;
+  --console-input-stroke: #8fb1d5;
+  --console-button-emphasis: #8fb1d5;
+  --console-button-emphasis-hover: #a7c3df;
+  --console-modal-title: #c7daed;
+  --console-modal-close-bg: #242421;
+  --console-modal-close-fg: #d9d6cb;
+  --console-cat-fallback: #b7b3a8;
+  --console-status-connected: #8fb1d5;
+  --chat-code-bg: #0f0f0e;
+  --chat-code-text: #f5f4ed;
+  --chat-code-btn-bg: #242421;
+  --chat-code-btn-text: #f5f4ed;
+  --chat-code-border: #504e49;
 }
 
 [data-theme="dark"][data-visual-theme="claude"] {
@@ -726,26 +796,248 @@
 }
 
 [data-visual-theme="slock"] .console-activity-rail {
-  border-right: 3px solid #000000;
+  border-right: var(--slock-rail-border-width) solid var(--slock-ink);
 }
 
 [data-visual-theme="slock"] .console-activity-button {
-  border: 2px solid #000000;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
-  background: #ffffff;
-  color: #000000;
-  box-shadow: 3px 3px 0 #000000;
+  background: var(--slock-white);
+  color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-icon);
 }
 
 [data-visual-theme="slock"] .console-activity-button:hover {
-  background: #fff0a6;
+  background: var(--slock-warm-yellow);
   transform: translate(-1px, -1px);
-  box-shadow: 4px 4px 0 #000000;
+  box-shadow: var(--slock-shadow-soft);
+}
+
+[data-visual-theme="slock"] .console-activity-button:active {
+  transform: translate(1px, 1px);
+  box-shadow: var(--slock-shadow-chip);
 }
 
 [data-visual-theme="slock"] .console-activity-button[data-active="true"] {
-  background: #000000;
-  color: #ffd83d;
+  background: var(--slock-ink);
+  color: var(--slock-rail-yellow);
+}
+
+[data-visual-theme="slock"] .console-activity-button[data-active="true"]::after {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 999px;
+  background: var(--slock-pink-active);
+  content: "";
+}
+
+[data-visual-theme="slock"] .console-activity-button[data-active="true"]:hover {
+  background: var(--slock-ink);
+  color: var(--slock-rail-yellow);
+  transform: translate(-1px, -1px);
+}
+
+[data-visual-theme="slock"] .slock-thread-sidebar {
+  border-right: var(--slock-rail-border-width) solid var(--slock-ink);
+  background: var(--slock-cream);
+  box-shadow: none !important;
+}
+
+[data-visual-theme="slock"] .slock-thread-sidebar-header {
+  min-height: 70px;
+  padding: 14px 16px;
+  border-bottom: var(--slock-rail-border-width) solid var(--slock-ink);
+}
+
+[data-visual-theme="slock"] .slock-thread-sidebar-title {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-new-button {
+  min-height: 38px;
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 0;
+  background: var(--slock-pink-active);
+  color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-chip);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-new-button:hover {
+  background: var(--slock-pink-hover);
+  transform: translate(-1px, -1px);
+  box-shadow: var(--slock-shadow-icon);
+}
+
+[data-visual-theme="slock"] .slock-sidebar-new-button:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-wrap {
+  padding: 14px 16px 12px;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-input {
+  height: 44px;
+  border: var(--slock-border-width) solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--slock-ink);
+  font-size: 18px;
+  font-weight: 750;
+  box-shadow: none;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-input:hover,
+[data-visual-theme="slock"] .slock-sidebar-search-input:focus {
+  border-color: var(--slock-ink);
+  background: var(--slock-white);
+  box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-input::placeholder {
+  color: var(--slock-secondary-text);
+}
+
+[data-visual-theme="slock"] .slock-sidebar-quicknav {
+  padding: 2px 12px 14px;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-section {
+  margin-top: 0;
+  padding-top: 16px;
+  border-top: var(--slock-border-width) solid var(--slock-ink);
+}
+
+[data-visual-theme="slock"] .slock-sidebar-section-title {
+  color: var(--slock-ink);
+  font-size: 15px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-section-count {
+  color: var(--slock-muted-text);
+  letter-spacing: 0;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-section-action {
+  width: 28px;
+  height: 28px;
+  border: var(--slock-border-width) solid transparent;
+  border-radius: 0;
+  color: var(--slock-ink);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-section-action:hover {
+  border-color: var(--slock-ink);
+  background: var(--slock-warm-yellow);
+  box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-channel-row,
+[data-visual-theme="slock"] .slock-sidebar-row {
+  min-height: 46px;
+  border: var(--slock-border-width) solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--slock-ink);
+  box-shadow: 0 0 0 transparent;
+  font-weight: 700;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    color 120ms ease;
+}
+
+[data-visual-theme="slock"] .slock-channel-row {
+  margin: 4px 12px;
+  width: calc(100% - 24px);
+  padding-right: 14px;
+  padding-left: 14px;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-row {
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
+[data-visual-theme="slock"] .slock-channel-row::before {
+  flex: 0 0 auto;
+  color: var(--slock-ink);
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1;
+  content: "#";
+}
+
+[data-visual-theme="slock"] .slock-channel-row:hover,
+[data-visual-theme="slock"] .slock-sidebar-row:hover {
+  border-color: var(--slock-ink);
+  background: var(--slock-warm-yellow);
+  color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-chip);
+  transform: translate(-1px, -1px);
+}
+
+[data-visual-theme="slock"] .slock-channel-row[data-active="true"],
+[data-visual-theme="slock"] .slock-sidebar-row[data-active="true"],
+[data-visual-theme="slock"] .slock-sidebar-row[aria-pressed="true"] {
+  border-color: var(--slock-ink);
+  background: var(--slock-pink-active);
+  color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-soft);
+  font-weight: 900;
+  transform: translate(-2px, -2px);
+}
+
+[data-visual-theme="slock"] .slock-channel-row[data-active="true"]:hover,
+[data-visual-theme="slock"] .slock-sidebar-row[data-active="true"]:hover,
+[data-visual-theme="slock"] .slock-sidebar-row[aria-pressed="true"]:hover {
+  background: var(--slock-pink-active);
+  box-shadow: var(--slock-shadow-soft);
+}
+
+[data-visual-theme="slock"] .slock-unread-badge {
+  min-width: 32px;
+  height: 26px;
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 6px;
+  background: var(--slock-pink-active);
+  color: var(--slock-white);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-result {
+  border: var(--slock-border-width) solid transparent;
+  border-radius: 0;
+}
+
+[data-visual-theme="slock"] .slock-sidebar-search-result:hover {
+  border-color: var(--slock-ink);
+  background: var(--slock-warm-yellow);
+  box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-sidebar-trash {
+  padding: 10px 12px 14px;
+  border-top: var(--slock-border-width) solid var(--slock-ink);
 }
 
 [data-visual-theme="slock"] .console-panel,
@@ -758,26 +1050,77 @@
 [data-visual-theme="slock"] .console-table-shell,
 [data-visual-theme="slock"] .console-search-field,
 [data-visual-theme="slock"] .console-status-panel {
-  border-color: #000000;
+  border-color: var(--slock-ink);
   border-radius: 0;
+}
+
+[data-visual-theme="slock"] .console-code-pane,
+[data-visual-theme="slock"] .console-table-shell,
+[data-visual-theme="slock"] .console-search-field,
+[data-visual-theme="slock"] .console-status-panel,
+[data-visual-theme="slock"] .slock-composer-frame,
+[data-visual-theme="slock"] .slock-page-frame,
+[data-visual-theme="slock"] .slock-panel-frame {
+  border-width: var(--slock-border-width);
 }
 
 [data-visual-theme="slock"] .console-card,
 [data-visual-theme="slock"] .console-section-shell,
 [data-visual-theme="slock"] .console-search-field,
 [data-visual-theme="slock"] .console-status-panel {
-  box-shadow: var(--console-shadow-soft);
+  box-shadow: var(--slock-shadow-soft);
 }
 
 [data-visual-theme="slock"] .console-pill,
 [data-visual-theme="slock"] .console-status-chip,
 [data-visual-theme="slock"] .console-nav-icon {
-  border-color: #000000;
+  border-color: var(--slock-ink);
   border-radius: 0;
-  box-shadow: 2px 2px 0 #000000;
+  box-shadow: var(--slock-shadow-chip);
 }
 
 [data-visual-theme="slock"] .console-nav-item {
-  border-color: #000000;
+  border-color: var(--slock-ink);
   border-radius: 0;
+}
+
+[data-visual-theme="slock"] .console-search-field:focus-within,
+[data-visual-theme="slock"] .slock-composer-frame:focus-within {
+  border-color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-page-frame,
+[data-visual-theme="slock"] .slock-panel-frame {
+  border-style: solid;
+  border-color: var(--slock-ink);
+  border-radius: 0;
+  box-shadow: var(--slock-shadow-soft);
+}
+
+[data-visual-theme="slock"] .slock-tool-button,
+[data-visual-theme="slock"] .slock-inline-control {
+  border: var(--slock-border-width) solid transparent;
+  border-radius: 0;
+}
+
+[data-visual-theme="slock"] .slock-tool-button:hover,
+[data-visual-theme="slock"] .slock-inline-control:hover {
+  border-color: var(--slock-ink);
+  background: var(--slock-warm-yellow);
+  color: var(--slock-ink);
+  box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-tool-button:active,
+[data-visual-theme="slock"] .slock-inline-control:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+
+[data-visual-theme="slock"] .slock-send-button,
+[data-visual-theme="slock"] .slock-stop-button {
+  border-color: var(--slock-ink);
+  color: var(--slock-rail-yellow);
+  box-shadow: var(--slock-shadow-icon);
 }

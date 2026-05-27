@@ -24,7 +24,7 @@ function SettingsShellInner() {
   if (standalone) {
     return (
       <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
-        <div className="flex flex-1 flex-col overflow-y-auto rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8">
+        <div className="slock-page-frame flex flex-1 flex-col overflow-y-auto rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8">
           <div className="space-y-5">
             <SettingsContent section={activeSection} />
           </div>

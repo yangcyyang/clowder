@@ -76,7 +76,7 @@ export function MissionHubView() {
 
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
-      <div className="flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3">
+      <div className="slock-page-frame flex flex-1 flex-col overflow-hidden rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3">
         {/* Header */}
         <header className="flex items-center justify-between px-7 py-4">
           <h1 className="text-lg font-bold text-cafe">Mission Hub</h1>
