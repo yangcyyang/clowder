@@ -152,6 +152,11 @@ export interface InvocationContext {
    */
   threadId?: string;
   /**
+   * Current user message ID — lets the runtime prompt point task claim to the
+   * exact triggering message instead of asking the model to infer it from text.
+   */
+  currentUserMessageId?: string;
+  /**
    * F087: Bootcamp state for CVO onboarding threads.
    * When present, cats inject bootcamp-guide behavior per phase.
    */
@@ -384,6 +389,26 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 2. Evidence Gate：交付前必须有证据，例如 commit hash、改动文件、测试命令、build 结果、截图、API smoke、导出文件路径之一；没有证据就不能说完成。
 3. Status Gate：有证据后把任务切到 in_review 等用户验收；做不了就明确 BLOCKED + 缺什么，不允许用“我会继续/正在处理/下一步”冒充交付。
 审计口径：状态回复 ≠ 交付；计划 ≠ 执行；没有证据的 done/in_review 都是不合格。`;
+
+function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
+  if (!context.threadId && !context.currentUserMessageId) return [];
+
+  const surface = `thread=${context.threadId ?? '$CAT_CAFE_THREAD_ID'}${
+    context.currentUserMessageId ? ` msg=${context.currentUserMessageId}` : ''
+  }`;
+  const claimCommand = context.currentUserMessageId
+    ? `$CLI task claim --message-id ${context.currentUserMessageId}`
+    : '$CLI task list → claim matching task';
+  const replyTarget = context.threadId ? `"${context.threadId}"` : '"$CAT_CAFE_THREAD_ID"';
+
+  return [
+    '## Clowder Task Gate（本轮动态）',
+    `surface: ${surface}`,
+    `行动任务先 claim: \`${claimCommand}\`；claim 失败就停止重复施工。`,
+    '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
+    `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
+  ];
+}
 
 // --- .local / .local-override support (#603) ---
 let _governanceDigestResolved: string = GOVERNANCE_OPERATIONAL_DIGEST;
@@ -815,6 +840,8 @@ export function buildInvocationContext(context: InvocationContext): string {
   } else {
     lines.push('当前模式：独立回答。', '');
   }
+
+  lines.push(...buildRuntimeTaskGateLines(context), '');
 
   // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
   // without considering whether a teammate needs to act next.

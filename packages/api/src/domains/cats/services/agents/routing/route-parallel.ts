@@ -255,6 +255,7 @@ export async function* routeParallel(
         teammates,
         mcpAvailable,
         toolPolicy: resolvedToolPolicy.toolPolicy,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
@@ -262,9 +263,10 @@ export async function* routeParallel(
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
+        ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
+        threadId,
       });
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
@@ -466,6 +468,7 @@ export async function* routeParallel(
         prompt,
         userId,
         threadId,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(signal ? { signal } : {}),

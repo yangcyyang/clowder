@@ -518,6 +518,22 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('独立回答'), 'Should indicate independent mode');
   });
 
+  test('buildInvocationContext injects runtime task gate with current message claim command', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread_abc',
+      currentUserMessageId: 'msg_123',
+    });
+    assert.ok(ctx.includes('Clowder Task Gate（本轮动态）'), 'Should include dynamic task gate');
+    assert.ok(ctx.includes('$CLI task claim --message-id msg_123'), 'Should point claim at current message');
+    assert.ok(ctx.includes('$CLI task update --task <taskId> --status in_review'), 'Should require in_review');
+    assert.ok(ctx.includes('$CLI message send --target "thread_abc"'), 'Should include current thread target');
+  });
+
   test('buildInvocationContext injects A2A exit check when enabled (non-parallel)', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({

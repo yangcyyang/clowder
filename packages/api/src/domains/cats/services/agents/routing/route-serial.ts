@@ -499,6 +499,7 @@ export async function* routeSerial(
         ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         a2aEnabled,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(directMessageFrom ? { directMessageFrom } : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
         ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
@@ -507,10 +508,11 @@ export async function* routeSerial(
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
+        ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
         ...(worldContext ? { worldContext } : {}),
+        threadId,
       });
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
@@ -766,6 +768,7 @@ export async function* routeSerial(
         prompt,
         userId,
         threadId,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(signal ? { signal } : {}),
