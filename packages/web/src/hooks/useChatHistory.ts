@@ -482,6 +482,10 @@ export function useChatHistory(threadId: string) {
         const params = new URLSearchParams({ limit: String(limit) });
         if (cursor) params.set('before', cursor);
         params.set('threadId', fetchForThread);
+        if (!cursor && typeof window !== 'undefined') {
+          const highlightId = new URLSearchParams(window.location.search).get('highlight');
+          if (highlightId) params.set('around', highlightId);
+        }
         const res = await apiFetch(`/api/messages?${params}`, {
           signal: controller.signal,
         });

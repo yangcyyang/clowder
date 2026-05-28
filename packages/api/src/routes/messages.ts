@@ -46,7 +46,7 @@ import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
@@ -229,6 +229,8 @@ const getMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(10000).default(50),
   /** Cursor: "timestamp:id" or legacy plain timestamp */
   before: z.string().optional(),
+  /** Center the first page around a search result. */
+  around: z.string().min(1).max(100).optional(),
   threadId: z.string().min(1).max(100).optional(),
 });
 
@@ -241,6 +243,28 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // multipart transport cap; image-specif
 const MAX_FILES = 5;
 
 const DECISION_NOTIFICATION_RE = /\b(review|lgtm|merge|pr)\b/i;
+
+function isMessageVisibleToUser(message: StoredMessage, userId: string): boolean {
+  if (message.deletedAt) return false;
+  if (message.userId === userId || isSystemUserMessage(message)) return true;
+  // Agent / connector messages are visible in shared Clowder threads even when
+  // the persisted userId is not the active browser session.
+  return Boolean(message.catId || message.source);
+}
+
+async function resolveThreadTitle(
+  threadStore: IThreadStore | undefined,
+  threadId: string,
+  cache: Map<string, string>,
+): Promise<string> {
+  const cached = cache.get(threadId);
+  if (cached) return cached;
+
+  const thread = await Promise.resolve(threadStore?.get(threadId)).catch(() => null);
+  const title = thread?.title || (threadId === 'default' ? '大厅' : '未命名对话');
+  cache.set(threadId, title);
+  return title;
+}
 
 export function shouldMarkDecisionNotification(content: string): boolean {
   const lower = content.toLowerCase();
@@ -1410,18 +1434,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     const { q, limit } = parseResult.data;
     const normalizedQuery = q.toLowerCase();
+    const threadTitleCache = new Map<string, string>();
     const recentMessages = await opts.messageStore.getRecent(10000);
-    const matches = recentMessages
+    const rawMatches = recentMessages
       .filter((m) => {
-        if (m.userId !== userId && !isSystemUserMessage(m)) return false;
+        if (!isMessageVisibleToUser(m, userId)) return false;
         if (!m.content?.trim()) return false;
         return m.content.toLowerCase().includes(normalizedQuery);
       })
       .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, limit)
-      .map((m) => ({
+      .slice(0, limit);
+    const matches = await Promise.all(
+      rawMatches.map(async (m) => ({
         id: m.id,
         threadId: m.threadId,
+        threadTitle: await resolveThreadTitle(opts.threadStore, m.threadId, threadTitleCache),
         content: m.content,
         timestamp: m.timestamp,
         catId: m.catId,
@@ -1435,7 +1462,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             : isSystemUserMessage(m)
               ? 'system'
               : 'user') as 'user' | 'assistant' | 'connector' | 'system',
-      }));
+      })),
+    );
 
     return { messages: matches };
   });
@@ -1446,7 +1474,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     if (!parseResult.success) {
       return { messages: [], hasMore: false };
     }
-    const { limit, before, threadId } = parseResult.data;
+    const { limit, before, around, threadId } = parseResult.data;
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       return { messages: [], hasMore: false };
@@ -1470,14 +1498,37 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Always thread-scoped — default to 'default' thread for lobby
     const resolvedThreadId = threadId ?? 'default';
-    const messages =
-      beforeTs != null
-        ? await opts.messageStore.getByThreadBefore(resolvedThreadId, beforeTs, limit + 1, beforeId, userId)
-        : await opts.messageStore.getByThread(resolvedThreadId, limit + 1, userId);
+    let hasMore = false;
+    let page: StoredMessage[] = [];
 
-    // Fetch limit+1 to determine hasMore; drop oldest (first) probe item
-    const hasMore = messages.length > limit;
-    const page = hasMore ? messages.slice(1) : messages;
+    if (around && beforeTs == null) {
+      const target = await opts.messageStore.getById(around);
+      if (target?.threadId === resolvedThreadId && isMessageVisibleToUser(target, userId)) {
+        const beforeLimit = Math.max(1, Math.floor((limit - 1) / 2));
+        const afterLimit = Math.max(0, limit - beforeLimit - 1);
+        const beforePage = await opts.messageStore.getByThreadBefore(
+          resolvedThreadId,
+          target.timestamp,
+          beforeLimit + 1,
+          target.id,
+          userId,
+        );
+        const afterPage = await opts.messageStore.getByThreadAfter(resolvedThreadId, target.id, afterLimit, userId);
+        hasMore = beforePage.length > beforeLimit;
+        page = [...beforePage.slice(-beforeLimit), target, ...afterPage.slice(0, afterLimit)];
+      }
+    }
+
+    if (page.length === 0) {
+      const messages =
+        beforeTs != null
+          ? await opts.messageStore.getByThreadBefore(resolvedThreadId, beforeTs, limit + 1, beforeId, userId)
+          : await opts.messageStore.getByThread(resolvedThreadId, limit + 1, userId);
+
+      // Fetch limit+1 to determine hasMore; drop oldest (first) probe item
+      hasMore = messages.length > limit;
+      page = hasMore ? messages.slice(1) : messages;
+    }
 
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {

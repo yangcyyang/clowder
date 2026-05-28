@@ -38,6 +38,7 @@ interface ThreadSidebarProps {
 interface MessageSearchResult {
   id: string;
   threadId: string;
+  threadTitle?: string;
   content: string;
   timestamp: number;
   catId: string | null;
@@ -344,17 +345,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
   const sidebarThreads = useMemo(() => liveThreads.filter((thread) => !isSidebarBranchThread(thread)), [liveThreads]);
-  const hiddenBranchThreadIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const thread of liveThreads) {
-      if (isSidebarBranchThread(thread)) ids.add(thread.id);
-    }
-    return ids;
-  }, [liveThreads]);
-  const visibleMessageSearchResults = useMemo(
-    () => messageSearchResults.filter((message) => !hiddenBranchThreadIds.has(message.threadId)),
-    [messageSearchResults, hiddenBranchThreadIds],
-  );
   const dmThreadByCatId = useMemo(() => {
     const map = new Map<string, Thread>();
     for (const thread of sidebarThreads) {
@@ -644,7 +634,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   };
 
   const renderMessageSearchResult = (message: MessageSearchResult) => {
-    const threadTitle = threadTitleById.get(message.threadId) ?? getThreadDisplayTitle(undefined, message.threadId);
+    const threadTitle =
+      message.threadTitle ?? threadTitleById.get(message.threadId) ?? getThreadDisplayTitle(undefined, message.threadId);
     return (
       <button
         key={message.id}
@@ -688,7 +679,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索对话、项目或 ID..."
+            placeholder="搜索对话、消息或 ID..."
             className="slock-sidebar-search-input console-form-input w-full text-xs"
           />
           {unreadIds.size > 0 && (
@@ -831,8 +822,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               <div className="space-y-0.5">
                 {isSearchingMessages ? (
                   <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">搜索消息中...</div>
-                ) : visibleMessageSearchResults.length > 0 ? (
-                  visibleMessageSearchResults.map(renderMessageSearchResult)
+                ) : messageSearchResults.length > 0 ? (
+                  messageSearchResults.map(renderMessageSearchResult)
                 ) : (
                   <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">没有匹配的消息</div>
                 )}
