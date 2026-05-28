@@ -41,6 +41,24 @@ tail -n 120 cat-cafe-daemon.log
 - 日志出现 `better-sqlite3 NODE_MODULE_VERSION`：Node ABI 不兼容，需要用当前运行 Node 重新编译 native module。
 - Web 仍显示旧状态但 `/api/cats` 正常：让用户 `Cmd+Shift+R` 硬刷新，或重启 3003。
 
+## 启动自检为什么可能没兜住
+
+`better-sqlite3` 自检只在 `start-dev.sh` 启动阶段运行。
+
+如果当前服务是一个早已启动的 `tsx watch` / direct API 进程，后续代码热重载只会让 API 子进程重跑，
+**不会重新进入 `start-dev.sh` 的 native module 自检阶段**。这时 Node 版本或 native module ABI 变化后，
+watch 进程会反复拉起 API，又反复在 `better-sqlite3` 加载处 crash。
+
+判断证据：
+
+```bash
+ps aux | rg "tsx watch src/index.ts|packages/api|start-dev"
+tail -n 120 cat-cafe-daemon.log
+```
+
+如果看到 `tsx watch src/index.ts` 仍在，但 3004 没监听，必须做完整 runtime restart，
+不能只等热重载自愈。
+
 ## 修复步骤
 
 ### 1. native module 不兼容
@@ -78,6 +96,9 @@ pnpm start:direct --quick
 
 如果 `pnpm stop` 只清理 stale daemon，没有杀掉 direct 进程，再按 PID 精准停止占用 3003/3004 的旧进程。
 
+如果 `pnpm start:status` 显示 daemon stale，但 `direct api-3004/web-3003` 正常，说明服务已经可用，
+但后台管理 PID 不干净；先向用户说明“不影响当前可用性”，再单独排 daemon wrapper。
+
 ### 3. 重启后验证
 
 必须拿到这些证据才算修复完成：
@@ -113,4 +134,3 @@ pnpm start:direct --quick
 
 用户侧动作：请 `Cmd+Shift+R` 硬刷新页面。
 ```
-
