@@ -10,6 +10,7 @@ import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { ChatInputMenus } from './ChatInputMenus';
@@ -30,6 +31,8 @@ import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 export { threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-drafts';
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const CVO_MODE_STORAGE_KEY = 'cat-cafe:cvoMode';
 const PROMPT_PREFIX_STORAGE_KEY = 'cat-cafe:promptPrefix';
 const CVO_MODE_PREFIX = `[CVO_MODE] 在执行任何操作之前，你必须先以采访者身份问我 3 个问题，帮助澄清需求：
@@ -110,7 +113,9 @@ interface ChatInputProps {
   uploadError?: string | null;
 }
 
-const ACCEPTED_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+const ACCEPTED_TYPES = ACCEPTED_IMAGE_TYPES.join(',');
+const ACCEPTED_IMAGE_TYPE_SET = new Set<string>(ACCEPTED_IMAGE_TYPES);
 
 function detectSlashCommand(value: string, cursor: number): string | null {
   if (!value.startsWith('/') || cursor <= 0) return null;
@@ -239,6 +244,7 @@ export function ChatInput({
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
   const [lobbyMode, setLobbyMode] = useState<'player' | 'god-view' | 'detective' | null>(null);
+  const addToast = useToastStore((s) => s.addToast);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const gameBtnRef = useRef<HTMLButtonElement>(null);
@@ -247,6 +253,20 @@ export function ChatInput({
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
+  const usedAttachmentSlots = images.length + attachments.length;
+  const hasReachedAttachmentLimit = usedAttachmentSlots >= MAX_ATTACHMENTS_PER_MESSAGE;
+
+  const showAttachmentError = useCallback(
+    (message: string) => {
+      addToast({
+        type: 'error',
+        title: '附件未添加',
+        message,
+        duration: 4200,
+      });
+    },
+    [addToast],
+  );
 
   // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
@@ -641,19 +661,44 @@ export function ChatInput({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
+      const capacity = MAX_ATTACHMENTS_PER_MESSAGE - images.length - attachments.length;
+      if (capacity <= 0) {
+        showAttachmentError(`每条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件`);
+        e.target.value = '';
+        return;
+      }
       setIsPreparingImages(true);
       try {
         const toAdd: File[] = [];
-        for (let i = 0; i < files.length && images.length + toAdd.length < 5; i++) {
-          toAdd.push(await compressImage(files[i]));
+        let rejectedTooLarge = 0;
+        let rejectedType = 0;
+        for (let i = 0; i < files.length && toAdd.length < capacity; i++) {
+          const file = files[i];
+          if (!ACCEPTED_IMAGE_TYPE_SET.has(file.type)) {
+            rejectedType += 1;
+            continue;
+          }
+          if (file.size > MAX_ATTACHMENT_BYTES) {
+            rejectedTooLarge += 1;
+            continue;
+          }
+          toAdd.push(await compressImage(file));
         }
-        setImages((prev) => [...prev, ...toAdd].slice(0, 5));
+        if (rejectedType > 0 || rejectedTooLarge > 0 || files.length > capacity) {
+          const reasons = [
+            rejectedType > 0 ? `${rejectedType} 个图片类型不支持` : '',
+            rejectedTooLarge > 0 ? `${rejectedTooLarge} 个文件超过 10MB` : '',
+            files.length > capacity ? `最多还能添加 ${capacity} 个附件` : '',
+          ].filter(Boolean);
+          showAttachmentError(reasons.join('，'));
+        }
+        setImages((prev) => [...prev, ...toAdd].slice(0, MAX_ATTACHMENTS_PER_MESSAGE));
       } finally {
         setIsPreparingImages(false);
       }
       e.target.value = '';
     },
-    [images],
+    [attachments.length, images.length, showAttachmentError],
   );
 
   const handlePaste = useCallback(
@@ -669,32 +714,85 @@ export function ChatInput({
       }
       if (imageFiles.length === 0) return;
       e.preventDefault();
+      const capacity = MAX_ATTACHMENTS_PER_MESSAGE - images.length - attachments.length;
+      if (capacity <= 0) {
+        showAttachmentError(`每条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件`);
+        return;
+      }
       setIsPreparingImages(true);
       try {
         const toAdd: File[] = [];
+        let rejectedTooLarge = 0;
+        let rejectedType = 0;
         for (const file of imageFiles) {
-          if (images.length + toAdd.length >= 5) break;
+          if (toAdd.length >= capacity) break;
+          if (!ACCEPTED_IMAGE_TYPE_SET.has(file.type)) {
+            rejectedType += 1;
+            continue;
+          }
+          if (file.size > MAX_ATTACHMENT_BYTES) {
+            rejectedTooLarge += 1;
+            continue;
+          }
           toAdd.push(await compressImage(file));
         }
-        setImages((prev) => [...prev, ...toAdd].slice(0, 5));
+        if (rejectedType > 0 || rejectedTooLarge > 0 || imageFiles.length > capacity) {
+          const reasons = [
+            rejectedType > 0 ? `${rejectedType} 个图片类型不支持` : '',
+            rejectedTooLarge > 0 ? `${rejectedTooLarge} 个文件超过 10MB` : '',
+            imageFiles.length > capacity ? `最多还能添加 ${capacity} 个附件` : '',
+          ].filter(Boolean);
+          showAttachmentError(reasons.join('，'));
+        }
+        setImages((prev) => [...prev, ...toAdd].slice(0, MAX_ATTACHMENTS_PER_MESSAGE));
       } finally {
         setIsPreparingImages(false);
       }
     },
-    [images],
+    [attachments.length, images.length, showAttachmentError],
   );
 
   const handleRemoveImage = useCallback((index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const handleAttachmentSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? []);
-    if (selected.length > 0) {
-      setAttachments((prev) => [...prev, ...selected].slice(0, 5));
-    }
-    e.target.value = '';
-  }, []);
+  const handleAttachmentSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = Array.from(e.target.files ?? []);
+      if (selected.length === 0) {
+        e.target.value = '';
+        return;
+      }
+      const capacity = MAX_ATTACHMENTS_PER_MESSAGE - images.length - attachments.length;
+      if (capacity <= 0) {
+        showAttachmentError(`每条消息最多 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件`);
+        e.target.value = '';
+        return;
+      }
+      const accepted: File[] = [];
+      let rejectedTooLarge = 0;
+      for (const file of selected) {
+        if (accepted.length >= capacity) break;
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          rejectedTooLarge += 1;
+          continue;
+        }
+        accepted.push(file);
+      }
+      if (rejectedTooLarge > 0 || selected.length > capacity) {
+        const reasons = [
+          rejectedTooLarge > 0 ? `${rejectedTooLarge} 个文件超过 10MB` : '',
+          selected.length > capacity ? `最多还能添加 ${capacity} 个附件` : '',
+        ].filter(Boolean);
+        showAttachmentError(reasons.join('，'));
+      }
+      if (accepted.length > 0) {
+        setAttachments((prev) => [...prev, ...accepted].slice(0, MAX_ATTACHMENTS_PER_MESSAGE));
+      }
+      e.target.value = '';
+    },
+    [attachments.length, images.length, showAttachmentError],
+  );
 
   const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
@@ -926,7 +1024,7 @@ export function ChatInput({
           onClose={() => setMobileToolbar(false)}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
-          maxImages={attachments.length >= 5}
+          maxImages={hasReachedAttachmentLimit}
         />
       )}
 
@@ -990,7 +1088,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
+                disabled={disabled || sendTemporarilyDisabled || hasReachedAttachmentLimit}
                 className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="上传图片"
                 title="上传图片"
@@ -1001,7 +1099,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={() => attachmentInputRef.current?.click()}
-                disabled={disabled || sendTemporarilyDisabled || attachments.length >= 5}
+                disabled={disabled || sendTemporarilyDisabled || hasReachedAttachmentLimit}
                 className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
                 aria-label="上传文件"
                 title="上传文件"

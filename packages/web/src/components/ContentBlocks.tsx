@@ -30,7 +30,7 @@ export function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
               key={i}
               src={src}
               alt="attached image"
-              className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-[var(--console-border-soft)] cursor-pointer hover:opacity-90 transition-opacity"
+              className="mt-2 max-h-[200px] max-w-full cursor-pointer rounded-lg border border-[var(--console-border-soft)] object-contain transition-opacity hover:opacity-90 sm:max-w-sm"
               onClick={() => setLightboxSrc(src)}
             />
           );

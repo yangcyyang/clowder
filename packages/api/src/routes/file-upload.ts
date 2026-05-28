@@ -9,7 +9,7 @@ import type { FileContent } from '@cat-cafe/shared';
 import { sanitizeFilenameStem } from '../utils/image-storage.js';
 
 const MAX_FILES = 5;
-export const MAX_GENERIC_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+export const MAX_GENERIC_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export interface UploadFile {
   filename?: string;

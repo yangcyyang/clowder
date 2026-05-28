@@ -10,6 +10,8 @@ import { FileUploadError, saveUploadedFiles, type UploadFile } from './file-uplo
 import { ImageUploadError, saveUploadedImages, type UploadImageFile } from './image-upload.js';
 import { sendMessageSchema } from './messages.schema.js';
 
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
+
 export type ParsedMultipart =
   | {
       content: string;
@@ -69,6 +71,9 @@ export async function parseMultipart(
   const parseResult = sendMessageSchema.safeParse(fields);
   if (!parseResult.success) {
     return { error: 'Invalid form fields' };
+  }
+  if (imageFiles.length + attachmentFiles.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    return { error: `Too many files (max ${MAX_ATTACHMENTS_PER_MESSAGE})` };
   }
 
   const { content, userId, threadId, replyTo, idempotencyKey } = parseResult.data;

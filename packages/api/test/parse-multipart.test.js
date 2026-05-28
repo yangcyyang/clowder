@@ -83,3 +83,53 @@ test('parseMultipart saves generic attachment files as file content blocks', asy
     await rm(uploadDir, { recursive: true, force: true });
   }
 });
+
+test('parseMultipart rejects more than five total uploaded files', async () => {
+  const uploadDir = await mkdtemp(join(tmpdir(), 'cat-cafe-parse-multipart-limit-'));
+  const request = {
+    parts: async function* () {
+      yield { type: 'field', fieldname: 'content', value: 'too many files' };
+      for (let i = 0; i < 6; i++) {
+        yield {
+          type: 'file',
+          fieldname: i % 2 === 0 ? 'images' : 'attachments',
+          filename: `file-${i}.png`,
+          mimetype: 'image/png',
+          toBuffer: async () => Buffer.from('fake-png'),
+        };
+      }
+    },
+  };
+
+  try {
+    const parsed = await parseMultipart(request, uploadDir);
+    assert.ok('error' in parsed, 'expected multipart parse failure');
+    assert.match(parsed.error, /Too many files \(max 5\)/);
+  } finally {
+    await rm(uploadDir, { recursive: true, force: true });
+  }
+});
+
+test('parseMultipart rejects generic attachments larger than 10MB', async () => {
+  const uploadDir = await mkdtemp(join(tmpdir(), 'cat-cafe-parse-multipart-size-'));
+  const request = {
+    parts: async function* () {
+      yield { type: 'field', fieldname: 'content', value: 'large file' };
+      yield {
+        type: 'file',
+        fieldname: 'attachments',
+        filename: 'large.bin',
+        mimetype: 'application/octet-stream',
+        toBuffer: async () => Buffer.alloc(10 * 1024 * 1024 + 1),
+      };
+    },
+  };
+
+  try {
+    const parsed = await parseMultipart(request, uploadDir);
+    assert.ok('error' in parsed, 'expected multipart parse failure');
+    assert.match(parsed.error, /File too large/);
+  } finally {
+    await rm(uploadDir, { recursive: true, force: true });
+  }
+});
