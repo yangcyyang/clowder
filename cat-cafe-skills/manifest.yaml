@@ -227,6 +227,28 @@ skills:
     sop_step: null
     merged_from: ["systematic-debugging"]
 
+  clowder-agent-runtime-doctor:
+    description: >
+      Clowder Agent 运行态检查与修复流程。
+      Use when: 左侧 DIRECT MESSAGES 显示“暂无 Agent”、@Agent 不触发、/api/cats 为空或失败、
+      3004 API 不通、重启后 Agent/主题/功能没加载。
+      Not for: 普通 UI 样式问题、单个 Agent 输出质量问题、非 Clowder 项目的运行故障。
+      Output: 根因结论 + 最小修复 + 验证证据 + 后续防复发建议。
+    triggers:
+      - "暂无 Agent"
+      - "检测不出 agent"
+      - "链接不上 agent"
+      - "/api/cats"
+      - "3004"
+      - "Agent 不见"
+    not_for:
+      - "普通 UI 样式问题"
+      - "单个 Agent 输出质量问题"
+      - "非 Clowder 项目"
+    output: "Runtime diagnosis / minimal repair / validation evidence"
+    next: ["debugging", "quality-gate"]
+    sop_step: null
+
   # ── 质量门禁 ──
   quality-gate:
     description: >
