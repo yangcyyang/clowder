@@ -144,6 +144,11 @@ export interface SocketCallbacks {
   onMessageDeleted?: (data: { messageId: string; threadId: string; deletedBy: string }) => void;
   onMessageRestored?: (data: { messageId: string; threadId: string }) => void;
   onMessageEdited?: (data: { messageId: string; threadId: string; content: string; editedAt: number }) => void;
+  onMessageReactionsUpdated?: (data: {
+    messageId: string;
+    threadId: string;
+    reactions: import('../stores/chat-types').MessageReaction[];
+  }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
   onAuthorizationRequest?: (data: {
     requestId: string;
@@ -775,6 +780,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('message_edited', (data: { messageId: string; threadId: string; content: string; editedAt: number }) => {
       callbacksRef.current.onMessageEdited?.(data);
     });
+    socket.on(
+      'message_reactions_updated',
+      (data: {
+        messageId: string;
+        threadId: string;
+        reactions: import('../stores/chat-types').MessageReaction[];
+      }) => {
+        callbacksRef.current.onMessageReactionsUpdated?.(data);
+      },
+    );
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);
     });

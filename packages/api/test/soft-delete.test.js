@@ -356,6 +356,85 @@ describe('PATCH /api/messages/:id (edit)', () => {
   });
 });
 
+describe('message reactions', () => {
+  it('adds a reaction, persists it in extra, and broadcasts updates', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const msgs = seedMessages(messageStore);
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${msgs[1].id}/reactions`,
+      payload: { userId: 'user-1', emoji: '👍' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.messageId, msgs[1].id);
+    assert.equal(body.threadId, 'thread-sd');
+    assert.deepEqual(body.reactions, [{ emoji: '👍', users: ['user-1'], updatedAt: body.reactions[0].updatedAt }]);
+
+    const stored = messageStore.getById(msgs[1].id);
+    assert.deepEqual(stored.extra.reactions, body.reactions);
+
+    const events = socketManager.getEvents();
+    assert.ok(
+      events.some(
+        (event) =>
+          event.room === 'thread:thread-sd' &&
+          event.event === 'message_reactions_updated' &&
+          event.data.messageId === msgs[1].id &&
+          event.data.reactions[0].emoji === '👍',
+      ),
+    );
+
+    await app.close();
+  });
+
+  it('removes the current user reaction and drops empty aggregates', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const msgs = seedMessages(messageStore);
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/messages/${msgs[1].id}/reactions`,
+      payload: { userId: 'user-1', emoji: '👍' },
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/messages/${msgs[1].id}/reactions/${encodeURIComponent('👍')}`,
+      payload: { userId: 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.deepEqual(body.reactions, []);
+    assert.deepEqual(messageStore.getById(msgs[1].id).extra.reactions, []);
+
+    const events = socketManager.getEvents();
+    assert.ok(
+      events.some(
+        (event) =>
+          event.event === 'message_reactions_updated' &&
+          event.data.messageId === msgs[1].id &&
+          event.data.reactions.length === 0,
+      ),
+    );
+
+    await app.close();
+  });
+});
+
 describe('PATCH /api/messages/:id/restore', () => {
   it('restores a soft-deleted message', async () => {
     const messageStore = new MessageStore();

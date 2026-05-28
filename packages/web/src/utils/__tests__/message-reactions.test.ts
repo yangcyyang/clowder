@@ -1,46 +1,74 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  getDefaultReactionEmojis,
-  getMessageReactions,
-  MESSAGE_REACTIONS_EVENT,
-  MESSAGE_REACTIONS_STORAGE_KEY,
-  toggleMessageReaction,
-} from '../message-reactions';
+import type { MessageReaction } from '@/stores/chat-types';
+import { apiFetch } from '../api-client';
+import { getDefaultReactionEmojis, hasUserReaction, toggleMessageReaction } from '../message-reactions';
+
+vi.mock('../api-client', () => ({
+  apiFetch: vi.fn(),
+}));
+
+const mockApiFetch = vi.mocked(apiFetch);
 
 describe('message-reactions', () => {
   beforeEach(() => {
-    localStorage.clear();
+    mockApiFetch.mockReset();
   });
 
   it('provides the default reaction palette', () => {
-    expect(getDefaultReactionEmojis()).toEqual(['👍', '❤️', '😂', '🎉', '👀', '✅']);
+    expect(getDefaultReactionEmojis()).toEqual(['👍', '❤️', '😄', '🎉', '😮', '👀']);
   });
 
-  it('toggles one user reaction on and off', () => {
-    expect(toggleMessageReaction('msg-1', '👍', 'user-1')).toEqual([
-      { emoji: '👍', users: ['user-1'], updatedAt: expect.any(Number) },
-    ]);
+  it('detects whether the current user has reacted', () => {
+    const reactions: MessageReaction[] = [{ emoji: '👍', users: ['user-1'], updatedAt: 1 }];
 
-    expect(getMessageReactions('msg-1')).toHaveLength(1);
-    expect(toggleMessageReaction('msg-1', '👍', 'user-1')).toEqual([]);
-    expect(getMessageReactions('msg-1')).toEqual([]);
-    expect(JSON.parse(localStorage.getItem(MESSAGE_REACTIONS_STORAGE_KEY) ?? '{}')).toEqual({});
+    expect(hasUserReaction(reactions, '👍', 'user-1')).toBe(true);
+    expect(hasUserReaction(reactions, '👍', 'user-2')).toBe(false);
+    expect(hasUserReaction(reactions, '👀', 'user-1')).toBe(false);
   });
 
-  it('keeps separate users on the same emoji', () => {
-    toggleMessageReaction('msg-1', '👀', 'user-1');
-    toggleMessageReaction('msg-1', '👀', 'user-2');
+  it('adds a reaction through the backend API', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ reactions: [{ emoji: '👍', users: ['user-1'], updatedAt: 123 }] }), {
+        status: 200,
+      }),
+    );
 
-    expect(getMessageReactions('msg-1')).toMatchObject([{ emoji: '👀', users: ['user-1', 'user-2'] }]);
+    await expect(
+      toggleMessageReaction({ messageId: 'msg-1', emoji: '👍', userId: 'user-1', active: false }),
+    ).resolves.toEqual([{ emoji: '👍', users: ['user-1'], updatedAt: 123 }]);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/msg-1/reactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'user-1', emoji: '👍' }),
+    });
   });
 
-  it('dispatches a same-window change event after persisting', () => {
-    const listener = vi.fn();
-    window.addEventListener(MESSAGE_REACTIONS_EVENT, listener);
+  it('removes an active reaction through the backend API', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ reactions: [] }), {
+        status: 200,
+      }),
+    );
 
-    toggleMessageReaction('msg-1', '✅', 'user-1');
+    await expect(
+      toggleMessageReaction({ messageId: 'msg-1', emoji: '👍', userId: 'user-1', active: true }),
+    ).resolves.toEqual([]);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/msg-1/reactions/%F0%9F%91%8D', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'user-1' }),
+    });
+  });
 
-    expect(listener).toHaveBeenCalledTimes(1);
-    window.removeEventListener(MESSAGE_REACTIONS_EVENT, listener);
+  it('surfaces backend errors', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'boom' }), {
+        status: 500,
+      }),
+    );
+
+    await expect(
+      toggleMessageReaction({ messageId: 'msg-1', emoji: '👍', userId: 'user-1', active: false }),
+    ).rejects.toThrow('boom');
   });
 });

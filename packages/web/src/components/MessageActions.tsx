@@ -6,7 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
-import { getDefaultReactionEmojis, toggleMessageReaction } from '@/utils/message-reactions';
+import { getDefaultReactionEmojis, hasUserReaction, toggleMessageReaction } from '@/utils/message-reactions';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -111,11 +111,24 @@ export function MessageActions({
     });
   }, [message, threadId]);
   const handleReaction = useCallback(
-    (emoji: string) => {
-      toggleMessageReaction(message.id, emoji, getUserId());
-      setReactionPickerOpen(false);
+    async (emoji: string) => {
+      const userId = getUserId();
+      const active = hasUserReaction(message.extra?.reactions, emoji, userId);
+      try {
+        const reactions = await toggleMessageReaction({ messageId: message.id, emoji, userId, active });
+        patchMessage(message.id, { extra: { reactions } });
+      } catch (err) {
+        useToastStore.getState().addToast({
+          type: 'error',
+          title: 'Reaction 失败',
+          message: err instanceof Error ? err.message : '请稍后重试',
+          duration: 3000,
+        });
+      } finally {
+        setReactionPickerOpen(false);
+      }
     },
-    [message.id],
+    [message.extra?.reactions, message.id, patchMessage],
   );
 
   const handlePin = useCallback(() => {

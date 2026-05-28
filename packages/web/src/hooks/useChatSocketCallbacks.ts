@@ -120,6 +120,13 @@ export function useChatSocketCallbacks({
         }
         requestStreamCatchUp(data.threadId);
       },
+      onMessageReactionsUpdated: (data) => {
+        if (data.threadId === threadId) {
+          patchMessage(data.messageId, { extra: { reactions: data.reactions } });
+          return;
+        }
+        requestStreamCatchUp(data.threadId);
+      },
       onThreadBranched: () => {
         /* branch navigation handled by the action initiator */
       },

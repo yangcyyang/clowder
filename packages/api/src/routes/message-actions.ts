@@ -37,6 +37,63 @@ const editBodySchema = z.object({
   content: z.string().trim().min(1).max(20_000),
 });
 
+const reactionBodySchema = z.object({
+  userId: z.string().min(1).max(100),
+  emoji: z.string().trim().min(1).max(32),
+});
+
+const deleteReactionBodySchema = z.object({
+  userId: z.string().min(1).max(100),
+});
+
+type MessageReaction = {
+  emoji: string;
+  users: string[];
+  updatedAt: number;
+};
+
+function normalizeReactions(value: unknown): MessageReaction[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is MessageReaction => {
+      if (!item || typeof item !== 'object') return false;
+      const candidate = item as Partial<MessageReaction>;
+      return (
+        typeof candidate.emoji === 'string' &&
+        Array.isArray(candidate.users) &&
+        candidate.users.every((user) => typeof user === 'string')
+      );
+    })
+    .map((item) => ({
+      emoji: item.emoji,
+      users: Array.from(new Set(item.users)),
+      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+    }))
+    .filter((item) => item.users.length > 0);
+}
+
+function addReaction(reactions: MessageReaction[], emoji: string, userId: string): MessageReaction[] {
+  const now = Date.now();
+  const found = reactions.find((reaction) => reaction.emoji === emoji);
+  if (!found) {
+    return [...reactions, { emoji, users: [userId], updatedAt: now }];
+  }
+  return reactions.map((reaction) => {
+    if (reaction.emoji !== emoji) return reaction;
+    return { ...reaction, users: Array.from(new Set([...reaction.users, userId])), updatedAt: now };
+  });
+}
+
+function removeReaction(reactions: MessageReaction[], emoji: string, userId: string): MessageReaction[] {
+  const now = Date.now();
+  return reactions
+    .map((reaction) => {
+      if (reaction.emoji !== emoji) return reaction;
+      return { ...reaction, users: reaction.users.filter((user) => user !== userId), updatedAt: now };
+    })
+    .filter((reaction) => reaction.users.length > 0);
+}
+
 export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOptions> = async (app, opts) => {
   // GET /api/messages/:id — fetch one message for CLI/task workflows.
   app.get<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
@@ -61,6 +118,76 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
       ...(msg.deletedAt ? { deletedAt: msg.deletedAt } : {}),
     };
   });
+
+  // POST /api/messages/:id/reactions — add an emoji reaction for the current user.
+  app.post<{ Params: { id: string } }>('/api/messages/:id/reactions', async (request, reply) => {
+    const parseResult = reactionBodySchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parseResult.error.issues };
+    }
+
+    const { id } = request.params;
+    const { userId, emoji } = parseResult.data;
+    const targetMsg = await opts.messageStore.getById(id);
+    if (!targetMsg || targetMsg.deletedAt || targetMsg._tombstone) {
+      reply.status(404);
+      return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
+    }
+
+    const reactions = addReaction(normalizeReactions(targetMsg.extra?.reactions), emoji, userId);
+    const extra = { ...(targetMsg.extra ?? {}), reactions };
+    const updated = await opts.messageStore.updateExtra(id, extra);
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Reaction update failed', code: 'REACTION_UPDATE_FAILED' };
+    }
+
+    opts.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'message_reactions_updated', {
+      messageId: id,
+      threadId: updated.threadId,
+      reactions,
+    });
+
+    return { messageId: id, threadId: updated.threadId, reactions };
+  });
+
+  // DELETE /api/messages/:id/reactions/:emoji — remove current user's reaction.
+  app.delete<{ Params: { id: string; emoji: string } }>(
+    '/api/messages/:id/reactions/:emoji',
+    async (request, reply) => {
+      const parseResult = deleteReactionBodySchema.safeParse(request.body);
+      if (!parseResult.success) {
+        reply.status(400);
+        return { error: 'Invalid request body', details: parseResult.error.issues };
+      }
+
+      const { id } = request.params;
+      const emoji = decodeURIComponent(request.params.emoji);
+      const { userId } = parseResult.data;
+      const targetMsg = await opts.messageStore.getById(id);
+      if (!targetMsg || targetMsg.deletedAt || targetMsg._tombstone) {
+        reply.status(404);
+        return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
+      }
+
+      const reactions = removeReaction(normalizeReactions(targetMsg.extra?.reactions), emoji, userId);
+      const extra = { ...(targetMsg.extra ?? {}), reactions };
+      const updated = await opts.messageStore.updateExtra(id, extra);
+      if (!updated) {
+        reply.status(500);
+        return { error: 'Reaction update failed', code: 'REACTION_UPDATE_FAILED' };
+      }
+
+      opts.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'message_reactions_updated', {
+        messageId: id,
+        threadId: updated.threadId,
+        reactions,
+      });
+
+      return { messageId: id, threadId: updated.threadId, reactions };
+    },
+  );
 
   // DELETE /api/messages/:id — soft or hard delete a single message
   app.delete<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {

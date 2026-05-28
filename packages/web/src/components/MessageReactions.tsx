@@ -1,43 +1,47 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import {
-  getMessageReactions,
-  MESSAGE_REACTIONS_EVENT,
-  toggleMessageReaction,
-  type MessageReaction,
-} from '@/utils/message-reactions';
+import type { MessageReaction } from '@/stores/chat-types';
+import { useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
+import { hasUserReaction, toggleMessageReaction } from '@/utils/message-reactions';
 import { getUserId } from '@/utils/userId';
 
 interface MessageReactionsProps {
   messageId: string;
+  reactions?: MessageReaction[];
 }
 
-export function MessageReactions({ messageId }: MessageReactionsProps) {
-  const [reactions, setReactions] = useState<MessageReaction[]>(() => getMessageReactions(messageId));
-
-  useEffect(() => {
-    const syncReactions = () => setReactions(getMessageReactions(messageId));
-    syncReactions();
-    window.addEventListener(MESSAGE_REACTIONS_EVENT, syncReactions);
-    window.addEventListener('storage', syncReactions);
-    return () => {
-      window.removeEventListener(MESSAGE_REACTIONS_EVENT, syncReactions);
-      window.removeEventListener('storage', syncReactions);
-    };
-  }, [messageId]);
-
+export function MessageReactions({ messageId, reactions = [] }: MessageReactionsProps) {
+  const patchMessage = useChatStore((s) => s.patchMessage);
   if (reactions.length === 0) return null;
 
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5">
       {reactions.map((reaction) => {
-        const active = reaction.users.includes(getUserId());
+        const userId = getUserId();
+        const active = hasUserReaction(reactions, reaction.emoji, userId);
         return (
           <button
             key={reaction.emoji}
             type="button"
-            onClick={() => setReactions(toggleMessageReaction(messageId, reaction.emoji, getUserId()))}
+            onClick={async () => {
+              try {
+                const nextReactions = await toggleMessageReaction({
+                  messageId,
+                  emoji: reaction.emoji,
+                  userId,
+                  active,
+                });
+                patchMessage(messageId, { extra: { reactions: nextReactions } });
+              } catch (err) {
+                useToastStore.getState().addToast({
+                  type: 'error',
+                  title: 'Reaction 失败',
+                  message: err instanceof Error ? err.message : '请稍后重试',
+                  duration: 3000,
+                });
+              }
+            }}
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
               active
                 ? 'border-[var(--cafe-accent)]/40 bg-[var(--cafe-accent)]/10 text-[var(--cafe-accent)]'

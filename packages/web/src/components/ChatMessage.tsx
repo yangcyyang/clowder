@@ -404,7 +404,7 @@ export function ChatMessage({
             )}
           </div>
           {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
-          <MessageReactions messageId={message.id} />
+          <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
           {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
             <ThreadReplyBadge
               count={threadReplyInfo.replyCount}
@@ -568,7 +568,7 @@ export function ChatMessage({
           )}
         </div>
         {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
-        <MessageReactions messageId={message.id} />
+        <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
         {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
           <ThreadReplyBadge
             count={threadReplyInfo.replyCount}

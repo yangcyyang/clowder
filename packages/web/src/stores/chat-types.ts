@@ -49,6 +49,12 @@ export interface ChatMessageMetadata {
   usage?: TokenUsage;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  users: string[];
+  updatedAt: number;
+}
+
 export interface EvidenceResultData {
   title: string;
   anchor: string;
@@ -282,6 +288,8 @@ export interface ChatMessage {
       reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
       invocationId?: string;
     };
+    /** P2-3: Aggregated emoji reactions keyed by message. */
+    reactions?: MessageReaction[];
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
      * timestamp-ordered into the message list (not appended at end).
