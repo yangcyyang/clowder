@@ -79,6 +79,8 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
+const SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理';
+const SKILL_DASHBOARD_PATH = join(SKILL_MANAGEMENT_DIR, 'skills-dashboard.html');
 
 function extractSkillFrontmatter(content: string): LocalSkillFrontmatter | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -145,6 +147,20 @@ async function listLocalClaudeSkills(skillsDir: string): Promise<SkillEntry[]> {
 }
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
+  app.get('/api/skills/dashboard', async (_request, reply) => {
+    try {
+      const html = await readFile(SKILL_DASHBOARD_PATH, 'utf-8');
+      reply.type('text/html; charset=utf-8');
+      return html;
+    } catch {
+      reply.status(404);
+      return {
+        error: 'Skill dashboard not found',
+        path: SKILL_DASHBOARD_PATH,
+      };
+    }
+  });
+
   app.get('/api/skills', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {

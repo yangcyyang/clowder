@@ -41,6 +41,10 @@ export function ChatContainerHeader({
     setIsHydrated(true);
   }, []);
 
+  const openSkillDashboard = () => {
+    window.open('/api/skills/dashboard', '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <header className="safe-area-top">
       <div className="h-[54px] border-b border-[var(--slock-border-color)] px-6 flex items-center gap-2.5">
@@ -63,6 +67,15 @@ export function ChatContainerHeader({
           <ThreadMemberAvatars threadId={threadId} />
         </div>
         <ExportButton threadId={threadId} />
+        <button
+          type="button"
+          onClick={openSkillDashboard}
+          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          title="打开 Skill 管理仪表盘"
+          aria-label="打开 Skill 管理仪表盘"
+        >
+          SK
+        </button>
         <button
           type="button"
           onClick={onOpenKnowledgeCapture}
