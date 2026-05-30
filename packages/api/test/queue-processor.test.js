@@ -2140,6 +2140,26 @@ describe('QueueProcessor', () => {
       );
     });
 
+    it('allows restart-requeued user autoExecute entry to execute itself', async () => {
+      enqueueEntry(deps.queue, {
+        userId: 'u1',
+        source: 'user',
+        targetCats: ['codex'],
+        autoExecute: true,
+      });
+
+      await processor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.equal(
+        deps.invocationTracker.startAll.mock.calls.length,
+        1,
+        'restart-requeued user autoExecute entry should not block itself',
+      );
+      const entries = deps.queue.list('t1', 'u1');
+      assert.equal(entries.length, 0, 'autoExecute user entry should be removed after execution');
+    });
+
     it('allows auto-execute when only agent entries are queued', async () => {
       enqueueEntry(deps.queue, {
         userId: 'system',

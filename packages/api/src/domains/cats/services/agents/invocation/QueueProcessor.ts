@@ -600,7 +600,7 @@ export class QueueProcessor {
     if (!this.deps.queue.hasQueuedNonAgentForThread?.(threadId)) return false;
     for (const userId of this.deps.queue.listUsersForThread(threadId)) {
       for (const entry of this.deps.queue.list(threadId, userId)) {
-        if (entry.source === 'agent' || entry.status !== 'queued') continue;
+        if (entry.source === 'agent' || entry.status !== 'queued' || entry.autoExecute) continue;
         const cat = entry.targetCats[0];
         if (!cat || !this.pausedSlots.has(QueueProcessor.slotKey(threadId, cat))) return true;
       }
