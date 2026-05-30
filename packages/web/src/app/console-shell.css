@@ -249,9 +249,9 @@
 }
 
 [data-visual-theme="slock"] {
-  --console-shell-bg: var(--slock-white);
+  --console-shell-bg: var(--slock-cream);
   --console-panel-bg: var(--slock-cream);
-  --console-card-bg: var(--slock-white);
+  --console-card-bg: #fffdf7;
   --console-card-soft-bg: var(--slock-cream);
   --console-code-bg: var(--slock-warm-yellow);
   --console-pill-bg: var(--slock-warm-yellow);
@@ -259,7 +259,7 @@
   --console-border-strong: var(--slock-ink);
   --console-shadow: var(--slock-shadow);
   --console-shadow-soft: var(--slock-shadow-soft);
-  --console-field-bg: var(--slock-white);
+  --console-field-bg: #fffdf7;
   --console-active-bg: var(--slock-pink-active);
   --console-active-fg: var(--slock-ink);
   --console-active-muted: #2f2f2f;
