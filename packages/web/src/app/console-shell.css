@@ -220,34 +220,6 @@
   --chat-code-border: #d2bda7;
 }
 
-[data-visual-theme="slack"] {
-  --console-shell-bg: #ffffff;
-  --console-panel-bg: #ffffff;
-  --console-card-bg: #ffffff;
-  --console-card-soft-bg: #f8f6f3;
-  --console-code-bg: #f4ede4;
-  --console-pill-bg: #f4ede4;
-  --console-border-soft: #ddd4c8;
-  --console-border-strong: #cfc6bb;
-  --console-shadow: 0 8px 24px rgba(29, 28, 29, 0.03);
-  --console-shadow-soft: 0 8px 20px rgba(29, 28, 29, 0.03);
-  --console-field-bg: #f8f6f3;
-  --console-active-bg: #f4ede4;
-  --console-hover-bg: rgba(255, 255, 255, 0.08);
-  --console-rail-bg: #4a154b;
-  --console-rail-item: rgba(255, 255, 255, 0.08);
-  --console-rail-active: #611f69;
-  --console-rail-fg: #ffffff;
-  --console-input-stroke: #1264a3;
-  --console-button-emphasis: #4a154b;
-  --console-button-emphasis-hover: #611f69;
-  --console-modal-title: #4a154b;
-  --console-modal-close-bg: #f4ede4;
-  --console-modal-close-fg: #4a154b;
-  --console-cat-fallback: #7c4082;
-  --console-status-connected: #2bac76;
-}
-
 [data-visual-theme="slockv1"] {
   --console-shell-bg: #ffffff;
   --console-panel-bg: #fffaef;
@@ -344,34 +316,6 @@
   --chat-code-btn-bg: #e8e6dc;
   --chat-code-btn-text: #141413;
   --chat-code-border: #e8e6dc;
-}
-
-[data-theme="dark"][data-visual-theme="slack"] {
-  --console-shell-bg: #1a1d21;
-  --console-panel-bg: #222529;
-  --console-card-bg: #222529;
-  --console-card-soft-bg: #2b2e33;
-  --console-code-bg: #111316;
-  --console-pill-bg: #2b2e33;
-  --console-border-soft: #34373c;
-  --console-border-strong: #4a4d52;
-  --console-shadow: 0 24px 56px rgba(0, 0, 0, 0.34);
-  --console-shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.24);
-  --console-field-bg: #111316;
-  --console-active-bg: rgba(54, 197, 240, 0.16);
-  --console-hover-bg: rgba(255, 255, 255, 0.08);
-  --console-rail-bg: #350d36;
-  --console-rail-item: rgba(255, 255, 255, 0.08);
-  --console-rail-active: #611f69;
-  --console-rail-fg: #ffffff;
-  --console-input-stroke: #36c5f0;
-  --console-button-emphasis: #36c5f0;
-  --console-button-emphasis-hover: #5bd2f4;
-  --console-modal-title: #f8f8f8;
-  --console-modal-close-bg: #2b2e33;
-  --console-modal-close-fg: #d1d2d3;
-  --console-cat-fallback: #7c4082;
-  --console-status-connected: #36c5f0;
 }
 
 [data-theme="dark"][data-visual-theme="slockv1"] {

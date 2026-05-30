@@ -16,7 +16,7 @@ const visualThemeBootstrapScript = `
 (() => {
   const storageKey = 'clowder:visual-theme';
   const migrationKey = 'clowder:visual-theme-default:v4';
-  const validThemes = new Set(['claude', 'slack', 'slockv1', 'slock', 'kami']);
+  const validThemes = new Set(['claude', 'slockv1', 'slock', 'kami']);
   const defaultTheme = 'slock';
   try {
     const migrated = window.localStorage.getItem(migrationKey) === '1';

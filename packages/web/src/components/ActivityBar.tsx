@@ -9,11 +9,11 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
-type VisualTheme = 'claude' | 'slack' | 'slockv1' | 'slock' | 'kami';
+type VisualTheme = 'claude' | 'slockv1' | 'slock' | 'kami';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
 const VISUAL_THEME_DEFAULT_MIGRATION_KEY = 'clowder:visual-theme-default:v4';
-const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'slockv1', 'slock', 'kami'];
+const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slockv1', 'slock', 'kami'];
 const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
 const NAV_ITEMS = [
@@ -97,9 +97,7 @@ function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
       ? 'V1'
       : theme === 'kami'
         ? 'K'
-        : theme === 'slack'
-          ? 'S'
-          : theme === 'slock'
+        : theme === 'slock'
             ? 'SL'
             : 'C';
 
@@ -114,7 +112,6 @@ function getVisualThemeLabel(theme: VisualTheme): string {
   if (theme === 'kami') return 'KAMI';
   if (theme === 'slockv1') return 'Slock v1';
   if (theme === 'slock') return 'Slock';
-  if (theme === 'slack') return 'Slack';
   return 'Claude';
 }
 
