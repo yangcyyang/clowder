@@ -84,6 +84,10 @@ export interface InvocationContext {
   governanceSourceContext?: string | null;
   /** Prompt-level tags like 'critique' (from IntentParser) */
   promptTags?: readonly string[];
+  /** Skill Router lightweight menu + matched SKILL.md payload. */
+  skillRouterBlock?: string | null;
+  /** Matched skill names for observability. */
+  skillRouterMatchedSkills?: readonly string[];
   /** Whether A2A collaboration prompt should be injected (only in serial/execute mode) */
   a2aEnabled?: boolean;
   /**
@@ -870,6 +874,10 @@ export function buildInvocationContext(context: InvocationContext): string {
   const skillTag = context.promptTags?.find((t) => t.startsWith('skill:'));
   if (skillTag) {
     lines.push(`⚡ Signal-triggered action → load skill: ${skillTag.slice(6)}`, '');
+  }
+
+  if (context.skillRouterBlock) {
+    lines.push(context.skillRouterBlock, '');
   }
 
   // F042 Wave 3: Active participant hint — re-injected per-invocation, survives compression.

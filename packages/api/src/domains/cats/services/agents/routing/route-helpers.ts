@@ -147,6 +147,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasGuideContext: boolean;
   hasMcpInstructions: boolean;
   hasAgentMemory: boolean;
+  skillRouterMatchedSkills?: readonly string[];
   governanceTier: 'core' | 'operational';
   governanceEstimatedTokens: number;
   hasGovernanceSourceContext: boolean;
@@ -164,6 +165,12 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
   if (input.hasSopHint) loadedBlocks.push('sop-hint');
   if (input.hasGuideContext) loadedBlocks.push('guide-context');
+  if (input.skillRouterMatchedSkills) {
+    loadedBlocks.push('skill-router');
+    for (const skillName of input.skillRouterMatchedSkills) {
+      loadedBlocks.push(`skill:${skillName}`);
+    }
+  }
 
   const skippedBlocks: string[] = [];
   if (!input.loadStandardContext) {

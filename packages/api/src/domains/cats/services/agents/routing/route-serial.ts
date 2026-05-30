@@ -55,6 +55,7 @@ import {
   getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
@@ -489,6 +490,7 @@ export async function* routeSerial(
 
       const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
       const a2aEnabled = worklistEntry.a2aCount < maxDepth;
+      const skillRouterContext = resolveSkillRouterContext(message);
       const invocationContext = buildInvocationContext({
         catId,
         mode: invocationMode,
@@ -499,6 +501,10 @@ export async function* routeSerial(
         toolPolicy: resolvedToolPolicy.toolPolicy,
         ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
+        ...(skillRouterContext ? { skillRouterBlock: skillRouterContext.promptBlock } : {}),
+        ...(skillRouterContext?.matchedSkillNames.length
+          ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames }
+          : {}),
         a2aEnabled,
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(directMessageFrom ? { directMessageFrom } : {}),
@@ -708,6 +714,7 @@ export async function* routeSerial(
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
+        ...(skillRouterContext ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames } : {}),
         governanceTier,
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),

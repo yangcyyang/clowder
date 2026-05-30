@@ -44,6 +44,19 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('codex'));
   });
 
+  test('injects Skill Router block when provided', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      skillRouterBlock: '## Skill Router（可用 Skill 菜单）\n- debugging: 排查 bug',
+    });
+    assert.ok(prompt.includes('## Skill Router（可用 Skill 菜单）'));
+    assert.ok(prompt.includes('debugging: 排查 bug'));
+  });
+
   test('contains display name for gemini', async () => {
     const build = await getBuilder();
     const prompt = build({

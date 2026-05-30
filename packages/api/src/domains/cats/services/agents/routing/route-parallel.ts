@@ -32,6 +32,7 @@ import {
   getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
@@ -250,6 +251,7 @@ export async function* routeParallel(
         }
       }
 
+      const skillRouterContext = resolveSkillRouterContext(message);
       const invocationContext = buildInvocationContext({
         catId,
         mode: 'parallel',
@@ -259,6 +261,10 @@ export async function* routeParallel(
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
+        ...(skillRouterContext ? { skillRouterBlock: skillRouterContext.promptBlock } : {}),
+        ...(skillRouterContext?.matchedSkillNames.length
+          ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames }
+          : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
@@ -457,6 +463,7 @@ export async function* routeParallel(
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
+        ...(skillRouterContext ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames } : {}),
         governanceTier,
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
