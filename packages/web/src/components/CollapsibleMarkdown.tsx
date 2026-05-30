@@ -9,6 +9,7 @@ const COLLAPSED_MAX_HEIGHT = 320;
 function foldLabel(content: string, lineCount: number): string {
   const reason = getTextFoldReason(content);
   if (reason === 'structured-agent') return '查看派工详情 ▾';
+  if (reason === 'technical-details') return '查看技术细节 ▾';
   return `查看完整内容 ▾ (+${lineCount - TEXT_FOLD_THRESHOLD} 行)`;
 }
 

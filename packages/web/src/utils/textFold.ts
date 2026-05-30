@@ -1,6 +1,6 @@
 export const TEXT_FOLD_THRESHOLD = 10;
 
-export type TextFoldReason = 'length' | 'structured-agent';
+export type TextFoldReason = 'length' | 'structured-agent' | 'technical-details';
 
 const STRUCTURED_AGENT_PATTERNS = [
   /(^|\n)\s*(?:[#*-]\s*)?(?:\*\*)?(?:🔒\s*)?代理名称(?:\*\*)?\s*[:：]/,
@@ -15,17 +15,30 @@ const STRUCTURED_AGENT_PATTERNS = [
   /(^|\n)\s*#{1,3}\s+.{4,}/,
 ];
 
+const TECHNICAL_DETAIL_PATTERNS = [
+  /```/,
+  /(^|\n)\s*[-*]\s*`?(?:pnpm|npm|bun|yarn|node|python3?|bash|curl|git|tsc|vitest|playwright)\b/i,
+  /(^|\n)\s*(?:验证|测试|构建|build|tsc|commit|截图|日志|API smoke|改动文件|文件清单)[:：]/i,
+  /\b(?:packages|src|scripts|docs|cat-cafe-skills)\//,
+  /\/Users\/[^\s，。；;、)）\]}>"']+/,
+];
+
+function isTechnicalDetail(text: string): boolean {
+  const lineCount = text.split('\n').filter((line) => line.trim().length > 0).length;
+  if (lineCount <= 3) return false;
+  return TECHNICAL_DETAIL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export function getTextFoldReason(text: string): TextFoldReason | null {
   if (!text) return null;
   const normalized = text.trimEnd();
   if (!normalized) return null;
   if (STRUCTURED_AGENT_PATTERNS.some((pattern) => pattern.test(normalized))) return 'structured-agent';
+  if (isTechnicalDetail(normalized)) return 'technical-details';
   if (normalized.split('\n').length > TEXT_FOLD_THRESHOLD) return 'length';
   return null;
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
-export function shouldFoldText(_text: string): boolean {
-  // Disabled 2026-05-19: always show full message content (no expand/collapse in chat)
-  return false;
+export function shouldFoldText(text: string): boolean {
+  return getTextFoldReason(text) !== null;
 }

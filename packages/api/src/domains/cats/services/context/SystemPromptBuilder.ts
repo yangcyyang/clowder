@@ -394,6 +394,10 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 3. Status Gate：有证据后把任务切到 in_review 等用户验收；做不了就明确 BLOCKED + 缺什么，不允许用“我会继续/正在处理/下一步”冒充交付。
 审计口径：状态回复 ≠ 交付；计划 ≠ 执行；没有证据的 done/in_review 都是不合格。`;
 
+const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
+合法主消息只有 4 类：开始、阻塞、交付、待验收；每次最多 4 行。
+不要出现 in_review/claim/$CLI 等运维词；技术细节>3行放 thread/附件。`;
+
 function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   if (!context.threadId && !context.currentUserMessageId) return [];
 
@@ -411,6 +415,7 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
     `行动任务先 claim: \`${claimCommand}\`；claim 失败就停止重复施工。`,
     '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
     `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
+    '主消息遵守输出协议：最多 4 行；不贴 claim/$CLI/in_review/工具日志。',
   ];
 }
 
@@ -704,6 +709,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   lines.push(HARNESS_SKILLS_SECTION, '');
   lines.push(EXECUTION_AUDIT_SECTION, '');
+  lines.push(VISIBLE_OUTPUT_PROTOCOL_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)
   const packBlocks = options?.packBlocks;

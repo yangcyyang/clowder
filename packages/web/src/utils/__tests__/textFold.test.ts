@@ -47,6 +47,24 @@ describe('shouldFoldText', () => {
     expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe('structured-agent');
   });
 
+  it('folds technical details over three lines', () => {
+    const text = [
+      '验证结果：',
+      '- pnpm --dir packages/api build',
+      '- pnpm --dir packages/web build',
+      '- commit 1234567',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(true);
+    expect(getTextFoldReason(text)).toBe('technical-details');
+  });
+
+  it('keeps short technical mentions visible', () => {
+    const text = '验证结果：build 通过。';
+
+    expect(shouldFoldText(text)).toBe(false);
+  });
+
   it('threshold defaults to 10', () => {
     expect(TEXT_FOLD_THRESHOLD).toBe(10);
   });
