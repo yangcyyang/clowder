@@ -143,6 +143,10 @@ cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
 pnpm start:direct --quick
 ```
 
+> 注意：`start:direct` 比 `start-dev.sh` 更可靠——`start-dev.sh` 是一个 bash 包装脚本，
+> 如果 Node 服务崩溃，bash 父进程仍会残留（僵尸进程），看起来"在跑"实际服务已死。
+> `start:direct` 直接启动 Node 进程，状态更透明。
+
 等 30 秒后再验证：`curl -m 5 http://localhost:3004/api/ready`
 
 ---
