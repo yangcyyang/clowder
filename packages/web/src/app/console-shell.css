@@ -251,7 +251,7 @@
 [data-visual-theme="slock"] {
   --console-shell-bg: var(--slock-cream);
   --console-panel-bg: var(--slock-cream);
-  --console-card-bg: #fffdf7;
+  --console-card-bg: var(--slock-white);
   --console-card-soft-bg: var(--slock-cream);
   --console-code-bg: var(--slock-warm-yellow);
   --console-pill-bg: var(--slock-warm-yellow);
@@ -259,7 +259,7 @@
   --console-border-strong: var(--slock-ink);
   --console-shadow: var(--slock-shadow);
   --console-shadow-soft: var(--slock-shadow-soft);
-  --console-field-bg: #fffdf7;
+  --console-field-bg: var(--slock-white);
   --console-active-bg: var(--slock-pink-active);
   --console-active-fg: var(--slock-ink);
   --console-active-muted: #2f2f2f;
@@ -777,7 +777,7 @@
   width: 14px;
   height: 14px;
   border: var(--slock-border-width) solid var(--slock-ink);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--slock-pink-active);
   content: "";
 }
@@ -961,7 +961,7 @@
   min-width: 32px;
   height: 26px;
   border: var(--slock-border-width) solid var(--slock-ink);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--slock-pink-active);
   color: var(--slock-white);
   font-size: 15px;
