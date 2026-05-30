@@ -1,16 +1,21 @@
 ---
 name: clowder-agent-runtime-doctor
 description: >
-  Clowder Agent 运行态检查与修复流程。Use when: 左侧 DIRECT MESSAGES 显示“暂无 Agent”、
-  @Agent 不触发、/api/cats 为空或失败、3004 API 不通、重启后 Agent/主题/功能没加载。
+  Clowder Agent 运行态检查与修复流程。Use when: 左侧 DIRECT MESSAGES 显示”暂无 Agent”、
+  @Agent 不触发、/api/cats 为空或失败、3004 API 不通、重启后 Agent/主题/功能没加载、
+  Claude agent 报 401 鉴权失败、服务崩溃连不上。
   Output: 根因结论 + 最小修复 + 验证证据 + 后续防复发建议。
 triggers:
-  - "暂无 Agent"
-  - "检测不出 agent"
-  - "链接不上 agent"
-  - "/api/cats"
-  - "3004"
-  - "Agent 不见"
+  - “暂无 Agent”
+  - “检测不出 agent”
+  - “链接不上 agent”
+  - “刷不出 agent”
+  - “/api/cats”
+  - “3004”
+  - “Agent 不见”
+  - “clowder 挂了”
+  - “401”
+  - “Failed to authenticate”
 ---
 
 # Clowder Agent Runtime Doctor
@@ -116,6 +121,67 @@ pnpm start:direct --quick
 /api/cats → 18
 包含：gpt52, kimi, pi, ppt-designer, requirements-analyst 等
 ```
+
+## 场景 4：服务完全无响应（3003/3004 都 connection refused）
+
+**症状**：`curl -m 3 http://localhost:3003/api/ready` 直接 curl: (7)，不是 timeout 而是立刻失败。
+
+**诊断**：
+
+```bash
+# 1. 检查是否有僵尸 start-dev.sh 进程（只有 bash 壳，没有 Node 进程）
+ps aux | grep "start-dev\|tsx.*api\|node.*3003\|node.*3004" | grep -v grep
+
+# 2. 如果只看到 bash start-dev.sh，没有 node/tsx 进程，说明 Node 服务死了而父 shell 还活着
+# 这些 bash 进程是无害的，不需要 kill，直接重启服务即可
+```
+
+**修复**：
+
+```bash
+cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+pnpm start:direct --quick
+```
+
+等 30 秒后再验证：`curl -m 5 http://localhost:3004/api/ready`
+
+---
+
+## 场景 5：Claude agent 报 401（Failed to authenticate）
+
+**症状**：@布偶猫4.5 等 Claude agent 回复 `Failed to authenticate. API Error: 401 Invalid authentication credentials` + `Error: Claude CLI: CLI 异常退出 (code: 1, signal: none)`。
+
+**根因**：Claude CLI 的 OAuth token 在 subscription 模式下约每 90 天需要刷新。token 刷新窗口期内可能出现短暂 401。
+
+**诊断**：
+
+```bash
+# 1. 确认 CLI 本身是否正常
+claude auth status
+
+# 2. 测试直接调用
+echo "hi" | claude -p "say hi" --output-format json 2>&1 | head -3
+```
+
+**修复**：
+
+如果 `claude auth status` 显示 loggedIn: false 或 CLI 直接调用也 401：
+
+```bash
+claude auth login  # 刷新 OAuth token
+```
+
+然后重启 Clowder 服务，让子进程继承新的 auth 状态：
+
+```bash
+pnpm start:direct --quick
+```
+
+如果 `claude auth status` 正常，CLI 直接调用也正常：说明 401 是瞬间的 token 刷新窗口造成的，**等待重试即可**，不需要操作。
+
+**验证**：`@布偶猫4.5 hi` → 正常回复。
+
+---
 
 ## 汇报模板
 
