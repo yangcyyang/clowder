@@ -127,7 +127,8 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
               key={tab.id}
               type="button"
               onClick={() => onTabChange(tab.id)}
-              className={`relative h-full px-3 text-xs tracking-[0.14em] transition-colors ${
+              data-active={isActive ? 'true' : 'false'}
+              className={`slock-tab-button relative h-full px-3 text-xs tracking-[0.14em] transition-colors ${
                 isActive
                   ? 'font-semibold text-[var(--cafe-text)]'
                   : 'text-[var(--cafe-text-muted)] hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]'

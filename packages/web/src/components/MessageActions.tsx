@@ -259,7 +259,7 @@ export function MessageActions({
 
   return (
     <div
-      className="group relative rounded-[var(--slock-radius-lg)] px-3 py-2 transition-shadow hover:ring-1 hover:ring-[var(--clowder-message-hover-ring)]"
+      className="slock-message-frame group relative rounded-[var(--slock-radius-lg)] px-3 py-2 transition-shadow hover:ring-1 hover:ring-[var(--clowder-message-hover-ring)]"
       onContextMenu={(event) => {
         if (!canAct) return;
         event.preventDefault();
@@ -270,12 +270,12 @@ export function MessageActions({
 
       {canAct && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
+          className={`slock-message-toolbar opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
         >
           <button
             type="button"
             onClick={handleReply}
-            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
             title="引用回复"
           >
             Reply
@@ -284,7 +284,7 @@ export function MessageActions({
             <button
               type="button"
               onClick={handleInlineEdit}
-              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
               title="编辑消息"
             >
               Edit
@@ -294,7 +294,7 @@ export function MessageActions({
             <button
               type="button"
               onClick={() => onOpenThread(message.id)}
-              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
               title="在 Thread 面板中查看"
             >
               Thread
@@ -304,7 +304,7 @@ export function MessageActions({
             <button
               type="button"
               onClick={() => setReactionPickerOpen((open) => !open)}
-              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
               title="添加表情反应"
               aria-expanded={reactionPickerOpen}
             >
@@ -330,7 +330,7 @@ export function MessageActions({
             <button
               type="button"
               onClick={handlePin}
-              className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
               title="固定消息"
             >
               Pin
@@ -339,7 +339,7 @@ export function MessageActions({
           <button
             type="button"
             onClick={handleSave}
-            className={`rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-cafe-surface-elevated hover:text-cafe ${
+            className={`slock-message-action-button rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-cafe-surface-elevated hover:text-cafe ${
               saved ? 'text-[var(--cafe-accent)]' : 'text-cafe-muted'
             }`}
             title={saved ? '取消收藏消息' : '收藏消息'}
@@ -350,14 +350,14 @@ export function MessageActions({
           <button
             type="button"
             onClick={handleOpenMoreMenu}
-            className="rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
             title="更多操作"
           >
             More
           </button>
           <button
             onClick={handleSoftDelete}
-            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
+            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
             title="删除"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -371,7 +371,7 @@ export function MessageActions({
           </button>
           <button
             onClick={handleBranchDirect}
-            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-emerald-text transition-colors"
+            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-emerald-text transition-colors"
             title="从这里分支"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -381,7 +381,7 @@ export function MessageActions({
           {isUser && (
             <button
               onClick={handleEdit}
-              className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-[var(--color-cafe-accent)] transition-colors"
+              className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-[var(--color-cafe-accent)] transition-colors"
               title="编辑消息"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -396,7 +396,7 @@ export function MessageActions({
           )}
           <button
             onClick={handleHardDelete}
-            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
+            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
             title="永久删除"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
