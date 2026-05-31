@@ -53,7 +53,7 @@ describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ 
     assert.ok(result.degradation, 'Should report degradation when override budget trims');
   });
 
-  test('effectiveMaxContextTokens=0 returns empty context with degradation', async () => {
+  test('effectiveMaxContextTokens=0 returns minimal envelope with degradation', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
     seedLongMessages(messageStore, 10);
@@ -63,7 +63,7 @@ describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ 
       effectiveMaxContextTokens: 0,
     });
 
-    assert.equal(result.contextText, '', 'Zero budget should return empty context');
+    assert.ok(!result.contextText.includes('[对话历史增量'), 'Zero budget should not include history block');
     assert.ok(result.degradation, 'Zero budget should report degradation');
   });
 

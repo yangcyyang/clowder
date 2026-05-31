@@ -105,6 +105,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.ok(result.contextText.includes('intentType: action'));
     assert.ok(result.contextText.includes('requiresTask: yes'));
     assert.ok(!result.contextText.includes('[对话历史增量'), 'Zero budget should not include history block');
+    assert.equal(result.degradation, undefined, 'Intentional minimal context should not warn as prompt exhaustion');
     assert.equal(result.includesCurrentUserMessage, false);
   });
 

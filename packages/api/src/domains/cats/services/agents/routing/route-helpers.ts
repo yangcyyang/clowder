@@ -1180,10 +1180,15 @@ export async function assembleIncrementalContext(
   // to prevent the assembled context + system prompt from exceeding the model's input limit.
   const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
 
-  // effectiveMaxContextTokens === 0 means system parts already exhausted the entire prompt budget.
-  // Return empty context with degradation rather than skipping the trim (old behavior of `> 0` guard).
+  // effectiveMaxContextTokens === 0 can mean two different things:
+  // - minimal toolPolicy intentionally disables history context (maxContextTokens=0)
+  // - system parts actually exhausted the prompt budget while history was allowed
+  // Only the second case should warn the user.
   if (effectiveTokenBudget <= 0) {
-    const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
+    const intentionalNoContext = budget.maxContextTokens <= 0;
+    const zeroBudgetDegradation = intentionalNoContext
+      ? undefined
+      : `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
     const zeroBoundaryId = capped[capped.length - 1]?.id;
     return {
       contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
@@ -1451,12 +1456,13 @@ async function assembleSmartWindowContext(
   const boundaryId = relevant[relevant.length - 1]?.id;
 
   if (effectiveTokenBudget <= 0) {
+    const intentionalNoContext = budget.maxContextTokens <= 0;
     return {
       contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
-      degradation: `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
+      degradation: intentionalNoContext ? undefined : `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
       intentSnapshot,
     };
   }
