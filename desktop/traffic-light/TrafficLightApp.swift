@@ -150,7 +150,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func poll() {
     let slock = checkProcess(pattern: "slock.*daemon|slock-daemon")
-      ? ServiceLight(name: "Slock", state: .idle, detail: "daemon 在线")
+      ? ServiceLight(name: "Slock", state: .running, detail: "daemon 正在运行")
       : ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
     let codex = checkProcess(pattern: "opencode|codex")
       ? ServiceLight(name: "Codex", state: .idle, detail: "客户端在线")
