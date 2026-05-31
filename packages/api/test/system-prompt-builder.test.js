@@ -545,7 +545,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('$CLI task claim --message-id msg_123'), 'Should point claim at current message');
     assert.ok(ctx.includes('$CLI task update --task <taskId> --status in_review'), 'Should require in_review');
     assert.ok(ctx.includes('$CLI message send --target "thread_abc"'), 'Should include current thread target');
-    assert.ok(ctx.includes('主消息遵守输出协议：最多 4 行'), 'Should enforce short visible output');
+    assert.ok(ctx.includes('主消息遵守输出协议：结论清楚、证据明确'), 'Should enforce clear visible output');
   });
 
   test('buildSystemPrompt includes Slock-like visible output protocol', async () => {
@@ -558,8 +558,8 @@ describe('SystemPromptBuilder', () => {
     });
 
     assert.ok(prompt.includes('主消息输出协议（Slock-like）'), 'Should include visible output protocol');
-    assert.ok(prompt.includes('合法主消息只有 4 类：开始、阻塞、交付、待验收'));
-    assert.ok(prompt.includes('每次最多 4 行'));
+    assert.ok(prompt.includes('行动/状态类主消息先给结论和证据'));
+    assert.ok(prompt.includes('讨论、解释、方案类允许分段展开'));
     assert.ok(prompt.includes('不要出现 in_review/claim/$CLI 等运维词'));
   });
 

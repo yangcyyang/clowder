@@ -395,8 +395,8 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 审计口径：状态回复 ≠ 交付；计划 ≠ 执行；没有证据的 done/in_review 都是不合格。`;
 
 const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
-合法主消息只有 4 类：开始、阻塞、交付、待验收；每次最多 4 行。
-不要出现 in_review/claim/$CLI 等运维词；技术细节>3行放 thread/附件。`;
+行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
+不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/折叠块。`;
 
 function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   if (!context.threadId && !context.currentUserMessageId) return [];
@@ -415,7 +415,7 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
     `行动任务先 claim: \`${claimCommand}\`；claim 失败就停止重复施工。`,
     '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
     `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
-    '主消息遵守输出协议：最多 4 行；不贴 claim/$CLI/in_review/工具日志。',
+    '主消息遵守输出协议：结论清楚、证据明确；不贴 claim/$CLI/in_review/工具日志。',
   ];
 }
 
