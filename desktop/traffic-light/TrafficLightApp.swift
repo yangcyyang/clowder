@@ -151,9 +151,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private func poll() {
     let clowder = clowderServiceLight()
     let slock = slockServiceLight()
-    let codex = checkProcess(pattern: "opencode|codex")
-      ? ServiceLight(name: "Codex", state: .idle, detail: "客户端在线")
-      : ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
+    let codex = codexServiceLight()
 
     render(services: [clowder, slock, codex])
   }
@@ -199,6 +197,44 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       return ServiceLight(name: "Slock", state: .idle, detail: "daemon 在线，当前未检测到忙碌 runtime")
     }
     return ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
+  }
+
+  private func codexServiceLight() -> ServiceLight {
+    let snapshot = codexRuntimeSnapshot()
+    if snapshot.busyRuntimeCount > 0 {
+      return ServiceLight(name: "Codex", state: .running, detail: "\(snapshot.busyRuntimeCount) 个 Codex runtime 活跃")
+    }
+    if snapshot.hasRuntimeBridge || checkProcess(pattern: "opencode|codex") {
+      return ServiceLight(name: "Codex", state: .idle, detail: "客户端在线，未检测到活跃 runtime")
+    }
+    return ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
+  }
+
+  private func codexRuntimeSnapshot() -> (hasRuntimeBridge: Bool, busyRuntimeCount: Int) {
+    let output = commandOutput(executable: "/bin/ps", arguments: ["-axo", "pcpu=,command="])
+    var hasRuntimeBridge = false
+    var busyRuntimeCount = 0
+    for rawLine in output.split(separator: "\n") {
+      let line = String(rawLine)
+      let normalized = line.lowercased()
+      let isCodexRuntime = normalized.contains("--runtime codex")
+        || normalized.contains("--runtime\",\"codex")
+        || normalized.contains("--runtime=codex")
+      guard isCodexRuntime else { continue }
+      if normalized.contains("clowdertrafficlight") || normalized.contains("/bin/ps ") { continue }
+
+      hasRuntimeBridge = true
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+      let cpu = parts.first.flatMap { Double($0) } ?? 0
+      let bridgeOnly = normalized.contains("chat-bridge.js --agent-id")
+
+      // 只把真正的 Codex runtime 进程算作运行中；常驻 bridge 不算。
+      if !bridgeOnly && cpu >= 1.0 {
+        busyRuntimeCount += 1
+      }
+    }
+    return (hasRuntimeBridge, busyRuntimeCount)
   }
 
   private func slockRuntimeSnapshot() -> (hasRuntimeBridge: Bool, busyRuntimeCount: Int) {
