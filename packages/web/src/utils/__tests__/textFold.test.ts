@@ -92,3 +92,27 @@ describe('shouldFoldText', () => {
     expect(TEXT_FOLD_THRESHOLD).toBe(30);
   });
 });
+
+  it('keeps normal explanation with single file path visible', () => {
+    const text = [
+      '调研结论：',
+      '这几个 skill 可以分成三类：内容到页面规格、页面规格到 HTML/PDF/PPTX、强视觉模板/图片槽位体系。',
+      '对 PPT Agent 最有价值的不是直接照搬某个 skill，而是吸收它们的"第二阶段 MD"设计方法。',
+      '1. Huashu Design',
+      '定位：高保真 HTML 设计生产线，能做原型、幻灯片、动画、设计变体、专家评审。',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
+  });
+
+  it('keeps normal explanation with inline code mentions visible', () => {
+    const text = [
+      '我会按这轮目标做轻量调研：先查线程记忆，再读 PPT Agent 真相源。',
+      '然后对比本地 huashu / kami / guizang 相关 skill。',
+      '不会生成新文档或修改 skill。',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
+  });

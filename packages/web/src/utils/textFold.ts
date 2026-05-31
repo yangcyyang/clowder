@@ -14,18 +14,39 @@ const STRUCTURED_AGENT_PATTERNS = [
   /(^|\n)\s*(?:[#*-]\s*)?(?:\*\*)?执行动作\s*\d*(?:\*\*)?\s*[:：]/,
 ];
 
-const TECHNICAL_DETAIL_PATTERNS = [
-  /```/,
-  /(^|\n)\s*[-*]\s*`?(?:pnpm|npm|bun|yarn|node|python3?|bash|curl|git|tsc|vitest|playwright)\b/i,
-  /(^|\n)\s*(?:验证|测试|构建|build|tsc|commit|截图|日志|API smoke|改动文件|文件清单)[:：]/i,
-  /\b(?:packages|src|scripts|docs|cat-cafe-skills)\//,
-  /\/Users\/[^\s，。；;、)）\]}>"']+/,
-];
-
+// 技术密度判断：需要同时满足多个特征才判定为技术细节
+// 避免单个路径/命令误伤正常解释内容
 function isTechnicalDetail(text: string): boolean {
   const lineCount = countMeaningfulLines(text);
   if (lineCount <= 3) return false;
-  return TECHNICAL_DETAIL_PATTERNS.some((pattern) => pattern.test(text));
+
+  let matchCount = 0;
+
+  // 代码块算强特征（+2）
+  if (/```/.test(text)) matchCount += 2;
+
+  // 命令行特征（+1）
+  if (/(^|\n)\s*[-*]\s*`?(?:pnpm|npm|bun|yarn|node|python3?|bash|curl|git|tsc|vitest|playwright)\b/i.test(text)) {
+    matchCount += 1;
+  }
+
+  // 验证/构建关键词（+1）
+  if (/(^|\n)\s*(?:验证|测试|构建|build|tsc|截图|日志|API smoke|改动文件|文件清单)[:：]/i.test(text)) {
+    matchCount += 1;
+  }
+  // 列表中的 commit/build 等（+1）
+  if (/(^|\n)\s*[-*]\s*(?:commit|build|tsc|验证|测试)\b/i.test(text)) {
+    matchCount += 1;
+  }
+
+  // 绝对路径（+1）
+  if (/\/Users\/[^\s，。；;、)）\]}>"']+/.test(text)) matchCount += 1;
+
+  // 带扩展名的文件路径（+1）
+  if (/\.[a-z]{2,6}\/[^\s]+/.test(text)) matchCount += 1;
+
+  // 需要至少 2 分才判定为技术细节
+  return matchCount >= 2;
 }
 
 function countMeaningfulLines(text: string): number {
