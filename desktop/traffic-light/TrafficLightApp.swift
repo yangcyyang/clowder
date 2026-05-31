@@ -92,7 +92,7 @@ final class TrafficLightView: NSView {
 
 final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private var panel: NSPanel!
-  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
+  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
   private var timer: Timer?
 
   private let apiURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_API_URL"] ?? "http://127.0.0.1:3004/api/runtime/traffic-light")!
@@ -109,7 +109,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func createPanel() {
     panel = NSPanel(
-      contentRect: NSRect(x: 1400, y: 760, width: 260, height: 112),
+      contentRect: NSRect(x: 1400, y: 760, width: 200, height: 120),
       styleMask: [.nonactivatingPanel, .borderless],
       backing: .buffered,
       defer: false
@@ -122,7 +122,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
     panel.isOpaque = false
     panel.hasShadow = true
 
-    let root = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
     root.wantsLayer = true
 
     root.addSubview(lightView)
