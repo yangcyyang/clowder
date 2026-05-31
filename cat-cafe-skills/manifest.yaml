@@ -969,6 +969,26 @@ skills:
     merged_from: null
     feature: "F144"
 
+  # ── 工具类 Skill ──
+  update-skills-dashboard:
+    description: >
+      扫描本地 skill 目录并重新生成 Skills Dashboard HTML 文件。
+      Use when: 铲屎官说"更新 dashboard"、"刷新技能列表"、skill 新增/删除后需要同步页面。
+      Not for: 查看 dashboard（直接访问 http://localhost:3003/api/skills/dashboard）、修改 skill 内容（用对应 skill）。
+      Output: 更新后的 skills-dashboard.html + 更新报告（新增/删除/总数）。
+    triggers:
+      - "更新 dashboard"
+      - "刷新技能列表"
+      - "update skills dashboard"
+      - "重新生成 dashboard"
+    not_for:
+      - "查看 dashboard"
+      - "修改 skill 内容"
+    output: "Updated skills-dashboard.html + change report"
+    next: []
+    sop_step: null
+    merged_from: null
+
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:
   mcp-callbacks:

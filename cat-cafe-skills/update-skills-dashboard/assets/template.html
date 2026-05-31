@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Skill 仪表板 · Skills Dashboard</title>
+  <style>
+    :root{--ink:#17130c;--muted:#766d5d;--card:#fffaf0;--line:#17130c;--accent:#ffcf33;--green:#49c27b;--pink:#ff7ab6;--blue:#76a9ff;--red:#ff6b4a}
+    *{box-sizing:border-box}
+    body{margin:0;color:var(--ink);background:radial-gradient(circle at 10% 10%,rgba(255,207,51,.45),transparent 28%),radial-gradient(circle at 82% 8%,rgba(255,122,182,.25),transparent 24%),linear-gradient(135deg,#f9f2e6,#eadfcf);font-family:"Avenir Next","PingFang SC",sans-serif}
+    .header{padding:18px 36px 14px;border-bottom:3px solid var(--line);background:rgba(255,250,240,.8);backdrop-filter:blur(10px);position:sticky;top:0;z-index:5}
+    h1{margin:6px 0 0;font-size:clamp(24px,3vw,40px);line-height:1.05;letter-spacing:-.06em}
+    .subtitle{max-width:840px;color:var(--muted);margin:8px 0 0;font-size:13px;line-height:1.45}
+    .badge{display:inline-flex;border:2px solid var(--line);background:var(--accent);padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800;box-shadow:3px 3px 0 var(--line)}
+    .controls{display:grid;grid-template-columns:1fr auto auto;gap:10px;margin-top:12px}
+    input,select{border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:9px 12px;font:inherit;font-weight:700;box-shadow:3px 3px 0 var(--line)}
+    main{padding:20px 36px 60px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:20px}
+    .stat{border:2px solid var(--line);background:var(--card);border-radius:14px;padding:10px 12px;box-shadow:3px 3px 0 var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+    .stat strong{display:block;font-size:24px}
+    .stat span{color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase}
+    .card{border:2px solid var(--line);background:var(--card);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:3px 3px 0 var(--line)}
+    .card-title{font-size:16px;font-weight:800;margin:0 0 4px}
+    .card-subtitle{font-size:12px;color:var(--muted);margin:0 0 8px}
+    .card-desc{font-size:13px;line-height:1.4;margin:0 0 10px}
+    .tags{display:flex;gap:6px;flex-wrap:wrap}
+    .tag{border:1.5px solid var(--line);background:#fff;padding:3px 8px;border-radius:8px;font-size:11px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="badge">Skills Dashboard</div>
+    <h1>Skill 仪表板 · Skills Dashboard</h1>
+    <p class="subtitle">按使用场景整理本地主力 skill。</p>
+    <div class="controls">
+      <input type="text" id="search" placeholder="搜索...">
+      <select id="categoryFilter"><option value="">全部场景</option></select>
+      <select id="sourceFilter"><option value="">全部来源</option></select>
+    </div>
+  </div>
+  <main>
+    <div class="stats">
+      <div class="stat"><strong id="totalCount">0</strong><span>总 Skill</span></div>
+      <div class="stat"><strong id="clowderCount">0</strong><span>Clowder</span></div>
+      <div class="stat"><strong id="personalCount">0</strong><span>个人</span></div>
+      <div class="stat"><strong id="riskCount">0</strong><span>风险</span></div>
+    </div>
+    <div id="skillsContainer"></div>
+  </main>
+  <script>
+    // SKILLS 数据会在生成时注入
+    const SKILLS = [];
+
+    function renderSkills(skills) {
+      const container = document.getElementById('skillsContainer');
+      container.innerHTML = skills.map(skill => `
+        <div class="card">
+          <div class="card-title">${skill.name}</div>
+          <div class="card-subtitle">${skill.path}</div>
+          <div class="card-desc">${skill.description}</div>
+          <div class="tags">
+            <span class="tag">${skill.source}</span>
+            <span class="tag">${skill.category}</span>
+            <span class="tag">风险:${skill.risk}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    renderSkills(SKILLS);
+  </script>
+</body>
+</html>
