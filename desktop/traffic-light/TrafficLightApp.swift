@@ -154,7 +154,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       : ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
     let codex = checkProcess(pattern: "opencode|codex")
       ? ServiceLight(name: "Codex", state: .idle, detail: "客户端在线")
-      : ServiceLight(name: "Codex", state: .idle, detail: "未检测到客户端进程")
+      : ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
 
     var request = URLRequest(url: apiURL)
     request.timeoutInterval = 1.0

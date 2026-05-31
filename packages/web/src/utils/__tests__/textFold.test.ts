@@ -11,9 +11,10 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
   });
 
-  it('returns true for text exceeding threshold', () => {
+  it('returns false for text exceeding threshold', () => {
     const text = Array.from({ length: TEXT_FOLD_THRESHOLD + 1 }, (_, i) => `line ${i + 1}`).join('\n');
-    expect(shouldFoldText(text)).toBe(true);
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
   });
 
   it('returns false for empty string', () => {
@@ -49,7 +50,7 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
   });
 
-  it('folds structured agent handoff content even under threshold', () => {
+  it('keeps structured agent handoff content visible', () => {
     const text = [
       '@gpt52',
       '**🔒 代理名称**：simple_html_worker',
@@ -57,17 +58,17 @@ describe('shouldFoldText', () => {
       '**⚙️ 执行动作**：创建 HTML 文件',
     ].join('\n');
 
-    expect(shouldFoldText(text)).toBe(true);
-    expect(getTextFoldReason(text)).toBe('structured-agent');
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
   });
 
   it('keeps ordinary Markdown heading content visible', () => {
     expect(getTextFoldReason('## 执行计划\n先做 A\n再做 B')).toBe(null);
   });
 
-  it('folds Chinese handoff fields as structured agent detail', () => {
-    expect(getTextFoldReason('任务名称：写一个简单网页')).toBe('structured-agent');
-    expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe('structured-agent');
+  it('keeps Chinese handoff fields visible', () => {
+    expect(getTextFoldReason('任务名称：写一个简单网页')).toBe(null);
+    expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe(null);
   });
 
   it('keeps technical-looking progress visible under length threshold', () => {
