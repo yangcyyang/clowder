@@ -38,35 +38,22 @@ final class TrafficLightView: NSView {
   private let green = NSColor(calibratedRed: 0.72, green: 0.86, blue: 0.16, alpha: 1)
   private let yellow = NSColor(calibratedRed: 1.00, green: 0.69, blue: 0.26, alpha: 1)
   private let red = NSColor(calibratedRed: 0.94, green: 0.32, blue: 0.25, alpha: 1)
-  private let dim = NSColor(calibratedWhite: 0.78, alpha: 1)
+  private let dim = NSColor(calibratedWhite: 0.48, alpha: 1)
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
     NSColor.clear.setFill()
     dirtyRect.fill()
 
-    let pillRect = bounds.insetBy(dx: 4, dy: 4)
-    let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2, yRadius: pillRect.height / 2)
-
-    let shadow = NSShadow()
-    shadow.shadowBlurRadius = 0
-    shadow.shadowOffset = NSSize(width: 3, height: -3)
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.85)
-
-    NSGraphicsContext.saveGraphicsState()
-    shadow.set()
-    NSColor(calibratedWhite: 0.80, alpha: 1).setFill()
-    pillPath.fill()
-    NSGraphicsContext.restoreGraphicsState()
-
-    NSColor.black.setStroke()
-    pillPath.lineWidth = 8
-    pillPath.stroke()
+    let barRect = bounds.insetBy(dx: 2, dy: 2)
+    let barPath = NSBezierPath(roundedRect: barRect, xRadius: 10, yRadius: 10)
+    NSColor(calibratedRed: 0.07, green: 0.10, blue: 0.16, alpha: 0.98).setFill()
+    barPath.fill()
 
     for (index, service) in services.prefix(3).enumerated() {
-      let cellWidth = pillRect.width / 3
-      let cellMidX = pillRect.minX + cellWidth * (CGFloat(index) + 0.5)
-      drawService(service, centerX: cellMidX)
+      let cellWidth = barRect.width / 3
+      let cellMinX = barRect.minX + cellWidth * CGFloat(index)
+      drawService(service, x: cellMinX + 16, width: cellWidth - 24)
     }
   }
 
@@ -83,42 +70,39 @@ final class TrafficLightView: NSView {
     }
   }
 
-  private func drawService(_ service: ServiceLight, centerX: CGFloat) {
-    drawLamp(center: NSPoint(x: centerX, y: bounds.midY + 12), color: colorFor(service.state))
+  private func drawService(_ service: ServiceLight, x: CGFloat, width: CGFloat) {
+    drawLamp(center: NSPoint(x: x + 8, y: bounds.midY), color: colorFor(service.state))
 
     let title = service.name as NSString
     let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
-      .foregroundColor: NSColor.black,
+      .font: NSFont.monospacedSystemFont(ofSize: 17, weight: .regular),
+      .foregroundColor: NSColor.white,
     ]
-    let size = title.size(withAttributes: attributes)
     title.draw(
-      at: NSPoint(x: centerX - size.width / 2, y: bounds.midY - 38),
+      in: NSRect(x: x + 28, y: bounds.midY - 12, width: width - 28, height: 24),
       withAttributes: attributes
     )
   }
 
   private func drawLamp(center: NSPoint, color: NSColor) {
-    let ringDiameter = bounds.height * 0.36
+    let ringDiameter: CGFloat = 16
     let ringRect = NSRect(
       x: center.x - ringDiameter / 2,
       y: center.y - ringDiameter / 2,
       width: ringDiameter,
       height: ringDiameter
     )
-    NSColor.black.setFill()
-    NSBezierPath(ovalIn: ringRect).fill()
-
-    let innerRect = ringRect.insetBy(dx: ringDiameter * 0.18, dy: ringDiameter * 0.18)
+    NSColor.black.withAlphaComponent(0.18).setFill()
+    NSBezierPath(ovalIn: ringRect.offsetBy(dx: 0, dy: -1)).fill()
     color.setFill()
-    NSBezierPath(ovalIn: innerRect).fill()
+    NSBezierPath(ovalIn: ringRect).fill()
   }
 }
 
 final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private var panel: NSPanel!
-  private let windowSize = NSSize(width: 300, height: 120)
-  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
+  private let windowSize = NSSize(width: 320, height: 56)
+  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 320, height: 56))
   private var timer: Timer?
 
   private let apiURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_API_URL"] ?? "http://127.0.0.1:3004/api/runtime/traffic-light")!
@@ -135,7 +119,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func createPanel() {
     panel = NSPanel(
-      contentRect: NSRect(x: 1300, y: 760, width: windowSize.width, height: windowSize.height),
+      contentRect: NSRect(x: 1320, y: 820, width: windowSize.width, height: windowSize.height),
       styleMask: [.nonactivatingPanel, .borderless],
       backing: .buffered,
       defer: false
