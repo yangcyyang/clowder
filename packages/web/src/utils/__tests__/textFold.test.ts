@@ -70,7 +70,7 @@ describe('shouldFoldText', () => {
     expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe('structured-agent');
   });
 
-  it('folds technical details over three lines', () => {
+  it('keeps technical-looking progress visible under length threshold', () => {
     const text = [
       '验证结果：',
       '- pnpm --dir packages/api build',
@@ -78,8 +78,8 @@ describe('shouldFoldText', () => {
       '- commit 1234567',
     ].join('\n');
 
-    expect(shouldFoldText(text)).toBe(true);
-    expect(getTextFoldReason(text)).toBe('technical-details');
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
   });
 
   it('keeps short technical mentions visible', () => {
@@ -106,7 +106,7 @@ describe('shouldFoldText', () => {
     expect(getTextFoldReason(text)).toBe(null);
   });
 
-  it('folds file change list when it has explicit technical heading and paths', () => {
+  it('keeps file change list visible under length threshold', () => {
     const text = [
       '改动文件：',
       '- packages/web/src/utils/textFold.ts',
@@ -114,8 +114,8 @@ describe('shouldFoldText', () => {
       '- packages/web/src/components/CollapsibleMarkdown.tsx',
     ].join('\n');
 
-    expect(shouldFoldText(text)).toBe(true);
-    expect(getTextFoldReason(text)).toBe('technical-details');
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
   });
 
   it('keeps normal explanation with inline code mentions visible', () => {
@@ -143,6 +143,29 @@ describe('shouldFoldText', () => {
       '这次重点补了两层：',
       '1. 给人审的 13 页逐页内容',
       '2. 给下游 Agent 执行的结构化输入',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
+  });
+
+  it('keeps agent research progress with inline code chips visible', () => {
+    const text = [
+      '🔍 接球：先查上下文，再做只读检测',
+      '',
+      '我会先确认本地 ppt-master 的位置和配置方式，只检查“是否配置/能否被程序识别”，不在主消息里暴露任何 API key。',
+      '',
+      '📍 开始定位本地 ppt-master',
+      '',
+      '我先找本地 ppt-master 仓库/工具目录和它的配置说明，再判断 API key 是读 .env、系统环境变量，还是某个配置文件。',
+      '',
+      '📚 找到本地 ppt-master',
+      '',
+      '本地实际目录是 产品项目/PPT agent/.research/ppt-master。文档显示 gpt-image-2 走的是 image_gen.py，需要 IMAGE_BACKEND 加对应 provider 的 *_API_KEY。',
+      '',
+      '⚠️ 第一轮检测结果',
+      '',
+      '当前这个本地 clone 没有 .env，当前进程也没有 IMAGE_BACKEND / OPENAI_API_KEY。我再查一遍用户级配置/环境变量，确认是不是挂在别处。',
     ].join('\n');
 
     expect(shouldFoldText(text)).toBe(false);
