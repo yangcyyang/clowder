@@ -57,5 +57,7 @@ describe('ChatContainerHeader safe-area', () => {
     expect(innerRow).not.toBeNull();
     expect(innerRow?.className).toContain('h-[54px]');
     expect(container.querySelector('[data-testid="hub-button"]')).toBeNull();
+    expect(container.textContent).toContain('技能库');
+    expect(container.querySelector('[aria-label="打开静态 Skill 仪表板"]')).not.toBeNull();
   });
 });

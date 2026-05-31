@@ -70,11 +70,11 @@ export function ChatContainerHeader({
         <button
           type="button"
           onClick={openSkillDashboard}
-          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
-          title="打开 Skill 管理仪表盘"
-          aria-label="打开 Skill 管理仪表盘"
+          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          title="打开静态 Skill 仪表板"
+          aria-label="打开静态 Skill 仪表板"
         >
-          SK
+          技能库
         </button>
         <button
           type="button"
