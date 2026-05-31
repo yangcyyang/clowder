@@ -249,6 +249,100 @@ skills:
     next: ["debugging", "quality-gate"]
     sop_step: null
 
+  # ── Agent Harness 治理 ──
+  agent-harness-review:
+    description: >
+      Agent 体检员：审查 Agent、多 Agent 或自动化系统的 Harness 治理缺口，
+      覆盖上下文生命周期、记忆、工具审批、独立验收、workflow、沙箱、预算与观测。
+      Use when: 需要系统性体检 Clowder/Agent 稳定性、Agent 老是乱、协作纪律不稳、或要制定治理改造路线。
+      Not for: 单个 bug 的直接修复、普通运行态故障排查（用 clowder-agent-runtime-doctor）、只需要代码实现。
+      Output: P0/P1/P2 风险分级 + 证据 + 可执行改造路线。
+    triggers:
+      - "Agent 体检"
+      - "体检 agent"
+      - "治理缺口"
+      - "harness review"
+      - "Agent 老是乱"
+      - "Agent 不稳定"
+      - "Clowder 体检"
+    not_for:
+      - "单个 bug 根因修复"
+      - "普通运行态故障"
+      - "只需要代码实现"
+    output: "Harness review with P0/P1/P2 risks and remediation steps"
+    next: ["context-reset-planner", "adversarial-evaluator-builder", "skill-to-workflow-freezer"]
+    sop_step: null
+    merged_from: ["AI-trae/agent-harness-review"]
+
+  context-reset-planner:
+    description: >
+      上下文接班规划师：为长任务、重启续跑、上下文压缩或 session reset 设计上下文生命周期和 handoff。
+      Use when: Agent 跑久了、重启后要继续、长任务需要接班、或上下文变脏需要 reset 方案。
+      Not for: 一次性短问答、无状态普通聊天、只需要压缩一段文案。
+      Output: Context lifecycle plan + handoff 模板 + reset 验证方式。
+    triggers:
+      - "上下文接班"
+      - "长任务续跑"
+      - "handoff"
+      - "context reset"
+      - "上下文重置"
+      - "Agent 跑久了"
+      - "重启后继续"
+    not_for:
+      - "一次性短问答"
+      - "无状态普通聊天"
+      - "只需要压缩文案"
+    output: "Context lifecycle plan + handoff template + reset validation"
+    next: ["cross-cat-handoff", "agent-harness-review"]
+    sop_step: null
+    merged_from: ["AI-trae/context-reset-planner"]
+
+  adversarial-evaluator-builder:
+    description: >
+      独立验收官：为代码、UI、文档、workflow 或 Agent 输出设计独立 Evaluator、Rubric 与动态验证流程。
+      Use when: 需要执行与验收分离、不要自验、补质量门禁、或设计对抗评估标准。
+      Not for: 直接修代码、纯主观评价、无证据要求的轻量反馈。
+      Output: Evaluator spec + rubric + dynamic verification plan。
+    triggers:
+      - "独立验收"
+      - "验收官"
+      - "不要自验"
+      - "质量门禁"
+      - "Evaluator"
+      - "对抗评估"
+      - "review rubric"
+    not_for:
+      - "直接修代码"
+      - "纯主观评价"
+      - "无需证据的轻量反馈"
+    output: "Evaluator spec + rubric + dynamic verification plan"
+    next: ["quality-gate", "request-review"]
+    sop_step: null
+    merged_from: ["AI-trae/adversarial-evaluator-builder"]
+
+  skill-to-workflow-freezer:
+    description: >
+      流程固化师：把高频、稳定、可复用的 Skill/SOP/prompt 流程冻结成确定性 workflow。
+      Use when: 某个 skill 经常重复执行、流程已经跑通、想减少每次重新推理、或需要固定输入输出 schema/checkpoint。
+      Not for: 一次性探索任务、需求仍模糊的流程、创意型开放任务。
+      Output: Workflow freeze plan with schema/checkpoints/failure branches。
+    triggers:
+      - "流程固化"
+      - "Skill 固化"
+      - "冻结成 workflow"
+      - "workflow freezer"
+      - "高频 skill"
+      - "自动流水线"
+      - "固定流程"
+    not_for:
+      - "一次性探索任务"
+      - "需求仍模糊的流程"
+      - "创意型任务"
+    output: "Workflow freeze plan with schema/checkpoints/failure branches"
+    next: ["agent-harness-review", "quality-gate"]
+    sop_step: null
+    merged_from: ["AI-trae/skill-to-workflow-freezer"]
+
   # ── 质量门禁 ──
   quality-gate:
     description: >
