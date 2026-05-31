@@ -520,7 +520,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
         )}
 
         {!isLoading && !error && sortedTasks.length > 0 && viewMode === 'board' && (
-          <div className="flex min-h-[520px] gap-4 overflow-x-auto pb-4">
+          <div className="flex min-h-[520px] items-start gap-4 overflow-x-auto pb-4">
             {groupedTasks.map((column) => (
               <section
                 key={column.status}
