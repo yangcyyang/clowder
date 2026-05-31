@@ -24,6 +24,26 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText('hello world')).toBe(false);
   });
 
+  it('keeps normal dialogue visible even when it has several Markdown sections', () => {
+    const text = [
+      '这个方案可以做，但我建议先分两步。',
+      '',
+      '## 为什么',
+      '第一，先把目录整理清楚。',
+      '第二，再让 agent 自动选择。',
+      '',
+      '## 怎么做',
+      '先生成 manifest。',
+      '再做 dashboard。',
+      '最后接入 router。',
+      '',
+      '要我现在就写 SKILL.md 内容吗？',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
+  });
+
   it('returns false for exactly threshold lines with trailing newline', () => {
     const text = 'x\n'.repeat(TEXT_FOLD_THRESHOLD);
     expect(shouldFoldText(text)).toBe(false);
@@ -68,7 +88,7 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
   });
 
-  it('threshold defaults to 10', () => {
-    expect(TEXT_FOLD_THRESHOLD).toBe(10);
+  it('threshold defaults to 30', () => {
+    expect(TEXT_FOLD_THRESHOLD).toBe(30);
   });
 });

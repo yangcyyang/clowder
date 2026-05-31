@@ -1,4 +1,4 @@
-export const TEXT_FOLD_THRESHOLD = 10;
+export const TEXT_FOLD_THRESHOLD = 30;
 
 export type TextFoldReason = 'length' | 'structured-agent' | 'technical-details';
 
@@ -23,9 +23,13 @@ const TECHNICAL_DETAIL_PATTERNS = [
 ];
 
 function isTechnicalDetail(text: string): boolean {
-  const lineCount = text.split('\n').filter((line) => line.trim().length > 0).length;
+  const lineCount = countMeaningfulLines(text);
   if (lineCount <= 3) return false;
   return TECHNICAL_DETAIL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function countMeaningfulLines(text: string): number {
+  return text.split('\n').filter((line) => line.trim().length > 0).length;
 }
 
 export function getTextFoldReason(text: string): TextFoldReason | null {
@@ -34,7 +38,7 @@ export function getTextFoldReason(text: string): TextFoldReason | null {
   if (!normalized) return null;
   if (STRUCTURED_AGENT_PATTERNS.some((pattern) => pattern.test(normalized))) return 'structured-agent';
   if (isTechnicalDetail(normalized)) return 'technical-details';
-  if (normalized.split('\n').length > TEXT_FOLD_THRESHOLD) return 'length';
+  if (countMeaningfulLines(normalized) > TEXT_FOLD_THRESHOLD) return 'length';
   return null;
 }
 
