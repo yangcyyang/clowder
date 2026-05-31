@@ -149,9 +149,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
   }
 
   private func poll() {
-    let slock = checkProcess(pattern: "slock.*daemon|slock-daemon")
-      ? ServiceLight(name: "Slock", state: .running, detail: "daemon 正在运行")
-      : ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
+    let slock = slockServiceLight()
     let codex = checkProcess(pattern: "opencode|codex")
       ? ServiceLight(name: "Codex", state: .idle, detail: "客户端在线")
       : ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
@@ -212,6 +210,83 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
     }.resume()
   }
 
+  private func slockServiceLight() -> ServiceLight {
+    let snapshot = slockRuntimeSnapshot()
+    if snapshot.busyRuntimeCount > 0 {
+      return ServiceLight(name: "Slock", state: .running, detail: "\(snapshot.busyRuntimeCount) 个 runtime 活跃")
+    }
+    if snapshot.hasRuntimeBridge || isSlockDaemonOnline() {
+      return ServiceLight(name: "Slock", state: .idle, detail: "daemon 在线，当前未检测到忙碌 runtime")
+    }
+    return ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
+  }
+
+  private func slockRuntimeSnapshot() -> (hasRuntimeBridge: Bool, busyRuntimeCount: Int) {
+    let output = commandOutput(executable: "/bin/ps", arguments: ["-axo", "pcpu=,command="])
+    var hasRuntimeBridge = false
+    var busyRuntimeCount = 0
+    for rawLine in output.split(separator: "\n") {
+      let line = String(rawLine)
+      guard line.contains("--runtime-actions-only") || line.contains("chat-bridge.js") else { continue }
+      if line.contains("ClowderTrafficLight") || line.contains("/bin/ps ") { continue }
+
+      hasRuntimeBridge = true
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+      let cpu = parts.first.flatMap { Double($0) } ?? 0
+      let bridgeOnly = line.contains("/chat-bridge.js --agent-id")
+
+      // chat-bridge 常驻不代表忙碌；真正的 runtime 进程 CPU 抬高才算运行中。
+      if !bridgeOnly && cpu >= 1.0 {
+        busyRuntimeCount += 1
+      }
+    }
+    return (hasRuntimeBridge, busyRuntimeCount)
+  }
+
+  private func isSlockDaemonOnline() -> Bool {
+    let machinesURL = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".slock/machines")
+    guard let machineDirs = try? FileManager.default.contentsOfDirectory(
+      at: machinesURL,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    ) else {
+      return false
+    }
+
+    for machineDir in machineDirs {
+      let ownerURL = machineDir.appendingPathComponent("daemon.lock/owner.json")
+      guard
+        let data = try? Data(contentsOf: ownerURL),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let pid = json["pid"] as? Int
+      else {
+        continue
+      }
+      if checkPid(pid) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func checkPid(_ pid: Int) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/kill")
+    process.arguments = ["-0", String(pid)]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      return process.terminationStatus == 0
+    } catch {
+      return false
+    }
+  }
+
   private func checkProcess(pattern: String) -> Bool {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -225,6 +300,24 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       return process.terminationStatus == 0
     } catch {
       return false
+    }
+  }
+
+  private func commandOutput(executable: String, arguments: [String]) -> String {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    process.standardOutput = output
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      let data = output.fileHandleForReading.readDataToEndOfFile()
+      return String(data: data, encoding: .utf8) ?? ""
+    } catch {
+      return ""
     }
   }
 

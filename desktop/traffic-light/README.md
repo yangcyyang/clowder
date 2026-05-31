@@ -11,10 +11,11 @@ macOS 桌面置顶三路状态灯，用来观察本机 Clowder、Slock daemon �
   - 绿灯：当前空闲，最近任务已完成或没有任务。
   - 红灯：最近 5 分钟有失败 invocation，且当前没有运行/排队任务。
   - 灰灯：无法连接 Clowder API。
-- `Slock`：用 `pgrep` 检测本机 Slock daemon 进程。
-  - 黄灯：daemon 正在运行。
+- `Slock`：读取本机 Slock daemon lock，并用 runtime 进程 CPU 判断忙闲。
+  - 黄灯：检测到 Slock-launched runtime 正在活跃。
+  - 绿灯：daemon 在线，但当前未检测到忙碌 runtime。
   - 灰灯：daemon 未运行。
-  - 注意：当前是进程级状态，不读取 Slock 内部 agent 执行队列。
+  - 注意：这是本机侧近似判断，不读取 Slock 服务端内部队列。
 - `Codex`：用 `pgrep` 检测本机 `opencode` / `codex` 客户端进程。
   - 绿灯：客户端在线。
   - 灰灯：未检测到客户端进程。
