@@ -181,6 +181,7 @@ import {
   remindersRoutes,
   resolutionRoutes,
   rulesRoutes,
+  runtimeTrafficLightRoutes,
   servicesRoutes,
   sessionChainRoutes,
   sessionHooksRoutes,
@@ -1362,6 +1363,9 @@ async function main(): Promise<void> {
     router,
     invocationTracker,
     queueProcessor,
+  });
+  await app.register(runtimeTrafficLightRoutes, {
+    invocationRecordStore,
   });
   await app.register(messageActionsRoutes, {
     messageStore,
