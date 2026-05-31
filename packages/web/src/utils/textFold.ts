@@ -42,8 +42,9 @@ function isTechnicalDetail(text: string): boolean {
   // 绝对路径（+1）
   if (/\/Users\/[^\s，。；;、)）\]}>"']+/.test(text)) matchCount += 1;
 
-  // 带扩展名的文件路径（+1），例如 packages/web/src/utils/textFold.ts
-  if (/(?:^|[\s`"'(（])(?:\.{1,2}\/|\/|[A-Za-z0-9_-]+\/)[^\s，。；;、)）\]}>"']+\.[A-Za-z0-9]{1,8}\b/.test(text)) {
+  // 改动文件清单上下文中的文件路径（+1）：只在明确的"改动文件/文件清单/验证"等列表前缀后计分
+  // 单独提及 .md/.ts 文件名不计分，避免误伤正常讨论
+  if (/(^|\n)\s*(?:改动文件|文件清单|changed files?|modified files?)[:：][^]*?(?:\.ts|\.tsx|\.js|\.jsx|\.css|\.md|\.json)/.test(text)) {
     matchCount += 1;
   }
 
