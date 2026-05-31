@@ -41,8 +41,11 @@ describe('shouldFoldText', () => {
     expect(getTextFoldReason(text)).toBe('structured-agent');
   });
 
-  it('folds Chinese heading content as structured agent detail', () => {
-    expect(getTextFoldReason('## 执行计划\n先做 A\n再做 B')).toBe('structured-agent');
+  it('keeps ordinary Markdown heading content visible', () => {
+    expect(getTextFoldReason('## 执行计划\n先做 A\n再做 B')).toBe(null);
+  });
+
+  it('folds Chinese handoff fields as structured agent detail', () => {
     expect(getTextFoldReason('任务名称：写一个简单网页')).toBe('structured-agent');
     expect(getTextFoldReason('执行步骤：\n1. 创建文件')).toBe('structured-agent');
   });
