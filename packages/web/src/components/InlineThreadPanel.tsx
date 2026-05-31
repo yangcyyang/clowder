@@ -528,11 +528,10 @@ export function InlineThreadPanel({
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
               原始消息
             </div>
-            <div className="px-1 py-1">
+            <div className="max-h-48 overflow-y-auto overscroll-contain px-1 py-1 pr-2">
               <ChatMessage
                 message={sourceMessage}
                 getCatById={getCatById}
-                disableContentCollapse
                 showRuntimeMetadata
               />
             </div>
@@ -547,7 +546,6 @@ export function InlineThreadPanel({
                 key={msg.id}
                 message={msg}
                 getCatById={getCatById}
-                disableContentCollapse
                 showRuntimeMetadata
               />
             ))
