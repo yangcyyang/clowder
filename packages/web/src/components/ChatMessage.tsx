@@ -88,18 +88,27 @@ function ThreadReplyBadge({ count, newCount = 0, onOpen }: { count: number; newC
   if (count <= 0) return null;
 
   return (
-    <div className="mt-1.5">
+    <div className="mt-2">
       <button
         type="button"
+        aria-label={`打开 Thread，${count} 条回复${newCount > 0 ? `，${newCount} 条新回复` : ''}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
           onOpen();
         }}
-        className="inline-flex items-center rounded-full border border-[var(--cafe-accent)]/30 bg-[var(--cafe-accent)]/10 px-2 py-0.5 text-[11px] font-semibold leading-none text-[var(--cafe-accent)] transition-colors hover:bg-[var(--cafe-accent)]/15"
+        className="inline-flex items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2 py-1 text-[11px] font-semibold leading-none text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
       >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2v-7Z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+        </svg>
         {count} {count === 1 ? 'reply' : 'replies'}
-        {newCount > 0 && <span className="ml-1 text-conn-emerald-text">· {newCount} new</span>}
+        {newCount > 0 && <span className="text-conn-emerald-text">· {newCount} new</span>}
       </button>
     </div>
   );
