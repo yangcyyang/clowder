@@ -21,6 +21,8 @@ function isTechnicalDetail(text: string): boolean {
   if (lineCount <= 3) return false;
 
   let matchCount = 0;
+  const hasExplicitTechnicalHeading =
+    /(^|\n)\s*(?:验证|测试|构建|build|tsc|截图|日志|API smoke|改动文件|文件清单)[:：]/i.test(text);
 
   // 代码块算强特征（+2）
   if (/```/.test(text)) matchCount += 2;
@@ -31,20 +33,19 @@ function isTechnicalDetail(text: string): boolean {
   }
 
   // 验证/构建关键词（+1）
-  if (/(^|\n)\s*(?:验证|测试|构建|build|tsc|截图|日志|API smoke|改动文件|文件清单)[:：]/i.test(text)) {
-    matchCount += 1;
-  }
+  if (hasExplicitTechnicalHeading) matchCount += 1;
+
   // 列表中的 commit/build 等（+1）
   if (/(^|\n)\s*[-*]\s*(?:commit|build|tsc|验证|测试)\b/i.test(text)) {
     matchCount += 1;
   }
 
-  // 绝对路径（+1）
-  if (/\/Users\/[^\s，。；;、)）\]}>"']+/.test(text)) matchCount += 1;
-
   // 改动文件清单上下文中的文件路径（+1）：只在明确的"改动文件/文件清单/验证"等列表前缀后计分
   // 单独提及 .md/.ts 文件名不计分，避免误伤正常讨论
-  if (/(^|\n)\s*(?:改动文件|文件清单|changed files?|modified files?)[:：][^]*?(?:\.ts|\.tsx|\.js|\.jsx|\.css|\.md|\.json)/.test(text)) {
+  if (
+    hasExplicitTechnicalHeading &&
+    /(^|\n)\s*(?:改动文件|文件清单|changed files?|modified files?)[:：][^]*?(?:\.ts|\.tsx|\.js|\.jsx|\.css|\.md|\.json)/i.test(text)
+  ) {
     matchCount += 1;
   }
 

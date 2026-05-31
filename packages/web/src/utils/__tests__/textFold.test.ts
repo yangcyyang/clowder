@@ -128,4 +128,24 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
     expect(getTextFoldReason(text)).toBe(null);
   });
+
+  it('keeps PPT write-back reply with markdown filename visible', () => {
+    const text = [
+      '开始写回',
+      '已收到确认。我会按刚才确认的方向改同一份 MD：先补“给人审的 13 页逐页内容”，再补“给设计稿 Agent / ppt-master / image-2 的完整输入”。不生成图片、不导出 PPT。',
+      '',
+      '🔎 正在自检',
+      '补充已经写入。我现在检查关键锚点、13 页是否齐、下游交接字段和哈希，确保这版能同时给人审和给下一步 Agent 执行。',
+      '',
+      '✅ 已按确认写回',
+      '已更新这份 MD:',
+      'dynamic-workflows-ppt-structure-design-blueprint.md',
+      '这次重点补了两层：',
+      '1. 给人审的 13 页逐页内容',
+      '2. 给下游 Agent 执行的结构化输入',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(false);
+    expect(getTextFoldReason(text)).toBe(null);
+  });
 });
