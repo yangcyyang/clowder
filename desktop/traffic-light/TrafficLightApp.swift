@@ -149,65 +149,45 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
   }
 
   private func poll() {
+    let clowder = clowderServiceLight()
     let slock = slockServiceLight()
     let codex = checkProcess(pattern: "opencode|codex")
       ? ServiceLight(name: "Codex", state: .idle, detail: "客户端在线")
       : ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
 
-    var request = URLRequest(url: apiURL)
-    request.timeoutInterval = 1.0
+    render(services: [clowder, slock, codex])
+  }
 
-    URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-      guard let self else { return }
-      if error != nil {
-        DispatchQueue.main.async {
-          self.render(services: [
-            ServiceLight(name: "Clowder", state: .offline, detail: "API 未连接"),
-            slock,
-            codex,
-          ])
-        }
-        return
-      }
-      guard
-        let data,
-        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let stateRaw = json["state"] as? String,
-        let state = LightState(rawValue: stateRaw)
-      else {
-        DispatchQueue.main.async {
-          self.render(services: [
-            ServiceLight(name: "Clowder", state: .offline, detail: "状态不可读"),
-            slock,
-            codex,
-          ])
-        }
-        return
-      }
+  private func clowderServiceLight() -> ServiceLight {
+    let output = commandOutput(
+      executable: "/usr/bin/curl",
+      arguments: ["-sS", "-m", "1", apiURL.absoluteString]
+    )
+    guard
+      let data = output.data(using: .utf8),
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let stateRaw = json["state"] as? String,
+      let state = LightState(rawValue: stateRaw)
+    else {
+      return ServiceLight(name: "Clowd", state: .offline, detail: "API 未连接或状态不可读")
+    }
 
-      let running = json["runningCount"] as? Int ?? 0
-      let queued = json["queuedCount"] as? Int ?? 0
-      let lastAgent = json["lastAgent"] as? String
-      let detail: String
-      switch state {
-      case .running:
-        detail = "\(running) 运行 / \(queued) 排队"
-      case .idle:
-        detail = lastAgent.map { "最近完成 \($0)" } ?? "当前空闲"
-      case .error:
-        detail = lastAgent.map { "最近失败 \($0)" } ?? "最近失败"
-      case .offline:
-        detail = "API 未连接"
-      }
+    let running = json["runningCount"] as? Int ?? 0
+    let queued = json["queuedCount"] as? Int ?? 0
+    let lastAgent = json["lastAgent"] as? String
+    let detail: String
+    switch state {
+    case .running:
+      detail = "\(running) 运行 / \(queued) 排队"
+    case .idle:
+      detail = lastAgent.map { "最近完成 \($0)" } ?? "当前空闲"
+    case .error:
+      detail = lastAgent.map { "最近失败 \($0)" } ?? "最近失败"
+    case .offline:
+      detail = "API 未连接"
+    }
 
-      DispatchQueue.main.async {
-        self.render(services: [
-          ServiceLight(name: "Clowder", state: state, detail: detail),
-          slock,
-          codex,
-        ])
-      }
-    }.resume()
+    return ServiceLight(name: "Clowd", state: state, detail: detail)
   }
 
   private func slockServiceLight() -> ServiceLight {
