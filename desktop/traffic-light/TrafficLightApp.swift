@@ -20,8 +20,18 @@ enum LightState: String {
   }
 }
 
+struct ServiceLight {
+  let name: String
+  let state: LightState
+  let detail: String
+}
+
 final class TrafficLightView: NSView {
-  var state: LightState = .offline {
+  var services: [ServiceLight] = [
+    ServiceLight(name: "Clowder", state: .offline, detail: "API 未连接"),
+    ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行"),
+    ServiceLight(name: "Codex", state: .idle, detail: "未检测到客户端进程"),
+  ] {
     didSet { needsDisplay = true }
   }
 
@@ -53,15 +63,15 @@ final class TrafficLightView: NSView {
     pillPath.lineWidth = 8
     pillPath.stroke()
 
-    drawLamp(centerX: pillRect.minX + pillRect.width * 0.24, color: colorFor(.idle))
-    drawLamp(centerX: pillRect.midX, color: colorFor(.running))
-    drawLamp(centerX: pillRect.minX + pillRect.width * 0.76, color: colorFor(.error))
+    for (index, service) in services.prefix(3).enumerated() {
+      let cellWidth = pillRect.width / 3
+      let cellMidX = pillRect.minX + cellWidth * (CGFloat(index) + 0.5)
+      drawService(service, centerX: cellMidX)
+    }
   }
 
-  private func colorFor(_ lamp: LightState) -> NSColor {
-    guard state != .offline else { return dim }
-    guard state == lamp else { return dim.withAlphaComponent(0.55) }
-    switch lamp {
+  private func colorFor(_ state: LightState) -> NSColor {
+    switch state {
     case .idle:
       return green
     case .running:
@@ -73,11 +83,26 @@ final class TrafficLightView: NSView {
     }
   }
 
-  private func drawLamp(centerX: CGFloat, color: NSColor) {
-    let ringDiameter = bounds.height * 0.54
+  private func drawService(_ service: ServiceLight, centerX: CGFloat) {
+    drawLamp(center: NSPoint(x: centerX, y: bounds.midY + 12), color: colorFor(service.state))
+
+    let title = service.name as NSString
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+      .foregroundColor: NSColor.black,
+    ]
+    let size = title.size(withAttributes: attributes)
+    title.draw(
+      at: NSPoint(x: centerX - size.width / 2, y: bounds.midY - 38),
+      withAttributes: attributes
+    )
+  }
+
+  private func drawLamp(center: NSPoint, color: NSColor) {
+    let ringDiameter = bounds.height * 0.36
     let ringRect = NSRect(
-      x: centerX - ringDiameter / 2,
-      y: bounds.midY - ringDiameter / 2,
+      x: center.x - ringDiameter / 2,
+      y: center.y - ringDiameter / 2,
       width: ringDiameter,
       height: ringDiameter
     )
@@ -92,7 +117,8 @@ final class TrafficLightView: NSView {
 
 final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private var panel: NSPanel!
-  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+  private let windowSize = NSSize(width: 300, height: 120)
+  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
   private var timer: Timer?
 
   private let apiURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_API_URL"] ?? "http://127.0.0.1:3004/api/runtime/traffic-light")!
@@ -109,7 +135,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func createPanel() {
     panel = NSPanel(
-      contentRect: NSRect(x: 1400, y: 760, width: 200, height: 120),
+      contentRect: NSRect(x: 1300, y: 760, width: windowSize.width, height: windowSize.height),
       styleMask: [.nonactivatingPanel, .borderless],
       backing: .buffered,
       defer: false
@@ -122,7 +148,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
     panel.isOpaque = false
     panel.hasShadow = true
 
-    let root = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+    let root = NSView(frame: NSRect(origin: .zero, size: windowSize))
     root.wantsLayer = true
 
     root.addSubview(lightView)
@@ -139,6 +165,13 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
   }
 
   private func poll() {
+    let slock = checkProcess(pattern: "slock.*daemon|slock-daemon")
+      ? ServiceLight(name: "Slock", state: .idle, detail: "daemon 在线")
+      : ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
+    let codex = checkProcess(pattern: "opencode|codex")
+      ? ServiceLight(name: "Codex", state: .running, detail: "检测到客户端进程")
+      : ServiceLight(name: "Codex", state: .idle, detail: "未检测到客户端进程")
+
     var request = URLRequest(url: apiURL)
     request.timeoutInterval = 1.0
 
@@ -146,7 +179,11 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       guard let self else { return }
       if error != nil {
         DispatchQueue.main.async {
-          self.render(state: .offline, detail: "API 未连接")
+          self.render(services: [
+            ServiceLight(name: "Clowder", state: .offline, detail: "API 未连接"),
+            slock,
+            codex,
+          ])
         }
         return
       }
@@ -157,7 +194,11 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
         let state = LightState(rawValue: stateRaw)
       else {
         DispatchQueue.main.async {
-          self.render(state: .offline, detail: "状态不可读")
+          self.render(services: [
+            ServiceLight(name: "Clowder", state: .offline, detail: "状态不可读"),
+            slock,
+            codex,
+          ])
         }
         return
       }
@@ -178,14 +219,36 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       }
 
       DispatchQueue.main.async {
-        self.render(state: state, detail: detail)
+        self.render(services: [
+          ServiceLight(name: "Clowder", state: state, detail: detail),
+          slock,
+          codex,
+        ])
       }
     }.resume()
   }
 
-  private func render(state: LightState, detail: String) {
-    lightView.state = state
-    panel.contentView?.toolTip = "Clowder \(state.title)：\(detail)"
+  private func checkProcess(pattern: String) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    process.arguments = ["-f", pattern]
+    process.standardOutput = Pipe()
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      return process.terminationStatus == 0
+    } catch {
+      return false
+    }
+  }
+
+  private func render(services: [ServiceLight]) {
+    lightView.services = services
+    panel.contentView?.toolTip = services
+      .map { "\($0.name) \($0.state.title)：\($0.detail)" }
+      .joined(separator: "\n")
   }
 }
 
