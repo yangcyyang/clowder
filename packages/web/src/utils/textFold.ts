@@ -42,8 +42,10 @@ function isTechnicalDetail(text: string): boolean {
   // 绝对路径（+1）
   if (/\/Users\/[^\s，。；;、)）\]}>"']+/.test(text)) matchCount += 1;
 
-  // 带扩展名的文件路径（+1）
-  if (/\.[a-z]{2,6}\/[^\s]+/.test(text)) matchCount += 1;
+  // 带扩展名的文件路径（+1），例如 packages/web/src/utils/textFold.ts
+  if (/(?:^|[\s`"'(（])(?:\.{1,2}\/|\/|[A-Za-z0-9_-]+\/)[^\s，。；;、)）\]}>"']+\.[A-Za-z0-9]{1,8}\b/.test(text)) {
+    matchCount += 1;
+  }
 
   // 需要至少 2 分才判定为技术细节
   return matchCount >= 2;

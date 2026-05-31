@@ -91,12 +91,12 @@ describe('shouldFoldText', () => {
   it('threshold defaults to 30', () => {
     expect(TEXT_FOLD_THRESHOLD).toBe(30);
   });
-});
 
   it('keeps normal explanation with single file path visible', () => {
     const text = [
       '调研结论：',
-      '这几个 skill 可以分成三类：内容到页面规格、页面规格到 HTML/PDF/PPTX、强视觉模板/图片槽位体系。',
+      '这几个 skill 可以分成三类：内容到页面规格、页面规格到 HTML/PDF/PPTX。',
+      '相关入口可以先看 packages/web/src/utils/textFold.ts。',
       '对 PPT Agent 最有价值的不是直接照搬某个 skill，而是吸收它们的"第二阶段 MD"设计方法。',
       '1. Huashu Design',
       '定位：高保真 HTML 设计生产线，能做原型、幻灯片、动画、设计变体、专家评审。',
@@ -104,6 +104,18 @@ describe('shouldFoldText', () => {
 
     expect(shouldFoldText(text)).toBe(false);
     expect(getTextFoldReason(text)).toBe(null);
+  });
+
+  it('folds file change list when it has explicit technical heading and paths', () => {
+    const text = [
+      '改动文件：',
+      '- packages/web/src/utils/textFold.ts',
+      '- packages/web/src/utils/__tests__/textFold.test.ts',
+      '- packages/web/src/components/CollapsibleMarkdown.tsx',
+    ].join('\n');
+
+    expect(shouldFoldText(text)).toBe(true);
+    expect(getTextFoldReason(text)).toBe('technical-details');
   });
 
   it('keeps normal explanation with inline code mentions visible', () => {
@@ -116,3 +128,4 @@ describe('shouldFoldText', () => {
     expect(shouldFoldText(text)).toBe(false);
     expect(getTextFoldReason(text)).toBe(null);
   });
+});
