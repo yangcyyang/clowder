@@ -396,7 +396,8 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 
 const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
 行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
-不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/折叠块。`;
+不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/think。
+检测/排查类任务：主消息只给“结论 + 关键证据 + 下一步”。工具绕路、环境报错、临时替代方案、模型列表数量、命令细节等内部过程放 think，不写进主消息，除非用户明确要求看过程。`;
 
 function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   if (!context.threadId && !context.currentUserMessageId) return [];
