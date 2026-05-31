@@ -6,19 +6,6 @@ enum LightState: String {
   case error
   case offline
 
-  var color: NSColor {
-    switch self {
-    case .idle:
-      return NSColor(calibratedRed: 0.20, green: 0.78, blue: 0.34, alpha: 1)
-    case .running:
-      return NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.16, alpha: 1)
-    case .error:
-      return NSColor(calibratedRed: 0.94, green: 0.20, blue: 0.20, alpha: 1)
-    case .offline:
-      return NSColor(calibratedWhite: 0.48, alpha: 1)
-    }
-  }
-
   var title: String {
     switch self {
     case .idle:
@@ -33,23 +20,23 @@ enum LightState: String {
   }
 }
 
-final class LightView: NSView {
+final class TrafficLightView: NSView {
   var state: LightState = .offline {
     didSet { needsDisplay = true }
   }
+
+  private let green = NSColor(calibratedRed: 0.72, green: 0.86, blue: 0.16, alpha: 1)
+  private let yellow = NSColor(calibratedRed: 1.00, green: 0.69, blue: 0.26, alpha: 1)
+  private let red = NSColor(calibratedRed: 0.94, green: 0.32, blue: 0.25, alpha: 1)
+  private let dim = NSColor(calibratedWhite: 0.78, alpha: 1)
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
     NSColor.clear.setFill()
     dirtyRect.fill()
 
-    let diameter = min(bounds.width, bounds.height) - 8
-    let rect = NSRect(
-      x: (bounds.width - diameter) / 2,
-      y: (bounds.height - diameter) / 2,
-      width: diameter,
-      height: diameter
-    )
+    let pillRect = bounds.insetBy(dx: 4, dy: 4)
+    let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2, yRadius: pillRect.height / 2)
 
     let shadow = NSShadow()
     shadow.shadowBlurRadius = 0
@@ -58,22 +45,54 @@ final class LightView: NSView {
 
     NSGraphicsContext.saveGraphicsState()
     shadow.set()
-    state.color.setFill()
-    NSBezierPath(ovalIn: rect).fill()
+    NSColor(calibratedWhite: 0.80, alpha: 1).setFill()
+    pillPath.fill()
     NSGraphicsContext.restoreGraphicsState()
 
     NSColor.black.setStroke()
-    let path = NSBezierPath(ovalIn: rect)
-    path.lineWidth = 2
-    path.stroke()
+    pillPath.lineWidth = 8
+    pillPath.stroke()
+
+    drawLamp(centerX: pillRect.minX + pillRect.width * 0.24, color: colorFor(.idle))
+    drawLamp(centerX: pillRect.midX, color: colorFor(.running))
+    drawLamp(centerX: pillRect.minX + pillRect.width * 0.76, color: colorFor(.error))
+  }
+
+  private func colorFor(_ lamp: LightState) -> NSColor {
+    guard state != .offline else { return dim }
+    guard state == lamp else { return dim.withAlphaComponent(0.55) }
+    switch lamp {
+    case .idle:
+      return green
+    case .running:
+      return yellow
+    case .error:
+      return red
+    case .offline:
+      return dim
+    }
+  }
+
+  private func drawLamp(centerX: CGFloat, color: NSColor) {
+    let ringDiameter = bounds.height * 0.54
+    let ringRect = NSRect(
+      x: centerX - ringDiameter / 2,
+      y: bounds.midY - ringDiameter / 2,
+      width: ringDiameter,
+      height: ringDiameter
+    )
+    NSColor.black.setFill()
+    NSBezierPath(ovalIn: ringRect).fill()
+
+    let innerRect = ringRect.insetBy(dx: ringDiameter * 0.18, dy: ringDiameter * 0.18)
+    color.setFill()
+    NSBezierPath(ovalIn: innerRect).fill()
   }
 }
 
 final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private var panel: NSPanel!
-  private let lightView = LightView(frame: NSRect(x: 12, y: 30, width: 54, height: 54))
-  private let titleLabel = NSTextField(labelWithString: "Clowder")
-  private let detailLabel = NSTextField(labelWithString: "连接中…")
+  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
   private var timer: Timer?
 
   private let apiURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_API_URL"] ?? "http://127.0.0.1:3004/api/runtime/traffic-light")!
@@ -90,8 +109,8 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func createPanel() {
     panel = NSPanel(
-      contentRect: NSRect(x: 1400, y: 760, width: 220, height: 96),
-      styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+      contentRect: NSRect(x: 1400, y: 760, width: 260, height: 112),
+      styleMask: [.nonactivatingPanel, .borderless],
       backing: .buffered,
       defer: false
     )
@@ -99,28 +118,14 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
     panel.level = .floating
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     panel.isMovableByWindowBackground = true
-    panel.titlebarAppearsTransparent = true
-    panel.backgroundColor = NSColor(calibratedRed: 1.0, green: 0.98, blue: 0.92, alpha: 0.96)
+    panel.backgroundColor = NSColor.clear
     panel.isOpaque = false
     panel.hasShadow = true
 
-    let root = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 96))
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
     root.wantsLayer = true
-    root.layer?.borderWidth = 2
-    root.layer?.borderColor = NSColor.black.cgColor
-    root.layer?.cornerRadius = 0
-
-    titleLabel.frame = NSRect(x: 78, y: 54, width: 120, height: 22)
-    titleLabel.font = NSFont.boldSystemFont(ofSize: 15)
-    titleLabel.textColor = NSColor.black
-
-    detailLabel.frame = NSRect(x: 78, y: 28, width: 130, height: 22)
-    detailLabel.font = NSFont.systemFont(ofSize: 12)
-    detailLabel.textColor = NSColor.darkGray
 
     root.addSubview(lightView)
-    root.addSubview(titleLabel)
-    root.addSubview(detailLabel)
 
     let click = NSClickGestureRecognizer(target: self, action: #selector(openClowder))
     root.addGestureRecognizer(click)
@@ -180,8 +185,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
 
   private func render(state: LightState, detail: String) {
     lightView.state = state
-    titleLabel.stringValue = "Clowder \(state.title)"
-    detailLabel.stringValue = detail
+    panel.contentView?.toolTip = "Clowder \(state.title)：\(detail)"
   }
 }
 
