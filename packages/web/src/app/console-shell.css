@@ -91,6 +91,11 @@
   --chat-code-btn-bg: #e0d4c9;
   --chat-code-btn-text: #4a3d33;
   --chat-code-border: #d3c2b2;
+  --chat-code-border-width: 1px;
+  --chat-code-radius: 10px;
+  --chat-code-btn-radius: 6px;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: 1px 1px 0 var(--chat-code-border);
   --terminal-text-muted: #888888;
   --terminal-text-dim: #666666;
   --terminal-text-error: #f7768e;
@@ -183,6 +188,11 @@
   --chat-code-btn-bg: #493a50;
   --chat-code-btn-text: #e2e8f0;
   --chat-code-border: #5b506c;
+  --chat-code-border-width: 1px;
+  --chat-code-radius: 10px;
+  --chat-code-btn-radius: 6px;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: 1px 1px 0 var(--chat-code-border);
 }
 
 [data-visual-theme="claude"] {
@@ -246,6 +256,16 @@
   --console-modal-close-fg: #141111;
   --console-cat-fallback: #ffd440;
   --console-status-connected: #a9d877;
+  --chat-code-bg: #101827;
+  --chat-code-text: #e5edf7;
+  --chat-code-btn-bg: #111827;
+  --chat-code-btn-text: #cbd5e1;
+  --chat-code-border: #141111;
+  --chat-code-border-width: 2px;
+  --chat-code-radius: 0;
+  --chat-code-btn-radius: 0;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: none;
 }
 
 [data-visual-theme="slock"] {
@@ -276,11 +296,16 @@
   --console-modal-close-fg: var(--slock-ink);
   --console-cat-fallback: var(--slock-ink);
   --console-status-connected: var(--slock-success);
-  --chat-code-bg: var(--slock-warm-yellow);
-  --chat-code-text: var(--slock-ink);
-  --chat-code-btn-bg: var(--slock-cream);
-  --chat-code-btn-text: var(--slock-ink);
+  --chat-code-bg: #101827;
+  --chat-code-text: #e5edf7;
+  --chat-code-btn-bg: #111827;
+  --chat-code-btn-text: #cbd5e1;
   --chat-code-border: var(--slock-ink);
+  --chat-code-border-width: 2px;
+  --chat-code-radius: 0;
+  --chat-code-btn-radius: 0;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: none;
 }
 
 [data-visual-theme="kami"] {
@@ -344,6 +369,16 @@
   --console-modal-close-fg: #ffd440;
   --console-cat-fallback: #ffd440;
   --console-status-connected: #a9d877;
+  --chat-code-bg: #101827;
+  --chat-code-text: #e5edf7;
+  --chat-code-btn-bg: #111827;
+  --chat-code-btn-text: #cbd5e1;
+  --chat-code-border: #ffd440;
+  --chat-code-border-width: 2px;
+  --chat-code-radius: 0;
+  --chat-code-btn-radius: 0;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: none;
 }
 
 [data-theme="dark"][data-visual-theme="slock"] {
@@ -374,11 +409,16 @@
   --console-modal-close-fg: var(--slock-ink);
   --console-cat-fallback: var(--slock-ink);
   --console-status-connected: var(--slock-success);
-  --chat-code-bg: var(--slock-warm-yellow);
-  --chat-code-text: var(--slock-ink);
-  --chat-code-btn-bg: var(--slock-cream);
-  --chat-code-btn-text: var(--slock-ink);
+  --chat-code-bg: #101827;
+  --chat-code-text: #e5edf7;
+  --chat-code-btn-bg: #111827;
+  --chat-code-btn-text: #cbd5e1;
   --chat-code-border: var(--slock-ink);
+  --chat-code-border-width: 2px;
+  --chat-code-radius: 0;
+  --chat-code-btn-radius: 0;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: none;
 }
 
 [data-theme="dark"][data-visual-theme="kami"] {
