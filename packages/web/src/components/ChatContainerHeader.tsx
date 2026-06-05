@@ -47,7 +47,7 @@ export function ChatContainerHeader({
 
   return (
     <header className="safe-area-top">
-      <div className="h-[54px] border-b border-[var(--slock-border-color)] px-6 flex items-center gap-2.5">
+      <div className="h-11 border-b border-[var(--slock-border-color)] px-5 flex items-center gap-2">
         <button
           onClick={onToggleSidebar}
           className="p-1 rounded-md hover:bg-[var(--console-hover-bg)] transition-colors md:hidden"
@@ -70,7 +70,7 @@ export function ChatContainerHeader({
         <button
           type="button"
           onClick={openSkillDashboard}
-          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-1 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
           title="打开静态 Skill 仪表板"
           aria-label="打开静态 Skill 仪表板"
         >
@@ -79,7 +79,7 @@ export function ChatContainerHeader({
         <button
           type="button"
           onClick={onOpenKnowledgeCapture}
-          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
           title="沉淀为知识"
           aria-label="沉淀为知识"
         >

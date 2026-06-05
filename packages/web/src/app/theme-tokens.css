@@ -144,7 +144,7 @@
   --slock-message-gap: 12px;
   --slock-avatar-size: 32px;
   --slock-density: compact;
-  --slock-input-min-height: 92px;
+  --slock-input-min-height: 84px;
   --slock-input-height-min: var(--slock-input-min-height);
   --slock-radius-sm: 6px;
   --slock-radius-md: 8px;
@@ -372,7 +372,7 @@
   --slock-border-color: var(--slock-ink);
   --slock-border-width: 2px;
   --slock-rail-border-width: 3px;
-  --slock-input-min-height: 112px;
+  --slock-input-min-height: 86px;
   --slock-input-height-min: var(--slock-input-min-height);
   --slock-radius-sm: 0;
   --slock-radius-md: 0;
@@ -443,7 +443,7 @@
 
   --slock-sidebar-bg: #141413;
   --slock-border-color: #e8e6dc;
-  --slock-input-height-min: 112px;
+  --slock-input-height-min: 86px;
   --slock-radius-sm: 4px;
   --slock-radius-md: 6px;
   --slock-radius-lg: 8px;
@@ -772,7 +772,7 @@
   --slock-border-color: var(--slock-ink);
   --slock-border-width: 2px;
   --slock-rail-border-width: 3px;
-  --slock-input-min-height: 112px;
+  --slock-input-min-height: 86px;
   --slock-input-height-min: var(--slock-input-min-height);
   --slock-radius-sm: 0;
   --slock-radius-md: 0;
@@ -834,7 +834,7 @@
 
   --slock-sidebar-bg: #0f0f0e;
   --slock-border-color: #504e49;
-  --slock-input-height-min: 112px;
+  --slock-input-height-min: 86px;
   --slock-radius-sm: 4px;
   --slock-radius-md: 6px;
   --slock-radius-lg: 8px;

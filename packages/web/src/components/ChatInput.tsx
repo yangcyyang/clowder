@@ -1028,7 +1028,7 @@ export function ChatInput({
         />
       )}
 
-      <div className="flex items-center gap-2 p-4 pt-2">
+      <div className="flex items-center gap-2 px-4 pb-3 pt-1.5">
         {/* Mobile: + toggle button */}
         <button
           onClick={() => setMobileToolbar((v) => !v)}
@@ -1079,8 +1079,8 @@ export function ChatInput({
                 ? '悄悄话...'
                 : '输入消息 #当前对话'
             }
-            className="max-h-[300px] min-h-16 flex-1 resize-none bg-transparent px-3 py-3 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-cafe-text placeholder:text-cafe-muted focus:outline-none"
-            rows={3}
+            className="max-h-[260px] min-h-12 flex-1 resize-none bg-transparent px-3 py-2.5 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-cafe-text placeholder:text-cafe-muted focus:outline-none"
+            rows={2}
             disabled={disabled}
           />
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
