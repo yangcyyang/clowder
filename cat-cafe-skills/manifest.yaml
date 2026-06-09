@@ -969,6 +969,56 @@ skills:
     merged_from: null
     feature: "F144"
 
+  # ── PPT-Agent MVP 页面计划工作流 ──
+  ppt-agent:
+    description: >
+      PPT 页面计划与双层蓝图生成工作流：Brief 补齐 → 资料理解 → 页面计划生成 → 人审内容稿 + Agent 制作规范。
+      Use when: 用户要用模糊需求和一批资料规划 PPT、沉淀 PPT-Agent MVP 流程、或要求先生成页面计划/结构设计蓝图再进入制作。
+      Not for: 直接制作/设计/导出 PPT（用 ppt-forge）、纯代码实现（用 worktree/tdd）、通用资料总结且不产出 PPT 页面计划。
+      Output: 已确认 Brief + 轻量资料理解 + 可执行页面计划，或一份给人审内容、给 Agent 执行的双层蓝图 MD。
+    triggers:
+      - "ppt-agent"
+      - "PPT Agent"
+      - "页面计划"
+      - "Brief补齐"
+      - "资料理解"
+      - "生成 PPT 大纲"
+      - "从资料生成 PPT"
+      - "PPT蓝图师"
+      - "PPT蓝图MD"
+      - "结构设计蓝图"
+    not_for:
+      - "直接制作 PPT"
+      - "PPT 视觉设计"
+      - "纯代码实现"
+      - "通用资料总结"
+    output: "Confirmed Brief + lightweight material understanding + executable page plan"
+    next: ["ppt-forge", "writing-plans"]
+    sop_step: null
+    merged_from: null
+
+  # ── Superpowers 集成 Skill ──
+  subagent-dispatch:
+    description: >
+      子任务并行分派与执行（借鉴 Superpowers）。
+      Use when: 有多个独立子任务可以并行执行，且任务间无依赖。
+      Not for: 需要跨猫协作决策、有复杂依赖关系的任务。
+      Output: 子任务分派清单 + 并行执行结果汇总。
+    triggers:
+      - "并行执行"
+      - "子任务分派"
+      - "独立任务"
+      - "同时处理"
+      - "并行处理"
+    not_for:
+      - "跨猫协作决策"
+      - "架构讨论"
+      - "有依赖关系的任务"
+    output: "Task dispatch list + parallel execution summary"
+    next: ["quality-gate"]
+    sop_step: null
+    source: "superpowers@obra (adapted)"
+
   # ── 工具类 Skill ──
   update-skills-dashboard:
     description: >

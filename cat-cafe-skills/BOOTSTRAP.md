@@ -3,7 +3,9 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（34 个）
+## Skills 列表（38 个）
+
+**集成 Superpowers**: 详见 `refs/superpowers-integration.md`
 
 ### 开发流程链
 ```
@@ -33,6 +35,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
+| `open-source-teardown` | 明星开源项目/竞品代码拆解 | — |
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
 | `enterprise-workflow` | 企微/飞书文档、表格、待办、会议、日程一键创建 | — |
 | `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
@@ -45,8 +48,12 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
 | `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
 | `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
+| `clowder-agent-runtime-doctor` | Agent 列表/运行态/API 不通时检查和修复 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
+| `ppt-agent` | 模糊需求+资料 → Brief 补齐 → 资料理解 → 页面计划 | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
+| `update-skills-dashboard` | 新增/删除/修改 skill 后刷新技能看板 HTML | — |
+| `subagent-dispatch` | 子任务并行分派（借鉴 Superpowers） | — |
 
 ### 参考文件（refs/，按需读取）
 
