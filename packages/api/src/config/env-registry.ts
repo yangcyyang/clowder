@@ -657,6 +657,27 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_SESSION_MUTEX_WAIT_TIMEOUT_MS',
+    defaultValue: '90000',
+    description: 'Session 并发锁等待超时（毫秒），超时后拒绝并发调用',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_A2A_ROUTING_MODE',
+    defaultValue: 'legacy',
+    description: 'A2A 路由模式：legacy（旧版串行）或 slock（新版并发）',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_SKILL_MANIFEST_PATH',
+    defaultValue: '(~/.cat-cafe/skills-manifest.json)',
+    description: 'Skills manifest 文件路径覆盖',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
     name: 'CAT_CAFE_CALLBACK_TOKEN',
     defaultValue: '(未设置)',
     description: 'Callback 鉴权 token',
