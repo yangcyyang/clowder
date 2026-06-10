@@ -188,6 +188,30 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
   });
 
+  it('GET /api/cats falls back when a local /avatars file is missing', async () => {
+    const catalog = makeCatalog('runtime-cat', '运行时猫');
+    catalog.breeds[0].avatar = '/avatars/missing-runtime-cat.png';
+    const projectRoot = createRuntimeCatalogProject(catalog);
+    mkdirSync(join(projectRoot, 'packages/web/public/avatars'), { recursive: true });
+    writeFileSync(join(projectRoot, 'packages/web/public/avatars/default.png'), 'placeholder');
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const runtimeCat = body.cats.find((cat) => cat.id === 'runtime-cat');
+    assert.ok(runtimeCat, 'runtime-cat should come from runtime catalog');
+    assert.equal(runtimeCat.avatar, '/avatars/default.png');
+
+    await app.close();
+  });
+
   it('GET /api/cat-templates returns template cats even when runtime catalog has additional members', async () => {
     const templateConfig = makeVersion2Config('template-cat', '模板猫', {
       family: 'ragdoll',

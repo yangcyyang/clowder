@@ -656,6 +656,7 @@ kill_port() {
         fi
         echo -e "${GREEN}  ✓ 端口 $port 已释放${NC}"
     fi
+    return 0
 }
 
 kill_managed_ports() {

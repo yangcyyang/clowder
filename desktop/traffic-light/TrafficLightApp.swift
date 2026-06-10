@@ -30,7 +30,7 @@ final class TrafficLightView: NSView {
   var services: [ServiceLight] = [
     ServiceLight(name: "Clowder", state: .offline, detail: "API 未连接"),
     ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行"),
-    ServiceLight(name: "Codex", state: .idle, detail: "未检测到客户端进程"),
+    ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程"),
   ] {
     didSet { needsDisplay = true }
   }
@@ -101,9 +101,12 @@ final class TrafficLightView: NSView {
 
 final class TrafficLightApp: NSObject, NSApplicationDelegate {
   private var panel: NSPanel!
-  private let windowSize = NSSize(width: 320, height: 56)
-  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 320, height: 56))
+  private let windowSize = NSSize(width: 420, height: 56)
+  private let lightView = TrafficLightView(frame: NSRect(x: 0, y: 0, width: 420, height: 56))
   private var timer: Timer?
+  private var codexBusyUntil: TimeInterval?
+  private var slockBusyUntil: TimeInterval?
+  private let runtimeQuietGraceInterval: TimeInterval = 8
 
   private let apiURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_API_URL"] ?? "http://127.0.0.1:3004/api/runtime/traffic-light")!
   private let webURL = URL(string: ProcessInfo.processInfo.environment["CLOWDER_WEB_URL"] ?? "http://127.0.0.1:3003")!
@@ -167,7 +170,7 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       let stateRaw = json["state"] as? String,
       let state = LightState(rawValue: stateRaw)
     else {
-      return ServiceLight(name: "Clowd", state: .offline, detail: "API 未连接或状态不可读")
+      return ServiceLight(name: "Clowder", state: .offline, detail: "API 未连接或状态不可读")
     }
 
     let running = json["runningCount"] as? Int ?? 0
@@ -185,79 +188,73 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
       detail = "API 未连接"
     }
 
-    return ServiceLight(name: "Clowd", state: state, detail: detail)
+    return ServiceLight(name: "Clowder", state: state, detail: detail)
   }
 
   private func slockServiceLight() -> ServiceLight {
-    let snapshot = slockRuntimeSnapshot()
-    if snapshot.busyRuntimeCount > 0 {
-      return ServiceLight(name: "Slock", state: .running, detail: "\(snapshot.busyRuntimeCount) 个 runtime 活跃")
+    let snapshot = currentSlockRuntimeSnapshot()
+    let online = snapshot.hasBridge || isSlockDaemonOnline()
+    let decision = runtimeActivityDecision(
+      snapshot: snapshot,
+      hasOnlineSignal: online,
+      now: Date().timeIntervalSince1970,
+      previousBusyUntil: slockBusyUntil,
+      quietGraceInterval: runtimeQuietGraceInterval
+    )
+    slockBusyUntil = decision.busyUntil
+
+    switch decision.state {
+    case .running:
+      let detail = snapshot.busyRuntimeCount > 0
+        ? "\(snapshot.busyRuntimeCount) 个 runtime 活跃"
+        : "刚检测到 runtime 活跃，短暂保持运行中"
+      return ServiceLight(name: "Slock", state: .running, detail: detail)
+    case .idle:
+      let detail = snapshot.hasRuntimeProcess
+        ? "\(snapshot.runtimeProcessCount) 个 runtime 在线但持续安静"
+        : "daemon 在线，当前未检测到忙碌 runtime"
+      return ServiceLight(name: "Slock", state: .idle, detail: detail)
+    case .offline:
+      return ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
     }
-    if snapshot.hasRuntimeBridge || isSlockDaemonOnline() {
-      return ServiceLight(name: "Slock", state: .idle, detail: "daemon 在线，当前未检测到忙碌 runtime")
-    }
-    return ServiceLight(name: "Slock", state: .offline, detail: "daemon 未运行")
   }
 
   private func codexServiceLight() -> ServiceLight {
-    let snapshot = codexRuntimeSnapshot()
-    if snapshot.busyRuntimeCount > 0 {
-      return ServiceLight(name: "Codex", state: .running, detail: "\(snapshot.busyRuntimeCount) 个 Codex runtime 活跃")
+    let snapshot = currentCodexRuntimeSnapshot()
+    let online = snapshot.hasBridge || checkProcess(pattern: "opencode|codex")
+    let decision = runtimeActivityDecision(
+      snapshot: snapshot,
+      hasOnlineSignal: online,
+      now: Date().timeIntervalSince1970,
+      previousBusyUntil: codexBusyUntil,
+      quietGraceInterval: runtimeQuietGraceInterval
+    )
+    codexBusyUntil = decision.busyUntil
+
+    switch decision.state {
+    case .running:
+      let detail = snapshot.busyRuntimeCount > 0
+        ? "\(snapshot.busyRuntimeCount) 个 Codex runtime 活跃"
+        : "刚检测到 Codex runtime 活跃，短暂保持运行中"
+      return ServiceLight(name: "Codex", state: .running, detail: detail)
+    case .idle:
+      let detail = snapshot.hasRuntimeProcess
+        ? "\(snapshot.runtimeProcessCount) 个 Codex runtime 在线但持续安静"
+        : "客户端在线，未检测到活跃 runtime"
+      return ServiceLight(name: "Codex", state: .idle, detail: detail)
+    case .offline:
+      return ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
     }
-    if snapshot.hasRuntimeBridge || checkProcess(pattern: "opencode|codex") {
-      return ServiceLight(name: "Codex", state: .idle, detail: "客户端在线，未检测到活跃 runtime")
-    }
-    return ServiceLight(name: "Codex", state: .offline, detail: "未检测到客户端进程")
   }
 
-  private func codexRuntimeSnapshot() -> (hasRuntimeBridge: Bool, busyRuntimeCount: Int) {
+  private func currentCodexRuntimeSnapshot() -> RuntimeProcessSnapshot {
     let output = commandOutput(executable: "/bin/ps", arguments: ["-axo", "pcpu=,command="])
-    var hasRuntimeBridge = false
-    var busyRuntimeCount = 0
-    for rawLine in output.split(separator: "\n") {
-      let line = String(rawLine)
-      let normalized = line.lowercased()
-      let isCodexRuntime = normalized.contains("--runtime codex")
-        || normalized.contains("--runtime\",\"codex")
-        || normalized.contains("--runtime=codex")
-      guard isCodexRuntime else { continue }
-      if normalized.contains("clowdertrafficlight") || normalized.contains("/bin/ps ") { continue }
-
-      hasRuntimeBridge = true
-      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-      let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-      let cpu = parts.first.flatMap { Double($0) } ?? 0
-      let bridgeOnly = normalized.contains("chat-bridge.js --agent-id")
-
-      // 只把真正的 Codex runtime 进程算作运行中；常驻 bridge 不算。
-      if !bridgeOnly && cpu >= 1.0 {
-        busyRuntimeCount += 1
-      }
-    }
-    return (hasRuntimeBridge, busyRuntimeCount)
+    return codexRuntimeSnapshot(from: output)
   }
 
-  private func slockRuntimeSnapshot() -> (hasRuntimeBridge: Bool, busyRuntimeCount: Int) {
+  private func currentSlockRuntimeSnapshot() -> RuntimeProcessSnapshot {
     let output = commandOutput(executable: "/bin/ps", arguments: ["-axo", "pcpu=,command="])
-    var hasRuntimeBridge = false
-    var busyRuntimeCount = 0
-    for rawLine in output.split(separator: "\n") {
-      let line = String(rawLine)
-      guard line.contains("--runtime-actions-only") || line.contains("chat-bridge.js") else { continue }
-      if line.contains("ClowderTrafficLight") || line.contains("/bin/ps ") { continue }
-
-      hasRuntimeBridge = true
-      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-      let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-      let cpu = parts.first.flatMap { Double($0) } ?? 0
-      let bridgeOnly = line.contains("/chat-bridge.js --agent-id")
-
-      // chat-bridge 常驻不代表忙碌；真正的 runtime 进程 CPU 抬高才算运行中。
-      if !bridgeOnly && cpu >= 1.0 {
-        busyRuntimeCount += 1
-      }
-    }
-    return (hasRuntimeBridge, busyRuntimeCount)
+    return slockRuntimeSnapshot(from: output)
   }
 
   private func isSlockDaemonOnline() -> Bool {
@@ -345,7 +342,12 @@ final class TrafficLightApp: NSObject, NSApplicationDelegate {
   }
 }
 
-let app = NSApplication.shared
-let delegate = TrafficLightApp()
-app.delegate = delegate
-app.run()
+@main
+struct ClowderTrafficLightMain {
+  static func main() {
+    let app = NSApplication.shared
+    let delegate = TrafficLightApp()
+    app.delegate = delegate
+    app.run()
+  }
+}

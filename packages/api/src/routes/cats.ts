@@ -4,8 +4,9 @@
  * GET /api/cats/:id/status - 获取猫猫状态
  */
 
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import {
   type CatConfig,
   CLI_EFFORT_VALUES,
@@ -185,6 +186,29 @@ const updateCatSchema = z.object({
 const reloadAssetCardSchema = z.object({
   path: z.string().min(1).optional(),
 });
+
+const DEFAULT_AVATAR_PATH = '/avatars/default.png';
+
+function resolveResponseAvatar(projectRoot: string, avatar: string | undefined): string {
+  const value = avatar?.trim() || DEFAULT_AVATAR_PATH;
+  if (!value.startsWith('/avatars/')) return value;
+
+  const avatarsDir = resolve(projectRoot, 'packages/web/public/avatars');
+  const defaultAvatarFile = resolve(avatarsDir, 'default.png');
+  if (!existsSync(defaultAvatarFile)) return value;
+
+  const relativeAvatarPath = value.slice('/avatars/'.length);
+  if (!relativeAvatarPath || relativeAvatarPath.includes('..') || relativeAvatarPath.includes('\\')) {
+    return DEFAULT_AVATAR_PATH;
+  }
+
+  const avatarFile = resolve(avatarsDir, relativeAvatarPath);
+  if (avatarFile !== defaultAvatarFile && !avatarFile.startsWith(`${avatarsDir}${sep}`)) {
+    return DEFAULT_AVATAR_PATH;
+  }
+
+  return existsSync(avatarFile) ? value : DEFAULT_AVATAR_PATH;
+}
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
 
@@ -461,6 +485,7 @@ async function toCatResponse(
   cat: CatConfig & { contextBudget?: ContextBudget },
   metadata: CatResponseMetadata,
   resolveEffectiveAccountRef: (cat: CatConfig & { contextBudget?: ContextBudget }) => Promise<string | undefined>,
+  projectRoot: string,
 ) {
   return {
     id: cat.id,
@@ -477,7 +502,7 @@ async function toCatResponse(
     cli: cat.cli,
     toolPolicy: cat.toolPolicy,
     contextBudget: cat.contextBudget,
-    avatar: cat.avatar,
+    avatar: resolveResponseAvatar(projectRoot, cat.avatar),
     roleDescription: cat.roleDescription,
     personality: cat.personality,
     teamStrengths: cat.teamStrengths,
@@ -583,7 +608,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     return {
       cats: await Promise.all(
         Object.values(getResolvedCats(projectRoot)).map((cat) =>
-          toCatResponse(cat, resolveMetadata(cat.id), resolveEffectiveAccountRef),
+          toCatResponse(cat, resolveMetadata(cat.id), resolveEffectiveAccountRef, projectRoot),
         ),
       ),
     };
@@ -714,7 +739,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const metadata = buildCatResponseMetadataResolver(projectRoot);
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
     reply.status(201);
-    return { cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef), updatedBy: operator };
+    return { cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef, projectRoot), updatedBy: operator };
   });
 
   app.patch<{ Params: { id: string } }>('/api/cats/:id', async (request, reply) => {
@@ -875,7 +900,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       });
       const cat = resolved[request.params.id];
       const metadata = buildCatResponseMetadataResolver(projectRoot);
-      return { cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef), updatedBy: operator };
+      return { cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef, projectRoot), updatedBy: operator };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/not found/i.test(message)) {
@@ -940,7 +965,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const cat = resolved[request.params.id];
       const metadata = buildCatResponseMetadataResolver(projectRoot);
       return {
-        cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef),
+        cat: await toCatResponse(cat, metadata(cat.id), resolveEffectiveAccountRef, projectRoot),
         assetCard: cat.assetCard,
         updatedBy: operator,
       };

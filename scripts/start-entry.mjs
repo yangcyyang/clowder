@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runWindowsStatus } from './lib/platform-status.mjs';
+import { runPlatformStatus } from './lib/platform-status.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
@@ -25,15 +25,7 @@ const IS_WINDOWS = process.platform === 'win32';
 const [mode, ...rest] = process.argv.slice(2);
 
 if (mode === 'status') {
-  if (IS_WINDOWS) {
-    runWindowsStatus({ projectRoot });
-  } else {
-    const child = spawn('bash', [resolve(__dirname, 'start-dev.sh'), '--status'], {
-      cwd: projectRoot,
-      stdio: 'inherit',
-    });
-    child.on('exit', (code) => process.exit(code ?? 1));
-  }
+  await runPlatformStatus({ projectRoot });
 } else if (IS_WINDOWS) {
   // Map Unix-style flags to PowerShell switch params
   const flagMap = { '--debug': '-Debug', '--quick': '-Quick', '--memory': '-Memory', '--dev': '-Dev' };

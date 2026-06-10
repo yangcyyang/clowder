@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
+import net from 'node:net';
+import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 
 const DEFAULT_API_PORT = '3004';
@@ -53,6 +55,48 @@ export function resolveWindowsStatusPorts({ projectRoot = process.cwd(), env = p
   };
 }
 
+export const resolveStatusPorts = resolveWindowsStatusPorts;
+
+export function checkTcpPort({ host = '127.0.0.1', port, timeoutMs = 750 } = {}) {
+  return new Promise((resolvePort) => {
+    const socket = net.createConnection({ host, port: Number(port) });
+    let settled = false;
+
+    const settle = (isOpen) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolvePort(isOpen);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => settle(true));
+    socket.once('timeout', () => settle(false));
+    socket.once('error', () => settle(false));
+  });
+}
+
+export async function checkApiReady({ apiPort, timeoutMs = 1000 } = {}) {
+  if (typeof fetch !== 'function') {
+    return { ok: false, detail: 'fetch unavailable' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`http://127.0.0.1:${apiPort}/ready`, { signal: controller.signal });
+    if (!response.ok) return { ok: false, detail: `HTTP ${response.status}` };
+
+    const body = await response.json().catch(() => null);
+    if (body?.status === 'ready') return { ok: true, detail: 'ready' };
+    return { ok: false, detail: body?.status ? String(body.status) : 'unexpected response' };
+  } catch (error) {
+    return { ok: false, detail: error?.name === 'AbortError' ? 'timeout' : 'unreachable' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function buildWindowsStatus({
   projectRoot = process.cwd(),
   env = process.env,
@@ -95,6 +139,59 @@ export function buildWindowsStatus({
     exitCode: requiredServices.every((service) => service.running) ? 0 : 1,
     lines,
   };
+}
+
+export async function buildUnixStatus({
+  projectRoot = process.cwd(),
+  env = process.env,
+  daemonStateDir = resolve(homedir(), '.cat-cafe'),
+  pidIsRunning: checkPid = pidIsRunning,
+  checkPort = checkTcpPort,
+  checkReady = checkApiReady,
+} = {}) {
+  const lines = ['Cat Cafe Unix status'];
+  const daemonPidPath = resolve(daemonStateDir, 'daemon.pid');
+
+  if (existsSync(daemonPidPath)) {
+    const pid = Number.parseInt(readFileSync(daemonPidPath, 'utf8').trim(), 10);
+    if (!Number.isNaN(pid) && checkPid(pid)) {
+      lines.push(`  daemon: running (PID: ${pid})`);
+      return { exitCode: 0, lines };
+    }
+    lines.push(
+      Number.isNaN(pid) ? '  daemon: not running (invalid PID file)' : `  daemon: not running (stale PID: ${pid})`,
+    );
+  } else {
+    lines.push('  daemon: not running (missing PID file)');
+  }
+
+  const { apiPort, webPort } = resolveStatusPorts({ projectRoot, env });
+  const [apiRunning, webRunning] = await Promise.all([
+    checkPort({ port: apiPort }),
+    checkPort({ port: webPort }),
+  ]);
+  const ready = apiRunning ? await checkReady({ apiPort }) : { ok: false, detail: 'port closed' };
+
+  lines.push(`  direct api-${apiPort}: ${apiRunning ? 'running' : 'not running'} (${ready.detail})`);
+  lines.push(`  direct web-${webPort}: ${webRunning ? 'running' : 'not running'}`);
+
+  return {
+    exitCode: apiRunning && webRunning && ready.ok ? 0 : 1,
+    lines,
+  };
+}
+
+export async function buildPlatformStatus(options = {}) {
+  if (process.platform === 'win32') return buildWindowsStatus(options);
+  return buildUnixStatus(options);
+}
+
+export async function runPlatformStatus(options = {}) {
+  const result = await buildPlatformStatus(options);
+  for (const line of result.lines) {
+    console.log(line);
+  }
+  process.exit(result.exitCode);
 }
 
 export function runWindowsStatus(options = {}) {
