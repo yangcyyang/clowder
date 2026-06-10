@@ -156,11 +156,11 @@ export async function buildUnixStatus({
     const pid = Number.parseInt(readFileSync(daemonPidPath, 'utf8').trim(), 10);
     if (!Number.isNaN(pid) && checkPid(pid)) {
       lines.push(`  daemon: running (PID: ${pid})`);
-      return { exitCode: 0, lines };
+    } else {
+      lines.push(
+        Number.isNaN(pid) ? '  daemon: not running (invalid PID file)' : `  daemon: not running (stale PID: ${pid})`,
+      );
     }
-    lines.push(
-      Number.isNaN(pid) ? '  daemon: not running (invalid PID file)' : `  daemon: not running (stale PID: ${pid})`,
-    );
   } else {
     lines.push('  daemon: not running (missing PID file)');
   }
@@ -172,8 +172,8 @@ export async function buildUnixStatus({
   ]);
   const ready = apiRunning ? await checkReady({ apiPort }) : { ok: false, detail: 'port closed' };
 
-  lines.push(`  direct api-${apiPort}: ${apiRunning ? 'running' : 'not running'} (${ready.detail})`);
-  lines.push(`  direct web-${webPort}: ${webRunning ? 'running' : 'not running'}`);
+  lines.push(`  api-${apiPort}: ${apiRunning ? 'running' : 'not running'} (${ready.detail})`);
+  lines.push(`  web-${webPort}: ${webRunning ? 'running' : 'not running'}`);
 
   return {
     exitCode: apiRunning && webRunning && ready.ok ? 0 : 1,
