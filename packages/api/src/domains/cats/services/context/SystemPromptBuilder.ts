@@ -293,6 +293,12 @@ function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): st
   return `${config.displayName}${variantPart}(${catId})`;
 }
 
+function variantRouteHandle(catId: string, config: CatConfig | undefined): string | null {
+  if (!config) return null;
+  if (!config.variantLabel && config.isDefaultVariant !== false) return null;
+  return pickVariantMention(catId, config);
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -371,12 +377,12 @@ function roughTokenEstimate(text: string): number {
  * Design decision: inject detail only for standard/full, not minimal.
  */
 const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
-身份与边界：用自己的身份签名，不冒充其他猫；规则是边界不是全部，不适用时用证据+替代方案 Push Back。
-原则：P1终态基座 P2自主跑完SOP P3方向正确>速度 P4单一真相源 P5可验证才算完成。用户是CVO，重要决策由用户拍板。
-实事求是：结论基于代码/commit/PR/文档等证据；不确定就说不确定；不要编造；查不完就说"还没查完"；完成必须附测试/截图/日志等证据。
-输出格式：日常对话和轻量问答用自然语言短答；只有任务完成、review、handoff、BLOCKED 等状态迁移才需要结构化报告。
-协作纪律：团队用"我们"；回复落在正确surface；@是球权路由，收到@后三选一：接/退/升；行动任务先认领或复用任务，交付进in_review。
-Magic Words（用户当前指令触发）： 「脚手架」终态自检；「绕路了」回直线路径；「喵约」重读家规；「星星罐子」停止副作用等指示；「第一性原理」/「数学之美」砍复杂度；「下次一定」能做的现在做；「我能猜出来」先读源文件；「碎片够了」换角度再搜并读原文。
+身份与边界：用自己的身份签名，不冒充；规则不适用时用证据+替代方案 Push Back。
+原则：P1终态基座 P2自主跑完SOP P3方向正确>速度 P4单一真相源 P5可验证才算完成；用户是CVO，重要决策由用户拍板。
+实事求是：结论基于代码/commit/PR/文档证据；不确定就说；不要编造；查不完就说"还没查完"；完成附测试/截图/日志。
+输出：日常短答；任务完成、review、handoff、BLOCKED 等状态迁移才结构化。
+协作：团队用"我们"；回复落正确surface；@是球权路由，收到@后三选一：接/退/升；行动任务先认领/复用，交付进in_review。
+Magic Words：「脚手架」/「绕路了」/「喵约」/「星星罐子」/「第一性原理」/「数学之美」/「下次一定」/「我能猜出来」/「碎片够了」，触发对应自检或换路。
 46 hotfix止血治理：fix/hotfix/quick fix/workaround 走 hotfix 标签、跨猫review、禁止作者自验。
 缅因猫fallback层数检测：同文件≥3层fallback时做坐标系自检，优先消除错误坐标系。
 暹罗猫创意-实现解耦：发现问题先记录+handoff；碰 packages/src 必须转执行猫。`;
@@ -806,7 +812,9 @@ export function buildInvocationContext(context: InvocationContext): string {
         return fromConfig?.defaultModel ?? 'unknown';
       }
     })();
-    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}`);
+    const routeHandle = variantRouteHandle(context.directMessageFrom as string, fromConfig);
+    const routeHint = routeHandle ? `; reply via ${routeHandle}` : '';
+    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}${routeHint}`);
     // Anti-spoofing fires only for same-breed variant handoffs (displayName collision + catId differs)
     if (fromConfig && fromConfig.displayName === config.displayName) {
       const selfVariant = config.variantLabel ?? runtimeModel;
@@ -858,7 +866,7 @@ export function buildInvocationContext(context: InvocationContext): string {
   // without considering whether a teammate needs to act next.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
     lines.push(
-      `A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。收到 @ 但对方说"我在动" → 矛盾，push back + 立刻接/退/升（诊断≠解决，说完不@=球还在地上）。收了球却说"你等着/你别动" → 球权死锁，禁止——做不了就退回或升级。球权只有第一人称：只能声明自己持球，不能声明别人持球——没有 @ 或 hold_ball 动作，球权就没转移。`,
+      `A2A 球权检查：@=球权转移（行首 @句柄，句中无效）。收到 @ 却说"我在动"=矛盾，push back 后接/退/升；收球又让对方等=死锁。球权只能第一人称声明；无 @ 或 hold_ball 动作就没转移。`,
       '',
     );
   }
@@ -895,7 +903,9 @@ export function buildInvocationContext(context: InvocationContext): string {
     if (topActive) {
       const topConfig = getConfig(topActive.catId as string);
       if (topConfig) {
-        lines.push(`最近活跃：${formatHandleFreeLabel(topActive.catId as string, topConfig)}`);
+        const routeHandle = variantRouteHandle(topActive.catId as string, topConfig);
+        const routeHint = routeHandle ? `；回传句柄：${routeHandle}` : '';
+        lines.push(`最近活跃：${formatHandleFreeLabel(topActive.catId as string, topConfig)}${routeHint}`);
       }
     }
   }
@@ -1044,11 +1054,11 @@ export function buildInvocationContext(context: InvocationContext): string {
     const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
     lines.push(
       '',
-      `下一棒传球决策树（本轮必选其一，缺 = 消息不完整）：先问"下一步谁能做"——`,
+      `下一棒传球决策树：先问"下一步谁能做"——`,
       `1. 另一只猫能做 → @句柄（review 完→@author / 修完→@reviewer / merge 完→@愿景守护猫）`,
-      `2. 等外部条件 → 实际调用 cat_cafe_hold_ball(...)。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条（口头"我继续"不算）`,
+      `2. 等外部条件 → 调 cat_cafe_hold_ball(...)。外部条件：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**；这些不在 roster，不可 @ 本地 proxy。`,
       `3. 只有铲屎官本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
-      `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（hold_ball），严禁投射成本地 @句柄。`,
+      `${cc} 不是默认出口。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决，没立场不 @。**外部 identity** 永远走选项 2（hold_ball），严禁投射成本地 @句柄。`,
     );
   }
 

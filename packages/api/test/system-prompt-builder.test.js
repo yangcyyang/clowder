@@ -997,6 +997,36 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃：缅因猫(codex)'), 'Self (codex) should not appear as most recently active');
   });
 
+  test('buildInvocationContext includes routable handle for non-default active variant', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'pi',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        activeParticipants: [{ catId: 'opus-45', lastMessageAt: 2000, messageCount: 5 }],
+      });
+
+      assert.match(ctx, /最近活跃：布偶猫 Opus 4\.5\(opus-45\).*@opus-45/);
+      assert.doesNotMatch(ctx, /最近活跃：.*@opus(?![-\w])/);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('buildInvocationContext skips self in activity list', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
@@ -1115,6 +1145,37 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Direct message from @opus'));
     // F167 anti-spoofing: handoff must carry sender model marker explicitly
     assert.ok(ctx.includes('[model='), 'handoff must include sender model marker');
+  });
+
+  test('buildInvocationContext includes routable reply handle for non-default variant sender', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'pi',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        directMessageFrom: 'opus-45',
+      });
+
+      assert.match(ctx, /^Direct message from 布偶猫 Opus 4\.5\(opus-45\)/m);
+      assert.ok(ctx.includes('reply via @opus-45'), 'variant sender reply must name the routable handle');
+      assert.ok(!ctx.includes('reply via @opus '), 'must not suggest default opus handle for opus-45');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
   });
 
   // F167 P2 (cloud review 2026-04-18): sender model must also honor runtime env override,
