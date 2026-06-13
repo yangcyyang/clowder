@@ -549,6 +549,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('$CLI task update --task <taskId> --status in_review'), 'Should require in_review');
     assert.ok(ctx.includes('$CLI message send --target "thread_abc"'), 'Should include current thread target');
     assert.ok(ctx.includes('主消息遵守输出协议：结论清楚、证据明确'), 'Should enforce clear visible output');
+    assert.ok(ctx.includes('文件受 git 版本控制时，可直接删除'), 'Should exempt git-tracked file deletion');
+    assert.ok(ctx.includes('§10.4 的“删数据”指数据库'), 'Should scope irreversible data deletion');
   });
 
   test('buildSystemPrompt includes Slock-like visible output protocol', async () => {
@@ -1326,6 +1328,25 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Direct message from @opus'));
     // F167 anti-spoofing: handoff must carry sender model marker explicitly
     assert.ok(ctx.includes('[model='), 'handoff must include sender model marker');
+  });
+
+  test('buildInvocationContext injects A2A trigger content above latest user message', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      directMessageFrom: 'opus',
+      a2aTriggerMessageId: 'msg-opus-handoff',
+      a2aTriggerContent:
+        '@gpt52 上轮 review 提的 3 项遗留需要补完：删除 recommend_styles.py，清理 pipeline.py 引用，清理 e2e-pipeline/SKILL.md 和测试引用。',
+    });
+    assert.ok(ctx.includes('本轮任务来源：布偶猫(opus) 的 A2A 派工'), 'Should identify A2A source');
+    assert.ok(ctx.includes('A2A trigger message: msg-opus-handoff'), 'Should include trigger id');
+    assert.ok(ctx.includes('删除 recommend_styles.py'), 'Should include trigger content');
+    assert.ok(ctx.includes('优先级：A2A 派工 > thread 最新用户消息'), 'Should define A2A priority');
+    assert.ok(ctx.includes('不要因为最新用户消息只是在催其他 Agent 就拒绝执行'), 'Should prevent latest-user override');
   });
 
   test('buildInvocationContext includes routable reply handle for non-default variant sender', async () => {

@@ -392,7 +392,8 @@ export async function* routeSerial(
               count: worklistEntry.streakPair.count,
             }
           : undefined;
-      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId) ?? options.replyToMessageId;
+      const a2aTriggerMessageId = worklistEntry.a2aTriggerMessageId.get(catId);
+      const streamReplyTo = a2aTriggerMessageId ?? options.replyToMessageId;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
@@ -516,6 +517,10 @@ export async function* routeSerial(
         a2aEnabled,
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(directMessageFrom ? { directMessageFrom } : {}),
+        ...(directMessageFrom && a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
+        ...(directMessageFrom && a2aTriggerMessageId && streamReplyPreview?.content
+          ? { a2aTriggerContent: streamReplyPreview.content }
+          : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
         ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
@@ -819,9 +824,7 @@ export async function* routeSerial(
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
         // F121: Pass A2A trigger message ID for auto-replyTo threading
-        ...(worklistEntry.a2aTriggerMessageId.get(catId)
-          ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
-          : {}),
+        ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
         ...((mentionParentSpan.get(index) ?? options.routeSpan)
           ? { routeSpan: mentionParentSpan.get(index) ?? options.routeSpan }
           : {}),

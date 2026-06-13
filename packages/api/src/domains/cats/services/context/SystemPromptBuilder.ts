@@ -172,6 +172,12 @@ export interface InvocationContext {
    */
   currentUserMessageId?: string;
   /**
+   * A2A handoff trigger — when another cat explicitly routed the ball to this cat.
+   * This must outrank the latest human message when deciding the current task.
+   */
+  a2aTriggerMessageId?: string;
+  a2aTriggerContent?: string;
+  /**
    * F087: Bootcamp state for CVO onboarding threads.
    * When present, cats inject bootcamp-guide behavior per phase.
    */
@@ -524,10 +530,18 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
     `行动任务先 claim: \`${claimCommand}\`；若没有 $CLI/claim 工具，在当前 thread 明确声明“我开始做：<范围>”后继续；若 claim 返回冲突才停止。`,
+    '文件删除权限：用户或 A2A 派工已明确要求删除，且文件受 git 版本控制时，可直接删除并用 git diff/status 留证；这不是不可逆操作。§10.4 的“删数据”指数据库、生产资源或不可恢复数据。',
     '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
     `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
     '主消息遵守输出协议：结论清楚、证据明确；不贴 claim/$CLI/in_review/工具日志。',
   ];
+}
+
+function formatA2ATriggerContent(content: string | undefined): string {
+  const normalized = (content ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const limit = 360;
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
 }
 
 // --- .local / .local-override support (#603) ---
@@ -959,6 +973,15 @@ export function buildInvocationContext(context: InvocationContext): string {
     const routeHandle = variantRouteHandle(context.directMessageFrom as string, fromConfig);
     const routeHint = routeHandle ? `; reply via ${routeHandle}` : '';
     lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}${routeHint}`);
+    const a2aTriggerContent = formatA2ATriggerContent(context.a2aTriggerContent);
+    if (context.a2aTriggerMessageId || a2aTriggerContent) {
+      lines.push(
+        `🎯 本轮任务来源：${fromLabel} 的 A2A 派工。`,
+        `A2A trigger message: ${context.a2aTriggerMessageId ?? 'unknown'}`,
+        `任务内容：${a2aTriggerContent || '（未取到内容，请优先查看该 A2A 触发消息，而不是只看最新用户消息。）'}`,
+        '优先级：A2A 派工 > thread 最新用户消息。若派工里直接 @你并列出执行项，按派工内容接球执行；不要因为最新用户消息只是在催其他 Agent 就拒绝执行。',
+      );
+    }
     // Anti-spoofing fires only for same-breed variant handoffs (displayName collision + catId differs)
     if (fromConfig && fromConfig.displayName === config.displayName) {
       const selfVariant = config.variantLabel ?? runtimeModel;
