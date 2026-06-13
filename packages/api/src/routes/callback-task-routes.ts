@@ -15,7 +15,12 @@ import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-hel
 
 const updateTaskSchema = z.object({
   taskId: z.string().min(1),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional(),
+  why: z.string().max(1000).optional(),
+});
+
+const claimTaskSchema = z.object({
+  taskId: z.string().min(1),
   why: z.string().max(1000).optional(),
 });
 
@@ -28,7 +33,7 @@ const createTaskSchema = z.object({
 const listTasksQuerySchema = z.object({
   threadId: z.string().min(1).optional(),
   catId: z.string().min(1).optional(),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional(),
   kind: z.enum(['work', 'pr_tracking']).optional(),
 });
 
@@ -77,6 +82,46 @@ export function registerCallbackTaskRoutes(
     if (!updated) {
       reply.status(500);
       return { error: 'Failed to update task' };
+    }
+
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    return { status: 'ok', task: updated };
+  });
+
+  app.post('/api/callbacks/claim-task', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    const actor = deriveCallbackActor(record);
+
+    const parsed = claimTaskSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const { taskId, why } = parsed.data;
+    const existing = await taskStore.get(taskId);
+    if (!existing) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    if (existing.threadId !== actor.threadId) {
+      reply.status(403);
+      return { error: 'Task belongs to a different thread' };
+    }
+    if (existing.ownerCatId && existing.ownerCatId !== actor.catId) {
+      reply.status(409);
+      return { error: 'Task is already claimed by another cat', ownerCatId: existing.ownerCatId };
+    }
+
+    const updated = await taskStore.update(taskId, {
+      ownerCatId: actor.catId,
+      status: 'doing',
+      ...(why ? { why } : {}),
+    });
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to claim task' };
     }
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);

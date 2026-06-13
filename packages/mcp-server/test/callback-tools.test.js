@@ -303,6 +303,32 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('status=blocked'));
   });
 
+  test('handleClaimTask forwards taskId and why', async () => {
+    const { handleClaimTask } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok' }),
+      };
+    };
+
+    const result = await handleClaimTask({
+      taskId: 'task-42',
+      why: 'Taking ownership',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/claim-task'));
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.taskId, 'task-42');
+    assert.equal(body.why, 'Taking ownership');
+  });
+
   test('handleFeatIndex forwards limit/featId/query filters', async () => {
     const { handleFeatIndex } = await import('../dist/tools/callback-tools.js');
 

@@ -348,8 +348,13 @@ export const createTaskInputSchema = {
 
 export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional().describe('New task status'),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional().describe('New task status'),
   why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
+};
+
+export const claimTaskInputSchema = {
+  taskId: z.string().min(1).describe('The ID of the task to claim'),
+  why: z.string().max(1000).optional().describe('Optional note explaining why you are claiming this task'),
 };
 
 export const crossPostMessageInputSchema = {
@@ -368,7 +373,7 @@ export const crossPostMessageInputSchema = {
 export const listTasksInputSchema = {
   threadId: z.string().min(1).optional().describe('Optional thread ID filter'),
   catId: z.string().min(1).optional().describe('Optional owner catId filter'),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional().describe('Optional task status filter'),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional().describe('Optional task status filter'),
   kind: z
     .enum(['work', 'pr_tracking'])
     .optional()
@@ -531,6 +536,18 @@ export async function handleUpdateTask(input: {
   });
 }
 
+export async function handleClaimTask(input: { taskId: string; why?: string | undefined }): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'claim_task',
+    primary: () =>
+      callbackPost('/api/callbacks/claim-task', {
+        taskId: input.taskId,
+        ...(input.why ? { why: input.why } : {}),
+      }),
+    policy: { kind: 'none' },
+  });
+}
+
 export async function handleCreateTask(input: {
   title: string;
   why?: string | undefined;
@@ -562,7 +579,7 @@ export async function handleCrossPostMessage(input: {
 export async function handleListTasks(input: {
   threadId?: string | undefined;
   catId?: string | undefined;
-  status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
+  status?: 'todo' | 'doing' | 'in_review' | 'blocked' | 'done' | undefined;
   kind?: 'work' | 'pr_tracking' | undefined;
 }): Promise<ToolResult> {
   return callbackGet('/api/callbacks/list-tasks', {
@@ -1139,11 +1156,20 @@ export const callbackTools = [
   {
     name: 'cat_cafe_update_task',
     description:
-      'Update the status of a task you own. Use to mark tasks as doing/blocked/done. ' +
+      'Update the status of a task you own. Use to mark tasks as doing/in_review/blocked/done. ' +
       'GOTCHA: You can only update tasks assigned to you (your catId). ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation.',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,
+  },
+  {
+    name: 'cat_cafe_claim_task',
+    description:
+      'Claim an existing 🧶 毛线球 task in the current thread and mark it as doing. ' +
+      'Use before starting action work when a task already exists. ' +
+      'If another cat already owns it, the tool returns a conflict; stop instead of duplicating work.',
+    inputSchema: claimTaskInputSchema,
+    handler: handleClaimTask,
   },
   {
     name: 'cat_cafe_create_task',

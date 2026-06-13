@@ -163,6 +163,63 @@ describe('Task Callback Integration', () => {
     assert.equal(response.json().task.status, 'doing');
   });
 
+  test('MCP claim-task claims unowned task for invocation cat', async () => {
+    const app = await createApp();
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
+    const task = taskStore.create({
+      threadId: 'thread-1',
+      title: 'Claim me',
+      why: 'Needs owner',
+      createdBy: 'user',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/claim-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        taskId: task.id,
+        why: 'Taking this now',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.status, 'ok');
+    assert.equal(body.task.ownerCatId, 'codex');
+    assert.equal(body.task.status, 'doing');
+    assert.equal(body.task.why, 'Taking this now');
+
+    const taskEvent = socketManager.getEvents().find((e) => e.event === 'task_updated');
+    assert.ok(taskEvent, 'task_updated event should be broadcast');
+  });
+
+  test('MCP claim-task rejects task owned by another cat', async () => {
+    const app = await createApp();
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', 'thread-1');
+    const task = taskStore.create({
+      threadId: 'thread-1',
+      title: 'Owned task',
+      why: 'Already claimed',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/claim-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        taskId: task.id,
+      },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().ownerCatId, 'opus');
+  });
+
   test('MCP update-task rejects cross-thread update', async () => {
     const app = await createApp();
 

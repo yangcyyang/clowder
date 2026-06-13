@@ -2,10 +2,12 @@
   "permissions": {
     "allow": [
       "mcp__cat-cafe__cat_cafe_list_tasks",
+      "mcp__cat-cafe__cat_cafe_claim_task",
       "mcp__cat-cafe__cat_cafe_get_thread_context",
       "mcp__cat-cafe__cat_cafe_post_message",
       "mcp__cat-cafe__cat_cafe_hold_ball",
       "mcp__cat_cafe__cat_cafe_list_tasks",
+      "mcp__cat_cafe__cat_cafe_claim_task",
       "mcp__cat_cafe__cat_cafe_get_thread_context",
       "mcp__cat_cafe__cat_cafe_post_message",
       "mcp__cat_cafe__cat_cafe_hold_ball"

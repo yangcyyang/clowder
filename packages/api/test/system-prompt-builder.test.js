@@ -545,6 +545,7 @@ describe('SystemPromptBuilder', () => {
     });
     assert.ok(ctx.includes('Clowder Task Gate（本轮动态）'), 'Should include dynamic task gate');
     assert.ok(ctx.includes('$CLI task claim --message-id msg_123'), 'Should point claim at current message');
+    assert.ok(ctx.includes('没有 $CLI/claim 工具'), 'Should allow verbal fallback when claim tooling is absent');
     assert.ok(ctx.includes('$CLI task update --task <taskId> --status in_review'), 'Should require in_review');
     assert.ok(ctx.includes('$CLI message send --target "thread_abc"'), 'Should include current thread target');
     assert.ok(ctx.includes('主消息遵守输出协议：结论清楚、证据明确'), 'Should enforce clear visible output');

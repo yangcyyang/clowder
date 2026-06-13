@@ -339,8 +339,7 @@ MCP 工具（异步汇报；token 有效期有限）：
 - cat_cafe_get_pending_mentions: @提及
 - cat_cafe_get_thread_context: thread 上下文
 - cat_cafe_list_threads: thread 摘要
-- cat_cafe_create_task: 🧶 毛线球（持久任务）
-- cat_cafe_update_task: 更新任务状态
+- cat_cafe_create_task / claim_task / update_task: 任务创建/认领/状态
 - cat_cafe_create_rich_block: rich block（inline）
 - cat_cafe_generate_document: 文档生成→IM投递
 - cat_cafe_get_rich_block_rules: rich block 规则
@@ -524,7 +523,7 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   return [
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
-    `行动任务先 claim: \`${claimCommand}\`；claim 失败就停止重复施工。`,
+    `行动任务先 claim: \`${claimCommand}\`；若没有 $CLI/claim 工具，在当前 thread 明确声明“我开始做：<范围>”后继续；若 claim 返回冲突才停止。`,
     '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
     `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
     '主消息遵守输出协议：结论清楚、证据明确；不贴 claim/$CLI/in_review/工具日志。',
@@ -814,10 +813,10 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   lines.push(
     '## Clowder CLI 工作纪律',
-    '如果你的运行环境可以执行 shell，可使用 Clowder CLI 操作当前 Clowder；命令前先设 `CLI="${CLOWDER_CLI_PATH:-clowder}"`，没有 `clowder` 时再用仓库根目录 `./bin/clowder`。',
-    '- 收到需要实际处理的任务：先 `$CLI task claim --message-id <messageId>` 或 `$CLI task claim --task <taskId>`。',
-    '- 用户说“推进/修复/执行/帮我做/你来/排查/改造/构建/备份/push/导出”等，就是行动任务；除非权限或信息不足，否则必须 claim 后直接做，不要只回复计划或状态。',
-    '- 行动任务的最终回复必须包含实际交付物或验证结果；禁止把“正在加载上下文/还没开始改代码/下一步我会做”当作任务完成。',
+    '可执行 shell 时先设 `CLI="${CLOWDER_CLI_PATH:-clowder}"`，没有 `clowder` 再用 `./bin/clowder`。',
+    '- 行动任务先 `$CLI task claim --message-id <messageId>` / `--task <taskId>`；若没有 $CLI/claim 工具，在当前 thread 声明“我开始做：<范围>”后继续；claim 冲突才停止。',
+    '- “推进/修复/执行/帮我做/排查/改造/构建/备份/push/导出”等是行动任务；能做就 claim 后做，不只回计划。',
+    '- 最终回复必须有交付物或验证结果；“正在加载/还没开始/下一步会做”不算完成。',
     '- 如果本轮不能动手（缺权限、缺文件、缺凭证、工具不可用），明确写 BLOCKED 和缺什么；不要伪装成已在执行。',
     '- 完成后等待人工验收：`$CLI task update --task <taskId> --status in_review`。',
     '- 需要回写当前 thread：`$CLI message send --target "$CAT_CAFE_THREAD_ID"`，正文走 stdin。',
