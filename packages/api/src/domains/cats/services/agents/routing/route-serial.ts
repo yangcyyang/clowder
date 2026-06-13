@@ -259,6 +259,7 @@ export async function* routeSerial(
     modeSystemPromptByCat,
     queueHasQueuedMessages,
     hasQueuedOrActiveAgentForCat,
+    enqueueA2ATargets,
   } = options;
   const previousResponses: { catId: CatId; content: string }[] = [];
   const thinkingMode = options.thinkingMode ?? 'play';
@@ -275,6 +276,11 @@ export async function* routeSerial(
     options.a2aRoutingMode ?? (process.env.CAT_CAFE_A2A_ROUTING_MODE === 'slock' ? 'slock' : 'legacy');
   const enableHiddenTextScanA2A = a2aRoutingMode !== 'slock';
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
+  if (targetCats.length === 1 && options.directMessageFrom) {
+    const targetCat = targetCats[0]!;
+    worklistEntry.a2aFrom.set(targetCat, options.directMessageFrom);
+    if (options.a2aTriggerMessageId) worklistEntry.a2aTriggerMessageId.set(targetCat, options.a2aTriggerMessageId);
+  }
 
   let index = 0;
   // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
@@ -1582,91 +1588,148 @@ export async function* routeSerial(
         }
 
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
-          // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
-          let dispatchSpan: Span | undefined;
-          const pendingTail = worklist.slice(index + 1);
-          const pendingOriginalTargets = targetCats.slice(index + 1);
-          for (const nextCat of a2aMentions) {
-            if (worklistEntry.a2aCount >= maxDepth) break;
-            // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
-            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
-              );
-              continue;
-            }
-            if (pendingTail.includes(nextCat)) {
-              // Keep original user-selected targets replying to user, not to another cat.
-              if (!pendingOriginalTargets.includes(nextCat)) {
-                worklistEntry.a2aFrom.set(nextCat, catId);
-                // F121: response-text path — set trigger message for auto-replyTo
-                if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+          if (enqueueA2ATargets && storedMsgId) {
+            const queueTargets: CatId[] = [];
+            for (const nextCat of a2aMentions) {
+              if (worklistEntry.a2aCount >= maxDepth) break;
+              if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId },
+                  'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
+                );
+                continue;
               }
-              continue;
+              const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
+              const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
+                hadSubstantiveToolCall,
+                outputLength: storedContent.length,
+              });
+              if (streak.blockPingPong) {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId, count: streak.count },
+                  'F167 L1: A2A ping-pong terminated (streak >= 4)',
+                );
+                yield {
+                  type: 'system_info' as AgentMessageType,
+                  catId,
+                  content: JSON.stringify({
+                    type: 'a2a_pingpong_terminated',
+                    fromCatId: catId,
+                    targetCatId: nextCat,
+                    pairCount: streak.count,
+                  }),
+                  timestamp: Date.now(),
+                } as AgentMessage;
+                continue;
+              }
+              queueTargets.push(nextCat);
+              worklistEntry.a2aCount++;
             }
-            // F167 L1 + Phase D: ping-pong streak check (canonical enqueue point).
-            // callerActivity (substantive tool + output length) gates streak accumulation —
-            // real work / long discussion no longer trips the breaker falsely.
-            // streak=4+ (pure language inertia) → block enqueue + emit a2a_pingpong_terminated.
-            const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
-            const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
-              hadSubstantiveToolCall,
-              outputLength: storedContent.length,
+            if (queueTargets.length === 0) continue;
+            const enqueued = await enqueueA2ATargets({
+              threadId,
+              userId,
+              callerCatId: catId,
+              targetCats: queueTargets,
+              content: storedContent,
+              triggerMessageId: storedMsgId,
             });
-            if (streak.blockPingPong) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId, count: streak.count },
-                'F167 L1: A2A ping-pong terminated (streak >= 4)',
-              );
+            for (const pendingCat of enqueued) {
+              const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
               yield {
-                type: 'system_info' as AgentMessageType,
+                type: 'a2a_handoff' as AgentMessageType,
                 catId,
-                content: JSON.stringify({
-                  type: 'a2a_pingpong_terminated',
-                  fromCatId: catId,
-                  targetCatId: nextCat,
-                  pairCount: streak.count,
-                }),
+                content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
                 timestamp: Date.now(),
               } as AgentMessage;
-              continue;
             }
-
-            // F153: lazily create mention_dispatch span on first actual push
-            if (!dispatchSpan) {
-              const mentionerSpan = catInvocationSpans.get(index);
-              if (mentionerSpan) {
-                const parentCtx = trace.setSpan(context.active(), mentionerSpan);
-                dispatchSpan = routeSerialTracer.startSpan(
-                  'cat_cafe.mention_dispatch',
-                  {
-                    attributes: { [AGENT_ID]: catId as string, 'dispatch.target_count': a2aMentions.length },
-                  },
-                  parentCtx,
+          } else {
+            // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
+            let dispatchSpan: Span | undefined;
+            const pendingTail = worklist.slice(index + 1);
+            const pendingOriginalTargets = targetCats.slice(index + 1);
+            for (const nextCat of a2aMentions) {
+              if (worklistEntry.a2aCount >= maxDepth) break;
+              // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
+              if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId },
+                  'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
                 );
+                continue;
               }
-            }
+              if (pendingTail.includes(nextCat)) {
+                // Keep original user-selected targets replying to user, not to another cat.
+                if (!pendingOriginalTargets.includes(nextCat)) {
+                  worklistEntry.a2aFrom.set(nextCat, catId);
+                  // F121: response-text path — set trigger message for auto-replyTo
+                  if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+                }
+                continue;
+              }
+              // F167 L1 + Phase D: ping-pong streak check (canonical enqueue point).
+              // callerActivity (substantive tool + output length) gates streak accumulation —
+              // real work / long discussion no longer trips the breaker falsely.
+              // streak=4+ (pure language inertia) → block enqueue + emit a2a_pingpong_terminated.
+              const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
+              const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
+                hadSubstantiveToolCall,
+                outputLength: storedContent.length,
+              });
+              if (streak.blockPingPong) {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId, count: streak.count },
+                  'F167 L1: A2A ping-pong terminated (streak >= 4)',
+                );
+                yield {
+                  type: 'system_info' as AgentMessageType,
+                  catId,
+                  content: JSON.stringify({
+                    type: 'a2a_pingpong_terminated',
+                    fromCatId: catId,
+                    targetCatId: nextCat,
+                    pairCount: streak.count,
+                  }),
+                  timestamp: Date.now(),
+                } as AgentMessage;
+                continue;
+              }
 
-            worklist.push(nextCat);
-            worklistEntry.a2aCount++;
-            pendingTail.push(nextCat); // Keep dedup view in sync
-            worklistEntry.a2aFrom.set(nextCat, catId);
-            // F121: response-text path — set trigger message for auto-replyTo
-            if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
-            // F153: record mention parent span for dispatched target
-            if (dispatchSpan) mentionParentSpan.set(worklist.length - 1, dispatchSpan);
-          }
-          // F153: end or defer dispatch span based on child execution
-          if (dispatchSpan) {
-            let maxChildIdx = -1;
-            for (const [idx, s] of mentionParentSpan) {
-              if (s === dispatchSpan && idx > maxChildIdx) maxChildIdx = idx;
+              // F153: lazily create mention_dispatch span on first actual push
+              if (!dispatchSpan) {
+                const mentionerSpan = catInvocationSpans.get(index);
+                if (mentionerSpan) {
+                  const parentCtx = trace.setSpan(context.active(), mentionerSpan);
+                  dispatchSpan = routeSerialTracer.startSpan(
+                    'cat_cafe.mention_dispatch',
+                    {
+                      attributes: { [AGENT_ID]: catId as string, 'dispatch.target_count': a2aMentions.length },
+                    },
+                    parentCtx,
+                  );
+                }
+              }
+
+              worklist.push(nextCat);
+              worklistEntry.a2aCount++;
+              pendingTail.push(nextCat); // Keep dedup view in sync
+              worklistEntry.a2aFrom.set(nextCat, catId);
+              // F121: response-text path — set trigger message for auto-replyTo
+              if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+              // F153: record mention parent span for dispatched target
+              if (dispatchSpan) mentionParentSpan.set(worklist.length - 1, dispatchSpan);
             }
-            if (maxChildIdx > index) {
-              pendingDispatchSpans.push({ span: dispatchSpan, lastChildIndex: maxChildIdx });
-            } else {
-              dispatchSpan.end();
+            // F153: end or defer dispatch span based on child execution
+            if (dispatchSpan) {
+              let maxChildIdx = -1;
+              for (const [idx, s] of mentionParentSpan) {
+                if (s === dispatchSpan && idx > maxChildIdx) maxChildIdx = idx;
+              }
+              if (maxChildIdx > index) {
+                pendingDispatchSpans.push({ span: dispatchSpan, lastChildIndex: maxChildIdx });
+              } else {
+                dispatchSpan.end();
+              }
             }
           }
         }

@@ -734,6 +734,8 @@ export class QueueProcessor {
         targetCats,
         intent,
         idempotencyKey,
+        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
+        ...(entry.a2aTriggerMessageId ? { a2aTriggerMessageId: entry.a2aTriggerMessageId } : {}),
       });
 
       if (createResult.outcome === 'duplicate') {
@@ -988,6 +990,45 @@ export class QueueProcessor {
           ...(controller.signal ? { signal: controller.signal } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
+          enqueueA2ATargets: async (handoff: {
+            threadId: string;
+            userId: string;
+            callerCatId: import('@cat-cafe/shared').CatId;
+            targetCats: import('@cat-cafe/shared').CatId[];
+            content: string;
+            triggerMessageId?: string;
+          }) => {
+            const enqueued: import('@cat-cafe/shared').CatId[] = [];
+            for (const targetCat of handoff.targetCats) {
+              if (queue.hasActiveOrQueuedAgentForCat(handoff.threadId, targetCat)) continue;
+              const result = queue.enqueue({
+                threadId: handoff.threadId,
+                userId: handoff.userId,
+                content: handoff.content,
+                source: 'agent',
+                sourceCategory: 'a2a',
+                targetCats: [targetCat],
+                intent: 'execute',
+                autoExecute: true,
+                callerCatId: handoff.callerCatId,
+                a2aTriggerMessageId: handoff.triggerMessageId,
+              });
+              if (result.outcome !== 'enqueued' || !result.entry) continue;
+              if (handoff.triggerMessageId) {
+                queue.backfillMessageId(handoff.threadId, handoff.userId, result.entry.id, handoff.triggerMessageId);
+              }
+              enqueued.push(targetCat);
+            }
+            if (enqueued.length > 0) {
+              socketManager.emitToUser(handoff.userId, 'queue_updated', {
+                threadId: handoff.threadId,
+                queue: queue.list(handoff.threadId, handoff.userId),
+                action: 'enqueued',
+              });
+              await this.tryAutoExecute(handoff.threadId);
+            }
+            return enqueued;
+          },
           invocationController: controller,
           trackA2ASlot: (tid: string, catId: string, uid: string, ctrl: AbortController) => {
             invocationTracker.trackExternalSlot?.(tid, catId, ctrl, uid, [catId]);
@@ -998,6 +1039,10 @@ export class QueueProcessor {
           cursorBoundaries,
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
+          ...(entry.callerCatId ? { directMessageFrom: entry.callerCatId } : {}),
+          ...(entry.a2aTriggerMessageId
+            ? { a2aTriggerMessageId: entry.a2aTriggerMessageId, replyToMessageId: entry.a2aTriggerMessageId }
+            : {}),
           callerTraceContext: entry.callerTraceContext,
         },
       )) {

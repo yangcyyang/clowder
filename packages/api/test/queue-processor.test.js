@@ -1444,6 +1444,83 @@ describe('QueueProcessor', () => {
       assert.ok(startedCats.includes('codex'), 'codex should be started');
       assert.ok(startedCats.includes('gemini'), 'gemini should be started');
     });
+
+    it('passes A2A caller and trigger context into queued target invocation', async () => {
+      const routeCalls = [];
+      const a2aDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            routeCalls.push(args);
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const a2aProcessor = new QueueProcessor(a2aDeps);
+      const entry = enqueueEntry(a2aDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请执行 Phase 1-B',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-claude-handoff',
+      });
+      a2aDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-claude-handoff');
+
+      await a2aProcessor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const createInput = a2aDeps.invocationRecordStore.create.mock.calls[0].arguments[0];
+      assert.equal(createInput.callerCatId, 'opus-45');
+      assert.equal(createInput.a2aTriggerMessageId, 'msg-claude-handoff');
+
+      const routeOptions = routeCalls[0][6];
+      assert.equal(routeOptions.directMessageFrom, 'opus-45');
+      assert.equal(routeOptions.a2aTriggerMessageId, 'msg-claude-handoff');
+      assert.equal(routeOptions.replyToMessageId, 'msg-claude-handoff');
+    });
+
+    it('enqueues text-scan A2A mentions as independent autoExecute work items', async () => {
+      const nestedDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
+            if (targetCats[0] === 'opus') {
+              const enqueued = await opts.enqueueA2ATargets({
+                threadId: 't1',
+                userId: 'u1',
+                callerCatId: 'opus',
+                targetCats: ['pi', 'codex'],
+                content: '@Pi 做 A，@codex 做 B',
+                triggerMessageId: 'msg-opus-handoff',
+              });
+              assert.deepEqual(enqueued, ['pi', 'codex']);
+            }
+            yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const nestedProcessor = new QueueProcessor(nestedDeps);
+      const entry = enqueueEntry(nestedDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        targetCats: ['opus'],
+        autoExecute: true,
+        callerCatId: 'claude',
+      });
+      nestedDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-root');
+
+      await nestedProcessor.tryAutoExecute('t1');
+      await new Promise((r) => setTimeout(r, 100));
+
+      const createdTargets = nestedDeps.invocationRecordStore.create.mock.calls.map(
+        (call) => call.arguments[0].targetCats[0],
+      );
+      assert.ok(createdTargets.includes('pi'), 'Pi should be started via queue-backed A2A');
+      assert.ok(createdTargets.includes('codex'), 'Codex should be started via queue-backed A2A');
+    });
   });
 
   // ── Tracker guard: prevent duplicate execution for CLI-active cats ──

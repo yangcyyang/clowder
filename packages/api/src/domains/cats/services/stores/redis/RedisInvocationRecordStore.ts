@@ -28,7 +28,7 @@ const IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
  * Lua script for atomic idempotency check + record creation.
  * KEYS[1] = idempotency key (ioredis auto-prefixes)
  * KEYS[2] = invocation record key (ioredis auto-prefixes)
- * ARGV[1..7] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now
+ * ARGV[1..9] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now, callerCatId, a2aTriggerMessageId
  */
 const CREATE_ATOMIC_LUA = `
 local existing = redis.call('GET', KEYS[1])
@@ -40,7 +40,7 @@ redis.call('HSET', KEYS[2],
   'id', ARGV[1], 'threadId', ARGV[2], 'userId', ARGV[3],
   'targetCats', ARGV[4], 'intent', ARGV[5],
   'idempotencyKey', ARGV[6], 'status', 'queued', 'phase', 'queued',
-  'userMessageId', '', 'error', '',
+  'userMessageId', '', 'callerCatId', ARGV[8], 'a2aTriggerMessageId', ARGV[9], 'error', '',
   'createdAt', ARGV[7], 'updatedAt', ARGV[7])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 return {'created', ARGV[1]}
@@ -143,6 +143,8 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       input.intent,
       input.idempotencyKey,
       now,
+      input.callerCatId ?? '',
+      input.a2aTriggerMessageId ?? '',
     )) as [string, string];
 
     return {
@@ -298,6 +300,8 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       threadId: data.threadId!,
       userId: data.userId!,
       userMessageId: data.userMessageId === '' ? null : data.userMessageId!,
+      ...(data.callerCatId ? { callerCatId: data.callerCatId as CatId } : {}),
+      ...(data.a2aTriggerMessageId ? { a2aTriggerMessageId: data.a2aTriggerMessageId } : {}),
       targetCats: safeParseArray(data.targetCats) as CatId[],
       intent: (data.intent as 'execute' | 'ideate') ?? 'execute',
       status: (data.status as InvocationStatus) ?? 'queued',

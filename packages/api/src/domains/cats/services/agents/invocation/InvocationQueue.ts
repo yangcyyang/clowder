@@ -34,6 +34,8 @@ export interface QueueEntry {
   autoExecute: boolean;
   /** F122B: which cat initiated this entry (for A2A/multi_mention display) */
   callerCatId?: string;
+  /** The persisted agent message that triggered this A2A work item. */
+  a2aTriggerMessageId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
@@ -133,6 +135,7 @@ export class InvocationQueue {
       | 'messageId'
       | 'autoExecute'
       | 'callerCatId'
+      | 'a2aTriggerMessageId'
       | 'priority'
       | 'position'
       | 'suggestedSkill'
@@ -140,6 +143,7 @@ export class InvocationQueue {
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
+      a2aTriggerMessageId?: string;
       priority?: 'urgent' | 'normal';
       suggestedSkill?: string;
       callerTraceContext?: CallerTraceContext;
@@ -189,6 +193,7 @@ export class InvocationQueue {
       createdAt: Date.now(),
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
+      a2aTriggerMessageId: input.a2aTriggerMessageId,
       senderMeta: input.senderMeta,
       priority:
         input.source === 'agent' && input.sourceCategory !== 'continuation' ? 'normal' : (input.priority ?? 'normal'),

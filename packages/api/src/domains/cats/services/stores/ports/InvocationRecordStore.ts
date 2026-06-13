@@ -34,6 +34,10 @@ export interface InvocationRecord {
   userId: string;
   /** Associated user message ID (null = message not yet written, needs compensation) */
   userMessageId: string | null;
+  /** Agent that handed off this invocation, for A2A recovery after restart. */
+  callerCatId?: CatId;
+  /** Persisted message that triggered this A2A invocation. */
+  a2aTriggerMessageId?: string;
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   status: InvocationStatus;
@@ -59,6 +63,8 @@ export interface CreateInvocationInput {
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   idempotencyKey: string;
+  callerCatId?: CatId;
+  a2aTriggerMessageId?: string;
 }
 
 /** Result of atomic create-or-deduplicate */
@@ -141,6 +147,8 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       threadId: input.threadId,
       userId: input.userId,
       userMessageId: null,
+      ...(input.callerCatId ? { callerCatId: input.callerCatId } : {}),
+      ...(input.a2aTriggerMessageId ? { a2aTriggerMessageId: input.a2aTriggerMessageId } : {}),
       targetCats: [...input.targetCats],
       intent: input.intent,
       status: 'queued',

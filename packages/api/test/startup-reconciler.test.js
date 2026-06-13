@@ -287,6 +287,85 @@ describe('StartupReconciler', () => {
     assert.equal(updated.error, 'process_restart_requeued');
   });
 
+  test('requeues recoverable A2A records with caller and trigger metadata', async () => {
+    const r1 = makeRecord({
+      id: 'recover-a2a-1',
+      threadId: 'thread-a2a',
+      userId: 'user-a2a',
+      status: 'running',
+      userMessageId: 'msg-claude-handoff',
+      targetCats: ['pi', 'gpt52'],
+      intent: 'execute',
+      callerCatId: 'opus-45',
+      a2aTriggerMessageId: 'msg-claude-handoff',
+    });
+    store.seed(r1);
+
+    const enqueued = [];
+    const messageStore = {
+      append(msg) {
+        return { ...msg, id: 'notice-a2a', threadId: msg.threadId ?? 'default' };
+      },
+      getById(id) {
+        if (id !== 'msg-claude-handoff') return null;
+        return {
+          id,
+          threadId: 'thread-a2a',
+          userId: 'user-a2a',
+          catId: 'opus-45',
+          content: '@pi 做调研；@gpt52 做实现。',
+          mentions: ['pi', 'gpt52'],
+          timestamp: Date.now() - 60_000,
+        };
+      },
+      markDelivered(id, deliveredAt) {
+        return { id, deliveryStatus: 'delivered', deliveredAt };
+      },
+    };
+    const invocationQueue = {
+      enqueue(input) {
+        enqueued.push(input);
+        return { outcome: 'enqueued', entry: { id: 'queue-a2a-1' } };
+      },
+      backfillMessageId() {},
+    };
+    const queueProcessor = {
+      async tryAutoExecute() {},
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+      invocationQueue,
+      queueProcessor,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.requeued, 1);
+    assert.equal(enqueued.length, 1);
+    assert.deepEqual(enqueued[0], {
+      threadId: 'thread-a2a',
+      userId: 'user-a2a',
+      content: '@pi 做调研；@gpt52 做实现。',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['pi', 'gpt52'],
+      intent: 'execute',
+      idempotencyKey: 'restart-requeue:recover-a2a-1',
+      autoExecute: true,
+      priority: 'urgent',
+      callerCatId: 'opus-45',
+      a2aTriggerMessageId: 'msg-claude-handoff',
+    });
+
+    const updated = await store.get('recover-a2a-1');
+    assert.equal(updated.status, 'failed');
+    assert.equal(updated.error, 'process_restart_requeued');
+  });
+
   test('posts recovered wording when running records are requeued', async () => {
     store.seed(makeRecord({ id: 'recover-notice', status: 'running', userMessageId: 'user-msg-2' }));
 

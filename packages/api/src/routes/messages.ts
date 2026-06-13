@@ -1029,6 +1029,50 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                       opts.invocationQueue?.hasQueuedUserMessagesForThread(tid) ?? false,
                     hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                       opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
+                    enqueueA2ATargets: async (handoff: {
+                      threadId: string;
+                      userId: string;
+                      callerCatId: CatId;
+                      targetCats: CatId[];
+                      content: string;
+                      triggerMessageId?: string;
+                    }) => {
+                      const enqueued: CatId[] = [];
+                      for (const targetCat of handoff.targetCats) {
+                        if (opts.invocationQueue?.hasActiveOrQueuedAgentForCat(handoff.threadId, targetCat)) continue;
+                        const result = opts.invocationQueue?.enqueue({
+                          threadId: handoff.threadId,
+                          userId: handoff.userId,
+                          content: handoff.content,
+                          source: 'agent',
+                          sourceCategory: 'a2a',
+                          targetCats: [targetCat],
+                          intent: 'execute',
+                          autoExecute: true,
+                          callerCatId: handoff.callerCatId,
+                          a2aTriggerMessageId: handoff.triggerMessageId,
+                        });
+                        if (result?.outcome !== 'enqueued' || !result.entry) continue;
+                        if (handoff.triggerMessageId) {
+                          opts.invocationQueue?.backfillMessageId(
+                            handoff.threadId,
+                            handoff.userId,
+                            result.entry.id,
+                            handoff.triggerMessageId,
+                          );
+                        }
+                        enqueued.push(targetCat);
+                      }
+                      if (enqueued.length > 0) {
+                        opts.socketManager.emitToUser(handoff.userId, 'queue_updated', {
+                          threadId: handoff.threadId,
+                          queue: opts.invocationQueue?.list(handoff.threadId, handoff.userId) ?? [],
+                          action: 'enqueued',
+                        });
+                        await opts.queueProcessor?.tryAutoExecute(handoff.threadId);
+                      }
+                      return enqueued;
+                    },
                   }
                 : {}),
               ...(controller ? { invocationController: controller } : {}),

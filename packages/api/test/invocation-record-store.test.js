@@ -54,6 +54,28 @@ describe('InvocationRecordStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
+  test('create() preserves optional A2A caller and trigger fields', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'a2a-key',
+      callerCatId: 'opus-45',
+      a2aTriggerMessageId: 'msg-handoff-1',
+    });
+
+    const record = store.get(invocationId);
+    assert.ok(record);
+    assert.equal(record.callerCatId, 'opus-45');
+    assert.equal(record.a2aTriggerMessageId, 'msg-handoff-1');
+  });
+
   test('idempotency dedup returns duplicate on same key', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

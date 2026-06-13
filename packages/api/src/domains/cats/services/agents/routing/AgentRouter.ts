@@ -48,7 +48,7 @@ import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type { PersistenceContext, RouteStrategyDeps } from '../routing/route-helpers.js';
+import type { PersistenceContext, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
@@ -818,6 +818,9 @@ export class AgentRouter {
       queueHasQueuedMessages?: (threadId: string) => boolean;
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
       invocationController?: AbortController;
+      enqueueA2ATargets?: RouteOptions['enqueueA2ATargets'];
+      directMessageFrom?: CatId;
+      a2aTriggerMessageId?: string;
       trackA2ASlot?: (threadId: string, catId: CatId, userId: string, controller: AbortController) => void;
       completeA2ASlots?: (threadId: string, catIds: readonly CatId[], controller: AbortController) => void;
       /** ADR-008 S3: pass a Map to collect cursor boundaries; caller acks after succeeded */
@@ -878,6 +881,9 @@ export class AgentRouter {
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
       invocationController: options?.invocationController,
+      enqueueA2ATargets: options?.enqueueA2ATargets,
+      ...(options?.directMessageFrom ? { directMessageFrom: options.directMessageFrom } : {}),
+      ...(options?.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
       trackA2ASlot: options?.trackA2ASlot,
       completeA2ASlots: options?.completeA2ASlots,
       promptTags: intent.promptTags,

@@ -53,12 +53,15 @@ interface RecoveryQueue {
     threadId: string;
     userId: string;
     content: string;
-    source: 'user';
+    source: 'user' | 'agent';
+    sourceCategory?: 'a2a';
     targetCats: CatId[];
     intent: InvocationRecord['intent'];
     idempotencyKey: string;
     autoExecute: true;
     priority: 'urgent';
+    callerCatId?: CatId;
+    a2aTriggerMessageId?: string;
   }): { outcome: 'enqueued' | 'full'; entry?: { id: string }; deduped?: boolean };
   backfillMessageId?(threadId: string, userId: string, entryId: string, messageId: string): void;
 }
@@ -302,12 +305,15 @@ export class StartupReconciler {
         threadId: record.threadId,
         userId: record.userId,
         content: userMessage.content ?? '',
-        source: 'user',
+        source: record.callerCatId ? 'agent' : 'user',
+        ...(record.callerCatId ? { sourceCategory: 'a2a' as const } : {}),
         targetCats: record.targetCats,
         intent: record.intent,
         idempotencyKey: `restart-requeue:${record.id}`,
         autoExecute: true,
         priority: 'urgent',
+        ...(record.callerCatId ? { callerCatId: record.callerCatId } : {}),
+        ...(record.a2aTriggerMessageId ? { a2aTriggerMessageId: record.a2aTriggerMessageId } : {}),
       });
       if (result.outcome !== 'enqueued' || !result.entry) return false;
 

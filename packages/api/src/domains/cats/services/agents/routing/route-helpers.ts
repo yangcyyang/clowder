@@ -322,6 +322,21 @@ export interface RouteOptions {
   parentInvocationId?: string | undefined;
   /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
   invocationController?: AbortController | undefined;
+  /** Queue-backed A2A text-scan dispatch. When present, routeSerial should not grow the in-memory worklist. */
+  enqueueA2ATargets?:
+    | ((input: {
+        threadId: string;
+        userId: string;
+        callerCatId: CatId;
+        targetCats: CatId[];
+        content: string;
+        triggerMessageId?: string;
+      }) => Promise<readonly CatId[]>)
+    | undefined;
+  /** Queue-backed A2A caller identity for a single-cat dispatch. */
+  directMessageFrom?: CatId | undefined;
+  /** Queue-backed A2A trigger message id for a single-cat dispatch. */
+  a2aTriggerMessageId?: string | undefined;
   /** Register an A2A worklist target with the outer invocation tracker before it executes. */
   trackA2ASlot?: ((threadId: string, catId: CatId, userId: string, controller: AbortController) => void) | undefined;
   /** Cleanup registered A2A worklist slots if the route exits before every target emits done. */
