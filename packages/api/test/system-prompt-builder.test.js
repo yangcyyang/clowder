@@ -563,6 +563,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('行动/状态类主消息先给结论和证据'));
     assert.ok(prompt.includes('讨论、解释、方案类允许分段展开'));
     assert.ok(prompt.includes('不要出现 in_review/claim/$CLI 等运维词'));
+    assert.ok(prompt.includes('费曼解释'), 'Should include Feynman explanation protocol');
+    assert.ok(prompt.includes('方案/架构/机制/决策/权衡/排查'), 'Should scope Feynman explanation to technical reasoning');
     assert.ok(prompt.includes('交付验证纪律'), 'Should include delivery verification discipline');
     assert.ok(prompt.includes('可直接复制运行的验证命令'), 'Should require runnable verification command');
     assert.ok(prompt.includes('规则优先级'), 'Should include rule priority section');
@@ -1976,6 +1978,7 @@ describe('SystemPromptBuilder', () => {
     const prompt = buildStaticIdentity('opus', { toolPolicy: 'standard' });
 
     assert.ok(prompt.includes('家规（shared-rules.md）'), 'standard should keep the operational governance digest');
+    assert.ok(prompt.includes('费曼解释'), 'standard should include Feynman explanation governance');
     assert.ok(prompt.includes('46 hotfix止血治理'), 'standard should include operational governance details');
     assert.ok(prompt.includes('Magic Words'), 'standard should include the full magic word protocol');
   });
