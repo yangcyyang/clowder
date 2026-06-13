@@ -154,6 +154,15 @@ export interface Thread {
   connectorHubState?: ConnectorHubStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
   preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
+  /** F224: Per-cat/user pending continuation capsule, consumed at next invocation start. */
+  pendingContinuation?: Record<string, PendingContinuationEntry>;
+  /** F224: Per-cat session strategy. Default is resume. */
+  memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
+}
+
+export interface PendingContinuationEntry {
+  capsule: Record<string, unknown>;
+  createdAt: number;
 }
 
 /** F088 Phase G: Connector Hub thread state for IM command isolation. */
@@ -329,6 +338,28 @@ export interface IThreadStore {
     threadId: string,
     mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
   ): void | Promise<void>;
+  updateMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    strategy: 'resume' | 'reborn' | null,
+  ): void | Promise<void>;
+  getMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): 'resume' | 'reborn' | undefined | Promise<'resume' | 'reborn' | undefined>;
+  isRebornSession(threadId: string, catId: string): boolean | Promise<boolean>;
+  setPendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+    entry: PendingContinuationEntry,
+  ): void | Promise<void>;
+  consumePendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): PendingContinuationEntry | null | Promise<PendingContinuationEntry | null>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -368,6 +399,10 @@ export class ThreadStore implements IThreadStore {
 
   private mentionRoutingFeedbackKey(threadId: string, catId: CatId): string {
     return `${threadId}:${catId}`;
+  }
+
+  private pendingContinuationKey(catId: string, userId: string): string {
+    return `${catId}:${userId}`;
   }
 
   create(userId: string, title?: string, projectPath?: string): Thread {
@@ -690,6 +725,60 @@ export class ThreadStore implements IThreadStore {
     } else {
       thread.preferredWorkspaceMode = mode;
     }
+  }
+
+  updateMemberSessionStrategy(threadId: string, catId: string, strategy: 'resume' | 'reborn' | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+
+    if (strategy === null || strategy === 'resume') {
+      if (!thread.memberSessionStrategy) return;
+      delete thread.memberSessionStrategy[catId];
+      if (Object.keys(thread.memberSessionStrategy).length === 0) {
+        delete thread.memberSessionStrategy;
+      }
+      return;
+    }
+
+    thread.memberSessionStrategy ??= {};
+    thread.memberSessionStrategy[catId] = strategy;
+    if (thread.pendingContinuation) {
+      const prefix = `${catId}:`;
+      for (const key of Object.keys(thread.pendingContinuation)) {
+        if (key.startsWith(prefix)) delete thread.pendingContinuation[key];
+      }
+      if (Object.keys(thread.pendingContinuation).length === 0) {
+        delete thread.pendingContinuation;
+      }
+    }
+  }
+
+  getMemberSessionStrategy(threadId: string, catId: string, _userId: string): 'resume' | 'reborn' | undefined {
+    const thread = this.get(threadId);
+    return thread?.memberSessionStrategy?.[catId];
+  }
+
+  isRebornSession(threadId: string, catId: string): boolean {
+    return this.get(threadId)?.memberSessionStrategy?.[catId] === 'reborn';
+  }
+
+  setPendingContinuation(threadId: string, catId: string, userId: string, entry: PendingContinuationEntry): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    thread.pendingContinuation ??= {};
+    thread.pendingContinuation[this.pendingContinuationKey(catId, userId)] = entry;
+  }
+
+  consumePendingContinuation(threadId: string, catId: string, userId: string): PendingContinuationEntry | null {
+    const thread = this.get(threadId);
+    const key = this.pendingContinuationKey(catId, userId);
+    const entry = thread?.pendingContinuation?.[key];
+    if (!thread?.pendingContinuation || !entry) return null;
+    delete thread.pendingContinuation[key];
+    if (Object.keys(thread.pendingContinuation).length === 0) {
+      delete thread.pendingContinuation;
+    }
+    return entry;
   }
 
   updateLastActive(threadId: string): void {

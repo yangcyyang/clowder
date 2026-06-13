@@ -22,6 +22,11 @@ import {
   isCollaborationContinuityCapsuleV1,
 } from './CollaborationContinuityCapsule.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import type {
+  ConsumedContinuationToken,
+  InvocationFinalStatus,
+  SessionContinuationCoordinator,
+} from './SessionContinuationCoordinator.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -127,6 +132,11 @@ export interface QueueProcessorDeps {
   threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
   /** Task #112: lightweight always-online status supervisor. */
   catSupervisor?: CatSupervisorLike;
+  /** F224: owns passive continuation consume/store around single-cat invocations. */
+  sessionContinuationCoordinator?: Pick<
+    SessionContinuationCoordinator,
+    'prepareInvocationContext' | 'commitInvocationOutcome'
+  >;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -696,7 +706,7 @@ export class QueueProcessor {
    * Creates InvocationRecord → tracker.start → route execution → complete → cleanup.
    * Returns final status for chain auto-dequeue (called by tryExecuteNext*).
    */
-  private async executeEntry(entry: QueueEntry): Promise<'succeeded' | 'failed' | 'canceled' | 'canceled_by_user'> {
+  private async executeEntry(entry: QueueEntry): Promise<InvocationFinalStatus> {
     const { queue, invocationTracker, invocationRecordStore, router, socketManager, messageStore, log } = this.deps;
     const { threadId, userId, targetCats, intent, messageId } = entry;
     const primaryCat = targetCats[0] ?? 'unknown';
@@ -707,10 +717,11 @@ export class QueueProcessor {
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
-    let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
+    let finalStatus: InvocationFinalStatus = 'failed';
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
     const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
+    let consumedContinuation: ConsumedContinuationToken | undefined;
 
     try {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
@@ -860,6 +871,45 @@ export class QueueProcessor {
           deliveredAt: deliveredNow,
           messages: deliveredMessages,
         });
+      }
+
+      if (this.deps.sessionContinuationCoordinator && targetCats.length === 1) {
+        const singleCatId = targetCats[0]!;
+        try {
+          const originalContent = content;
+          const prepared = await this.deps.sessionContinuationCoordinator.prepareInvocationContext({
+            threadId,
+            catId: singleCatId,
+            userId,
+            content,
+          });
+          content = prepared.content;
+          consumedContinuation = prepared.consumedContinuation;
+
+          if (prepared.sessionPolicy === 'reborn' && entry.sourceCategory === 'continuation') {
+            log.info(
+              { threadId, catId: singleCatId, entryId: entry.id },
+              '[QueueProcessor] F224: reborn session drops stale continuation entry',
+            );
+            await invocationRecordStore.update(invocationId, { status: 'succeeded', phase: 'done' });
+            finalStatus = 'succeeded';
+            return 'succeeded';
+          }
+
+          if (prepared.consumedContinuation) {
+            const sameQueuedContinuation =
+              entry.sourceCategory === 'continuation' &&
+              entry.continuationKey === QueueProcessor.continuationKey(prepared.consumedContinuation.capsule);
+            if (sameQueuedContinuation) {
+              content = originalContent;
+            }
+          }
+        } catch (err) {
+          log.warn(
+            { threadId, catId: singleCatId, err },
+            '[QueueProcessor] F224: prepareInvocationContext failed, proceeding without continuation context',
+          );
+        }
       }
 
       // 7. Route execution
@@ -1165,6 +1215,20 @@ export class QueueProcessor {
       } else {
         for (const bid of batchedEntryIds) {
           queue.rollbackProcessing(threadId, bid);
+        }
+      }
+      if (this.deps.sessionContinuationCoordinator) {
+        try {
+          await this.deps.sessionContinuationCoordinator.commitInvocationOutcome({
+            finalStatus,
+            threadId,
+            catId: primaryCat,
+            userId,
+            consumedContinuation,
+            producedCapsules: continuationCapsules.values(),
+          });
+        } catch (err) {
+          log.warn({ threadId, targetCats, err }, '[QueueProcessor] F224: commitInvocationOutcome failed');
         }
       }
       socketManager.emitToUser(userId, 'queue_updated', {

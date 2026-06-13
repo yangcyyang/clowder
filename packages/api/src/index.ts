@@ -37,11 +37,13 @@ import {
   selectInvocationBackendKind,
 } from './domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
+import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
   resolveAcpBootstrapArgs,
   resolveAcpBootstrapCommand,
@@ -1257,6 +1259,21 @@ async function main(): Promise<void> {
 
   // F39: Message queue delivery
   const invocationQueue = new InvocationQueue();
+  const sessionContinuationCoordinator = new SessionContinuationCoordinator({
+    threadStore: {
+      getMemberSessionStrategy: (threadId, catId, userId) =>
+        threadStore.getMemberSessionStrategy(threadId, catId, userId),
+      consumePendingContinuation: async (threadId, catId, userId) => {
+        const entry = await threadStore.consumePendingContinuation(threadId, catId, userId);
+        return isCollaborationContinuityCapsuleV1(entry?.capsule) ? entry.capsule : null;
+      },
+      setPendingContinuation: (threadId, catId, userId, capsule) =>
+        threadStore.setPendingContinuation(threadId, catId, userId, {
+          capsule: capsule as unknown as Record<string, unknown>,
+          createdAt: Date.now(),
+        }),
+    },
+  });
   const queueProcessor = new QueueProcessor({
     queue: invocationQueue,
     invocationTracker,
@@ -1266,6 +1283,7 @@ async function main(): Promise<void> {
     messageStore,
     log: app.log,
     catSupervisor,
+    sessionContinuationCoordinator,
   });
   socketManager.setQueueProcessor(queueProcessor);
 
@@ -1343,6 +1361,7 @@ async function main(): Promise<void> {
     invocationQueue,
     queueProcessor,
     catSupervisor,
+    sessionContinuationCoordinator,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },

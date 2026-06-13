@@ -18,6 +18,7 @@ import type {
   ConnectorHubStateV1,
   IThreadStore,
   MentionActionabilityMode,
+  PendingContinuationEntry,
   Thread,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
@@ -527,6 +528,82 @@ export class RedisThreadStore implements IThreadStore {
       await this.deleteDetailFields(key, 'preferredWorkspaceMode');
     } else {
       await this.setDetailFields(key, 'preferredWorkspaceMode', mode);
+    }
+  }
+
+  async updateMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    strategy: 'resume' | 'reborn' | null,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (strategy === null || strategy === 'resume') {
+      await this.redis.hdel(key, `memberSS:${catId}`);
+      return;
+    }
+
+    await this.redis.hset(key, { [`memberSS:${catId}`]: strategy });
+    const prefix = `pendCont:${catId}:`;
+    await this.redis.eval(
+      `local cursor = "0"
+       repeat
+         local r = redis.call("HSCAN", KEYS[1], cursor, "MATCH", ARGV[1])
+         cursor = r[1]
+         local data = r[2]
+         for i = 1, #data, 2 do
+           redis.call("HDEL", KEYS[1], data[i])
+         end
+       until cursor == "0"`,
+      1,
+      key,
+      `${prefix}*`,
+    );
+  }
+
+  async getMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    _userId: string,
+  ): Promise<'resume' | 'reborn' | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSS:${catId}`);
+    return raw === 'resume' || raw === 'reborn' ? raw : undefined;
+  }
+
+  async isRebornSession(threadId: string, catId: string): Promise<boolean> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSS:${catId}`);
+    return raw === 'reborn';
+  }
+
+  async setPendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+    entry: PendingContinuationEntry,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    await this.redis.hset(key, { [`pendCont:${catId}:${userId}`]: JSON.stringify(entry) });
+  }
+
+  async consumePendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): Promise<PendingContinuationEntry | null> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `pendCont:${catId}:${userId}`;
+    const raw = (await this.redis.eval(
+      `local v = redis.call('hget', KEYS[1], ARGV[1])
+       if v then redis.call('hdel', KEYS[1], ARGV[1]) end
+       return v`,
+      1,
+      key,
+      field,
+    )) as string | null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PendingContinuationEntry;
+    } catch {
+      return null;
     }
   }
 
