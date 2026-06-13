@@ -5,6 +5,8 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -561,6 +563,182 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('行动/状态类主消息先给结论和证据'));
     assert.ok(prompt.includes('讨论、解释、方案类允许分段展开'));
     assert.ok(prompt.includes('不要出现 in_review/claim/$CLI 等运维词'));
+    assert.ok(prompt.includes('交付验证纪律'), 'Should include delivery verification discipline');
+    assert.ok(prompt.includes('可直接复制运行的验证命令'), 'Should require runnable verification command');
+    assert.ok(prompt.includes('规则优先级'), 'Should include rule priority section');
+    assert.ok(prompt.includes('Pack 指令 > 输出协议 > 共享家规 > 角色性格'), 'Should define conflict order');
+  });
+
+  test('buildStaticIdentity injects durable agent memory with session header', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      agentMemoryContext: '# Codex 记忆\n\n## 已关闭决策（别再提了）\n- 不再做 X',
+    });
+
+    assert.ok(prompt.includes('跨 Session 记忆（持久化）'), 'Should include durable memory section header');
+    assert.ok(prompt.includes('已关闭决策（别再提了）'), 'Should surface closed decisions');
+    assert.ok(prompt.includes('.cat-cafe/memory/{catId}.md'), 'Should guide memory write-back');
+  });
+
+  test('buildStaticIdentity budgets agent memory by section', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const longCurrentState = '当前状态很长。'.repeat(1_300);
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      agentMemoryContext: [
+        '# Codex 记忆',
+        '',
+        '## 当前状态',
+        longCurrentState,
+        '',
+        '## 已关闭决策（别再提了）',
+        '- 不再恢复 4 行主消息硬限制',
+      ].join('\n'),
+    });
+
+    assert.ok(prompt.includes('## 当前状态'), 'Should keep section heading');
+    assert.ok(prompt.includes('[已截断，完整内容见 .cat-cafe/memory/{catId}.md]'), 'Should mark truncated section');
+    assert.ok(prompt.includes('不再恢复 4 行主消息硬限制'), 'Should keep later sections after truncation');
+  });
+
+  test('buildStaticIdentity injects LESSONS when budget allows', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      lessonsContext: '# Clowder 公共踩坑记录\n\n- textFold 不要匹配 heading',
+      maxPromptTokens: 100_000,
+    });
+
+    assert.ok(prompt.includes('公共踩坑记录（LESSONS.md，低优先级）'), 'Should include lessons header');
+    assert.ok(prompt.includes('textFold 不要匹配 heading'), 'Should include lessons content');
+    assert.ok(prompt.includes('不得覆盖当前用户指令'), 'Should mark lessons as low priority');
+  });
+
+  test('buildStaticIdentity skips LESSONS when prompt budget is tight', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      lessonsContext: '# Clowder 公共踩坑记录\n\n- 这条不应进入 prompt',
+      maxPromptTokens: 10,
+    });
+
+    assert.ok(!prompt.includes('公共踩坑记录（LESSONS.md，低优先级）'), 'Should skip lessons header');
+    assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip lessons content');
+  });
+
+  test('buildStaticIdentity injects project progress when budget allows', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      projectContext: '# session-handoff 进度\n\n## 当前阶段\nPhase 8 项目公告板',
+      maxPromptTokens: 100_000,
+    });
+
+    assert.ok(prompt.includes('项目进度（只读参考）'), 'Should include project progress header');
+    assert.ok(prompt.includes('session-handoff 进度'), 'Should include selected project progress');
+    assert.ok(prompt.includes('只作参考，不覆盖当前用户指令'), 'Should mark project progress as read-only');
+    assert.ok(prompt.includes('完成子任务后要更新对应 progress.md'), 'Should require project progress write-back');
+  });
+
+  test('buildStaticIdentity skips project progress when prompt budget is tight', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const prompt = buildStaticIdentity('codex', {
+      mcpAvailable: false,
+      projectContext: '# ppthtml 进度\n\n## 当前阶段\n这条不应进入 prompt',
+      maxPromptTokens: 10,
+    });
+
+    assert.ok(!prompt.includes('项目进度（只读参考）'), 'Should skip project progress header');
+    assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip project progress content');
+  });
+
+  test('readLessonsForPrompt loads .cat-cafe/LESSONS.md content', async () => {
+    const { readLessonsForPrompt } = await import('../dist/domains/cats/services/agents/memory/LessonStore.js');
+    const content = await readLessonsForPrompt();
+
+    assert.ok(content?.includes('Clowder 公共踩坑记录'), 'Should load shared lessons file');
+    assert.ok(content?.includes('textFold'), 'Should include a real known lesson');
+  });
+
+  test('readProjectProgressForPrompt loads selected progress.md files', async () => {
+    const { readProjectProgressForPrompt } = await import(
+      '../dist/domains/cats/services/agents/memory/ProjectProgressStore.js'
+    );
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-project-progress-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'progress.md'),
+        '# Demo 进度\n\n## 当前阶段\n正在验证项目公告板。',
+        'utf-8',
+      );
+
+      const content = await readProjectProgressForPrompt(['demo'], root);
+      assert.ok(content?.includes('project:demo'), 'Should include project marker');
+      assert.ok(content?.includes('Demo 进度'), 'Should load progress content');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('buildInvocationContext injects context rational-line warning when provided', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      contextUsageWarning: {
+        ratio: 0.72,
+        estimatedTokens: 72000,
+        maxPromptTokens: 100000,
+        level: 'caution',
+        action: 'memory-writeback',
+      },
+    });
+
+    assert.ok(ctx.includes('Context 理智线预警'), 'Should include rational-line warning');
+    assert.ok(ctx.includes('警戒'), 'Should include caution level');
+    assert.ok(ctx.includes('72%'), 'Should show usage percentage');
+    assert.ok(ctx.includes('.cat-cafe/memory/{catId}.md'), 'Should direct memory write-back');
+  });
+
+  test('buildInvocationContext differentiates high and critical context pressure warnings', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const high = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      contextUsageWarning: {
+        ratio: 0.86,
+        estimatedTokens: 86000,
+        maxPromptTokens: 100000,
+        level: 'high',
+        action: 'memory-writeback',
+      },
+    });
+    const critical = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      contextUsageWarning: {
+        ratio: 0.96,
+        estimatedTokens: 96000,
+        maxPromptTokens: 100000,
+        level: 'critical',
+        action: 'memory-writeback',
+      },
+    });
+
+    assert.ok(high.includes('高压'), 'Should render high pressure heading');
+    assert.ok(high.includes('请立即回写'), 'High pressure should ask immediate write-back');
+    assert.ok(high.includes('验证命令'), 'High pressure should request handoff evidence');
+    assert.ok(critical.includes('紧急'), 'Should render critical pressure heading');
+    assert.ok(critical.includes('必须立即停下'), 'Critical pressure should require stopping and preserving state');
+    assert.ok(critical.includes('下一轮可能从压缩后的摘要恢复'), 'Critical pressure should mention compression recovery');
   });
 
   test('buildInvocationContext injects A2A exit check when enabled (non-parallel)', async () => {
@@ -997,6 +1175,36 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃：缅因猫(codex)'), 'Self (codex) should not appear as most recently active');
   });
 
+  test('buildInvocationContext includes routable handle for non-default active variant', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'pi',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        activeParticipants: [{ catId: 'opus-45', lastMessageAt: 2000, messageCount: 5 }],
+      });
+
+      assert.match(ctx, /最近活跃：布偶猫 Opus 4\.5\(opus-45\).*@opus-45/);
+      assert.doesNotMatch(ctx, /最近活跃：.*@opus(?![-\w])/);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   test('buildInvocationContext skips self in activity list', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
@@ -1115,6 +1323,37 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Direct message from @opus'));
     // F167 anti-spoofing: handoff must carry sender model marker explicitly
     assert.ok(ctx.includes('[model='), 'handoff must include sender model marker');
+  });
+
+  test('buildInvocationContext includes routable reply handle for non-default variant sender', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      const ctx = buildInvocationContext({
+        catId: 'pi',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        directMessageFrom: 'opus-45',
+      });
+
+      assert.match(ctx, /^Direct message from 布偶猫 Opus 4\.5\(opus-45\)/m);
+      assert.ok(ctx.includes('reply via @opus-45'), 'variant sender reply must name the routable handle');
+      assert.ok(!ctx.includes('reply via @opus '), 'must not suggest default opus handle for opus-45');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
   });
 
   // F167 P2 (cloud review 2026-04-18): sender model must also honor runtime env override,
@@ -1470,7 +1709,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 5700, `Prompt with SOP hint is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5800, `Prompt with SOP hint is ${prompt.length} chars, expected < 5800`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1517,7 +1756,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 5700, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5700`);
+    assert.ok(prompt.length < 5800, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5800`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1806,7 +2045,7 @@ describe('SystemPromptBuilder', () => {
 
     // Pin: update this hash whenever you add/remove/rename P* or W* sections
     // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '89989b48ac64c6ee';
+    const PINNED_HASH = '6b8f8b67bc7f61c9';
     if (PINNED_HASH === '${PLACEHOLDER}') {
       // First run — print hash for pinning
       console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);

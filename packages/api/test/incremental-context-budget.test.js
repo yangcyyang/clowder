@@ -130,6 +130,9 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
       hasSopHint: false,
       hasGuideContext: false,
       hasMcpInstructions: false,
+      hasAgentMemory: false,
+      hasLessonsContext: true,
+      hasProjectContext: true,
       governanceTier: 'core',
       governanceEstimatedTokens: 120,
       hasGovernanceSourceContext: true,
@@ -141,6 +144,8 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.equal(snapshot.governanceSourceInjected, true);
     assert.ok(snapshot.loadedBlocks.includes('governance-core'));
     assert.ok(snapshot.loadedBlocks.includes('governance-source'));
+    assert.ok(snapshot.loadedBlocks.includes('lessons'));
+    assert.ok(snapshot.loadedBlocks.includes('project-progress'));
   });
 
   test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {

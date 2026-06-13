@@ -45,6 +45,8 @@ import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/M
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
+import { readLessonsForPrompt } from '../memory/LessonStore.js';
+import { readProjectProgressForPrompt } from '../memory/ProjectProgressStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
@@ -55,6 +57,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
@@ -192,11 +195,16 @@ export async function* routeParallel(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
+      const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
+      const projectContext = loadStandardContext ? await readProjectProgressForPrompt() : null;
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
         packBlocks,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         agentMemoryContext,
+        lessonsContext,
+        projectContext,
+        maxPromptTokens: effectiveContextBudget.maxPromptTokens,
       });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
@@ -252,7 +260,7 @@ export async function* routeParallel(
       }
 
       const skillRouterContext = resolveSkillRouterContext(message);
-      const invocationContext = buildInvocationContext({
+      const invocationContextInput: InvocationContext = {
         catId,
         mode: 'parallel',
         teammates,
@@ -274,7 +282,8 @@ export async function* routeParallel(
         ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
         threadId,
-      });
+      };
+      let invocationContext = buildInvocationContext(invocationContextInput);
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -386,6 +395,18 @@ export async function* routeParallel(
         }
 
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const contextUsageWarning = buildContextUsageWarning({
+          estimatedTokens: estimateTokens(
+            [staticIdentity, invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions, inc.contextText, message]
+              .filter(Boolean)
+              .join('\n\n'),
+          ),
+          maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        });
+        if (contextUsageWarning) {
+          invocationContext = buildInvocationContext({ ...invocationContextInput, contextUsageWarning });
+        }
+
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
@@ -433,6 +454,18 @@ export async function* routeParallel(
         }
 
         const parCatModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const contextUsageWarning = buildContextUsageWarning({
+          estimatedTokens: estimateTokens(
+            [staticIdentity, invocationContext, parCatModePromptLegacy, bootstrapCtx, mcpInstructions, catContextHistory, message]
+              .filter(Boolean)
+              .join('\n\n'),
+          ),
+          maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        });
+        if (contextUsageWarning) {
+          invocationContext = buildInvocationContext({ ...invocationContextInput, contextUsageWarning });
+        }
+
         if (invocationContext || parCatModePromptLegacy || mcpInstructions || bootstrapCtx) {
           const parts = [invocationContext, parCatModePromptLegacy, bootstrapCtx, mcpInstructions].filter(Boolean);
           if (catContextHistory) parts.push(catContextHistory);
@@ -463,6 +496,8 @@ export async function* routeParallel(
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
+        hasLessonsContext: Boolean(lessonsContext && staticIdentity.includes('公共踩坑记录（LESSONS.md，低优先级）')),
+        hasProjectContext: Boolean(projectContext && staticIdentity.includes('项目进度（只读参考）')),
         ...(skillRouterContext ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames } : {}),
         governanceTier,
         governanceEstimatedTokens,

@@ -2413,6 +2413,34 @@ describe('routeSerial degradation notification', () => {
     assert.equal(sysInfos.length, 0, 'should not yield degradation when within budget');
   });
 
+  it('injects context rational-line warning when prompt usage exceeds threshold', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captureService = createCapturingService('codex', 'response');
+    const deps = createMockDeps({ codex: captureService });
+
+    process.env.CAT_CODEX_MAX_PROMPT_TOKENS = '1000';
+    try {
+      const history = Array.from({ length: 8 }, (_, i) => ({
+        id: `m${i}`,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: `message ${i} ${'上下文'.repeat(80)}`,
+        mentions: [],
+        timestamp: Date.now() - (8 - i) * 1000,
+      }));
+
+      for await (const _ of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', { history })) {
+      }
+
+      assert.equal(captureService.calls.length, 1, 'codex should be called once');
+      assert.ok(captureService.calls[0].includes('Context 理智线预警'), 'prompt should include rational-line warning');
+      assert.ok(captureService.calls[0].includes('.cat-cafe/memory/{catId}.md'), 'warning should request memory write-back');
+    } finally {
+      delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
+    }
+  });
+
   it('yields system_info when context is truncated by token budget (not count)', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'response') });

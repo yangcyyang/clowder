@@ -73,6 +73,8 @@ import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
+import { readLessonsForPrompt } from '../memory/LessonStore.js';
+import { readProjectProgressForPrompt } from '../memory/ProjectProgressStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
@@ -90,6 +92,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
@@ -411,11 +414,16 @@ export async function* routeSerial(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
+      const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
+      const projectContext = loadStandardContext ? await readProjectProgressForPrompt() : null;
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
         packBlocks,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         agentMemoryContext,
+        lessonsContext,
+        projectContext,
+        maxPromptTokens: effectiveContextBudget.maxPromptTokens,
       });
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
@@ -491,7 +499,7 @@ export async function* routeSerial(
       const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
       const a2aEnabled = worklistEntry.a2aCount < maxDepth;
       const skillRouterContext = resolveSkillRouterContext(message);
-      const invocationContext = buildInvocationContext({
+      const invocationContextInput: InvocationContext = {
         catId,
         mode: invocationMode,
         chainIndex: index + 1,
@@ -520,7 +528,8 @@ export async function* routeSerial(
         ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
         ...(worldContext ? { worldContext } : {}),
         threadId,
-      });
+      };
+      let invocationContext = buildInvocationContext(invocationContextInput);
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -639,6 +648,18 @@ export async function* routeSerial(
         }
 
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const contextUsageWarning = buildContextUsageWarning({
+          estimatedTokens: estimateTokens(
+            [staticIdentity, invocationContext, catModePrompt, bootstrapContext, mcpInstructions, inc.contextText, message]
+              .filter(Boolean)
+              .join('\n\n'),
+          ),
+          maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        });
+        if (contextUsageWarning) {
+          invocationContext = buildInvocationContext({ ...invocationContextInput, contextUsageWarning });
+        }
+
         const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
@@ -686,6 +707,18 @@ export async function* routeSerial(
         }
 
         const catModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const contextUsageWarning = buildContextUsageWarning({
+          estimatedTokens: estimateTokens(
+            [staticIdentity, invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions, catContextHistory, prompt]
+              .filter(Boolean)
+              .join('\n\n'),
+          ),
+          maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        });
+        if (contextUsageWarning) {
+          invocationContext = buildInvocationContext({ ...invocationContextInput, contextUsageWarning });
+        }
+
         if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrapContext) {
           const parts = [invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions].filter(Boolean);
           if (catContextHistory) parts.push(catContextHistory);
@@ -714,6 +747,8 @@ export async function* routeSerial(
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
+        hasLessonsContext: Boolean(lessonsContext && staticIdentity.includes('公共踩坑记录（LESSONS.md，低优先级）')),
+        hasProjectContext: Boolean(projectContext && staticIdentity.includes('项目进度（只读参考）')),
         ...(skillRouterContext ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames } : {}),
         governanceTier,
         governanceEstimatedTokens,

@@ -63,6 +63,47 @@ export interface RuntimeContextSurfaceHint {
   title?: string | null | undefined;
 }
 
+export interface ContextUsageWarning {
+  ratio: number;
+  estimatedTokens: number;
+  maxPromptTokens: number;
+  level: 'caution' | 'high' | 'critical';
+  action: 'memory-writeback';
+}
+
+const CONTEXT_RATIONAL_LINE_RATIO = 0.7;
+
+export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'high' | 'critical' {
+  if (ratio >= 0.95) return 'critical';
+  if (ratio >= 0.85) return 'high';
+  if (ratio >= 0.7) return 'caution';
+  return 'none';
+}
+
+export function buildContextUsageWarning(input: {
+  estimatedTokens: number;
+  maxPromptTokens: number;
+  thresholdRatio?: number;
+}): ContextUsageWarning | undefined {
+  const estimatedTokens = Math.max(0, Math.ceil(input.estimatedTokens));
+  const maxPromptTokens = Math.max(0, Math.floor(input.maxPromptTokens));
+  if (maxPromptTokens <= 0 || estimatedTokens <= 0) return undefined;
+
+  const ratio = estimatedTokens / maxPromptTokens;
+  const thresholdRatio = input.thresholdRatio ?? CONTEXT_RATIONAL_LINE_RATIO;
+  if (ratio < thresholdRatio) return undefined;
+  const level = getContextPressureLevel(ratio);
+  if (level === 'none') return undefined;
+
+  return {
+    ratio,
+    estimatedTokens,
+    maxPromptTokens,
+    level,
+    action: 'memory-writeback',
+  };
+}
+
 const STANDARD_CONTEXT_BUDGET_CAP: Pick<ContextBudget, 'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'> =
   {
     maxContextTokens: 24_000,
@@ -147,6 +188,8 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasGuideContext: boolean;
   hasMcpInstructions: boolean;
   hasAgentMemory: boolean;
+  hasLessonsContext: boolean;
+  hasProjectContext?: boolean;
   skillRouterMatchedSkills?: readonly string[];
   governanceTier: 'core' | 'operational';
   governanceEstimatedTokens: number;
@@ -157,6 +200,8 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
   if (input.hasGovernanceSourceContext) loadedBlocks.push('governance-source');
   if (input.hasAgentMemory) loadedBlocks.push('agent-memory');
+  if (input.hasLessonsContext) loadedBlocks.push('lessons');
+  if (input.hasProjectContext) loadedBlocks.push('project-progress');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
   if (input.hasWorldContext) loadedBlocks.push('world-context');
@@ -174,7 +219,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
 
   const skippedBlocks: string[] = [];
   if (!input.loadStandardContext) {
-    skippedBlocks.push('pack-blocks', 'world-context', 'session-bootstrap');
+    skippedBlocks.push('pack-blocks', 'world-context', 'session-bootstrap', 'lessons', 'project-progress');
   }
   if (!input.loadFullContext) {
     skippedBlocks.push('signal-articles', 'always-on-docs', 'sop-hint', 'guide-context');

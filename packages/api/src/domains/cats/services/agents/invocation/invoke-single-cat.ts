@@ -61,6 +61,7 @@ import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
+import { autoUpdateAgentMemory } from '../memory/AgentMemoryAutoWriter.js';
 import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
@@ -417,6 +418,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didComplete = false;
   let didResetRestoreFailures = false;
   let openCodeRuntimeConfigPath: string | undefined;
+  let assistantTextForMemory = '';
+
+  const captureAssistantTextForMemory = (message: AgentMessage): void => {
+    if (message.type !== 'text' || !message.content) return;
+    assistantTextForMemory =
+      message.textMode === 'replace' ? message.content : `${assistantTextForMemory}${message.content}`;
+    if (assistantTextForMemory.length > 4000) {
+      assistantTextForMemory = assistantTextForMemory.slice(-4000);
+    }
+  };
 
   // === CAT_INVOKED 审计 (fire-and-forget, 缅因猫 review P2-3) ===
   auditLog
@@ -1761,6 +1772,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             };
           }
         }
+        captureAssistantTextForMemory(out);
         yield out;
       }
     };
@@ -2187,6 +2199,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     catResponseDuration.record(finalDurationMs / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     if (threadCreatedAt) {
       threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
+    }
+
+    if (otelStatus === 'ok' && assistantTextForMemory.trim()) {
+      autoUpdateAgentMemory({
+        catId,
+        invocationId,
+        threadId,
+        ...(params.currentUserMessageId ? { currentUserMessageId: params.currentUserMessageId } : {}),
+        assistantText: assistantTextForMemory,
+        completedAt: Date.now(),
+      }).catch((err) => {
+        log.warn({ catId, threadId, invocationId, err }, 'memory auto-update failed (non-blocking)');
+      });
     }
 
     // F089: Mark agent pane status when invocation completes

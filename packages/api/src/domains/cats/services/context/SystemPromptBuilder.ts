@@ -118,6 +118,17 @@ export interface InvocationContext {
   /** F042: Thread-scoped routing policy summary (intent/scope). Injected per-invocation. */
   routingPolicy?: ThreadRoutingPolicyV1;
   /**
+   * Phase 2 Session continuity guard: warn the agent when prompt/context usage
+   * is close to the model's rational operating line.
+   */
+  contextUsageWarning?: {
+    readonly ratio: number;
+    readonly estimatedTokens: number;
+    readonly maxPromptTokens: number;
+    readonly level: 'caution' | 'high' | 'critical';
+    readonly action: 'memory-writeback';
+  };
+  /**
    * F073 P4: SOP stage hint from Mission Hub workflow-sop.
    * Injected per-invocation so all cats (Claude/Codex/Gemini) see current stage.
    * 告示牌哲学：猫看了自己决定行动，不被系统推着走。
@@ -293,6 +304,12 @@ function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): st
   return `${config.displayName}${variantPart}(${catId})`;
 }
 
+function variantRouteHandle(catId: string, config: CatConfig | undefined): string | null {
+  if (!config) return null;
+  if (!config.variantLabel && config.isDefaultVariant !== false) return null;
+  return pickVariantMention(catId, config);
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -338,9 +355,9 @@ ${RICH_BLOCK_SHORT}
  * Keep this short: every agent sees it, including minimal/default DM responders.
  */
 const GOVERNANCE_CORE_DIGEST = `## 核心家规（shared-rules.md 摘要）
-规则是边界不是全部：先判断角色、验证信息源、避免笨重方案；认为规则不适用时，用证据+替代方案 Push Back。
-硬原则：面向终态、不绕路；方向正确优先；单一真相源；可验证才算完成；用户是 CVO，重要决策由用户拍板。
-协作底线：回复落在正确 surface；行动任务先认领/复用任务；完成必须给证据；危险/不可逆操作先停下确认。
+规则是边界不是全部：先判断角色/事实/直线路径；不适用时用证据+替代方案 Push Back。
+原则：终态/不绕路/方向优先/单一真相源/验证+记忆与项目进度回写；用户CVO。
+协作底线：正确 surface；行动先认领/复用；交付给证据；危险/不可逆先确认。
 Magic Words：脚手架/绕路了/喵约/星星罐子/第一性原理/数学之美/下次一定/我能猜出来/碎片够了 = 用户手动拉闸，必须立即自检。
 完整规则按需查阅：cat-cafe-skills/refs/shared-rules.md。`;
 
@@ -371,12 +388,12 @@ function roughTokenEstimate(text: string): number {
  * Design decision: inject detail only for standard/full, not minimal.
  */
 const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
-身份与边界：用自己的身份签名，不冒充其他猫；规则是边界不是全部，不适用时用证据+替代方案 Push Back。
-原则：P1终态基座 P2自主跑完SOP P3方向正确>速度 P4单一真相源 P5可验证才算完成。用户是CVO，重要决策由用户拍板。
-实事求是：结论基于代码/commit/PR/文档等证据；不确定就说不确定；不要编造；查不完就说"还没查完"；完成必须附测试/截图/日志等证据。
-输出格式：日常对话和轻量问答用自然语言短答；只有任务完成、review、handoff、BLOCKED 等状态迁移才需要结构化报告。
-协作纪律：团队用"我们"；回复落在正确surface；@是球权路由，收到@后三选一：接/退/升；行动任务先认领或复用任务，交付进in_review。
-Magic Words（用户当前指令触发）： 「脚手架」终态自检；「绕路了」回直线路径；「喵约」重读家规；「星星罐子」停止副作用等指示；「第一性原理」/「数学之美」砍复杂度；「下次一定」能做的现在做；「我能猜出来」先读源文件；「碎片够了」换角度再搜并读原文。
+身份与边界：用自己的身份签名，不冒充；规则不适用时用证据+替代方案 Push Back。
+原则：P1终态 P2自主SOP P3方向>速 P4真相源 P5验证 P6回写session P7回写progress；CVO。
+实事求是：基于代码/commit/PR/文档；不确定就说，查不完说"还没查完"；完成附证据。
+输出格式：轻问答自然短答；完成、review、handoff、BLOCKED 才结构化。
+协作纪律：团队用"我们"；回复落正确surface；@后三选一：接/退/升；行动先认领/复用，交付进in_review。
+Magic Words（触发自检）： 「脚手架」「绕路了」「喵约」「星星罐子」「第一性原理」「数学之美」「下次一定」「我能猜出来」「碎片够了」。
 46 hotfix止血治理：fix/hotfix/quick fix/workaround 走 hotfix 标签、跨猫review、禁止作者自验。
 缅因猫fallback层数检测：同文件≥3层fallback时做坐标系自检，优先消除错误坐标系。
 暹罗猫创意-实现解耦：发现问题先记录+handoff；碰 packages/src 必须转执行猫。`;
@@ -397,7 +414,99 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
 行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
 不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/think。
-检测/排查类任务：主消息只给“结论 + 关键证据 + 下一步”。工具绕路、环境报错、临时替代方案、模型列表数量、命令细节等内部过程放 think，不写进主消息，除非用户明确要求看过程。`;
+检测/排查类：主消息只给结论+关键证据+下一步；工具绕路、环境报错、命令细节进 think，用户要求时再展开。
+
+### 交付验证纪律
+验收交付附：可直接复制运行的验证命令、预期输出、不符含义；缺命令不算完成。`;
+
+const RULE_PRIORITY_SECTION = `规则优先级：Pack 指令 > 输出协议 > 共享家规 > 角色性格。`;
+const LESSONS_CONTEXT_BUDGET_RATIO = 0.7;
+const PROJECT_CONTEXT_BUDGET_RATIO = 0.7;
+const MEMORY_SECTION_FALLBACK_BUDGET_TOKENS = 1_000;
+const MEMORY_TRUNCATION_MARKER = '[已截断，完整内容见 .cat-cafe/memory/{catId}.md]';
+
+const MEMORY_SECTION_BUDGETS: readonly {
+  readonly match: RegExp;
+  readonly budgetTokens: number;
+}[] = [
+  { match: /^当前状态\b/, budgetTokens: 1_500 },
+  { match: /^已关闭决策\b/, budgetTokens: 2_000 },
+  { match: /^行为偏好\b/, budgetTokens: 1_500 },
+  { match: /^环境 gotcha\b/i, budgetTokens: 1_000 },
+];
+
+function shouldInjectLessonsContext(currentPrompt: string, lessonsContext: string, maxPromptTokens?: number): boolean {
+  if (!lessonsContext.trim()) return false;
+  if (!maxPromptTokens || maxPromptTokens <= 0) return true;
+
+  const estimatedTokens = roughTokenEstimate(`${currentPrompt}\n\n${lessonsContext}`);
+  return estimatedTokens <= Math.floor(maxPromptTokens * LESSONS_CONTEXT_BUDGET_RATIO);
+}
+
+function shouldInjectProjectContext(currentPrompt: string, projectContext: string, maxPromptTokens?: number): boolean {
+  if (!projectContext.trim()) return false;
+  if (!maxPromptTokens || maxPromptTokens <= 0) return true;
+
+  const estimatedTokens = roughTokenEstimate(`${currentPrompt}\n\n${projectContext}`);
+  return estimatedTokens <= Math.floor(maxPromptTokens * PROJECT_CONTEXT_BUDGET_RATIO);
+}
+
+function getMemorySectionBudgetTokens(section: string): number {
+  const heading = section.match(/^##\s+(.+)$/m)?.[1]?.trim() ?? '';
+  return (
+    MEMORY_SECTION_BUDGETS.find((entry) => entry.match.test(heading))?.budgetTokens ??
+    MEMORY_SECTION_FALLBACK_BUDGET_TOKENS
+  );
+}
+
+function truncateToTokenBudget(text: string, budgetTokens: number): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  if (roughTokenEstimate(trimmed) <= budgetTokens) return trimmed;
+
+  const maxChars = Math.max(0, budgetTokens * 4 - MEMORY_TRUNCATION_MARKER.length - 2);
+  const clipped = trimmed.slice(0, maxChars).trimEnd();
+  return `${clipped}\n\n${MEMORY_TRUNCATION_MARKER}`;
+}
+
+export function budgetAgentMemoryForPrompt(rawMemory: string): string {
+  const trimmed = rawMemory.trim();
+  if (!trimmed) return '';
+
+  const sections = trimmed.split(/(?=^##\s+)/m).filter((section) => section.trim().length > 0);
+  if (sections.length === 0) {
+    return truncateToTokenBudget(trimmed, MEMORY_SECTION_FALLBACK_BUDGET_TOKENS);
+  }
+
+  return sections
+    .map((section) => truncateToTokenBudget(section, getMemorySectionBudgetTokens(section)))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function formatContextUsageWarning(context: NonNullable<InvocationContext['contextUsageWarning']>): string[] {
+  const percent = Math.round(context.ratio * 100);
+  const commonLine = `当前 prompt/context 估算 ${percent}%（${context.estimatedTokens}/${context.maxPromptTokens} tokens）。`;
+  if (context.level === 'critical') {
+    return [
+      '## Context 理智线预警（紧急）',
+      commonLine,
+      '上下文将被压缩。必须立即停下手头工作，回写 `.cat-cafe/memory/{catId}.md` 的关键状态；下一轮可能从压缩后的摘要恢复。',
+    ];
+  }
+  if (context.level === 'high') {
+    return [
+      '## Context 理智线预警（高压）',
+      commonLine,
+      '上下文即将耗尽。请立即回写 `.cat-cafe/memory/{catId}.md`，并在主消息中附带交接摘要：做了什么、下一步、验证命令。',
+    ];
+  }
+  return [
+    '## Context 理智线预警（警戒）',
+    commonLine,
+    '建议在本轮完成后回写 `.cat-cafe/memory/{catId}.md`，沉淀当前状态、已关闭决策和环境 gotcha。',
+  ];
+}
 
 function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   if (!context.threadId && !context.currentUserMessageId) return [];
@@ -611,6 +720,18 @@ export interface StaticIdentityOptions {
    * Loaded from .cat-cafe/memory/{catId}.md and injected as durable preferences/context.
    */
   agentMemoryContext?: string | null;
+  /**
+   * Shared low-priority lessons from .cat-cafe/LESSONS.md.
+   * Inject only when prompt budget has enough headroom.
+   */
+  lessonsContext?: string | null;
+  /**
+   * Project-level progress board from .cat-cafe/projects/{project}/progress.md.
+   * Read-only reference for long-running work; injected only when manually selected.
+   */
+  projectContext?: string | null;
+  /** Runtime max prompt budget used to decide low-priority LESSONS injection. */
+  maxPromptTokens?: number;
 }
 
 /**
@@ -711,6 +832,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   lines.push(HARNESS_SKILLS_SECTION, '');
   lines.push(EXECUTION_AUDIT_SECTION, '');
   lines.push(VISIBLE_OUTPUT_PROTOCOL_SECTION, '');
+  lines.push(RULE_PRIORITY_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)
   const packBlocks = options?.packBlocks;
@@ -730,16 +852,43 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
   lines.push('', getGovernanceDigest(toolPolicy));
 
-  const agentMemory = options?.agentMemoryContext?.trim();
+  const agentMemory = budgetAgentMemoryForPrompt(options?.agentMemoryContext ?? '');
   if (agentMemory) {
     lines.push(
       '',
-      '## Agent Memory（跨会话记忆）',
-      '以下是你的持久记忆，用于记住用户偏好、长期项目上下文、已验证的工作方式和注意事项。',
-      '记忆不是最高优先级：如果它和当前用户指令、系统规则或事实冲突，以当前明确指令和事实为准。',
+      '## 跨 Session 记忆（持久化）',
+      '用于恢复当前状态、已关闭决策、行为偏好、环境 gotcha；先看已关闭决策，别重复提议。',
+      '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md`；若与当前指令/事实冲突，以当前为准。',
       '',
       '```markdown',
       agentMemory,
+      '```',
+    );
+  }
+
+  const lessonsContext = options?.lessonsContext?.trim();
+  if (lessonsContext && shouldInjectLessonsContext(lines.join('\n'), lessonsContext, options?.maxPromptTokens)) {
+    lines.push(
+      '',
+      '## 公共踩坑记录（LESSONS.md，低优先级）',
+      '这些是团队已验证的避坑经验，只用于提醒；不得覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
+      '',
+      '```markdown',
+      lessonsContext,
+      '```',
+    );
+  }
+
+  const projectContext = options?.projectContext?.trim();
+  if (projectContext && shouldInjectProjectContext(lines.join('\n'), projectContext, options?.maxPromptTokens)) {
+    lines.push(
+      '',
+      '## 项目进度（只读参考）',
+      '这些内容来自 `.cat-cafe/projects/{project}/progress.md`，用于恢复长期项目阶段、决策和验收状态；只作参考，不覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
+      '参与跨 session 项目时，完成子任务后要更新对应 progress.md。',
+      '',
+      '```markdown',
+      projectContext,
       '```',
     );
   }
@@ -806,7 +955,9 @@ export function buildInvocationContext(context: InvocationContext): string {
         return fromConfig?.defaultModel ?? 'unknown';
       }
     })();
-    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}`);
+    const routeHandle = variantRouteHandle(context.directMessageFrom as string, fromConfig);
+    const routeHint = routeHandle ? `; reply via ${routeHandle}` : '';
+    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}${routeHint}`);
     // Anti-spoofing fires only for same-breed variant handoffs (displayName collision + catId differs)
     if (fromConfig && fromConfig.displayName === config.displayName) {
       const selfVariant = config.variantLabel ?? runtimeModel;
@@ -854,6 +1005,10 @@ export function buildInvocationContext(context: InvocationContext): string {
 
   lines.push(...buildRuntimeTaskGateLines(context), '');
 
+  if (context.contextUsageWarning) {
+    lines.push(...formatContextUsageWarning(context.contextUsageWarning), '');
+  }
+
   // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
   // without considering whether a teammate needs to act next.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
@@ -895,7 +1050,9 @@ export function buildInvocationContext(context: InvocationContext): string {
     if (topActive) {
       const topConfig = getConfig(topActive.catId as string);
       if (topConfig) {
-        lines.push(`最近活跃：${formatHandleFreeLabel(topActive.catId as string, topConfig)}`);
+        const routeHandle = variantRouteHandle(topActive.catId as string, topConfig);
+        const routeHint = routeHandle ? `；回传句柄：${routeHandle}` : '';
+        lines.push(`最近活跃：${formatHandleFreeLabel(topActive.catId as string, topConfig)}${routeHint}`);
       }
     }
   }

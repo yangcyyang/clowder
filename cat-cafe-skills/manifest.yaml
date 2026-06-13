@@ -343,6 +343,27 @@ skills:
     sop_step: null
     merged_from: ["AI-trae/skill-to-workflow-freezer"]
 
+  memory-consolidator:
+    description: >
+      记忆整理员：定期整合所有 agent 的持久 memory 文件，检查 stale 当前状态、
+      验证已关闭决策和环境 gotcha，并把跨 agent 重复经验沉淀到 LESSONS.md。
+      Use when: 要整合记忆、清理 memory、检查 agent 记忆质量、或每周做 memory consolidation。
+      Not for: 单次 invocation 自动回写、普通聊天、实时任务执行。
+      Output: Memory consolidation report + LESSONS 增量建议。
+    triggers:
+      - "整合记忆"
+      - "清理 memory"
+      - "memory consolidation"
+      - "记忆整理"
+      - "检查 agent 记忆"
+    not_for:
+      - "单次 invocation 自动回写"
+      - "普通聊天"
+      - "实时任务执行"
+    output: "Memory consolidation report + LESSONS delta"
+    next: ["agent-harness-review", "quality-gate"]
+    sop_step: null
+
   # ── 质量门禁 ──
   quality-gate:
     description: >
