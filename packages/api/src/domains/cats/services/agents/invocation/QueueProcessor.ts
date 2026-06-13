@@ -652,26 +652,26 @@ export class QueueProcessor {
     userId: string,
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
     this.sweepZombieSlots(threadId);
-    // F108 P1-3 fix: peek at next entry's target cat to check slot mutex BEFORE marking processing.
-    // This prevents entries from getting stuck as 'processing' when the slot is busy.
-    const nextEntry = this.deps.queue.peekNextQueued(threadId, userId);
-    if (!nextEntry) return { started: false };
+    // P0 per-agent queue: 队首目标 cat 忙时，不应阻塞后面的空闲 cat。
+    // 逐个跳过忙 slot；同一 cat 的多次 invocation 仍由 slot mutex 串行保护。
+    const busyCats = new Set<string>();
+    let entry: QueueEntry | null = null;
+    let entryCat = 'unknown';
+    let sk = '';
+    for (;;) {
+      entry = this.deps.queue.markProcessing(threadId, userId, busyCats);
+      if (!entry) return { started: false };
 
-    const entryCat = nextEntry.targetCats[0] ?? 'unknown';
-    const sk = QueueProcessor.slotKey(threadId, entryCat);
+      entryCat = entry.targetCats[0] ?? 'unknown';
+      sk = QueueProcessor.slotKey(threadId, entryCat);
 
-    // Mutex check — per-slot (before mutating queue state)
-    if (this.processingSlots.has(sk)) {
-      return { started: false };
+      if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+        this.deps.queue.rollbackProcessing(threadId, entry.id);
+        busyCats.add(entryCat);
+        continue;
+      }
+      break;
     }
-    // Fix: skip if cat already has an active invocation via CLI/messages.ts (same guard as above)
-    if (this.deps.invocationTracker.has(threadId, entryCat)) {
-      return { started: false };
-    }
-
-    // Now safe to mark processing — slot is available
-    const entry = this.deps.queue.markProcessing(threadId, userId);
-    if (!entry) return { started: false };
 
     this.processingSlots.set(sk, Date.now());
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release

@@ -1137,6 +1137,39 @@ describe('QueueProcessor', () => {
       assert.equal(r2.started, true, 'codex entry should start since opus slot was released');
     });
 
+    it('processNext skips queued entries whose cat slot is already processing', async () => {
+      const slowDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            await new Promise((r) => setTimeout(r, 200));
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const slowProcessor = new QueueProcessor(slowDeps);
+
+      const runningOpus = enqueueEntry(slowDeps.queue, { content: 'opus running', targetCats: ['opus'] });
+      slowDeps.queue.backfillMessageId('t1', 'u1', runningOpus.id, 'msg-running-opus');
+      await slowProcessor.processNext('t1', 'u1');
+
+      const queuedOpus = enqueueEntry(slowDeps.queue, { content: 'opus queued', targetCats: ['opus'] });
+      slowDeps.queue.backfillMessageId('t1', 'u1', queuedOpus.id, 'msg-queued-opus');
+      const queuedCodex = enqueueEntry(slowDeps.queue, { content: 'codex queued', targetCats: ['codex'] });
+      slowDeps.queue.backfillMessageId('t1', 'u1', queuedCodex.id, 'msg-queued-codex');
+
+      const result = await slowProcessor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true, 'free codex slot should start even when older opus entry is blocked');
+      assert.deepEqual(result.entry?.targetCats, ['codex']);
+      const queue = slowDeps.queue.list('t1', 'u1');
+      assert.equal(
+        queue.find((entry) => entry.id === queuedOpus.id)?.status,
+        'queued',
+        'busy opus entry should be rolled back and remain queued',
+      );
+    });
+
     it('onInvocationComplete requires catId parameter', async () => {
       enqueueEntry(deps.queue);
 
@@ -1466,6 +1499,26 @@ describe('QueueProcessor', () => {
       const queue = deps.queue.list('t1', 'u1');
       assert.equal(queue.length, 1);
       assert.equal(queue[0].status, 'queued', 'entry must remain queued');
+    });
+
+    it('skips active tracker cat and starts next queued entry for an idle cat', async () => {
+      const opusEntry = enqueueEntry(deps.queue, { content: 'opus queued', targetCats: ['opus'] });
+      deps.queue.backfillMessageId('t1', 'u1', opusEntry.id, 'msg-opus');
+      const codexEntry = enqueueEntry(deps.queue, { content: 'codex queued', targetCats: ['codex'] });
+      deps.queue.backfillMessageId('t1', 'u1', codexEntry.id, 'msg-codex');
+
+      deps.invocationTracker.has = mock.fn((_tid, catId) => catId === 'opus');
+
+      const result = await processor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true, 'idle codex should start even when older opus entry is blocked');
+      assert.deepEqual(result.entry?.targetCats, ['codex']);
+      const queue = deps.queue.list('t1', 'u1');
+      assert.equal(
+        queue.find((entry) => entry.id === opusEntry.id)?.status,
+        'queued',
+        'blocked opus entry should remain queued',
+      );
     });
   });
 

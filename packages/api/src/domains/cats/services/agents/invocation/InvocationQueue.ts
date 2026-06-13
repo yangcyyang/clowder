@@ -323,10 +323,10 @@ export class InvocationQueue {
   }
 
   /** F175: Mark the highest-priority queued entry as processing (stays in array). */
-  markProcessing(threadId: string, userId: string): QueueEntry | null {
+  markProcessing(threadId: string, userId: string, skipCatIds?: Set<string>): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const queued = q.filter((e) => e.status === 'queued');
+    const queued = q.filter((e) => e.status === 'queued' && !skipCatIds?.has(e.targetCats[0] ?? ''));
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
     const best = queued[0]!;
