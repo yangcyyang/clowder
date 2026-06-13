@@ -1113,10 +1113,14 @@
   border-radius: 0;
 }
 
-[data-visual-theme="slock"] .console-search-field:focus-within,
-[data-visual-theme="slock"] .slock-composer-frame:focus-within {
+[data-visual-theme="slock"] .console-search-field:focus-within {
   border-color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
+}
+
+[data-visual-theme="slock"] .slock-composer-frame:focus-within {
+  border-color: var(--slock-ink);
+  box-shadow: none;
 }
 
 [data-visual-theme="slock"] .slock-page-frame,
@@ -1156,13 +1160,19 @@
 
 [data-visual-theme="slock"] .slock-message-frame:hover {
   border-color: var(--slock-ink);
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
 }
 
 [data-visual-theme="slock"] .slock-message-toolbar {
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-composer-frame:focus-within,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-frame:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-toolbar {
+  box-shadow: none;
 }
 
 [data-visual-theme="slock"] .markdown-content code:not([class*="language-"]) {
