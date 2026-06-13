@@ -341,7 +341,7 @@ export function ChatMessage({
             'ME'
           )}
         </button>
-        <div className="max-w-[75%]">
+        <div className="max-w-[85%] md:max-w-[1120px] min-w-0">
           <div className="flex justify-start items-center gap-2 mb-1 [line-height:var(--clowder-leading-tight)]">
             {isWhisper && (
               <span
@@ -458,7 +458,7 @@ export function ChatMessage({
         </button>
       )}
       {catData && isAssistantContinuation && <div className="w-8 flex-shrink-0" aria-hidden="true" />}
-      <div className="max-w-[85%] md:max-w-[720px] min-w-0">
+      <div className="max-w-[85%] md:max-w-[1120px] min-w-0">
         {catStyle && !isAssistantContinuation && (
           <div className="mb-1 flex flex-col gap-1 min-w-0 [line-height:var(--clowder-leading-tight)]">
             <div className="flex items-center gap-2 min-w-0">
