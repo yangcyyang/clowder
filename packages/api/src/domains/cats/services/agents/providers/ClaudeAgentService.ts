@@ -35,6 +35,9 @@ import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './
 const log = createModuleLogger('claude-agent');
 
 const PERMISSION_MODE = 'bypassPermissions';
+const DECISION_ONLY_CLAUDE_CAT_IDS = new Set(['opus-45']);
+const DECISION_ONLY_PERMISSION_MODE = 'plan';
+const DECISION_ONLY_DISALLOWED_TOOLS = ['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
 
 const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
@@ -58,6 +61,10 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
     'Claude CLI: 检测到损坏的 thinking signature，当前会话无法 --resume。',
     `请先在仓库根目录运行 ${command}，再重试。`,
   ].join(' ');
+}
+
+function isDecisionOnlyClaudeCat(catId: CatId): boolean {
+  return DECISION_ONLY_CLAUDE_CAT_IDS.has(catId as string);
 }
 
 const IS_WINDOWS = process.platform === 'win32';
@@ -199,7 +206,7 @@ export class ClaudeAgentService implements AgentService {
       '--effort',
       getCatEffort(this.catId as string, undefined, 'anthropic'),
       '--permission-mode',
-      PERMISSION_MODE,
+      isDecisionOnlyClaudeCat(this.catId) ? DECISION_ONLY_PERMISSION_MODE : PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
       // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
@@ -207,6 +214,10 @@ export class ClaudeAgentService implements AgentService {
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
       '--chrome',
     ];
+
+    if (isDecisionOnlyClaudeCat(this.catId)) {
+      args.push('--disallowedTools', DECISION_ONLY_DISALLOWED_TOOLS.join(','));
+    }
 
     // Only pass --model for known Anthropic models. For third-party models
     // (e.g. glm-5 via BigModel/DashScope), ANTHROPIC_MODEL env var is set in

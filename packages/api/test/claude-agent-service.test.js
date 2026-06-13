@@ -647,6 +647,25 @@ test('does not pass --allowedTools — all tools available by default', async ()
   assert.ok(!args.includes('--allowedTools'), 'must NOT pass --allowedTools so all tools are available');
 });
 
+test('opus-45 runs in decision-only mode and cannot execute code changes', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ catId: 'opus-45', model: 'claude-opus-4-6', spawnFn });
+
+  const promise = collect(service.invoke('hi'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const permissionModeIdx = args.indexOf('--permission-mode');
+  assert.equal(args[permissionModeIdx + 1], 'plan');
+
+  const disallowedToolsIdx = args.indexOf('--disallowedTools');
+  assert.ok(disallowedToolsIdx >= 0, 'decision-only Claude should deny execution tools');
+  const disallowedTools = args[disallowedToolsIdx + 1].split(',');
+  assert.deepEqual(disallowedTools, ['Bash', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
+});
+
 test('resolves default MCP server path from API cwd (../mcp-server/dist/index.js)', () => {
   const root = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-path-'));
   const apiCwd = join(root, 'packages', 'api');
