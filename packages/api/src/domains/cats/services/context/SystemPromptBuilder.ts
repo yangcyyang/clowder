@@ -397,6 +397,7 @@ const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
 原则：P1终态 P2自主SOP P3方向>速 P4真相源 P5验证 P6回写session P7回写progress；CVO。
 实事求是：基于代码/commit/PR/文档；不确定就说，查不完说"还没查完"；完成附证据。
 输出格式：轻问答自然短答；完成、review、handoff、BLOCKED 才结构化。
+用户可读：中文白话优先；无任务短路；禁接续检查/记忆命中/源码护栏。
 协作纪律：团队用"我们"；回复落正确surface；@后三选一：接/退/升；行动先认领/复用，交付进in_review。
 Magic Words（触发自检）： 「脚手架」「绕路了」「喵约」「星星罐子」「第一性原理」「数学之美」「下次一定」「我能猜出来」「碎片够了」。
 46 hotfix止血治理：fix/hotfix/quick fix/workaround 走 hotfix 标签、跨猫review、禁止作者自验。
@@ -419,7 +420,8 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
 行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
 不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/think。
-检测/排查类：主消息只给结论+关键证据+下一步；工具绕路、环境报错、命令细节进 think，用户要求时再展开。
+检测/排查类：主消息只给结论+关键证据+下一步；工具绕路、环境报错、命令细节进 think。
+输出：中文白话优先；无明确执行任务的 @ 提及只短确认/待命。
 
 费曼解释：方案/架构/机制/决策/权衡/排查末尾2-4句类比；确认/进度/交付/错误/代码不加。
 

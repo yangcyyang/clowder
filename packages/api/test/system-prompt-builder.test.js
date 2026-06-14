@@ -566,6 +566,9 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('行动/状态类主消息先给结论和证据'));
     assert.ok(prompt.includes('讨论、解释、方案类允许分段展开'));
     assert.ok(prompt.includes('不要出现 in_review/claim/$CLI 等运维词'));
+    assert.ok(prompt.includes('中文白话优先'), 'Should require plain-language visible output');
+    assert.ok(prompt.includes('无明确执行任务的 @ 提及只短确认/待命'), 'Should short-circuit non-task mentions');
+    assert.ok(prompt.includes('接续检查/记忆命中/源码护栏'), 'Should ban internal protocol jargon');
     assert.ok(prompt.includes('费曼解释'), 'Should include Feynman explanation protocol');
     assert.ok(prompt.includes('方案/架构/机制/决策/权衡/排查'), 'Should scope Feynman explanation to technical reasoning');
     assert.ok(prompt.includes('交付验证纪律'), 'Should include delivery verification discipline');
@@ -2001,6 +2004,8 @@ describe('SystemPromptBuilder', () => {
 
     assert.ok(prompt.includes('家规（shared-rules.md）'), 'standard should keep the operational governance digest');
     assert.ok(prompt.includes('费曼解释'), 'standard should include Feynman explanation governance');
+    assert.ok(prompt.includes('中文白话优先'), 'standard should include user-readable output rule');
+    assert.ok(prompt.includes('无任务短路'), 'standard should include no-task mention short-circuit');
     assert.ok(prompt.includes('46 hotfix止血治理'), 'standard should include operational governance details');
     assert.ok(prompt.includes('Magic Words'), 'standard should include the full magic word protocol');
   });
