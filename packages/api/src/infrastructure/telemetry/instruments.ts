@@ -71,12 +71,6 @@ export const inlineActionDetected = lazy(() =>
   }),
 );
 
-export const inlineActionShadowMiss = lazy(() =>
-  meter().createCounter('cat_cafe.a2a.inline_action.shadow_miss', {
-    description: 'Shadow detection: inline @ found but no action keyword (potential vocab gap)',
-  }),
-);
-
 export const inlineActionFeedbackWritten = lazy(() =>
   meter().createCounter('cat_cafe.a2a.inline_action.feedback_written', {
     description: 'Inline action mention routing feedback persisted',
@@ -98,12 +92,6 @@ export const inlineActionHintEmitted = lazy(() =>
 export const inlineActionHintEmitFailed = lazy(() =>
   meter().createCounter('cat_cafe.a2a.inline_action.hint_emit_failed', {
     description: 'Inline action hint system message send failure',
-  }),
-);
-
-export const inlineActionRoutedSetSkip = lazy(() =>
-  meter().createCounter('cat_cafe.a2a.inline_action.routed_set_skip', {
-    description: 'Inline action @mention skipped because already routed via line-start',
   }),
 );
 

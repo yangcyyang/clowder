@@ -23,9 +23,7 @@ export function getMaxA2ADepth(): number {
 
 /** Max number of distinct cats a single message can @mention (F27 safety limit) */
 const MAX_A2A_MENTION_TARGETS = 2;
-/** @internal Exported for a2a-shadow-detection.ts. */
 export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
-/** @internal Exported for a2a-shadow-detection.ts. */
 export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
 const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 
@@ -171,14 +169,12 @@ export function analyzeA2AMentions(
  * Action patterns that appear immediately BEFORE @mention (e.g. "Ready for @xxx").
  * Chinese 请 uses negative lookbehind to exclude compounds (邀请 = invite, 申请 = apply).
  */
-/** @internal Exported for a2a-shadow-detection.ts. */
 export const BEFORE_HANDOFF_RE = /(?:ready\s+for|交接给?|转给|(?<![邀申敬])请|帮)\s*$/i;
 /**
  * Action patterns immediately AFTER @mention (e.g. "@xxx review").
  * English verbs use (?![a-z]) to reject continuations ("reviewed", "checklist").
  * Chinese verbs use negative lookahead to exclude completion suffixes (过/了/完/好/掉).
  */
-/** @internal Exported for a2a-shadow-detection.ts. */
 export const AFTER_HANDOFF_RE =
   /^\s*(?:(?:review|check|fix|merge)(?![a-z])|(?:确认|处理|来处理|来看)(?![过了完好掉])|看一?下|帮忙|请(?![教示假求问]))/i;
 
@@ -251,7 +247,3 @@ export function detectInlineActionMentions(
 
   return found;
 }
-
-// --- clowder-ai#489: Shadow detection — extracted to a2a-shadow-detection.ts ---
-export type { ShadowDetectionResult, ShadowMiss } from './a2a-shadow-detection.js';
-export { detectInlineActionMentionsWithShadow } from './a2a-shadow-detection.js';

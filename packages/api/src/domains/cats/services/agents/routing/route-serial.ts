@@ -35,8 +35,6 @@ import {
   inlineActionFeedbackWritten,
   inlineActionHintEmitFailed,
   inlineActionHintEmitted,
-  inlineActionRoutedSetSkip,
-  inlineActionShadowMiss,
   lineStartDetected,
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
@@ -76,7 +74,7 @@ import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
 import { readLessonsForPrompt } from '../memory/LessonStore.js';
 import { readProjectProgressForPrompt } from '../memory/ProjectProgressStore.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import { detectInlineActionMentions, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
   isSubstantiveTool,
   registerWorklist,
@@ -1175,19 +1173,12 @@ export async function* routeSerial(
           }
         }
 
-        // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
-        // clowder-ai#489: counters for detection, shadow, feedback, hint
+        // #417 / F064 AC-B3: Write-side feedback for explicit inline action-like @mentions.
         if (deps.invocationDeps.threadStore) {
-          const {
-            strictHits: inlineHits,
-            shadowMisses,
-            routedSetSkips,
-          } = detectInlineActionMentionsWithShadow(storedContent, catId, a2aMentions);
+          const inlineHits = detectInlineActionMentions(storedContent, catId, a2aMentions);
           const agentAttr = { 'agent.id': catId as string };
           inlineActionChecked.add(1, agentAttr);
           if (inlineHits.length > 0) inlineActionDetected.add(inlineHits.length, agentAttr);
-          if (shadowMisses.length > 0) inlineActionShadowMiss.add(shadowMisses.length, agentAttr);
-          if (routedSetSkips > 0) inlineActionRoutedSetSkip.add(routedSetSkips, agentAttr);
 
           if (inlineHits.length > 0) {
             try {
