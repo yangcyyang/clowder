@@ -411,8 +411,7 @@ export async function* routeSerial(
           log.warn({ catId: catId as string, err: feedbackErr }, 'consumeMentionRoutingFeedback failed');
         }
       }
-      // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
-      // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
+      // MCP write callbacks remain per-message; static identity only carries a short pull-context guide.
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       // F129: Load active pack blocks (best-effort, failure does not block invocation)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
@@ -457,31 +456,6 @@ export async function* routeSerial(
           if (signals.length > 0) activeSignals = signals;
         } catch {
           /* best-effort: signal lookup failure does not block invocation */
-        }
-      }
-
-      // F163 AC-A3: always_on constitutional docs injection (fail-open, flag-gated)
-      // shadow: query but do NOT inject into prompt (record-only for experiment diff)
-      // on: query AND inject into prompt
-      // off: skip entirely
-      let alwaysOnDocs: readonly { anchor: string; title: string; summary: string }[] | undefined;
-      let alwaysOnInjectionMode: 'off' | 'shadow' | 'on' = 'off';
-      if (loadFullContext && deps.evidenceStore) {
-        try {
-          const { freezeFlags } = await import('../../../../../domains/memory/f163-types.js');
-          const f163Flags = freezeFlags();
-          alwaysOnInjectionMode = f163Flags.alwaysOnInjection;
-          if (alwaysOnInjectionMode !== 'off') {
-            const queryAlwaysOn = (
-              deps.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }> }
-            ).queryAlwaysOn;
-            if (queryAlwaysOn) {
-              const docs = queryAlwaysOn();
-              if (docs.length > 0) alwaysOnDocs = docs;
-            }
-          }
-        } catch {
-          /* fail-open: always_on lookup failure does not block invocation */
         }
       }
 
@@ -535,7 +509,6 @@ export async function* routeSerial(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
-        ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
         ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
         ...(worldContext ? { worldContext } : {}),
         threadId,
@@ -753,7 +726,7 @@ export async function* routeSerial(
         hasWorldContext: Boolean(worldContext),
         hasSessionBootstrap: Boolean(bootstrapContext),
         hasSignalArticles: Boolean(activeSignals?.length),
-        hasAlwaysOnDocs: Boolean(alwaysOnDocs?.length && alwaysOnInjectionMode === 'on'),
+        hasAlwaysOnDocs: false,
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),

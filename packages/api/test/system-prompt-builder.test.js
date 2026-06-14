@@ -143,10 +143,11 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: true,
     });
-    assert.ok(prompt.includes('cat_cafe_post_message'));
-    assert.ok(prompt.includes('cat_cafe_register_pr_tracking'));
-    assert.ok(prompt.includes('cat_cafe_get_pending_mentions'));
+    assert.ok(prompt.includes('上下文查询指南（按需拉取）'));
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
+    assert.ok(prompt.includes('cat_cafe_search_evidence'));
+    assert.ok(!prompt.includes('cat_cafe_post_message'));
+    assert.ok(!prompt.includes('cat_cafe_register_pr_tracking'));
   });
 
   test('omits MCP tools when mcpAvailable is false', async () => {
@@ -169,7 +170,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
     });
     assert.ok(prompt.includes('P1终态不绕路'));
-    assert.ok(prompt.includes('没人 claim 的任务留在 board 可见'));
+    assert.ok(prompt.includes('没人认领的任务留在 board 可见'));
   });
 
   test('is deterministic (identical inputs produce identical output)', async () => {
@@ -533,7 +534,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('独立回答'), 'Should indicate independent mode');
   });
 
-  test('buildInvocationContext injects runtime task gate with current message claim command', async () => {
+  test('buildInvocationContext injects runtime task gate without leaking CLI commands', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -544,16 +545,17 @@ describe('SystemPromptBuilder', () => {
       currentUserMessageId: 'msg_123',
     });
     assert.ok(ctx.includes('Clowder Task Gate（本轮动态）'), 'Should include dynamic task gate');
-    assert.ok(ctx.includes('$CLI task claim --message-id msg_123'), 'Should point claim at current message');
-    assert.ok(ctx.includes('没有 $CLI/claim 工具'), 'Should allow verbal fallback when claim tooling is absent');
-    assert.ok(ctx.includes('$CLI task update --task <taskId> --status in_review'), 'Should require in_review');
-    assert.ok(ctx.includes('$CLI message send --target "thread_abc"'), 'Should include current thread target');
-    assert.ok(ctx.includes('主消息遵守输出协议：结论清楚、证据明确'), 'Should enforce clear visible output');
+    assert.ok(ctx.includes('thread=thread_abc msg=msg_123'), 'Should point at current surface');
+    assert.ok(ctx.includes('行动任务先认领当前消息或匹配任务'), 'Should require task ownership');
+    assert.ok(ctx.includes('完成后切到待验收'), 'Should require review state without command syntax');
+    assert.ok(ctx.includes('不要贴任务命令、工具日志或状态机黑话'), 'Should enforce clear visible output');
+    assert.ok(!ctx.includes('$CLI task claim'), 'Should not leak claim command syntax');
+    assert.ok(!ctx.includes('--status in_review'), 'Should not leak status command syntax');
     assert.ok(ctx.includes('文件受 git 版本控制时，可直接删除'), 'Should exempt git-tracked file deletion');
     assert.ok(ctx.includes('§10.4 的“删数据”指数据库'), 'Should scope irreversible data deletion');
   });
 
-  test('buildSystemPrompt includes Slock-like visible output protocol', async () => {
+  test('buildSystemPrompt includes Slock-like visible output and pull-context guidance', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'codex',
@@ -562,17 +564,16 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
     });
 
-    assert.ok(prompt.includes('主消息输出协议（Slock-like）'), 'Should include visible output protocol');
-    assert.ok(prompt.includes('行动/状态类主消息先给结论和证据'));
-    assert.ok(prompt.includes('讨论、解释、方案类允许分段展开'));
-    assert.ok(prompt.includes('不要出现 in_review/claim/$CLI 等运维词'));
+    assert.ok(prompt.includes('家规（shared-rules.md）'), 'Should include operational shared-rules digest');
+    assert.ok(prompt.includes('上下文查询指南（按需拉取）'), 'Should include pull-context guide');
+    assert.ok(prompt.includes('cat_cafe_get_thread_context'), 'Should point to thread context lookup');
+    assert.ok(prompt.includes('cat_cafe_search_evidence'), 'Should point to evidence lookup');
     assert.ok(prompt.includes('中文白话优先'), 'Should require plain-language visible output');
-    assert.ok(prompt.includes('无明确执行任务的 @ 提及只短确认/待命'), 'Should short-circuit non-task mentions');
-    assert.ok(prompt.includes('接续检查/记忆命中/源码护栏'), 'Should ban internal protocol jargon');
+    assert.ok(prompt.includes('无任务短路'), 'Should short-circuit non-task mentions');
+    assert.ok(prompt.includes('接续检查'), 'Should ban internal protocol jargon');
     assert.ok(prompt.includes('费曼解释'), 'Should include Feynman explanation protocol');
     assert.ok(prompt.includes('方案/架构/机制/决策/权衡/排查'), 'Should scope Feynman explanation to technical reasoning');
-    assert.ok(prompt.includes('交付验证纪律'), 'Should include delivery verification discipline');
-    assert.ok(prompt.includes('可直接复制运行的验证命令'), 'Should require runnable verification command');
+    assert.ok(prompt.includes('交付必须附证据'), 'Should include delivery verification discipline');
     assert.ok(prompt.includes('规则优先级'), 'Should include rule priority section');
     assert.ok(prompt.includes('Pack 指令 > 输出协议 > 共享家规 > 角色性格'), 'Should define conflict order');
   });
@@ -585,11 +586,11 @@ describe('SystemPromptBuilder', () => {
     });
 
     assert.ok(prompt.includes('跨 Session 记忆（持久化）'), 'Should include durable memory section header');
-    assert.ok(prompt.includes('已关闭决策（别再提了）'), 'Should surface closed decisions');
+    assert.ok(prompt.includes('已关闭决策：不再做 X'), 'Should surface closed decisions as a summary');
     assert.ok(prompt.includes('.cat-cafe/memory/{catId}.md'), 'Should guide memory write-back');
   });
 
-  test('buildStaticIdentity budgets agent memory by section', async () => {
+  test('buildStaticIdentity summarizes agent memory to a short prompt block', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const longCurrentState = '当前状态很长。'.repeat(1_300);
     const prompt = buildStaticIdentity('codex', {
@@ -605,9 +606,13 @@ describe('SystemPromptBuilder', () => {
       ].join('\n'),
     });
 
-    assert.ok(prompt.includes('## 当前状态'), 'Should keep section heading');
-    assert.ok(prompt.includes('[已截断，完整内容见 .cat-cafe/memory/{catId}.md]'), 'Should mark truncated section');
+    assert.ok(prompt.includes('只注入 ≤200 字摘要'), 'Should explain memory summary behavior');
+    assert.ok(prompt.includes('当前状态：'), 'Should keep current-state signal');
     assert.ok(prompt.includes('不再恢复 4 行主消息硬限制'), 'Should keep later sections after truncation');
+    const memoryLine = prompt
+      .split('\n')
+      .find((line) => line.startsWith('当前状态：') || line.startsWith('已关闭决策：'));
+    assert.ok(memoryLine && memoryLine.length <= 220, 'Memory payload should stay short');
   });
 
   test('buildStaticIdentity injects LESSONS when budget allows', async () => {
@@ -934,10 +939,7 @@ describe('SystemPromptBuilder', () => {
     );
   });
 
-  test('F167-F AC-F6: trailing anchor lists 外部 identity as hold_ball scenarios (not @-eligible)', async () => {
-    // KD-21: external identities (GitHub bot / CI / webhook) are NOT in roster.
-    // Trailing anchor option 2 (hold_ball) must name these explicitly so the
-    // model doesn't cargo-cult-project "云端 codex" onto local @codex / @gpt52.
+  test('F167-F AC-F6: A2A closeout warns external identities are not local cats', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -946,21 +948,19 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    // Hold_ball row must explicitly name external identities to prevent cargo-cult to @local-proxy.
     assert.match(
       ctx,
-      /云端\s*codex|GitHub\s*(?:bot|Actions|review)|PR\s*check|CI/i,
-      'trailing anchor hold_ball line must list 云端 codex / GitHub bot / CI as examples',
+      /GitHub\s*(?:bot|Actions|review)|CI|云端 reviewer/i,
+      'A2A closeout should name external identities as not local cats',
     );
-    // And should warn not to @ local proxy for external identity.
     assert.match(
       ctx,
-      /外部\s*identity|外部条件|不在\s*roster|不可\s*@/,
-      'must state that external identities are not in roster / not @-eligible',
+      /不是本地猫|不要投射成本地 @句柄/,
+      'must state that external identities are not @-eligible local cats',
     );
   });
 
-  test('F167-D2: trailing anchor uses decision-tree ordering (not flat three-choice)', async () => {
+  test('F167-D2: A2A closeout is lightweight, not a forced decision tree', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -969,17 +969,12 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    // Decision-tree structure: ask "who can do next?" first, then numbered answers.
-    assert.match(ctx, /(先问|谁能).*下一步|下一棒/, 'trailing anchor must ask "who can do next" first');
-    // 1. another cat can do
-    assert.match(ctx, /1\..*另一只猫.*@句柄/s, 'option 1 = another cat via @handle');
-    // 2. external condition
-    assert.match(ctx, /2\..*外部条件|hold_ball/, 'option 2 = external wait via hold_ball');
-    // 3. only co-creator (three hard conditions)
-    assert.match(ctx, /3\..*铲屎官|@co-creator|@co-creator/, 'option 3 = co-creator reserved for hard conditions');
+    assert.match(ctx, /只有明确需要队友行动时/, 'should only route when action is required');
+    assert.match(ctx, /没有下一步就直接收口/, 'should allow no-handoff closeout');
+    assert.doesNotMatch(ctx, /下一棒传球决策树|hold_ball|本轮必选其一/, 'should not inject old decision tree');
   });
 
-  test('F167-D2: trailing anchor names the three hard conditions for @co-creator', async () => {
+  test('F167-D2: A2A closeout does not reintroduce co-creator ping rules', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -988,12 +983,10 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.match(ctx, /不可逆/, 'hard condition 1: irreversible operation');
-    assert.match(ctx, /愿景|feat|VISION/, 'hard condition 2: vision-level decision');
-    assert.match(ctx, /僵局|冲突/, 'hard condition 3: cross-cat deadlock');
+    assert.doesNotMatch(ctx, /@co-creator|反问式|要不要|僵局/, 'co-creator escalation rules live in shared-rules only');
   });
 
-  test('F167-D2: trailing anchor warns against 反问式 ping (soft @co-creator)', async () => {
+  test('F167-D2: A2A closeout does not force question-ping warnings', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const ctx = buildInvocationContext({
       catId: 'codex',
@@ -1002,8 +995,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    // Must call out the anti-pattern and show "要不要/吗？" pattern
-    assert.match(ctx, /反问式|软性|要不要|吗？/, 'must warn about soft @ / reflexive ping');
+    assert.doesNotMatch(ctx, /反问式|软性|要不要/, 'question-ping warnings should not be a trailing anchor protocol');
   });
 
   test('buildInvocationContext does not inject A2A exit check in parallel mode', async () => {
@@ -1078,24 +1070,26 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('铲屎官是真人用户'), '铲屎官 reference should be in static identity');
   });
 
-  test('buildStaticIdentity includes MCP tools when mcpAvailable', async () => {
+  test('buildStaticIdentity keeps MCP guidance minimal when mcpAvailable', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus', { mcpAvailable: true });
-    assert.ok(identity.includes('cat_cafe_post_message'), 'Should contain MCP tools when mcpAvailable');
-    assert.ok(identity.includes('cat_cafe_get_thread_context'), 'Should contain thread context tool');
+    assert.ok(identity.includes('上下文查询指南（按需拉取）'), 'Should contain lightweight tool guide');
+    assert.ok(identity.includes('cat_cafe_get_thread_context'), 'Should contain thread context lookup hint');
+    assert.ok(!identity.includes('cat_cafe_post_message'), 'Should not inject full MCP tool catalog');
   });
 
-  test('buildStaticIdentity omits MCP tools when mcpAvailable is false', async () => {
+  test('buildStaticIdentity uses the same lightweight tool guide when mcpAvailable is false', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    assert.ok(!identity.includes('cat_cafe_post_message'), 'Should not contain MCP tools without mcpAvailable');
+    assert.ok(identity.includes('cat_cafe_get_thread_context'), 'Should still teach pull-based context lookup');
+    assert.ok(!identity.includes('cat_cafe_post_message'), 'Should not contain full write-tool catalog');
   });
 
   test('buildStaticIdentity does NOT include mcpCallbackInstructions (non-Claude stays per-message)', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     // Non-Claude cats use per-message injection for HTTP callback instructions
     // because their systemPrompt lives in session history and may be lost on compression.
-    // Only Claude's MCP_TOOLS_SECTION goes in staticIdentity (survives compression via --append-system-prompt).
+    // Static identity only carries a lightweight pull-context guide.
     const identity = buildStaticIdentity('codex');
     assert.ok(!identity.includes('cat_cafe_post_message'), 'Codex should not have MCP tools in static identity');
     assert.ok(!identity.includes('HTTP 回调'), 'Codex should not have callback instructions in static identity');
@@ -1857,15 +1851,15 @@ describe('SystemPromptBuilder', () => {
     assert.ok(codexId.includes('无任务 @ 只短确认'), 'codex prompt must include no-task mention short-circuit');
   });
 
-  test('static identity includes Slock-like execution audit gates', async () => {
+  test('static identity includes merged execution closeout rules', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const prompt = buildStaticIdentity('codex');
-    assert.ok(prompt.includes('Slock-like 执行闭环审计'), 'prompt must include execution audit section');
-    assert.ok(prompt.includes('Intake Gate'), 'prompt must require claim/reuse before action');
-    assert.ok(prompt.includes('Evidence Gate'), 'prompt must require delivery evidence');
-    assert.ok(prompt.includes('Status Gate'), 'prompt must require in_review/BLOCKED status consistency');
-    assert.ok(prompt.includes('状态回复 ≠ 交付'), 'prompt must reject status-only delivery');
-    assert.ok(prompt.includes('没有证据'), 'prompt must reject evidence-free completion');
+    assert.ok(prompt.includes('执行闭环'), 'prompt must include merged execution rules');
+    assert.ok(prompt.includes('先认领或复用任务'), 'prompt must require task ownership before action');
+    assert.ok(prompt.includes('交付必须附证据'), 'prompt must require delivery evidence');
+    assert.ok(prompt.includes('阻塞原因 + 缺什么'), 'prompt must require actionable blocked state');
+    assert.ok(!prompt.includes('Intake Gate'), 'prompt must not reintroduce standalone audit protocol');
+    assert.ok(!prompt.includes('Status Gate'), 'prompt must not reintroduce standalone audit protocol');
   });
 
   // ─── F129 Pack Block Injection ──────────────────────────────────────
@@ -2004,7 +1998,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('费曼解释'), 'standard should include Feynman explanation governance');
     assert.ok(prompt.includes('中文白话优先'), 'standard should include user-readable output rule');
     assert.ok(prompt.includes('无任务短路'), 'standard should include no-task mention short-circuit');
-    assert.ok(prompt.includes('没人 claim 的任务留在 board 可见'), 'standard should include task-board anti-drop rule');
+    assert.ok(prompt.includes('没人认领的任务留在 board 可见'), 'standard should include task-board anti-drop rule');
     assert.ok(prompt.includes('不靠全局品种管控'), 'standard should include per-agent memory behavior constraint');
     assert.ok(prompt.includes('不可逆操作、愿景级决策、跨猫僵局'), 'standard should include escalation boundary');
     assert.ok(prompt.includes('runtime端口不是沙箱'), 'standard should include runtime safety rule');

@@ -30,7 +30,6 @@ import type {
   ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
 } from '../stores/ports/ThreadStore.js';
-import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
 
 const ASSET_CARD_MAX_CHARS = 30_000;
 
@@ -207,11 +206,6 @@ export interface InvocationContext {
    */
   packBlocks?: CompiledPackBlocks | null;
   /**
-   * F163 AC-A3: Pre-fetched always_on + constitutional docs for physical injection.
-   * Populated from SqliteEvidenceStore.queryAlwaysOn() at bootstrap time.
-   */
-  alwaysOnDocs?: readonly { anchor: string; title: string; summary: string }[];
-  /**
    * F093: World context envelope for world-building mode.
    * When present, injects world state (characters, scene, canon) into the prompt.
    */
@@ -323,37 +317,14 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 /**
- * Skills-as-source-of-truth: MCP tools section is minimal.
- * Full specs live in cat-cafe-skills/refs/ (rich-blocks.md, mcp-callbacks.md).
+ * Slock-like tool menu: one-line hints only. Detailed docs are pulled on demand.
  */
-const MCP_TOOLS_SECTION = `
-MCP 工具（异步汇报；token 有效期有限）：
-
-**记忆工具：**
-- cat_cafe_search_evidence: 首选入口；depth=raw 可看消息级细节
-- cat_cafe_reflect: 反思性合成
-
-**drill-down：**
-- cat_cafe_list_session_chain: 列出 session 链
-- cat_cafe_read_session_digest: 读 session 摘要
-- cat_cafe_read_session_events: 读 session 事件（raw/chat/handoff）
-- cat_cafe_read_invocation_detail: 读单次 invocation 全事件
-
-**协作工具：**
-- cat_cafe_post_message: 异步消息
-- cat_cafe_register_pr_tracking: PR tracking
-- cat_cafe_get_pending_mentions: @提及
-- cat_cafe_get_thread_context: thread 上下文
-- cat_cafe_list_threads: thread 摘要
-- cat_cafe_create_task / claim_task / update_task: 任务创建/认领/状态
-- cat_cafe_create_rich_block: rich block（inline）
-- cat_cafe_generate_document: 文档生成→IM投递
-- cat_cafe_get_rich_block_rules: rich block 规则
-- cat_cafe_multi_mention: 并行拉猫讨论（先搜后问）
-
-${RICH_BLOCK_SHORT}
-需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。
-规范：cat-cafe-skills/refs/rich-blocks.md。`;
+const TOOL_QUERY_GUIDE_SECTION = `## 上下文查询指南（按需拉取）
+- thread 历史只给最近窗口；需要更多时用 cat_cafe_get_thread_context。
+- 历史证据/项目文档/refs 用 cat_cafe_search_evidence；不要预设已知道全部背景。
+- session 接续用 cat_cafe_list_session_chain + cat_cafe_read_session_digest。
+- 需要富呈现用 rich block 工具；规则不确定再查 cat_cafe_get_rich_block_rules。
+- 先查最小范围，主消息只写结论、关键证据和下一步。`;
 
 /**
  * L0 Governance Core — Slock-like always-on constitutional floor.
@@ -387,51 +358,19 @@ const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
 原则：P1终态不绕路 P2自主协作 P3方向优先 P4单一真相源 P5可验证 P6回写session P7回写progress。
 操作：不确定先问；bug先写report；可验证子任务及时commit；review必须有明确立场。
 路由：@了谁谁接，做完@下一人；无执行任务不发消息；叙述性提及不用@。
-防漏接：做前 claim，做完 done/in_review；没人 claim 的任务留在 board 可见；@ 本身就是传球。
+防漏接：做前认领，做完切到待验收/完成；没人认领的任务留在 board 可见；@ 本身就是传球。
 升级铲屎官仅三种：不可逆操作、愿景级决策、跨猫僵局；其他自决。
+上下文：默认只看最近窗口和摘要；缺 thread 历史用 get_thread_context，缺证据/refs 用 search_evidence，缺 session 接续用 session-chain/digest。
+执行闭环：先认领或复用任务；交付必须附证据；阻塞说明阻塞原因 + 缺什么 + 谁能补。
 输出：中文白话优先；默认一两句话给结论；无任务短路；禁接续检查/记忆命中等协议黑话。
+费曼解释：方案/架构/机制/决策/权衡/排查类回答末尾用生活类比解释。
 行为约束：写入 .cat-cafe/memory/{catId}.md 的行为偏好，不靠全局品种管控。
 安全：runtime端口不是沙箱；共享状态只在main改；共享契约热点文件需全量测试。`;
-
-const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
-- intake：先判断用户请求是问答还是行动；能执行就直接执行，只有阻塞时才追问。
-- task-router：行动前复用/认领任务；状态流保持 todo/open → in_progress → in_review → done。
-- thread-reply：回复必须落在正确 target；多步骤进展、日志和证物沉到源 thread。
-- quality-gate：交付前跑最小有效验证并报告证物（测试/tsc/build/截图/API smoke/dry-run）。`;
-
-const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
-行动任务必须走三道门：
-1. Intake Gate：用户要求推进/修复/执行/构建/导出/备份/push/检查/排查/改造时，先 claim 或复用任务，再动手。
-2. Evidence Gate：交付前必须有证据，例如 commit hash、改动文件、测试命令、build 结果、截图、API smoke、导出文件路径之一；没有证据就不能说完成。
-3. Status Gate：有证据后把任务切到 in_review 等用户验收；做不了就明确 BLOCKED + 缺什么，不允许用“我会继续/正在处理/下一步”冒充交付。
-审计口径：状态回复 ≠ 交付；计划 ≠ 执行；没有证据的 done/in_review 都是不合格。`;
-
-const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
-行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
-不要出现 in_review/claim/$CLI 等运维词；禁接续检查/记忆命中/源码护栏等协议黑话；长日志、完整 diff、执行流水账放 thread/附件/think。
-检测/排查类：主消息只给结论+关键证据+下一步；工具绕路、环境报错、命令细节进 think。
-输出：中文白话优先；无明确执行任务的 @ 提及只短确认/待命。
-
-费曼解释：方案/架构/机制/决策/权衡/排查末尾2-4句类比；确认/进度/交付/错误/代码不加。
-
-### 交付验证纪律
-验收交付附：可直接复制运行的验证命令、预期输出、不符含义；缺命令不算完成。`;
 
 const RULE_PRIORITY_SECTION = `规则优先级：Pack 指令 > 输出协议 > 共享家规 > 角色性格。`;
 const LESSONS_CONTEXT_BUDGET_RATIO = 0.7;
 const PROJECT_CONTEXT_BUDGET_RATIO = 0.7;
-const MEMORY_SECTION_FALLBACK_BUDGET_TOKENS = 1_000;
-const MEMORY_TRUNCATION_MARKER = '[已截断，完整内容见 .cat-cafe/memory/{catId}.md]';
-
-const MEMORY_SECTION_BUDGETS: readonly {
-  readonly match: RegExp;
-  readonly budgetTokens: number;
-}[] = [
-  { match: /^当前状态\b/, budgetTokens: 1_500 },
-  { match: /^已关闭决策\b/, budgetTokens: 2_000 },
-  { match: /^行为偏好\b/, budgetTokens: 1_500 },
-  { match: /^环境 gotcha\b/i, budgetTokens: 1_000 },
-];
+const MEMORY_SUMMARY_MAX_CHARS = 200;
 
 function shouldInjectLessonsContext(currentPrompt: string, lessonsContext: string, maxPromptTokens?: number): boolean {
   if (!lessonsContext.trim()) return false;
@@ -449,37 +388,43 @@ function shouldInjectProjectContext(currentPrompt: string, projectContext: strin
   return estimatedTokens <= Math.floor(maxPromptTokens * PROJECT_CONTEXT_BUDGET_RATIO);
 }
 
-function getMemorySectionBudgetTokens(section: string): number {
-  const heading = section.match(/^##\s+(.+)$/m)?.[1]?.trim() ?? '';
-  return (
-    MEMORY_SECTION_BUDGETS.find((entry) => entry.match.test(heading))?.budgetTokens ??
-    MEMORY_SECTION_FALLBACK_BUDGET_TOKENS
-  );
+function extractMemorySection(rawMemory: string, headingPattern: RegExp): string {
+  const headings = [...rawMemory.matchAll(/^##\s+(.+?)\s*$/gm)];
+  const heading = headings.find((item) => headingPattern.test(item[1]?.trim() ?? ''));
+  if (!heading || heading.index === undefined) return '';
+  const nextHeading = headings.find((item) => item.index !== undefined && item.index > heading.index!);
+  const contentStart = heading.index + heading[0].length;
+  const contentEnd = nextHeading?.index ?? rawMemory.length;
+  return rawMemory
+    .slice(contentStart, contentEnd)
+    .replace(/^\s*[-*]\s*/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function truncateToTokenBudget(text: string, budgetTokens: number): string {
-  const trimmed = text.trim();
-  if (!trimmed) return '';
-  if (roughTokenEstimate(trimmed) <= budgetTokens) return trimmed;
-
-  const maxChars = Math.max(0, budgetTokens * 4 - MEMORY_TRUNCATION_MARKER.length - 2);
-  const clipped = trimmed.slice(0, maxChars).trimEnd();
-  return `${clipped}\n\n${MEMORY_TRUNCATION_MARKER}`;
+function clipMemoryPart(label: string, value: string, maxChars: number): string {
+  if (!value) return '';
+  const content = value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+  return `${label}：${content}`;
 }
 
-export function budgetAgentMemoryForPrompt(rawMemory: string): string {
+export function summarizeAgentMemoryForPrompt(rawMemory: string): string {
   const trimmed = rawMemory.trim();
   if (!trimmed) return '';
 
-  const sections = trimmed.split(/(?=^##\s+)/m).filter((section) => section.trim().length > 0);
-  if (sections.length === 0) {
-    return truncateToTokenBudget(trimmed, MEMORY_SECTION_FALLBACK_BUDGET_TOKENS);
-  }
+  const currentState = extractMemorySection(trimmed, /^当前状态/);
+  const closedDecisions = extractMemorySection(trimmed, /^已关闭决策/);
+  const behavior = extractMemorySection(trimmed, /^行为偏好/);
+  const gotcha = extractMemorySection(trimmed, /^环境 gotcha/i);
+  const parts = [
+    clipMemoryPart('当前状态', currentState, 72),
+    clipMemoryPart('已关闭决策', closedDecisions, 72),
+    clipMemoryPart('行为偏好', behavior, 48),
+    clipMemoryPart('环境 gotcha', gotcha, 48),
+  ].filter(Boolean);
+  const summary = (parts.join('；') || trimmed.replace(/\s+/g, ' ')).trim();
 
-  return sections
-    .map((section) => truncateToTokenBudget(section, getMemorySectionBudgetTokens(section)))
-    .filter(Boolean)
-    .join('\n\n');
+  return summary.length <= MEMORY_SUMMARY_MAX_CHARS ? summary : `${summary.slice(0, MEMORY_SUMMARY_MAX_CHARS - 1)}…`;
 }
 
 function formatContextUsageWarning(context: NonNullable<InvocationContext['contextUsageWarning']>): string[] {
@@ -512,19 +457,14 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   const surface = `thread=${context.threadId ?? '$CAT_CAFE_THREAD_ID'}${
     context.currentUserMessageId ? ` msg=${context.currentUserMessageId}` : ''
   }`;
-  const claimCommand = context.currentUserMessageId
-    ? `$CLI task claim --message-id ${context.currentUserMessageId}`
-    : '$CLI task list → claim matching task';
-  const replyTarget = context.threadId ? `"${context.threadId}"` : '"$CAT_CAFE_THREAD_ID"';
 
   return [
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
-    `行动任务先 claim: \`${claimCommand}\`；若没有 $CLI/claim 工具，在当前 thread 明确声明“我开始做：<范围>”后继续；若 claim 返回冲突才停止。`,
+    '行动任务先认领当前消息或匹配任务；如果任务被别人认领，停止并说明冲突。',
     '文件删除权限：用户或 A2A 派工已明确要求删除，且文件受 git 版本控制时，可直接删除并用 git diff/status 留证；这不是不可逆操作。§10.4 的“删数据”指数据库、生产资源或不可恢复数据。',
-    '交付必须有证据；完成后 `$CLI task update --task <taskId> --status in_review`，阻塞则 `blocked`。',
-    `回写当前 thread：\`$CLI message send --target ${replyTarget}\`。`,
-    '主消息遵守输出协议：结论清楚、证据明确；不贴 claim/$CLI/in_review/工具日志。',
+    '交付必须有证据；完成后切到待验收，阻塞就写清缺什么。',
+    '主消息只写结论、证据和下一步；不要贴任务命令、工具日志或状态机黑话。',
   ];
 }
 
@@ -664,15 +604,7 @@ function buildTeammateRoster(currentCatId: CatId): string | null {
  * session-level — injected once on new session, skipped on --resume.
  */
 export interface StaticIdentityOptions {
-  /**
-   * Whether native MCP tools are available (Claude with --mcp-config).
-   * When true, MCP_TOOLS_SECTION is included in static identity because
-   * Claude's --append-system-prompt survives context compression.
-   *
-   * Non-Claude cats (Codex/Gemini) use HTTP callback instructions which
-   * must stay in per-message prompt because their systemPrompt is in
-   * session history and MAY be lost on compression.
-   */
+  /** Whether native MCP tools are available (Claude with --mcp-config). */
   mcpAvailable?: boolean;
   /**
    * F129: Compiled pack blocks to inject.
@@ -766,7 +698,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     // 再匹配，所以 `- @cat` / `> @cat` 是**合法路由**（不是陷阱）。真正的陷阱是
     // @ 不在剥离后的行首位置——句中 / URL 内 / 任意非首字符。
     lines.push(
-      `[错误] 句中 ${exampleTarget}（@ 不是行首也不是剥离 markdown 前缀后的首字符）· URL 内 ${exampleTarget} · 任何非行首位置的 @ 都不路由，球权掉地上。`,
+      `[错误] 句中 ${exampleTarget}（@ 不是行首也不是剥离 markdown 前缀后的首字符）· URL 内 ${exampleTarget} · 任何非行首位置的 @ 都不会触发路由。`,
     );
     lines.push(
       `发前自检：我消息里想路由的 @句柄 都在"独立一行的行首"或"markdown 列表/引用前缀后的首字符"吗？URL 内 / 句中任意位置的 @ 不是路由指令。`,
@@ -783,21 +715,18 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   lines.push(
     '## Clowder CLI 工作纪律',
     '可执行 shell 时先设 `CLI="${CLOWDER_CLI_PATH:-clowder}"`，没有 `clowder` 再用 `./bin/clowder`。',
-    '- 行动任务先 `$CLI task claim --message-id <messageId>` / `--task <taskId>`；若没有 $CLI/claim 工具，在当前 thread 声明“我开始做：<范围>”后继续；claim 冲突才停止。',
-    '- “推进/修复/执行/帮我做/排查/改造/构建/备份/push/导出”等是行动任务；能做就 claim 后做，不只回计划。',
+    '- 行动任务先认领或复用任务；若没有任务工具，在当前 thread 声明“我开始做：<范围>”后继续；冲突才停止。',
+    '- “推进/修复/执行/帮我做/排查/改造/构建/备份/push/导出”等是行动任务；能做就认领后做，不只回计划。',
     '- 最终回复必须有交付物或验证结果；“正在加载/还没开始/下一步会做”不算完成。',
     '- 如果本轮不能动手（缺权限、缺文件、缺凭证、工具不可用），明确写 BLOCKED 和缺什么；不要伪装成已在执行。',
-    '- 完成后等待人工验收：`$CLI task update --task <taskId> --status in_review`。',
-    '- 需要回写当前 thread：`$CLI message send --target "$CAT_CAFE_THREAD_ID"`，正文走 stdin。',
-    '纯讨论/解释不需要 claim；不要为了 @ 队友而使用 message send，A2A 仍按上面的行首 @ 规则。',
+    '- 完成后把任务切到待验收，并在当前 thread 回写结论、证据、验证方式。',
+    '纯讨论/解释不需要认领；不要为了 @ 队友而使用 message send，A2A 仍按上面的行首 @ 规则。',
     '',
   );
 
   lines.push(GENERIC_WORKFLOW_TRIGGERS, '');
 
-  lines.push(HARNESS_SKILLS_SECTION, '');
-  lines.push(EXECUTION_AUDIT_SECTION, '');
-  lines.push(VISIBLE_OUTPUT_PROTOCOL_SECTION, '');
+  lines.push(TOOL_QUERY_GUIDE_SECTION, '');
   lines.push(RULE_PRIORITY_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)
@@ -818,17 +747,15 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
   lines.push('', getGovernanceDigest(toolPolicy));
 
-  const agentMemory = budgetAgentMemoryForPrompt(options?.agentMemoryContext ?? '');
+  const agentMemory = summarizeAgentMemoryForPrompt(options?.agentMemoryContext ?? '');
   if (agentMemory) {
     lines.push(
       '',
       '## 跨 Session 记忆（持久化）',
-      '用于恢复当前状态、已关闭决策、行为偏好、环境 gotcha；先看已关闭决策，别重复提议。',
+      '只注入 ≤200 字摘要，用于恢复当前状态、已关闭决策、行为偏好、环境 gotcha；需要全文时按需读取 memory 文件。',
       '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md`；若与当前指令/事实冲突，以当前为准。',
       '',
-      '```markdown',
       agentMemory,
-      '```',
     );
   }
 
@@ -872,13 +799,6 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // F129: World driver summary (read-only, informational)
   if (packBlocks?.worldDriverSummary) {
     lines.push('', packBlocks.worldDriverSummary);
-  }
-
-  // MCP tools documentation — ONLY for Claude (--append-system-prompt survives compression).
-  // Non-Claude cats (Codex/Gemini) inject HTTP callback instructions per-message
-  // because their systemPrompt lives in session history and may be lost on compression.
-  if (options?.mcpAvailable) {
-    lines.push('', MCP_TOOLS_SECTION.trim());
   }
 
   return lines.join('\n');
@@ -1138,19 +1058,6 @@ export function buildInvocationContext(context: InvocationContext): string {
     lines.push(context.governanceSourceContext, '');
   }
 
-  // F163 AC-A3: always_on constitutional knowledge injection (physical, not retrieval)
-  if (context.alwaysOnDocs && context.alwaysOnDocs.length > 0) {
-    lines.push('');
-    lines.push('## Constitutional Knowledge (always_on)');
-    lines.push('');
-    for (const doc of context.alwaysOnDocs) {
-      lines.push(`### ${doc.title}`);
-      lines.push('');
-      lines.push(doc.summary);
-      lines.push('');
-    }
-  }
-
   // F091: Active Signal articles in discussion context
   if (context.activeSignals && context.activeSignals.length > 0) {
     lines.push('Signal articles linked to this thread:');
@@ -1168,18 +1075,12 @@ export function buildInvocationContext(context: InvocationContext): string {
     }
   }
 
-  // F167 Phase D: Trailing anchor — decision tree, not flat three-choice.
-  // @co-creator is a hard-condition exit, not the safe default (KD-19).
-  // Placed at the very end for maximum recency bias (critical for non-Claude models).
+  // F167 Phase D simplified: routing belongs to server + explicit line-start @, not an agent-side decision tree.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
-    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
     lines.push(
       '',
-      `下一棒传球决策树（本轮必选其一，缺 = 消息不完整）：先问"下一步谁能做"——`,
-      `1. 另一只猫能做 → @句柄（review 完→@author / 修完→@reviewer / merge 完→@愿景守护猫）`,
-      `2. 等外部条件 → 实际调用 cat_cafe_hold_ball(...)。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条（口头"我继续"不算）`,
-      `3. 只有铲屎官本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
-      `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（hold_ball），严禁投射成本地 @句柄。`,
+      'A2A 收口：只有明确需要队友行动时，才在行首 @ 对方并写清 Next Action；没有下一步就直接收口，不强制传球。',
+      '外部服务、CI、GitHub bot、云端 reviewer 不是本地猫，不要投射成本地 @句柄。',
     );
   }
 

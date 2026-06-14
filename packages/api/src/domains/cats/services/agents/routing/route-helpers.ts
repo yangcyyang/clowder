@@ -106,18 +106,18 @@ export function buildContextUsageWarning(input: {
 
 const STANDARD_CONTEXT_BUDGET_CAP: Pick<ContextBudget, 'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'> =
   {
-    maxContextTokens: 24_000,
-    maxMessages: 40,
-    maxContentLengthPerMsg: 6_000,
+    maxContextTokens: 12_000,
+    maxMessages: 10,
+    maxContentLengthPerMsg: 4_000,
   };
 
 const FOCUSED_SURFACE_CONTEXT_BUDGET_CAP: Pick<
   ContextBudget,
   'maxContextTokens' | 'maxMessages' | 'maxContentLengthPerMsg'
 > = {
-  maxContextTokens: 12_000,
-  maxMessages: 24,
-  maxContentLengthPerMsg: 4_000,
+  maxContextTokens: 8_000,
+  maxMessages: 10,
+  maxContentLengthPerMsg: 3_000,
 };
 
 function isFocusedSurface(surface: RuntimeContextSurfaceHint | undefined): boolean {

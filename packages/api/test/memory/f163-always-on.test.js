@@ -95,8 +95,8 @@ describe('F163 always_on injection', () => {
   });
 });
 
-describe('F163 SystemPromptBuilder always_on injection', () => {
-  it('injects always_on docs into prompt output', () => {
+describe('F163 SystemPromptBuilder always_on pull-mode', () => {
+  it('does not physically inject always_on docs into prompt output', () => {
     const context = {
       catId: 'opus',
       mode: 'independent',
@@ -106,9 +106,9 @@ describe('F163 SystemPromptBuilder always_on injection', () => {
     };
 
     const output = buildInvocationContext(context);
-    assert.ok(output.includes('Constitutional Knowledge'), 'should contain constitutional section');
-    assert.ok(output.includes('SOP Iron Rules'), 'should contain doc title');
-    assert.ok(output.includes('Never touch Redis 6399'), 'should contain doc summary');
+    assert.ok(!output.includes('Constitutional Knowledge'), 'should not contain constitutional section');
+    assert.ok(!output.includes('SOP Iron Rules'), 'should not contain doc title');
+    assert.ok(!output.includes('Never touch Redis 6399'), 'should not contain doc summary');
   });
 
   it('does not inject when alwaysOnDocs is empty', () => {
