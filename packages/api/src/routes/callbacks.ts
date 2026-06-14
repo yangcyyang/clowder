@@ -16,7 +16,7 @@ import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/rout
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
-import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
+import { buildVoteNotification } from '../domains/votes/vote-utils.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';

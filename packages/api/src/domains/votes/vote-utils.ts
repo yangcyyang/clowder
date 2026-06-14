@@ -1,31 +1,19 @@
 /**
- * F079 Phase 2: Vote interception utilities
+ * Vote utilities shared by HTTP routes and callback notifications.
  *
- * Pure functions for extracting [VOTE:xxx] patterns from cat responses
- * and managing vote completion logic.
+ * Routing must not parse agent prose as protocol commands. Vote casting stays
+ * on explicit APIs, while these helpers only build result/notification payloads.
  */
 
 import type { ConnectorSource } from '@cat-cafe/shared';
-import type { VotingStateV1 } from '../../stores/ports/ThreadStore.js';
+import type { VotingStateV1 } from '../cats/services/stores/ports/ThreadStore.js';
 
-/** Gap 3: vote results render as ConnectorBubble, not plain system message. */
+/** Vote results render as ConnectorBubble, not plain system message. */
 export const VOTE_RESULT_SOURCE: ConnectorSource = {
   connector: 'vote-result',
   label: '投票结果',
   icon: 'ballot',
 };
-
-const VOTE_PATTERN = /\[VOTE:(.+?)\]/;
-
-/**
- * Extract vote option from text content.
- * Returns the trimmed option string, or null if no vote pattern found.
- */
-export function extractVoteFromText(text: string): string | null {
-  const match = text.match(VOTE_PATTERN);
-  if (!match) return null;
-  return match[1]?.trim() ?? null;
-}
 
 /**
  * Check if all designated voters have voted.
@@ -42,7 +30,7 @@ export function checkVoteCompletion(state: VotingStateV1): boolean {
  */
 export function buildVoteNotification(question: string, options: string[]): string {
   const optionList = options.map((o) => `• ${o}`).join('\n');
-  return `投票请求：${question}\n\n选项：\n${optionList}\n\n请在回复中包含 [VOTE:你的选项]，例如 [VOTE:${options[0]}]`;
+  return `投票请求：${question}\n\n选项：\n${optionList}\n\n请在投票组件中选择一个选项。`;
 }
 
 /**

@@ -73,7 +73,6 @@ import {
   upsertMaxBoundary,
 } from './route-helpers.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
-import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-parallel');
 
@@ -809,87 +808,6 @@ export async function* routeParallel(
         // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
         // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
         // L2 suppression log below still surfaces the raw @ tokens from the text for observability.
-
-        // F079 Phase 2: Vote interception for parallel routing.
-        // @all / multi-cat requests route here, so [VOTE:xxx] must be handled too.
-        const votedOption = extractVoteFromText(storedContent);
-        if (votedOption && deps.invocationDeps.threadStore) {
-          try {
-            const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
-            if (voteState && voteState.status === 'active' && voteState.options.includes(votedOption)) {
-              // Parity with HTTP/routeSerial cast validations.
-              if (Date.now() > voteState.deadline) {
-                log.info({ threadId, votedOption }, 'Vote expired, ignoring');
-              } else if (
-                voteState.voters &&
-                voteState.voters.length > 0 &&
-                !voteState.voters.includes(msg.catId) &&
-                msg.catId !== voteState.initiatedByCat
-              ) {
-                log.info({ catId: msg.catId, threadId }, 'Not in voters list, ignoring vote');
-              } else {
-                voteState.votes[msg.catId] = votedOption;
-                await deps.invocationDeps.threadStore.updateVotingState(threadId, voteState);
-                log.info({ catId: msg.catId, votedOption, threadId }, 'Vote cast');
-
-                if (checkVoteCompletion(voteState)) {
-                  const tally = buildVoteTally(voteState.options, voteState.votes);
-                  const totalVotes = Object.values(voteState.votes).length;
-                  const fields = voteState.options.map((opt) => ({
-                    label: opt,
-                    value: `${tally[opt] ?? 0} 票 (${totalVotes > 0 ? Math.round(((tally[opt] ?? 0) / totalVotes) * 100) : 0}%)`,
-                  }));
-                  const richBlock = {
-                    id: `vote-${Date.now()}`,
-                    kind: 'card' as const,
-                    v: 1 as const,
-                    title: `投票结果: ${voteState.question}`,
-                    bodyMarkdown: voteState.anonymous ? `匿名投票 · ${totalVotes} 票` : `实名投票 · ${totalVotes} 票`,
-                    tone: 'info' as const,
-                    fields,
-                  };
-                  await deps.invocationDeps.threadStore.updateVotingState(threadId, null);
-                  // F079 Bug 1 fix: do NOT push richBlock into allRichBlocks — that
-                  // embeds the result in the cat's own message, causing duplication.
-                  // Only the standalone connector message below should carry the result.
-                  // Gap 3: persist separate connector message for ConnectorBubble rendering
-                  try {
-                    const stored = await deps.messageStore.append({
-                      userId,
-                      catId: null,
-                      content: `投票结果: ${voteState.question}`,
-                      mentions: [],
-                      timestamp: Date.now(),
-                      threadId,
-                      source: VOTE_RESULT_SOURCE,
-                      extra: { rich: { v: 1 as const, blocks: [richBlock] } },
-                    });
-                    // F079 Bug 2 fix: broadcast connector_message so frontend updates without F5
-                    if (deps.socketManager) {
-                      deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-                        threadId,
-                        message: {
-                          id: stored.id,
-                          type: 'connector',
-                          content: stored.content,
-                          source: VOTE_RESULT_SOURCE,
-                          timestamp: stored.timestamp,
-                          extra: stored.extra,
-                        },
-                      });
-                    }
-                  } catch (persistErr) {
-                    log.warn({ threadId, err: persistErr }, 'Failed to persist vote connector message');
-                  }
-                  log.info({ threadId }, 'Vote auto-closed');
-                }
-              }
-            }
-          } catch (voteErr) {
-            log.warn({ catId: msg.catId, err: voteErr }, 'Vote interception failed');
-          }
-        }
-
         const thinking = catThinking.get(msg.catId);
         try {
           await deps.messageStore.append({

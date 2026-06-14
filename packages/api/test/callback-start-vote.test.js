@@ -128,7 +128,7 @@ describe('POST /api/callbacks/start-vote', () => {
     assert.equal(persistedMessages.length, 1, 'should persist 1 notification message');
     const msg = persistedMessages[0];
     assert.ok(msg.content.includes('投票请求'), 'notification should contain vote prompt');
-    assert.ok(msg.content.includes('[VOTE:'), 'notification should contain VOTE example');
+    assert.ok(msg.content.includes('投票组件'), 'notification should point voters to the vote UI');
     assert.equal(msg.catId, 'opus', 'catId should be the initiating cat');
     assert.ok(msg.mentions.length === 2, 'should mention both voters');
   });
