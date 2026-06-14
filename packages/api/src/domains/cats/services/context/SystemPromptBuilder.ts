@@ -361,24 +361,15 @@ ${RICH_BLOCK_SHORT}
  */
 const GOVERNANCE_CORE_DIGEST = `## 核心家规（shared-rules.md 摘要）
 规则是边界不是全部：先判断角色/事实/直线路径；不适用时用证据+替代方案 Push Back。
-原则：终态/不绕路/方向优先/单一真相源/验证+记忆与项目进度回写；用户CVO。
-协作底线：正确 surface；行动先认领/复用；交付给证据；危险/不可逆先确认。
-Magic Words：脚手架/绕路了/喵约/星星罐子/第一性原理/数学之美/下次一定/我能猜出来/碎片够了 = 用户手动拉闸，必须立即自检。
+原则：终态/不绕路/方向优先/单一真相源/验证+记忆与项目进度回写。
+协作底线：正确 surface；任务系统+@传球防漏接；行动先认领/复用；交付给证据；危险/不可逆先确认。
+输出：中文白话优先；默认一两句话给结论；无明确任务的 @ 只短确认；禁接续检查/记忆命中/源码护栏等协议黑话。
+行为约束写各猫 memory，不靠全局品种规则。
 完整规则按需查阅：cat-cafe-skills/refs/shared-rules.md。`;
 
 export type GovernanceTier = 'core' | 'operational';
 
-const GOVERNANCE_MAGIC_WORDS = [
-  '脚手架',
-  '绕路了',
-  '喵约',
-  '星星罐子',
-  '第一性原理',
-  '数学之美',
-  '下次一定',
-  '我能猜出来',
-  '碎片够了',
-] as const;
+const GOVERNANCE_MAGIC_WORDS = [] as const;
 
 const GOVERNANCE_SOURCE_MAX_CHARS = 18_000;
 
@@ -393,16 +384,14 @@ function roughTokenEstimate(text: string): number {
  * Design decision: inject detail only for standard/full, not minimal.
  */
 const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
-身份与边界：用自己的身份签名，不冒充；规则不适用时用证据+替代方案 Push Back。
-原则：P1终态 P2自主SOP P3方向>速 P4真相源 P5验证 P6回写session P7回写progress；CVO。
-实事求是：基于代码/commit/PR/文档；不确定就说，查不完说"还没查完"；完成附证据。
-输出格式：轻问答自然短答；完成、review、handoff、BLOCKED 才结构化。
-用户可读：中文白话优先；无任务短路；禁接续检查/记忆命中/源码护栏。
-协作纪律：团队用"我们"；回复落正确surface；@后三选一：接/退/升；行动先认领/复用，交付进in_review。
-Magic Words（触发自检）： 「脚手架」「绕路了」「喵约」「星星罐子」「第一性原理」「数学之美」「下次一定」「我能猜出来」「碎片够了」。
-46 hotfix止血治理：fix/hotfix/quick fix/workaround 走 hotfix 标签、跨猫review、禁止作者自验。
-缅因猫fallback层数检测：同文件≥3层fallback时做坐标系自检，优先消除错误坐标系。
-暹罗猫创意-实现解耦：发现问题先记录+handoff；碰 packages/src 必须转执行猫。`;
+原则：P1终态不绕路 P2自主协作 P3方向优先 P4单一真相源 P5可验证 P6回写session P7回写progress。
+操作：不确定先问；bug先写report；可验证子任务及时commit；review必须有明确立场。
+路由：@了谁谁接，做完@下一人；无执行任务不发消息；叙述性提及不用@。
+防漏接：做前 claim，做完 done/in_review；没人 claim 的任务留在 board 可见；@ 本身就是传球。
+升级铲屎官仅三种：不可逆操作、愿景级决策、跨猫僵局；其他自决。
+输出：中文白话优先；默认一两句话给结论；无任务短路；禁接续检查/记忆命中等协议黑话。
+行为约束：写入 .cat-cafe/memory/{catId}.md 的行为偏好，不靠全局品种管控。
+安全：runtime端口不是沙箱；共享状态只在main改；共享契约热点文件需全量测试。`;
 
 const HARNESS_SKILLS_SECTION = `## Harness Skills（Slock SOP）
 - intake：先判断用户请求是问答还是行动；能执行就直接执行，只有阻塞时才追问。
@@ -419,7 +408,7 @@ const EXECUTION_AUDIT_SECTION = `## Slock-like 执行闭环审计
 
 const VISIBLE_OUTPUT_PROTOCOL_SECTION = `## 主消息输出协议（Slock-like）
 行动/状态类主消息先给结论和证据，保持自然可读；讨论、解释、方案类允许分段展开。
-不要出现 in_review/claim/$CLI 等运维词；长日志、完整 diff、执行流水账放 thread/附件/think。
+不要出现 in_review/claim/$CLI 等运维词；禁接续检查/记忆命中/源码护栏等协议黑话；长日志、完整 diff、执行流水账放 thread/附件/think。
 检测/排查类：主消息只给结论+关键证据+下一步；工具绕路、环境报错、命令细节进 think。
 输出：中文白话优先；无明确执行任务的 @ 提及只短确认/待命。
 
@@ -610,51 +599,15 @@ export function buildGovernanceSourceContext(message: string): string | null {
   }
 }
 
-/** Per-breed workflow triggers: when to proactively @ other cats.
- *  Keyed by breedId so all variants of a breed share the same workflow. */
-const WORKFLOW_TRIGGERS: Record<string, string> = {
-  ragdoll: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成开发/修复 → @缅因猫 请 review',
-    '- 修完 review 意见 → @缅因猫 确认修复',
-    '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
-  ].join('\n'),
-  'maine-coon': [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成 review → @布偶猫 通知结果',
-    '- 修完 bug/feature → @布偶猫 请 review',
-    '- serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）',
-    '- 发现需要架构决策 → @布偶猫 征询',
-    '- Review 代码：每个发现给明确立场（放行/退回 + 理由）',
-    '- 收到 review 意见：独立判断，认为自己对就 push back（Rule 0），不全盘接受',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 接球后静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 声明 = 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行',
-    '- 只发状态迁移消息，中间产物留在代码里',
-    '- 完成任务后必须 @ 下一棒',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-  ].join('\n'),
-  siamese: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成设计/视觉资产 → 分别 @布偶猫 和 @缅因猫 请确认（每只猫各占一行）',
-    '- 遇到技术实现问题 → @布偶猫 征询',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 涉及 UI/前端验证时：通过截图产出证据',
-    '- 接球后静默执行到下一状态点（DONE / HANDOFF）',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-  ].join('\n'),
-};
+const GENERIC_WORKFLOW_TRIGGERS = [
+  '## 工作流（通用协作触发点）',
+  '- 需要别人行动：行首 @ 对应猫 + 明确 Next Action；parallel 不互 @。',
+  '- 需要审查：@审查猫 review；完成 review：@原执行猫，放行/退回 + 理由。',
+  '- 架构/愿景级决策：给证据和选项，再 @方案/验收猫或升级铲屎官。',
+  '- 有明确执行任务才启动；无任务 @ 只短确认，不全量接续检查',
+  '- 主消息给结论、证据和下一步，不铺执行流水账；完成后按需 @ 下一棒，没有下一棒就说明已收口。',
+  '- 出口一问：这条消息有没有让用户听懂结论？有没有明确下一步？',
+].join('\n');
 
 /**
  * F-Ground-3: Build teammate roster table.
@@ -840,11 +793,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     '',
   );
 
-  // Per-breed workflow triggers (fallback to catId for legacy configs without breedId)
-  const triggers = WORKFLOW_TRIGGERS[config.breedId ?? ''] ?? WORKFLOW_TRIGGERS[catId as string];
-  if (triggers) {
-    lines.push(triggers, '');
-  }
+  lines.push(GENERIC_WORKFLOW_TRIGGERS, '');
 
   lines.push(HARNESS_SKILLS_SECTION, '');
   lines.push(EXECUTION_AUDIT_SECTION, '');
@@ -1035,11 +984,10 @@ export function buildInvocationContext(context: InvocationContext): string {
     lines.push(...formatContextUsageWarning(context.contextUsageWarning), '');
   }
 
-  // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
-  // without considering whether a teammate needs to act next.
+  // A2A: lightweight routing reminder from simplified shared-rules.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
     lines.push(
-      `A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。收到 @ 但对方说"我在动" → 矛盾，push back + 立刻接/退/升（诊断≠解决，说完不@=球还在地上）。收了球却说"你等着/你别动" → 球权死锁，禁止——做不了就退回或升级。球权只有第一人称：只能声明自己持球，不能声明别人持球——没有 @ 或 hold_ball 动作，球权就没转移。`,
+      'A2A 路由：行首 @ 才触发；需要行动才 @；无明确执行任务只短确认，不做全量接续检查。',
       '',
     );
   }

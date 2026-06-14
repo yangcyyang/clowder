@@ -160,7 +160,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('cat_cafe_post_message'));
   });
 
-  test('contains anti-impersonation rule', async () => {
+  test('contains simplified governance floor', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -168,8 +168,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    // Phase 0 正面化: 不冒充 → 用自己的身份签名 (L0 GOVERNANCE_L0_DIGEST)
-    assert.ok(prompt.includes('用自己的身份签名'));
+    assert.ok(prompt.includes('P1终态不绕路'));
+    assert.ok(prompt.includes('没人 claim 的任务留在 board 可见'));
   });
 
   test('is deterministic (identical inputs produce identical output)', async () => {
@@ -187,7 +187,7 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
-  test('output size stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
+  test('output size stays under 3900 chars after simplified governance prompt growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -276,7 +276,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('不确定'), 'Prompt should tell cats to say "I\'m not sure"');
   });
 
-  test('contains "不要编造" anti-fabrication rule', async () => {
+  test('contains simplified evidence discipline', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'codex',
@@ -284,8 +284,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('实事求是'), 'Prompt should enforce evidence-based honesty');
-    assert.ok(prompt.includes('还没查完'), 'Prompt should tell cats to say when investigation is incomplete');
+    assert.ok(prompt.includes('P5可验证'), 'Prompt should enforce verifiable delivery');
+    assert.ok(prompt.includes('可验证子任务及时commit'), 'Prompt should require evidence-oriented work units');
   });
 
   // --- System prompt split tests (buildStaticIdentity / buildInvocationContext) ---
@@ -296,9 +296,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(identity.includes('布偶猫'), 'Should contain display name');
     assert.ok(identity.includes('Anthropic'), 'Should contain provider');
     assert.ok(identity.includes('## 协作'), 'Should contain collaboration guide');
-    // Phase 0 正面化: 不冒充 → 用自己的身份签名 (L0 GOVERNANCE_L0_DIGEST)
-    assert.ok(identity.includes('用自己的身份签名'), 'Should contain identity-signature rule (anti-impersonation)');
-    assert.ok(identity.includes('团队用"我们"'), 'Should contain identity contract (folded into L0)');
+    assert.ok(identity.includes('P1终态不绕路'), 'Should contain simplified governance floor');
+    assert.ok(identity.includes('不靠全局品种管控'), 'Should contain per-agent memory behavior constraint');
   });
 
   test('buildStaticIdentity returns empty for unknown cat', async () => {
@@ -310,11 +309,12 @@ describe('SystemPromptBuilder', () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const opusId = buildStaticIdentity('opus');
     assert.ok(opusId.includes('工作流'), 'Opus should have workflow triggers');
-    assert.ok(opusId.includes('@缅因猫'), 'Opus workflow should mention review with 缅因猫');
+    assert.ok(opusId.includes('通用协作触发点'), 'Opus workflow should use generic collaboration triggers');
+    assert.ok(opusId.includes('审查猫'), 'Opus workflow should route review by role, not breed');
 
     const codexId = buildStaticIdentity('codex');
     assert.ok(codexId.includes('工作流'), 'Codex should have workflow triggers');
-    assert.ok(codexId.includes('@布偶猫'), 'Codex workflow should mention notifying 布偶猫');
+    assert.ok(codexId.includes('Next Action'), 'Codex workflow should require explicit next action');
     assert.ok(codexId.includes('出口一问'), 'Codex workflow should include exit check (出口一问)');
   });
 
@@ -477,7 +477,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildStaticIdentity roster size with full runtime config stays under 4700 chars after Magic Words growth', async () => {
+  test('buildStaticIdentity roster size with full runtime config stays under 4700 chars after simplified governance growth', async () => {
     const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const originalConfigs = catRegistry.getAllConfigs();
@@ -758,9 +758,8 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    // F064 球权模型: A2A 出口检查 → A2A 球权检查
-    assert.ok(ctx.includes('A2A 球权检查'), 'Should include A2A ball-ownership check hint');
-    assert.ok(ctx.includes('句中无效'), 'Should teach inline @ is invalid for routing');
+    assert.ok(ctx.includes('A2A 路由'), 'Should include A2A routing hint');
+    assert.ok(ctx.includes('行首 @ 才触发'), 'Should teach line-start @ routing');
   });
 
   test('F167-F AC-F1: teammate roster surfaces resolved model per cat (handle/model 解绑)', async () => {
@@ -1016,7 +1015,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       a2aEnabled: true,
     });
-    assert.ok(!ctx.includes('A2A 球权检查'), 'Parallel mode should not encourage @mention chaining');
+    assert.ok(!ctx.includes('A2A 路由'), 'Parallel mode should not encourage @mention chaining');
   });
 
   // F167 L2 AC-A6: parallel 模式明确告知 @句柄 无路由语义
@@ -1259,7 +1258,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
   });
 
-  test('buildSystemPrompt size with activeParticipants stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
+  test('buildSystemPrompt size with activeParticipants stays under 3900 chars after simplified governance growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1719,7 +1718,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('skill'), 'Should not contain skill reference when null');
   });
 
-  test('buildSystemPrompt size stays under 3900 chars with SOP hint after Magic Words + runtime prompt growth', async () => {
+  test('buildSystemPrompt size stays under 3900 chars with SOP hint after simplified governance growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1765,7 +1764,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 5200 chars with voice mode + SOP hint after Magic Words growth', async () => {
+  test('buildSystemPrompt size stays under 5200 chars with voice mode + SOP hint after simplified governance growth', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1844,19 +1843,18 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('静默执行'), 'maine-coon prompt must include 静默执行');
-    assert.ok(prompt.includes('声明'), 'maine-coon prompt must include 声明 ≠ 执行');
-    // F064 球权模型: 空气传球 警告并入 "A2A 球权检查" invocation context（矛盾 push back 语义）
-    assert.ok(prompt.includes('push back'), 'maine-coon prompt must include push back (phantom handoff guard)');
+    assert.ok(prompt.includes('有明确执行任务才启动'), 'maine-coon prompt must include execution trigger boundary');
+    assert.ok(prompt.includes('不全量接续检查'), 'maine-coon prompt must include no full continuation check boundary');
+    assert.ok(prompt.includes('主消息给结论'), 'maine-coon prompt must include user-readable output rule');
     assert.ok(prompt.includes('出口一问'), 'maine-coon prompt must include 出口一问');
   });
 
   test('maine-coon workflow contains A2A state transition keywords', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const codexId = buildStaticIdentity('codex');
-    assert.ok(codexId.includes('BLOCKED'), 'codex prompt must include BLOCKED state');
-    assert.ok(codexId.includes('REVIEW READY'), 'codex prompt must include REVIEW READY state');
-    assert.ok(codexId.includes('DONE'), 'codex prompt must include DONE state');
+    assert.ok(codexId.includes('有明确执行任务才启动'), 'codex prompt must include execution trigger boundary');
+    assert.ok(codexId.includes('没有下一棒就说明已收口'), 'codex prompt must include handoff closeout rule');
+    assert.ok(codexId.includes('无任务 @ 只短确认'), 'codex prompt must include no-task mention short-circuit');
   });
 
   test('static identity includes Slock-like execution audit gates', async () => {
@@ -2006,23 +2004,24 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('费曼解释'), 'standard should include Feynman explanation governance');
     assert.ok(prompt.includes('中文白话优先'), 'standard should include user-readable output rule');
     assert.ok(prompt.includes('无任务短路'), 'standard should include no-task mention short-circuit');
-    assert.ok(prompt.includes('46 hotfix止血治理'), 'standard should include operational governance details');
-    assert.ok(prompt.includes('Magic Words'), 'standard should include the full magic word protocol');
+    assert.ok(prompt.includes('没人 claim 的任务留在 board 可见'), 'standard should include task-board anti-drop rule');
+    assert.ok(prompt.includes('不靠全局品种管控'), 'standard should include per-agent memory behavior constraint');
+    assert.ok(prompt.includes('不可逆操作、愿景级决策、跨猫僵局'), 'standard should include escalation boundary');
+    assert.ok(prompt.includes('runtime端口不是沙箱'), 'standard should include runtime safety rule');
+    assert.ok(!prompt.includes('46 hotfix止血治理'), 'standard should not include retired hotfix-specific rules');
+    assert.ok(!prompt.includes('Magic Words'), 'standard should not include retired magic word protocol');
   });
 
-  test('Slock-like governance: magic words trigger shared-rules source context', async () => {
+  test('Slock-like governance: retired magic words no longer trigger shared-rules source context', async () => {
     const { buildGovernanceSourceContext, detectGovernanceMagicWord, buildInvocationContext } = await import(
       '../dist/domains/cats/services/context/SystemPromptBuilder.js'
     );
 
-    assert.equal(detectGovernanceMagicWord('这个方向绕路了'), '绕路了');
+    assert.equal(detectGovernanceMagicWord('这个方向绕路了'), null);
     assert.equal(detectGovernanceMagicWord('普通问候'), null);
 
     const sourceContext = buildGovernanceSourceContext('喵约，重新对照一下');
-    assert.ok(sourceContext, 'magic word should build source context');
-    assert.ok(sourceContext.includes('家规原文按需参考'), 'should include on-demand source header');
-    assert.ok(sourceContext.includes('触发词：「喵约」'), 'should record matched magic word');
-    assert.ok(sourceContext.includes('shared-rules.md'), 'should point to source of truth');
+    assert.equal(sourceContext, null, 'retired magic words should not build source context');
 
     const invocation = buildInvocationContext({
       catId: 'opus',
@@ -2031,20 +2030,16 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
       governanceSourceContext: sourceContext,
     });
-    assert.ok(invocation.includes('家规原文按需参考'), 'invocation should inject source context when provided');
+    assert.ok(!invocation.includes('家规原文按需参考'), 'invocation should not inject source context without a source');
   });
 
-  // ── Drift guard: magic words in shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──
-  test('GOVERNANCE_L0_DIGEST contains all magic words from shared-rules.md', async () => {
+  // ── Drift guard: simplified shared-rules should not reintroduce Magic Words ──
+  test('GOVERNANCE_L0_DIGEST does not reintroduce retired Magic Words', async () => {
     const { readFileSync } = await import('node:fs');
+    const { detectGovernanceMagicWord } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
     const rulesText = readFileSync(rulesPath, 'utf8');
-    const magicWordPattern = /\|.*?「(.+?)」/g;
-    const rulesMagicWords = [...rulesText.matchAll(magicWordPattern)].map((m) => m[1]);
-    assert.ok(
-      rulesMagicWords.length >= 7,
-      `Expected >=7 magic words in shared-rules.md, got ${rulesMagicWords.length}`,
-    );
+    assert.ok(!rulesText.includes('Magic Words'), 'shared-rules should not include retired Magic Words section');
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -2052,9 +2047,8 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    for (const word of rulesMagicWords) {
-      assert.ok(prompt.includes(`「${word}」`), `Missing magic word 「${word}」 in GOVERNANCE_L0_DIGEST`);
-    }
+    assert.ok(!prompt.includes('Magic Words'), 'runtime prompt should not include retired Magic Words section');
+    assert.equal(detectGovernanceMagicWord('喵约'), null, 'retired magic word should not trigger at runtime');
   });
 
   // ── Drift guard: shared-rules.md ↔ GOVERNANCE_L0_DIGEST ──────
@@ -2075,7 +2069,7 @@ describe('SystemPromptBuilder', () => {
 
     // Pin: update this hash whenever you add/remove/rename P* or W* sections
     // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '6b8f8b67bc7f61c9';
+    const PINNED_HASH = '8fca3c4f8127ca15';
     if (PINNED_HASH === '${PLACEHOLDER}') {
       // First run — print hash for pinning
       console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
