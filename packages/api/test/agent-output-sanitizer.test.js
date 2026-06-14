@@ -44,4 +44,36 @@ describe('agent output sanitizer', () => {
 
     assert.equal(output, '建议：只抽取 WorkSpace 隔离、可审计记忆、显式子 agent harness 三块给 Clowder。');
   });
+
+  test('drops internal progress jargon lines while keeping conclusions', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '🔍 我先取上下文',
+      '我会先按家规查当前任务记忆和可用工具，再快速扫本地 skill 目录。',
+      '',
+      '📊 初步结果',
+      '本地三个主要 skill 根目录里扫到 399 个 SKILL.md。',
+      '',
+      '结论：你的 skill 不是缺数量，而是缺触发和应用闭环。',
+      '建议：先做 manifest + dashboard，再接入 Clowder router。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：你的 skill 不是缺数量，而是缺触发和应用闭环。\n建议：先做 manifest + dashboard，再接入 Clowder router。');
+  });
+
+  test('removes continuation and memory-hit implementation chatter', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '接续检查：读取最近 thread 与 MEMORY.md。',
+      '记忆命中：发现 PilotDeck 已调研。',
+      '全量扫描完成，开始整理。',
+      '结论：这里应该只输出用户可用的判断。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：这里应该只输出用户可用的判断。');
+  });
 });

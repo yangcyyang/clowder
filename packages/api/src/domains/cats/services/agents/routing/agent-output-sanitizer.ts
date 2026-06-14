@@ -14,6 +14,23 @@ const INTERNAL_PROTOCOL_PATTERNS = [
   /\bclowder\s+message\b/i,
 ];
 
+const INTERNAL_PROGRESS_LINE_PATTERNS = [
+  /接续检查/,
+  /记忆命中/,
+  /全量扫描/,
+  /当前任务记忆/,
+  /可用工具/,
+  /我先取上下文/,
+  /使用\s*Skill/i,
+  /初步结果/,
+  /并行拆分/,
+  /子任务状态/,
+  /对齐数量口径/,
+  /按家规查/,
+  /加载.*技能/,
+  /Task\s+更新/i,
+];
+
 function stripInlineArtifacts(text: string): string {
   return text
     .replace(OPENAI_CITATION_RE, '')
@@ -25,6 +42,15 @@ function stripInlineArtifacts(text: string): string {
 
 function isInternalProtocolBlock(block: string): boolean {
   return INTERNAL_PROTOCOL_PATTERNS.some((pattern) => pattern.test(block));
+}
+
+function isInternalProgressLine(line: string): boolean {
+  const normalized = line.trim().replace(/^[#>*\-\s\d.)（(]+/, '').trim();
+  return INTERNAL_PROGRESS_LINE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function isUserFacingLine(line: string): boolean {
+  return /^(结论|建议|结果|交付|验证|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议)[：:]/.test(line.trim());
 }
 
 /**
@@ -44,9 +70,13 @@ export function sanitizeAgentVisibleOutput(content: string): string {
     if (!block.trim()) continue;
     if (isInternalProtocolBlock(block)) continue;
 
-    const cleanedLines = block
-      .split('\n')
-      .map((line) => stripInlineArtifacts(line).replace(/[ \t]{2,}/g, ' ').trimEnd())
+    const rawLines = block.split('\n').map((line) => stripInlineArtifacts(line).replace(/[ \t]{2,}/g, ' ').trimEnd());
+    if (rawLines.some(isInternalProgressLine) && !rawLines.some(isUserFacingLine)) {
+      continue;
+    }
+
+    const cleanedLines = rawLines
+      .filter((line) => !isInternalProgressLine(line))
       .filter((line) => line.trim().length > 0);
 
     if (cleanedLines.length > 0) {
