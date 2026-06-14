@@ -611,6 +611,55 @@ describe('Queue Management API', () => {
     assert.equal(doneCalls[0].arguments[0].catId, 'opus');
   });
 
+  it('POST /cancel/:catId deletes only the canceled cat streaming draft', async () => {
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'] }));
+
+    const deleteCalls = [];
+    deps.draftStore = {
+      getByThread: mock.fn(async () => [
+        {
+          userId: 'user-a',
+          threadId: 't1',
+          invocationId: 'inv-opus',
+          catId: 'opus',
+          content: 'partial opus',
+          updatedAt: Date.now(),
+        },
+        {
+          userId: 'user-a',
+          threadId: 't1',
+          invocationId: 'inv-pi',
+          catId: 'pi',
+          content: 'partial pi',
+          updatedAt: Date.now(),
+        },
+      ]),
+      delete: mock.fn(async (...args) => {
+        deleteCalls.push(args);
+      }),
+      upsert: mock.fn(),
+      touch: mock.fn(),
+      deleteByThread: mock.fn(),
+    };
+
+    const { queueRoutes } = await import('../dist/routes/queue.js');
+    const localApp = Fastify();
+    await localApp.register(queueRoutes, deps);
+    await localApp.ready();
+    try {
+      const res = await localApp.inject({
+        method: 'POST',
+        url: '/api/threads/t1/cancel/opus',
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(deleteCalls, [['user-a', 't1', 'inv-opus']]);
+    } finally {
+      await localApp.close();
+    }
+  });
+
   it('POST /cancel/:catId returns 404 when cat is not active (AC-B9)', async () => {
     deps.invocationTracker.has = mock.fn(() => false);
 

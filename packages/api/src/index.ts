@@ -1374,6 +1374,7 @@ async function main(): Promise<void> {
     invocationTracker,
     socketManager,
     messageStore, // F117: for marking queued messages as canceled on withdraw/clear
+    draftStore,
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,

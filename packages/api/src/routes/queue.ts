@@ -19,6 +19,7 @@ import {
   isSystemPinnedQueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
@@ -50,6 +51,8 @@ export interface QueueRoutesOptions {
   socketManager: SocketManager;
   /** F117: MessageStore for marking queued messages as canceled on withdraw/clear */
   messageStore?: IMessageStore;
+  /** Streaming drafts should disappear immediately when a running cat is canceled. */
+  draftStore?: IDraftStore;
 }
 
 const moveBodySchema = z.object({
@@ -95,7 +98,23 @@ async function guardThreadOwnership(
 }
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
-  const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
+  const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore, draftStore } =
+    opts;
+
+  async function cleanupCanceledDrafts(threadId: string, userId: string, catId: string): Promise<number> {
+    if (!draftStore) return 0;
+    try {
+      const drafts = await draftStore.getByThread(userId, threadId);
+      const matchingDrafts = drafts.filter((draft) => draft.catId === catId);
+      await Promise.all(
+        matchingDrafts.map((draft) => draftStore.delete(userId, threadId, draft.invocationId)),
+      );
+      return matchingDrafts.length;
+    } catch (err) {
+      app.log.warn({ err, threadId, userId, catId }, '[queue] failed to clean canceled cat drafts');
+      return 0;
+    }
+  }
 
   // GET /api/threads/:threadId/queue
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {
@@ -443,6 +462,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         for (const m of buildCancelMessages(scopedResult)) {
           socketManager.broadcastAgentMessage(m, threadId);
         }
+        await cleanupCanceledDrafts(threadId, guard.userId, catId);
         queueProcessor.clearPause(threadId, catId);
         queueProcessor.releaseSlot(threadId, catId);
       }
