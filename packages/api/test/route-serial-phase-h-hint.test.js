@@ -7,8 +7,8 @@
  *     `source.connector === 'routing-syntax-hint'` system message
  *   - Legitimate exit (line-start @ / hold_ball / MCP targetCats) → no emit
  *   - Structural exemptions (fenced code, blockquote, URL) → no emit
- *   - AC-H5: when Phase H hits AND verdict-no-pass would also hit, only
- *     routing-syntax-hint emits (root-cause wins; AC-C7 suppressed)
+ *   - Old verdict-no-pass/hold-ball hints are removed; Phase H remains the
+ *     only syntax hint for inline @ routing mistakes.
  */
 
 import assert from 'node:assert/strict';
@@ -191,21 +191,20 @@ describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => 
   });
 });
 
-describe('F167 Phase H AC-H5: AC-C7 verdict-no-pass suppression when Phase H hits', () => {
-  test('inline @ + LGTM (verdict) in slot → only routing-syntax-hint, NOT verdict-no-pass-hint', async () => {
+describe('F167 Phase H after legacy hold hint removal', () => {
+  test('inline @ + LGTM in slot → emits routing-syntax-hint only', async () => {
     const { appended } = await runRoute('LGTM, 我让 @codex 看了下', 'thread-ph-7');
     const phaseH = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     const verdictHint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
     assert.ok(phaseH, 'Phase H hint must emit (root cause)');
-    assert.equal(verdictHint, undefined, 'AC-H5: verdict-no-pass-hint must be suppressed when Phase H hits');
+    assert.equal(verdictHint, undefined, 'legacy verdict-no-pass-hint must not emit');
   });
 
-  test('verdict LGTM without inline @ → verdict-no-pass-hint still emits (Phase H not hit)', async () => {
-    // Control case: Phase H does NOT fire (no inline @ in slot). AC-C7 should still fire.
+  test('verdict LGTM without inline @ → no legacy hold hint', async () => {
     const { appended } = await runRoute('LGTM, all tests pass', 'thread-ph-8');
     const phaseH = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     const verdictHint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
     assert.equal(phaseH, undefined, 'Phase H does not fire without inline @ in slot');
-    assert.ok(verdictHint, 'AC-C7 still fires on verdict-only output when Phase H did not hit');
+    assert.equal(verdictHint, undefined, 'legacy verdict-only hold hint was removed');
   });
 });

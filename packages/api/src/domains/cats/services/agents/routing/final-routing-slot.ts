@@ -9,8 +9,8 @@
  * - 命中只产出 invalid_route_syntax，不自动路由 / 不推断目标 / 不替猫决定意图
  * - 豁免只走结构边界（fenced code / blockquote / URL），禁止动作词表 / 语义豁免表
  *
- * 与 verdict-detect.ts（AC-C7）同构，但更严格的纯机械判定，命中时 route-serial
- * 会 suppress AC-C7 + 既有 #417 inline-mention-hint（格式错是根因）。
+ * 这是保留下来的唯一 route 层格式提示：只处理 inline @ 这种明确语法错误，
+ * 不再联动旧的 verdict/球权推断。
  */
 
 export interface ValidationInput {
