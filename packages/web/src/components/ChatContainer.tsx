@@ -41,6 +41,7 @@ import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
+import { AgentStatusIndicator } from './AgentStatusIndicator';
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
@@ -72,7 +73,6 @@ import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SavedMessagesPanel } from './SavedMessagesPanel';
 import { SplitPaneView } from './SplitPaneView';
 import { TasksPanel } from './TasksPanel';
-import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { VoteActiveBar } from './VoteActiveBar';
@@ -1419,7 +1419,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </div>
           )}
 
-          <ThreadExecutionBar />
+          <AgentStatusIndicator
+            threadId={threadId}
+            activeInvocations={activeInvocations}
+            catStatuses={catStatuses}
+            catInvocations={catInvocations}
+            getCatById={getCatById}
+          />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
