@@ -81,6 +81,11 @@ interface CatSupervisorLike {
   markIdle(catIds: string | readonly string[]): Promise<void> | void;
 }
 
+function isCompleteMessageDeliveryEnabled(): boolean {
+  const value = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 /** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 export interface OutboundDeliveryHookLike {
   deliver(
@@ -925,6 +930,8 @@ export class QueueProcessor {
         richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
       }> = [];
       let currentTurnCatId: string | undefined;
+      const completeMessageDeliveryEnabled = isCompleteMessageDeliveryEnabled();
+      const completedSocketTurnIndices = new Set<number>();
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -1156,7 +1163,32 @@ export class QueueProcessor {
           break;
         }
 
-        socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
+        if (completeMessageDeliveryEnabled && msg.type === 'done' && msg.catId) {
+          for (let i = 0; i < outboundTurns.length; i++) {
+            if (completedSocketTurnIndices.has(i)) continue;
+            const turn = outboundTurns[i];
+            if (!turn || turn.catId !== msg.catId) continue;
+            const turnContent = turn.textParts.join('');
+            if (!turnContent) continue;
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'text',
+                catId: turn.catId,
+                content: turnContent,
+                textMode: 'replace',
+                origin: 'stream',
+                timestamp: Date.now(),
+                ...(invocationId ? { invocationId } : {}),
+              },
+              threadId,
+            );
+            completedSocketTurnIndices.add(i);
+          }
+        }
+
+        if (!(completeMessageDeliveryEnabled && msg.type === 'text')) {
+          socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
+        }
       }
 
       // 8. Check abort before marking succeeded (F122B B6 P1: abort→succeeded bug fix)

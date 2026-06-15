@@ -1718,6 +1718,51 @@ describe('QueueProcessor', () => {
       assert.equal(endCall.arguments[1], '第一段。插入一句。第二段。');
     });
 
+    it('complete-message delivery flag buffers text chunks and broadcasts one final text message', async () => {
+      const previous = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY;
+      process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY = '1';
+      try {
+        const hookDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* () {
+              yield { type: 'text', catId: 'opus', content: '第一段。', timestamp: 1000 };
+              yield { type: 'text', catId: 'opus', content: '第二段。', timestamp: 1001 };
+              yield { type: 'done', catId: 'opus', timestamp: 1002 };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+          threadMetaLookup: mock.fn(async () => undefined),
+        });
+        const hookProcessor = new QueueProcessor(hookDeps);
+
+        const entry = enqueueEntry(hookDeps.queue);
+        hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+        await hookProcessor.processNext('t1', 'u1');
+        await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 2);
+
+        const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+        const textMessages = agentMessages.filter((msg) => msg.type === 'text');
+        const doneMessages = agentMessages.filter((msg) => msg.type === 'done');
+
+        assert.equal(textMessages.length, 1, 'should not broadcast intermediate text chunks');
+        assert.equal(textMessages[0].content, '第一段。第二段。');
+        assert.equal(textMessages[0].textMode, 'replace');
+        assert.equal(textMessages[0].origin, 'stream');
+        assert.equal(doneMessages.length, 1, 'done lifecycle event should still be broadcast');
+        assert.ok(
+          agentMessages.indexOf(textMessages[0]) < agentMessages.indexOf(doneMessages[0]),
+          'final text should arrive before done so the UI can finalize it immediately',
+        );
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY;
+        } else {
+          process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY = previous;
+        }
+      }
+    });
+
     it('multi-cat execution: outboundHook.deliver called per-turn with each catId', async () => {
       const deliverCalls = [];
       const outboundHook = {
