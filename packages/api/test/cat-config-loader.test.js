@@ -909,6 +909,15 @@ describe('getCatEffort', () => {
   });
 });
 describe('F32-b P4c: Sonnet variant in project config', () => {
+  it('project cat-template.json loads Pi Agent with ultraspeed model', () => {
+    const config = loadCatConfig();
+    const pi = config.breeds.find((b) => b.id === 'pi');
+    assert.ok(pi, 'pi breed exists');
+    const defaultVariant = pi.variants.find((v) => v.id === 'pi-default');
+    assert.ok(defaultVariant, 'pi-default variant exists');
+    assert.equal(defaultVariant.defaultModel, 'mimo/mimo-v2.5-pro-ultraspeed');
+  });
+
   it('project cat-template.json loads with Sonnet variant', () => {
     const config = loadCatConfig();
     const ragdoll = config.breeds.find((b) => b.id === 'ragdoll');
@@ -941,14 +950,14 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.notDeepEqual(all.sonnet.color, all.opus.color);
   });
 
-  it('total cat count is 14 (opus + sonnet + opus-45 + opus-47 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
+  it('total cat count is 15 (opus + sonnet + opus-45 + opus-47 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode + pi)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 14);
+    assert.equal(Object.keys(all).length, 15);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
@@ -963,6 +972,7 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
     assert.ok(all['antig-opus']); // F061: Bengal cat Claude variant
     assert.ok(all.opencode); // F105: OpenCode external agent
+    assert.ok(all.pi); // Pi Agent local CLI bridge
   });
 
   it('antigravity variants have no cli config (F061 Bridge replaces CDP)', () => {
