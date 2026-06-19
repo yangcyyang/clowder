@@ -38,6 +38,22 @@ const CLI_EFFORT_LABELS: Record<string, string> = {
 };
 
 const AVATAR_PRESETS = [
+  { label: 'Slock Blue Cat', src: '/avatars/slock/slock-blue-cat.png' },
+  { label: 'Slock Yellow Cat', src: '/avatars/slock/slock-yellow-cat.png' },
+  { label: 'Slock Purple Bot', src: '/avatars/slock/slock-purple-bot.png' },
+  { label: 'Slock Skull', src: '/avatars/slock/slock-skull.png' },
+  { label: 'Slock Green Mask', src: '/avatars/slock/slock-green-mask.png' },
+  { label: 'Slock Pink Pig', src: '/avatars/slock/slock-pink-pig.png' },
+  { label: 'Slock Yellow Wizard', src: '/avatars/slock/slock-yellow-wizard.png' },
+  { label: 'Slock Fire', src: '/avatars/slock/slock-fire.png' },
+  { label: 'Slock Cyan Gem', src: '/avatars/slock/slock-cyan-gem.png' },
+  { label: 'Slock Pink Robot', src: '/avatars/slock/slock-pink-robot.png' },
+  { label: 'Slock Purple Eye', src: '/avatars/slock/slock-purple-eye.png' },
+  { label: 'Slock Yellow Crown', src: '/avatars/slock/slock-yellow-crown.png' },
+  { label: 'Slock Blue Mountain', src: '/avatars/slock/slock-blue-mountain.png' },
+  { label: 'Slock Coral Tile', src: '/avatars/slock/slock-coral-tile.png' },
+  { label: 'Slock Navy Dome', src: '/avatars/slock/slock-navy-dome.png' },
+  { label: 'Slock Green Blob', src: '/avatars/slock/slock-green-blob.png' },
   { label: 'Default', src: '/avatars/default.png' },
   { label: 'Opus', src: '/avatars/opus.png' },
   { label: 'Opus 45', src: '/avatars/opus-45.png' },

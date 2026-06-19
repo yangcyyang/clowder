@@ -2021,12 +2021,14 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const kimiPreset = queryField<HTMLButtonElement>(container, 'button[aria-label="选择预设头像 Kimi"]');
+    const kimiPreset = queryField<HTMLButtonElement>(container, 'button[aria-label="选择预设头像 Slock Yellow Cat"]');
     await act(async () => {
       kimiPreset.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Avatar"]').value).toBe('/avatars/kimi.png');
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Avatar"]').value).toBe(
+      '/avatars/slock/slock-yellow-cat.png',
+    );
     expect(kimiPreset.getAttribute('aria-pressed')).toBe('true');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
@@ -2039,7 +2041,7 @@ describe('HubCatEditor', () => {
       ([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH',
     );
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.avatar).toBe('/avatars/kimi.png');
+    expect(payload.avatar).toBe('/avatars/slock/slock-yellow-cat.png');
   });
 
   it('uses the designed add member template shell', async () => {
