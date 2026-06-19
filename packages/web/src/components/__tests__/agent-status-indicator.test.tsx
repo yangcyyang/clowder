@@ -52,7 +52,7 @@ describe('AgentStatusIndicator', () => {
       />,
     );
 
-    expect(html).toContain('AGENT');
+    expect(html).not.toContain('AGENT');
     expect(html).toContain('缅因猫');
     expect(html).toContain('正在生成');
   });

@@ -149,11 +149,10 @@ export function AgentStatusIndicator({
 
   return (
     <div
-      className="mx-4 mb-2 flex flex-wrap items-center gap-2 border-2 border-[var(--slock-border-color)] bg-[var(--clowder-running-bar-bg)] px-3 py-2 text-xs shadow-[var(--shadow-chip)]"
+      className="mx-4 mb-2 flex flex-wrap items-center gap-2 px-3 py-2 text-xs"
       data-testid="agent-status-indicator"
       aria-live="polite"
     >
-      <span className="shrink-0 font-semibold tracking-[0.12em] text-[var(--cafe-text-muted)]">AGENT</span>
       {rows.map((row) => {
         const statusLabel = getAgentStatusLabel(row.status, row.phase);
         return (
