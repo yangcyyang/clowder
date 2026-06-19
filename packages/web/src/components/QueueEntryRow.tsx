@@ -24,12 +24,16 @@ export interface QueueEntryRowProps {
 
 export function SortableQueueEntryRow(props: QueueEntryRowProps) {
   const { entry } = props;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
+  const isProcessing = entry.status === 'processing';
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: entry.id,
+    disabled: isProcessing,
+  });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
 
   return (
     <div ref={setNodeRef} style={style}>
-      <QueueEntryRow {...props} dragHandleProps={{ ...attributes, ...listeners }} />
+      <QueueEntryRow {...props} dragHandleProps={isProcessing ? undefined : { ...attributes, ...listeners }} />
     </div>
   );
 }
@@ -46,6 +50,7 @@ function QueueEntryRow({
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
   const isAgent = entry.source === 'agent';
   const isUrgent = entry.priority === 'urgent';
+  const isProcessing = entry.status === 'processing';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
 
   const sourceLabel = isAgent
@@ -58,12 +63,15 @@ function QueueEntryRow({
     <div
       className={`flex items-center gap-2 px-3 py-2 border-b last:border-b-0 ${
         isPaused ? 'border-conn-amber-ring' : 'border-[var(--color-opus-primary)]/10'
-      } ${isAgent ? 'bg-conn-purple-bg' : ''} ${isUrgent ? 'bg-conn-red-bg/40' : ''}`}
+      } ${isProcessing ? 'bg-conn-emerald-bg/40' : isAgent ? 'bg-conn-purple-bg' : ''} ${isUrgent ? 'bg-conn-red-bg/40' : ''}`}
     >
       {/* Drag handle */}
       <button
-        className="p-0.5 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing shrink-0 touch-none"
+        className={`p-0.5 text-cafe-muted shrink-0 touch-none ${
+          isProcessing ? 'cursor-default opacity-40' : 'cursor-grab hover:text-cafe-secondary active:cursor-grabbing'
+        }`}
         aria-label="Drag to reorder"
+        disabled={isProcessing}
         {...dragHandleProps}
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -106,6 +114,11 @@ function QueueEntryRow({
               {categoryLabel}
             </span>
           )}
+          {isProcessing && (
+            <span className="text-[9px] px-1 py-px rounded bg-conn-emerald-bg text-conn-emerald-text font-medium">
+              处理中
+            </span>
+          )}
           {isAgent && entry.autoExecute && (
             <span className="text-[9px] px-1 py-px rounded bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)] font-medium">
               自动
@@ -131,7 +144,12 @@ function QueueEntryRow({
         type="button"
         data-testid={`steer-${entry.id}`}
         onClick={() => onSteer(entry.id)}
-        className="text-xs px-3 py-1 rounded-full bg-[var(--color-opus-primary)] text-[var(--cafe-surface)] hover:bg-[var(--color-opus-dark)] transition-colors shrink-0"
+        disabled={isProcessing}
+        className={`text-xs px-3 py-1 rounded-full transition-colors shrink-0 ${
+          isProcessing
+            ? 'cursor-not-allowed bg-[var(--cafe-border)] text-cafe-muted'
+            : 'bg-[var(--color-opus-primary)] text-[var(--cafe-surface)] hover:bg-[var(--color-opus-dark)]'
+        }`}
         aria-label="Steer"
       >
         Steer
@@ -139,8 +157,12 @@ function QueueEntryRow({
 
       {/* Remove button */}
       <button
+        type="button"
         onClick={() => onRemove(entry.id)}
-        className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
+        disabled={isProcessing}
+        className={`p-1 text-cafe-muted transition-colors shrink-0 ${
+          isProcessing ? 'cursor-not-allowed opacity-40' : 'hover:text-conn-red-text'
+        }`}
         title="撤回"
         aria-label="撤回"
       >

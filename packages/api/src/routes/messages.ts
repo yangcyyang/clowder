@@ -28,6 +28,7 @@ import {
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type {
   ConsumedContinuationToken,
@@ -666,6 +667,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         queue: opts.invocationQueue.list(resolvedThreadId, userId),
         action: enqueueResult.outcome,
       });
+      if (isParallelDispatchEnabled()) {
+        void opts.queueProcessor?.processNext(resolvedThreadId, userId).catch((err) => {
+          log.error({ err, threadId: resolvedThreadId, userId }, 'Parallel dispatch after enqueue failed');
+        });
+      }
 
       tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
@@ -776,6 +782,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               queue: opts.invocationQueue.list(resolvedThreadId, userId),
               action: enqueueResult.outcome,
             });
+            if (isParallelDispatchEnabled()) {
+              void opts.queueProcessor?.processNext(resolvedThreadId, userId).catch((err) => {
+                log.error({ err, threadId: resolvedThreadId, userId }, 'Parallel dispatch after TOCTOU enqueue failed');
+              });
+            }
             tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
             reply.status(202);
             return {

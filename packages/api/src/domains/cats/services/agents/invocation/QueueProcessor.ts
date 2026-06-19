@@ -86,6 +86,11 @@ function isCompleteMessageDeliveryEnabled(): boolean {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
+export function isParallelDispatchEnabled(): boolean {
+  const value = process.env.CAT_CAFE_PARALLEL_DISPATCH?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 /** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 export interface OutboundDeliveryHookLike {
   deliver(
@@ -468,7 +473,11 @@ export class QueueProcessor {
     if (status === 'succeeded' || status === 'canceled_by_user') {
       this.pausedSlots.delete(sk);
       if (this.hasDispatchableQueuedForThread(threadId)) {
-        await this.tryExecuteNextAcrossUsers(threadId, catId);
+        if (isParallelDispatchEnabled()) {
+          await this.tryExecuteAllAcrossUsers(threadId, catId);
+        } else {
+          await this.tryExecuteNextAcrossUsers(threadId, catId);
+        }
         await this.tryAutoExecute(threadId);
         if (status === 'canceled_by_user') {
           this.deps.log.info({ threadId, catId }, 'Auto-resumed queued entry after user cancel');
@@ -494,7 +503,10 @@ export class QueueProcessor {
           '[QueueProcessor] Auto-recovering paused slot after timeout (#595)',
         );
         if (this.hasDispatchableQueuedForThread(threadId)) {
-          void this.tryExecuteNextAcrossUsers(threadId, catId).catch((err) => {
+          const recovery = isParallelDispatchEnabled()
+            ? this.tryExecuteAllAcrossUsers(threadId, catId)
+            : this.tryExecuteNextAcrossUsers(threadId, catId);
+          void recovery.catch((err) => {
             this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
           });
         }
@@ -546,9 +558,15 @@ export class QueueProcessor {
   /**
    * User-level entry: 铲屎官 manually triggers processing their next entry.
    */
-  async processNext(threadId: string, userId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
+  async processNext(
+    threadId: string,
+    userId: string,
+  ): Promise<{ started: boolean; entry?: QueueEntry; entries?: QueueEntry[] }> {
     // Clear all paused slots for this thread (manual resume clears all)
     this.clearPause(threadId);
+    if (isParallelDispatchEnabled()) {
+      return this.tryExecuteAllForUser(threadId, userId);
+    }
     return this.tryExecuteNextForUser(threadId, userId);
   }
 
@@ -662,6 +680,19 @@ export class QueueProcessor {
     }
   }
 
+  private async tryExecuteAllAcrossUsers(
+    threadId: string,
+    catId: string,
+  ): Promise<{ started: boolean; entry?: QueueEntry; entries?: QueueEntry[] }> {
+    const entries: QueueEntry[] = [];
+    for (;;) {
+      const result = await this.tryExecuteNextAcrossUsers(threadId, catId);
+      if (!result.started || !result.entry) break;
+      entries.push(result.entry);
+    }
+    return { started: entries.length > 0, entry: entries[0], entries };
+  }
+
   private async tryExecuteNextForUser(
     threadId: string,
     userId: string,
@@ -704,6 +735,19 @@ export class QueueProcessor {
     );
 
     return { started: true, entry };
+  }
+
+  private async tryExecuteAllForUser(
+    threadId: string,
+    userId: string,
+  ): Promise<{ started: boolean; entry?: QueueEntry; entries?: QueueEntry[] }> {
+    const entries: QueueEntry[] = [];
+    for (;;) {
+      const result = await this.tryExecuteNextForUser(threadId, userId);
+      if (!result.started || !result.entry) break;
+      entries.push(result.entry);
+    }
+    return { started: entries.length > 0, entry: entries[0], entries };
   }
 
   /**

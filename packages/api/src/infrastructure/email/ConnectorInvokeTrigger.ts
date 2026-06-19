@@ -14,6 +14,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../../config/cat-config-loader.js';
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { isParallelDispatchEnabled } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
@@ -218,6 +219,14 @@ export class ConnectorInvokeTrigger {
       queue: invocationQueue.list(threadId, userId),
       action: result.outcome,
     });
+    if (isParallelDispatchEnabled()) {
+      void this.opts.queueProcessor?.processNext(threadId, userId).catch((err) => {
+        log.error(
+          { err, threadId, catId, userId },
+          '[ConnectorInvokeTrigger] Parallel dispatch after connector enqueue failed',
+        );
+      });
+    }
     log.info(
       { threadId, catId, outcome: result.outcome },
       '[ConnectorInvokeTrigger] Queued (active invocation running)',

@@ -320,6 +320,100 @@ describe('QueueProcessor', () => {
     assert.equal(result.started, false);
   });
 
+  it('CAT_CAFE_PARALLEL_DISPATCH=1 starts multiple free cat slots in one processNext call', async () => {
+    const previous = process.env.CAT_CAFE_PARALLEL_DISPATCH;
+    process.env.CAT_CAFE_PARALLEL_DISPATCH = '1';
+    try {
+      const slowDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            await new Promise((r) => setTimeout(r, 120));
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const slowProcessor = new QueueProcessor(slowDeps);
+
+      enqueueEntry(slowDeps.queue, { content: 'opus work', targetCats: ['opus'] });
+      enqueueEntry(slowDeps.queue, { content: 'codex work', targetCats: ['codex'] });
+
+      const result = await slowProcessor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true);
+      assert.equal(result.entries?.length, 2);
+      assert.deepEqual(
+        result.entries?.map((entry) => entry.targetCats[0]).sort(),
+        ['codex', 'opus'],
+      );
+      await new Promise((r) => setTimeout(r, 20));
+      assert.equal(slowDeps.invocationTracker.startAll.mock.calls.length, 2);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_PARALLEL_DISPATCH;
+      else process.env.CAT_CAFE_PARALLEL_DISPATCH = previous;
+    }
+  });
+
+  it('CAT_CAFE_PARALLEL_DISPATCH=1 does not start two invocations for the same cat slot', async () => {
+    const previous = process.env.CAT_CAFE_PARALLEL_DISPATCH;
+    process.env.CAT_CAFE_PARALLEL_DISPATCH = '1';
+    try {
+      const slowDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            await new Promise((r) => setTimeout(r, 120));
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const slowProcessor = new QueueProcessor(slowDeps);
+
+      enqueueEntry(slowDeps.queue, { content: 'first opus work', targetCats: ['opus'] });
+      enqueueEntry(slowDeps.queue, { content: 'second opus work', targetCats: ['opus'] });
+
+      const result = await slowProcessor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true);
+      assert.equal(result.entries?.length, 1);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.equal(slowDeps.invocationTracker.startAll.mock.calls.length, 1);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_PARALLEL_DISPATCH;
+      else process.env.CAT_CAFE_PARALLEL_DISPATCH = previous;
+    }
+  });
+
+  it('CAT_CAFE_PARALLEL_DISPATCH disabled preserves single-entry processNext behavior', async () => {
+    const previous = process.env.CAT_CAFE_PARALLEL_DISPATCH;
+    delete process.env.CAT_CAFE_PARALLEL_DISPATCH;
+    try {
+      const slowDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            await new Promise((r) => setTimeout(r, 120));
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const slowProcessor = new QueueProcessor(slowDeps);
+
+      enqueueEntry(slowDeps.queue, { content: 'opus work', targetCats: ['opus'] });
+      enqueueEntry(slowDeps.queue, { content: 'codex work', targetCats: ['codex'] });
+
+      const result = await slowProcessor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true);
+      assert.equal(result.entries, undefined);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.equal(slowDeps.invocationTracker.startAll.mock.calls.length, 1);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_PARALLEL_DISPATCH;
+      else process.env.CAT_CAFE_PARALLEL_DISPATCH = previous;
+    }
+  });
+
   // ── Mutex ──
 
   it('concurrent tryExecuteNext on same thread + same cat → only one starts (F108: per-slot mutex)', async () => {
