@@ -55,15 +55,11 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     () =>
       queue
         .filter(
-          (e) =>
-            (e.status === 'queued' || e.status === 'processing') &&
-            !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+          (e) => e.status === 'queued' && !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
         )
         .sort(compareQueueEntries),
     [queue],
   );
-  const processingCount = visibleEntries.filter((entry) => entry.status === 'processing').length;
-  const queuedCount = visibleEntries.length - processingCount;
 
   const handleRemove = useCallback(
     async (entryId: string) => {
@@ -160,12 +156,9 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       const oldIndex = visibleEntries.findIndex((e) => e.id === active.id);
       const newIndex = visibleEntries.findIndex((e) => e.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
-      if (visibleEntries[oldIndex]?.status !== 'queued' || visibleEntries[newIndex]?.status !== 'queued') return;
 
       const reordered = arrayMove(visibleEntries, oldIndex, newIndex);
-      const positions = reordered
-        .filter((entry) => entry.status === 'queued')
-        .map((e, i) => ({ entryId: e.id, position: i }));
+      const positions = reordered.map((e, i) => ({ entryId: e.id, position: i }));
 
       const prevQueue = queue;
       setQueue(
@@ -219,7 +212,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
           </svg>
-          <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '任务队列'}</span>
+          <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '排队中'}</span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
               queuePaused
@@ -227,7 +220,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                 : 'bg-[var(--color-opus-primary)]/20 text-[var(--color-opus-primary)]'
             }`}
           >
-            {processingCount > 0 ? `${processingCount}处理中 / ${queuedCount}排队` : `${queuedCount}排队`}
+            {visibleEntries.length}
           </span>
         </div>
         <div className="flex items-center gap-2">
