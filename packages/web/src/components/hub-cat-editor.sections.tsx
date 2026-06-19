@@ -37,6 +37,29 @@ const CLI_EFFORT_LABELS: Record<string, string> = {
   xhigh: 'xhigh — 超深思考',
 };
 
+const AVATAR_PRESETS = [
+  { label: 'Default', src: '/avatars/default.png' },
+  { label: 'Opus', src: '/avatars/opus.png' },
+  { label: 'Opus 45', src: '/avatars/opus-45.png' },
+  { label: 'Opus 47', src: '/avatars/opus-47.png' },
+  { label: 'Opus Kawaii', src: '/avatars/opus-kawaii.png' },
+  { label: 'Sonnet', src: '/avatars/sonnet.png' },
+  { label: 'Codex', src: '/avatars/codex.png' },
+  { label: 'Codex Kawaii', src: '/avatars/codex-kawaii.png' },
+  { label: 'Codex Liquid', src: '/avatars/codex_iquid.png' },
+  { label: 'GPT52', src: '/avatars/gpt52.png' },
+  { label: 'OpenCode', src: '/avatars/opencode.png' },
+  { label: 'Gemini', src: '/avatars/gemini.png' },
+  { label: 'Gemini 25', src: '/avatars/gemini25.png' },
+  { label: 'Gemini Kawaii', src: '/avatars/gemini-kawaii.png' },
+  { label: 'Kimi', src: '/avatars/kimi.png' },
+  { label: 'Antigravity', src: '/avatars/antigravity.png' },
+  { label: 'Antig Opus', src: '/avatars/antig-opus.png' },
+  { label: 'Keeper', src: '/avatars/keeper.png' },
+  { label: 'Dare', src: '/avatars/dare.png' },
+  { label: 'Codex Box', src: '/avatars/codex_box.png' },
+] as const;
+
 function safeAvatarSrc(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -296,6 +319,36 @@ export function IdentitySection({
           onChange={(event) => onChange({ avatar: event.target.value })}
           className="sr-only"
         />
+      </div>
+
+      <div className="flex items-start gap-[14px]">
+        <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">预设头像</span>
+        <div className="min-w-0 flex-1">
+          <div className="grid grid-cols-6 gap-2 sm:grid-cols-8">
+            {AVATAR_PRESETS.map((preset) => {
+              const selected = form.avatar.trim() === preset.src;
+              return (
+                <button
+                  key={preset.src}
+                  type="button"
+                  aria-label={`选择预设头像 ${preset.label}`}
+                  aria-pressed={selected}
+                  title={preset.label}
+                  onClick={() => onChange({ avatar: preset.src })}
+                  className={[
+                    'flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 bg-[var(--console-card-bg)] transition',
+                    selected
+                      ? 'border-cafe-accent shadow-[0_0_0_2px_rgba(244,111,167,0.18)]'
+                      : 'border-[var(--console-border-soft)] opacity-75 hover:border-cafe-accent hover:opacity-100',
+                  ].join(' ')}
+                >
+                  <AvatarImageWithFallback src={preset.src} alt={preset.label} className="h-full w-full object-cover" />
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[11px] text-cafe-secondary">点击即可切换；仍可上传自定义头像。</p>
+        </div>
       </div>
 
       <div className="flex items-center gap-[14px]">

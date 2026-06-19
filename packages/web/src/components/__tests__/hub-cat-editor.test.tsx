@@ -1982,6 +1982,66 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('运行时持久化');
   });
 
+  it('lets users switch avatars from preset options', async () => {
+    const existingCat: CatData = {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      nickname: '砚砚',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+    };
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      if (path === '/api/cats/codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'codex' } }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    const kimiPreset = queryField<HTMLButtonElement>(container, 'button[aria-label="选择预设头像 Kimi"]');
+    await act(async () => {
+      kimiPreset.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Avatar"]').value).toBe('/avatars/kimi.png');
+    expect(kimiPreset.getAttribute('aria-pressed')).toBe('true');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH',
+    );
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.avatar).toBe('/avatars/kimi.png');
+  });
+
   it('uses the designed add member template shell', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
