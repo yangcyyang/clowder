@@ -110,6 +110,7 @@ const mapSupervisorStatusToUiStatus = (
     case 'offline':
       return 'done';
     case 'online_idle':
+      return 'done';
     default:
       return 'alive_but_silent';
   }
