@@ -59,6 +59,8 @@ const mockSetCatStatus = vi.fn();
 const mockRemoveActiveInvocation = vi.fn();
 const mockAddToast = vi.fn();
 const mockThreadQueues = new Map<string, unknown[]>();
+let mockActiveInvocations: Record<string, { catId: string; mode: string }> = {};
+let mockTargetCats: string[] = [];
 const mockGetThreadState = vi.fn(() => ({
   messages: [],
   isLoading: false,
@@ -102,7 +104,8 @@ vi.mock('@/stores/chatStore', () => {
     addActiveInvocation: vi.fn(),
     removeActiveInvocation: mockRemoveActiveInvocation,
     setCatStatus: mockSetCatStatus,
-    activeInvocations: {} as Record<string, { catId: string; mode: string }>,
+    activeInvocations: mockActiveInvocations,
+    targetCats: mockTargetCats,
     getThreadState: mockGetThreadState,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
@@ -192,6 +195,8 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
     mockUserId = 'test-user';
     mockStoreCurrentThreadId = 'thread-B';
+    mockActiveInvocations = {};
+    mockTargetCats = [];
     mockThreadQueues.clear();
     mockAddMessageToThread.mockClear();
     mockAppendToThreadMessage.mockClear();
@@ -257,6 +262,47 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       mode: 'execute',
       targetCats: ['opus'],
     });
+  });
+
+  it('ignores global catStatusChange when cat is not active in current thread', () => {
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('catStatusChange', {
+        catId: 'pi-agent',
+        status: 'streaming',
+      });
+    });
+
+    expect(mockSetCatStatus).not.toHaveBeenCalled();
+  });
+
+  it('accepts global catStatusChange only for current-thread active cats', () => {
+    mockActiveInvocations = {
+      'inv-1': { catId: 'pi-agent', mode: 'execute' },
+    };
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('catStatusChange', {
+        catId: 'pi-agent',
+        status: 'streaming',
+      });
+    });
+
+    expect(mockSetCatStatus).toHaveBeenCalledWith('pi-agent', 'alive_but_silent');
   });
 
   it('intent_mode from OTHER thread routes to background path, not callback', () => {

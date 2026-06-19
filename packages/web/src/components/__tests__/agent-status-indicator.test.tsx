@@ -61,7 +61,7 @@ describe('AgentStatusIndicator', () => {
     expect(getAgentStatusLabel('streaming', 'tool_calling')).toBe('正在执行工具');
   });
 
-  it('falls back to active cat status when invocation slot is not present yet', () => {
+  it('ignores stale cat status when invocation slot is not present', () => {
     const html = renderToStaticMarkup(
       <AgentStatusIndicator
         threadId="thread-1"
@@ -72,7 +72,6 @@ describe('AgentStatusIndicator', () => {
       />,
     );
 
-    expect(html).toContain('缅因猫');
-    expect(html).toContain('排队中');
+    expect(html).toBe('');
   });
 });

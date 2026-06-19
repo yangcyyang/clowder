@@ -1,6 +1,5 @@
 import type { GameView } from '@cat-cafe/shared';
 import { useMemo } from 'react';
-import { deriveBubbleId } from '@/debug/bubbleIdentity';
 import type { SocketCallbacks } from '@/hooks/useSocket';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
@@ -40,7 +39,7 @@ export function useChatSocketCallbacks({
     setHasActiveInvocation,
     setIntentMode,
     setTargetCats,
-    addMessage,
+    addActiveInvocation,
     removeThreadMessage,
     patchMessage,
     requestStreamCatchUp,
@@ -81,18 +80,10 @@ export function useChatSocketCallbacks({
         setHasActiveInvocation(true);
         const targetCats = data.targetCats ?? [];
         setTargetCats(targetCats);
-        for (const catId of targetCats) {
-          addMessage({
-            id: deriveBubbleId(data.invocationId, catId, () => `msg-${startedAt}-${catId}-spawning`),
-            type: 'assistant',
-            catId,
-            content: '',
-            origin: 'stream',
-            extra: { stream: { invocationId: data.invocationId } },
-            timestamp: startedAt,
-            isStreaming: true,
-          });
-        }
+        targetCats.forEach((catId, index) => {
+          const invocationId = index === 0 ? data.invocationId : `${data.invocationId}-${catId}`;
+          addActiveInvocation(invocationId, catId, 'execute', startedAt);
+        });
       },
       onTaskCreated: (task) => {
         const t = task as Record<string, unknown>;
@@ -156,7 +147,7 @@ export function useChatSocketCallbacks({
       setHasActiveInvocation,
       setIntentMode,
       setTargetCats,
-      addMessage,
+      addActiveInvocation,
       addTask,
       updateTask,
       removeThreadMessage,

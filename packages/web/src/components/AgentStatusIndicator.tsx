@@ -24,14 +24,6 @@ interface AgentStatusRow {
   phase?: InvocationPhase;
 }
 
-const ACTIVE_STATUSES = new Set<CatStatusType>([
-  'spawning',
-  'pending',
-  'streaming',
-  'alive_but_silent',
-  'suspected_stall',
-]);
-
 function formatElapsed(startedAt: number, now: number): string {
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const minutes = Math.floor(elapsed / 60);
@@ -96,20 +88,6 @@ function buildRows({
       startedAt: slot.startedAt ?? catInvocations[slot.catId]?.startedAt ?? now,
       status: catStatuses[slot.catId],
       phase: slot.phase ?? catInvocations[slot.catId]?.phase,
-    });
-  }
-
-  for (const [catId, status] of Object.entries(catStatuses ?? {})) {
-    if (rows.has(catId) || !ACTIVE_STATUSES.has(status)) continue;
-    const cat = getCatById(catId);
-    const invocation = catInvocations[catId];
-    rows.set(catId, {
-      catId,
-      label: cat ? formatCatName(cat) : catId,
-      color: cat?.color.primary ?? 'var(--console-cat-fallback)',
-      startedAt: invocation?.startedAt ?? now,
-      status,
-      phase: invocation?.phase,
     });
   }
 

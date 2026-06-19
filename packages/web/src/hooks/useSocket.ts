@@ -761,7 +761,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('catStatusChange', (data: CatStatusChangeEvent) => {
       if (!data?.catId) return;
       const uiStatus = mapSupervisorStatusToUiStatus(data.status);
-      useChatStore.getState().setCatStatus(data.catId, uiStatus);
+      const state = useChatStore.getState();
+      const isInCurrentThread =
+        state.targetCats?.includes(data.catId) ||
+        Object.values(state.activeInvocations ?? {}).some((slot) => slot?.catId === data.catId);
+      if (isInCurrentThread) {
+        state.setCatStatus(data.catId, uiStatus);
+      }
       recordInvocationEvent({
         event: 'agent_message',
         eventType: `cat_status:${data.status}`,
