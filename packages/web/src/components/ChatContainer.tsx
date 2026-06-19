@@ -41,7 +41,6 @@ import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
-import { AgentStatusIndicator } from './AgentStatusIndicator';
 import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
@@ -1419,13 +1418,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </div>
           )}
 
-          <AgentStatusIndicator
-            threadId={threadId}
-            activeInvocations={activeInvocations}
-            catStatuses={catStatuses}
-            catInvocations={catInvocations}
-            getCatById={getCatById}
-          />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
