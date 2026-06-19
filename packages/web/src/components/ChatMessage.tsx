@@ -173,6 +173,7 @@ export function ChatMessage({
   const threads = useChatStore((s) => s.threads);
   const threadMessages = useChatStore((s) => s.messages);
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
+  const catStatuses = useChatStore((s) => s.catStatuses);
   const tasks = useTaskStore((s) => s.tasks);
   const isUser = message.type === 'user' && !message.catId;
   const isSystem = message.type === 'system';
@@ -222,6 +223,11 @@ export function ChatMessage({
   const isAssistantContinuation = isGrouped;
   const assistantAppearClass =
     message.type === 'assistant' && !message.isStreaming ? 'motion-safe:animate-message-appear' : '';
+  const catRuntimeStatus = message.catId ? catStatuses[message.catId] : undefined;
+  const catActivityStatus =
+    catRuntimeStatus === 'spawning' || catRuntimeStatus === 'pending' || catRuntimeStatus === 'streaming'
+      ? 'active'
+      : 'idle';
 
   // Slock-like rendering: streaming tokens are buffered in store but hidden from
   // the timeline until the final message arrives. The input area shows typing
@@ -454,7 +460,12 @@ export function ChatMessage({
           className="cursor-pointer flex-shrink-0"
           title={`查看${formatCatName(catData)}详情`}
         >
-          <CatAvatar catId={message.catId!} size={32} status={message.isStreaming ? 'streaming' : undefined} />
+          <CatAvatar
+            catId={message.catId!}
+            size={32}
+            status={message.isStreaming ? 'streaming' : undefined}
+            activityStatus={catActivityStatus}
+          />
         </button>
       )}
       {catData && isAssistantContinuation && <div className="w-8 flex-shrink-0" aria-hidden="true" />}

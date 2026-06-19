@@ -6,6 +6,7 @@ import { hexToRgba } from '@/lib/color-utils';
 import { PawIcon } from './icons/PawIcon';
 
 type CatStatus = 'spawning' | 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
+type CatActivityStatus = 'active' | 'idle';
 
 /** F174 D2b-2 — callback-auth health (per cat, derived from /api/debug/callback-auth snapshot). */
 export type CallbackAuthStatus = 'healthy' | 'degraded' | 'broken' | 'unknown';
@@ -24,6 +25,8 @@ interface CatAvatarProps {
   tone?: 'default' | 'quiet';
   /** F174 D2b-2: corner status dot for callback-auth health surface (明厨亮灶 实体层). */
   callbackAuthStatus?: CallbackAuthStatus;
+  /** Runtime activity dot: Slock-like lightweight indicator for active cats. */
+  activityStatus?: CatActivityStatus;
   /** Optional aria-label / hover hint for the status dot (e.g. "broken · 12 fails"). */
   callbackAuthLabel?: string;
   /**
@@ -42,6 +45,7 @@ export function CatAvatar({
   status,
   tone = 'default',
   callbackAuthStatus,
+  activityStatus,
   callbackAuthLabel,
   callbackAuthPopover,
   onCallbackAuthClick,
@@ -89,6 +93,26 @@ export function CatAvatar({
           />
         )}
       </div>
+      {activityStatus && (
+        <span
+          role="status"
+          data-testid="cat-activity-dot"
+          data-cat-activity-status={activityStatus}
+          aria-label={activityStatus === 'active' ? '正在运行' : '空闲'}
+          title={activityStatus === 'active' ? '正在运行' : '空闲'}
+          className={`absolute block rounded-full ${activityStatus === 'active' ? 'animate-pulse' : ''}`}
+          style={{
+            left: callbackAuthStatus ? -dotBorder : undefined,
+            right: callbackAuthStatus ? undefined : -dotBorder,
+            bottom: -dotBorder,
+            width: dotSize,
+            height: dotSize,
+            backgroundColor:
+              activityStatus === 'active' ? 'var(--conn-emerald-text)' : 'var(--cafe-text-muted)',
+            border: `${dotBorder}px solid var(--cafe-surface)`,
+          }}
+        />
+      )}
       {callbackAuthStatus && (
         <span
           className="absolute"
