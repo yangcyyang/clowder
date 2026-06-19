@@ -27,6 +27,7 @@ import type {
   InvocationFinalStatus,
   SessionContinuationCoordinator,
 } from './SessionContinuationCoordinator.js';
+import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -776,7 +777,17 @@ export class QueueProcessor {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
       // Connector-sourced entries use connector-${messageId} to match the direct-execution
       // idempotency path, so retries after queue processing are also caught persistently.
-      const idempotencyKey = entry.source === 'connector' && messageId ? `connector-${messageId}` : `queue-${entry.id}`;
+      const idempotencyKey =
+        entry.idempotencyKey ??
+        (entry.sourceCategory === 'a2a' && entry.a2aTriggerMessageId && entry.callerCatId && primaryCat !== 'unknown'
+          ? buildA2AIdempotencyKey({
+              triggerMessageId: entry.a2aTriggerMessageId,
+              callerCatId: entry.callerCatId,
+              targetCatId: primaryCat,
+            })
+          : entry.source === 'connector' && messageId
+            ? `connector-${messageId}`
+            : `queue-${entry.id}`);
       const createResult = await invocationRecordStore.create({
         threadId,
         userId,
@@ -1055,6 +1066,15 @@ export class QueueProcessor {
               const result = queue.enqueue({
                 threadId: handoff.threadId,
                 userId: handoff.userId,
+                ...(handoff.triggerMessageId
+                  ? {
+                      idempotencyKey: buildA2AIdempotencyKey({
+                        triggerMessageId: handoff.triggerMessageId,
+                        callerCatId: handoff.callerCatId,
+                        targetCatId: targetCat,
+                      }),
+                    }
+                  : {}),
                 content: handoff.content,
                 source: 'agent',
                 sourceCategory: 'a2a',

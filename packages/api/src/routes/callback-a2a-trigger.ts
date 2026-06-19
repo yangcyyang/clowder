@@ -17,6 +17,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import {
   getWorklist,
   hasWorklist,
@@ -161,6 +162,11 @@ export async function enqueueA2ATargets(
       const result = deps.invocationQueue.enqueue({
         threadId,
         userId: opts.userId,
+        idempotencyKey: buildA2AIdempotencyKey({
+          triggerMessageId,
+          callerCatId,
+          targetCatId: catId,
+        }),
         content: opts.content,
         source: 'agent',
         targetCats: [catId],

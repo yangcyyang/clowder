@@ -28,6 +28,7 @@ import {
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type {
@@ -1054,6 +1055,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                         const result = opts.invocationQueue?.enqueue({
                           threadId: handoff.threadId,
                           userId: handoff.userId,
+                          ...(handoff.triggerMessageId
+                            ? {
+                                idempotencyKey: buildA2AIdempotencyKey({
+                                  triggerMessageId: handoff.triggerMessageId,
+                                  callerCatId: handoff.callerCatId,
+                                  targetCatId: targetCat,
+                                }),
+                              }
+                            : {}),
                           content: handoff.content,
                           source: 'agent',
                           sourceCategory: 'a2a',

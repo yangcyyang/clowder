@@ -469,6 +469,19 @@ describe('QueueProcessor', () => {
     assert.strictEqual(createArg.idempotencyKey, 'connector-msg-conn-1');
   });
 
+  it('entry-provided idempotency key overrides queue entry id', async () => {
+    const entry = enqueueEntry(deps.queue, { idempotencyKey: 'a2a:msg-trigger:opus-45:codex' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-trigger');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const createCalls = deps.invocationRecordStore.create.mock.calls;
+    assert.ok(createCalls.length > 0);
+    const createArg = createCalls[0].arguments[0];
+    assert.strictEqual(createArg.idempotencyKey, 'a2a:msg-trigger:opus-45:codex');
+  });
+
   // ── P1-2 fix: isPaused state tracking ──
 
   it('isPaused returns true after canceled when queue has entries', async () => {
@@ -1569,6 +1582,7 @@ describe('QueueProcessor', () => {
       const createInput = a2aDeps.invocationRecordStore.create.mock.calls[0].arguments[0];
       assert.equal(createInput.callerCatId, 'opus-45');
       assert.equal(createInput.a2aTriggerMessageId, 'msg-claude-handoff');
+      assert.equal(createInput.idempotencyKey, 'a2a:msg-claude-handoff:opus-45:codex');
 
       const routeOptions = routeCalls[0][6];
       assert.equal(routeOptions.directMessageFrom, 'opus-45');
