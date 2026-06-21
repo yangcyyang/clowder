@@ -426,6 +426,45 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].data.totalAdded, 3);
   });
 
+  test('POST task events accepts usage event payload and filters it', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const postRes = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: {
+        catId: 'codex',
+        type: 'usage',
+        data: {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          inputTokens: 1000,
+          outputTokens: 500,
+          totalTokens: 1500,
+          costUsd: 0.00045,
+        },
+      },
+    });
+    assert.equal(postRes.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events?type=usage`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'usage');
+    assert.equal(response.json().events[0].data.totalTokens, 1500);
+    assert.equal(response.json().events[0].data.costUsd, 0.00045);
+  });
+
   test('GET task by thread and lineage endpoint return association fields', async () => {
     const app = await createApp();
     const parentRes = await app.inject({

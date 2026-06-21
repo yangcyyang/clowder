@@ -20,6 +20,7 @@ import {
   flattenTextParts,
   flattenTurnTextParts,
 } from '../text-aggregation.js';
+import { mergeTokenUsage, type MessageMetadata, type TokenUsage } from '../../types.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -106,6 +107,76 @@ interface GitArtifactSnapshot {
 }
 
 type GitArtifactCollector = () => Promise<GitArtifactSnapshot>;
+
+interface TokenUsageAggregate {
+  catId: string;
+  provider?: string;
+  model: string;
+  usage: TokenUsage;
+}
+
+interface TokenPricing {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cacheReadPerMillion?: number;
+  cacheCreationPerMillion?: number;
+}
+
+const TOKEN_PRICING_BY_MODEL: Record<string, TokenPricing> = {
+  'claude-opus-4': { inputPerMillion: 15, outputPerMillion: 75, cacheReadPerMillion: 1.5, cacheCreationPerMillion: 18.75 },
+  'claude-sonnet-4': { inputPerMillion: 3, outputPerMillion: 15, cacheReadPerMillion: 0.3, cacheCreationPerMillion: 3.75 },
+  'claude-haiku-4': { inputPerMillion: 0.8, outputPerMillion: 4, cacheReadPerMillion: 0.08, cacheCreationPerMillion: 1 },
+  'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  'gpt-4o': { inputPerMillion: 2.5, outputPerMillion: 10 },
+  'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
+  'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10 },
+  'deepseek-chat': { inputPerMillion: 0.27, outputPerMillion: 1.1 },
+};
+
+function findTokenPricing(model: string | undefined): TokenPricing | undefined {
+  const normalized = model?.toLowerCase();
+  if (!normalized) return undefined;
+  return Object.entries(TOKEN_PRICING_BY_MODEL)
+    .sort((a, b) => b[0].length - a[0].length)
+    .find(([key]) => normalized.includes(key))?.[1];
+}
+
+function computeTokenCostUsd(usage: TokenUsage, model: string | undefined): number | undefined {
+  if (Number.isFinite(usage.costUsd)) return usage.costUsd;
+  const pricing = findTokenPricing(model);
+  if (!pricing) return undefined;
+  const inputTokens = usage.inputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? 0;
+  const cacheReadTokens = usage.cacheReadTokens ?? 0;
+  const cacheCreationTokens = usage.cacheCreationTokens ?? 0;
+  const uncachedInputTokens = Math.max(inputTokens - cacheReadTokens - cacheCreationTokens, 0);
+  const inputCost =
+    (uncachedInputTokens * pricing.inputPerMillion +
+      cacheReadTokens * (pricing.cacheReadPerMillion ?? pricing.inputPerMillion) +
+      cacheCreationTokens * (pricing.cacheCreationPerMillion ?? pricing.inputPerMillion)) /
+    1_000_000;
+  const outputCost = (outputTokens * pricing.outputPerMillion) / 1_000_000;
+  const totalCost = inputCost + outputCost;
+  return totalCost > 0 ? Number(totalCost.toFixed(8)) : undefined;
+}
+
+function isMeaningfulTokenUsage(usage: TokenUsage): boolean {
+  return (
+    (usage.inputTokens ?? 0) > 0 ||
+    (usage.outputTokens ?? 0) > 0 ||
+    (usage.totalTokens ?? 0) > 0 ||
+    (usage.cacheReadTokens ?? 0) > 0 ||
+    (usage.cacheCreationTokens ?? 0) > 0 ||
+    Number.isFinite(usage.costUsd)
+  );
+}
+
+function getMessageMetadata(msg: { metadata?: unknown }): MessageMetadata | undefined {
+  if (!msg.metadata || typeof msg.metadata !== 'object') return undefined;
+  const metadata = msg.metadata as Partial<MessageMetadata>;
+  if (typeof metadata.model !== 'string' || !metadata.usage) return undefined;
+  return metadata as MessageMetadata;
+}
 
 function isCompleteMessageDeliveryEnabled(): boolean {
   const value = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY?.trim().toLowerCase();
@@ -357,7 +428,7 @@ export class QueueProcessor {
     }
   }
 
-  private async findSourceTaskForArtifact(params: {
+  private async findSourceTaskForLedger(params: {
     threadId: string;
     sourceMessageIds: readonly string[];
   }): Promise<TaskItem | null> {
@@ -376,6 +447,72 @@ export class QueueProcessor {
     return null;
   }
 
+  private collectTokenUsage(
+    aggregates: Map<string, TokenUsageAggregate>,
+    msg: { catId?: string; metadata?: unknown },
+  ): void {
+    if (!msg.catId) return;
+    const metadata = getMessageMetadata(msg);
+    if (!metadata?.usage || !isMeaningfulTokenUsage(metadata.usage)) return;
+    const existing = aggregates.get(msg.catId);
+    aggregates.set(msg.catId, {
+      catId: msg.catId,
+      provider: metadata.provider,
+      model: metadata.model,
+      usage: mergeTokenUsage(existing?.usage, metadata.usage),
+    });
+  }
+
+  private async appendUsageTaskEvents(params: {
+    threadId: string;
+    sourceMessageIds: readonly string[];
+    aggregates: Iterable<TokenUsageAggregate>;
+  }): Promise<void> {
+    const { taskStore } = this.deps;
+    if (!taskStore) return;
+    const aggregates = Array.from(params.aggregates);
+    if (aggregates.length === 0) return;
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      if (!sourceTask) return;
+      for (const aggregate of aggregates) {
+        if (!isMeaningfulTokenUsage(aggregate.usage)) continue;
+        const totalTokens =
+          aggregate.usage.totalTokens ?? (aggregate.usage.inputTokens ?? 0) + (aggregate.usage.outputTokens ?? 0);
+        const costUsd = computeTokenCostUsd(aggregate.usage, aggregate.model);
+        const updated = await taskStore.update(sourceTask.id, {
+          events: [
+            {
+              ts: new Date().toISOString(),
+              catId: aggregate.catId,
+              type: 'usage',
+              data: {
+                provider: aggregate.provider,
+                model: aggregate.model,
+                inputTokens: aggregate.usage.inputTokens ?? 0,
+                outputTokens: aggregate.usage.outputTokens ?? 0,
+                totalTokens,
+                ...(aggregate.usage.cacheReadTokens != null ? { cacheReadTokens: aggregate.usage.cacheReadTokens } : {}),
+                ...(aggregate.usage.cacheCreationTokens != null
+                  ? { cacheCreationTokens: aggregate.usage.cacheCreationTokens }
+                  : {}),
+                ...(costUsd != null ? { costUsd } : {}),
+              },
+            },
+          ],
+        });
+        if (updated) {
+          this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append usage task event failed');
+    }
+  }
+
   private async appendArtifactTaskEvent(params: {
     threadId: string;
     catId: string;
@@ -388,7 +525,7 @@ export class QueueProcessor {
     const artifact = this.diffArtifactSnapshots(params.before, params.after);
     if (!artifact) return;
     try {
-      const sourceTask = await this.findSourceTaskForArtifact({
+      const sourceTask = await this.findSourceTaskForLedger({
         threadId: params.threadId,
         sourceMessageIds: params.sourceMessageIds,
       });
@@ -1215,6 +1352,7 @@ export class QueueProcessor {
       let currentTurnCatId: string | undefined;
       const completeMessageDeliveryEnabled = isCompleteMessageDeliveryEnabled();
       const completedSocketTurnIndices = new Set<number>();
+      const tokenUsageAggregates = new Map<string, TokenUsageAggregate>();
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -1356,6 +1494,7 @@ export class QueueProcessor {
         if (controller.signal.aborted) {
           break;
         }
+        this.collectTokenUsage(tokenUsageAggregates, msg);
         if (msg.catId) {
           if (msg.type === 'tool_use') {
             await this.deps.catSupervisor?.pauseForTool?.(msg.catId);
@@ -1542,6 +1681,12 @@ export class QueueProcessor {
         deliveredTurnIndices,
         threadMeta,
       );
+
+      await this.appendUsageTaskEvents({
+        threadId,
+        sourceMessageIds: allMessageIds,
+        aggregates: tokenUsageAggregates.values(),
+      });
 
       if (artifactBaseline) {
         const artifactAfter = await this.collectGitArtifacts(threadId);

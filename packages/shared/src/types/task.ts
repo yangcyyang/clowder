@@ -25,7 +25,8 @@ export type TaskEventType =
   | 'completed'
   | 'failed'
   | 'handoff'
-  | 'artifact';
+  | 'artifact'
+  | 'usage';
 
 /**
  * Task kind discriminator (#320).

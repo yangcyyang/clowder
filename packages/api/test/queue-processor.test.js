@@ -1674,6 +1674,11 @@ describe('QueueProcessor', () => {
       ];
       const updatedTasks = [];
       const artifactDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async () => ({ id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
         gitArtifactCollector: mock.fn(async () => snapshots.shift() ?? snapshots.at(-1)),
         taskStore: {
           listByThread: mock.fn(async () => [sourceTask]),
@@ -1712,6 +1717,68 @@ describe('QueueProcessor', () => {
       assert.equal(event.data.totalAdded, 4);
       assert.equal(event.data.totalRemoved, 2);
       assert.equal(artifactDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
+    });
+
+    it('appends usage task event with estimated token cost after successful execution', async () => {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        taskThreadId: 't1',
+        events: [],
+      };
+      const updatedTasks = [];
+      const usageDeps = stubDeps({
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previous = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previous.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'text',
+              catId: 'opus',
+              content: 'done',
+              timestamp: Date.now(),
+              metadata: {
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                usage: { inputTokens: 1000, outputTokens: 500 },
+              },
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const usageProcessor = new QueueProcessor(usageDeps);
+      enqueueEntry(usageDeps.queue, {
+        userId: 'u1',
+        targetCats: ['opus'],
+      });
+
+      await usageProcessor.processNext('t1', 'u1');
+      await new Promise((r) => setTimeout(r, 80));
+
+      assert.equal(updatedTasks.length, 1);
+      const event = updatedTasks[0].events.at(-1);
+      assert.equal(event.type, 'usage');
+      assert.equal(event.catId, 'opus');
+      assert.equal(event.data.provider, 'openai');
+      assert.equal(event.data.model, 'gpt-4o-mini');
+      assert.equal(event.data.inputTokens, 1000);
+      assert.equal(event.data.outputTokens, 500);
+      assert.equal(event.data.totalTokens, 1500);
+      assert.ok(Math.abs(event.data.costUsd - 0.00045) < 1e-10);
+      assert.equal(usageDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
     });
   });
 

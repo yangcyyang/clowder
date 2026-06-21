@@ -127,7 +127,7 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
 const taskEventSchema = z.object({
   ts: z.string().datetime().optional(),
   catId: z.string().min(1),
-  type: z.enum(['claimed', 'unclaimed', 'status_changed', 'completed', 'failed', 'handoff', 'artifact']),
+  type: z.enum(['claimed', 'unclaimed', 'status_changed', 'completed', 'failed', 'handoff', 'artifact', 'usage']),
   data: z.record(z.unknown()).optional(),
 });
 
