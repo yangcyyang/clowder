@@ -161,6 +161,30 @@ P1/P2 当轮修完。P3 当场决定修或不修，不记 TECH-DEBT。
 
 ---
 
+## 安全边界（隐性规则显式化）
+
+### 凭证安全
+- API key / token / secret 不得出现在聊天消息、task 描述、commit message 或 memory 文件中
+- `.env` 文件不进 git，不跨猫共享，不打印到日志
+- 发现凭证泄漏：立即通知铲屎官，不尝试自行删除（git 历史不灭）
+
+### 网络隔离
+- Redis 6399 仅本机访问（`127.0.0.1`），不绑定 `0.0.0.0`
+- `localhost:3003/3004` 是在线 runtime，不对外暴露
+- 外部 API 调用走 proxy 或 owner 确认的白名单
+
+### 数据保护
+- 删除文件 / 清空数据库 / force push 前必须先 git commit 保底
+- `.cat-cafe/memory/{catId}.md` 按猫隔离，不跨猫读取或写入
+- 共享状态文件（`cat-config.json`、`cat-template.json`）只在 main 分支修改
+
+### 权限边界
+- 环境变量修改需要 owner 确认
+- 重启 runtime / 重置 Redis 需要铲屎守权限
+- 安装新 npm 包 / 修改 `package.json` 需要走 review 流程
+
+---
+
 ## 行为约束（个人记忆，不靠全局品种规则）
 
 不用全局品种管控。每只猫的行为约束写在各自的记忆文件里：
