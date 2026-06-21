@@ -61,6 +61,12 @@ const assetCardSchema = z.object({
 
 const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
 const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
+const capabilityContractSchema = z.object({
+  primaryRoles: z.array(z.string().min(1)).default([]),
+  canHandle: z.array(z.string().min(1)).default([]),
+  shouldAvoid: z.array(z.string().min(1)).optional(),
+  handoffTriggers: z.array(z.string().min(1)).optional(),
+});
 const cliSchema = z.object({
   command: z.string().min(1).optional(),
   outputFormat: z.string().min(1).optional(),
@@ -106,6 +112,7 @@ const baseCatSchema = z.object({
   teamStrengths: z.string().optional(),
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
+  capabilityContract: capabilityContractSchema.optional(),
   sessionChain: z.boolean().optional(),
   voiceConfig: z
     .object({
@@ -161,6 +168,7 @@ const updateCatSchema = z.object({
   teamStrengths: z.string().optional(),
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
+  capabilityContract: capabilityContractSchema.nullable().optional(),
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
   clientId: clientSchema.optional(),
@@ -508,6 +516,7 @@ async function toCatResponse(
     teamStrengths: cat.teamStrengths,
     caution: cat.caution,
     strengths: cat.strengths,
+    capabilityContract: cat.capabilityContract,
     sessionChain: cat.sessionChain,
     commandArgs: cat.commandArgs,
     cliConfigArgs: cat.cliConfigArgs,
@@ -674,6 +683,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          capabilityContract: body.capabilityContract,
           assetCard: body.assetCard,
           sessionChain: body.sessionChain,
           clientId: 'antigravity',
@@ -705,6 +715,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          capabilityContract: body.capabilityContract,
           assetCard: body.assetCard,
           sessionChain: body.sessionChain,
           clientId: body.clientId,
@@ -867,6 +878,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
         ...(body.caution !== undefined ? { caution: body.caution } : {}),
         ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
+        ...(body.capabilityContract !== undefined ? { capabilityContract: body.capabilityContract } : {}),
         ...(body.sessionChain !== undefined ? { sessionChain: body.sessionChain } : {}),
         ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
         ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),

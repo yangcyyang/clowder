@@ -10,7 +10,7 @@
 import type { CatId } from './ids.js';
 
 export type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
-export type TaskEventType = 'claimed' | 'unclaimed' | 'status_changed' | 'completed' | 'failed';
+export type TaskEventType = 'claimed' | 'unclaimed' | 'status_changed' | 'completed' | 'failed' | 'handoff';
 
 /**
  * Task kind discriminator (#320).

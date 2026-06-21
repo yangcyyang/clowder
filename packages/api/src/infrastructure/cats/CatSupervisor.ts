@@ -124,6 +124,21 @@ export class CatSupervisor {
     }
   }
 
+  async recoverStaleStatuses(): Promise<string[]> {
+    const recovered: string[] = [];
+    for (const catId of this.enabledCats) {
+      const status = this.statuses.get(catId);
+      if (status !== 'processing' && status !== 'timeout') continue;
+      this.clearProcessingTimeout(catId);
+      await this.setStatus(catId, 'online_idle', { force: true });
+      recovered.push(catId);
+    }
+    if (recovered.length > 0) {
+      this.log.info({ catIds: recovered }, '[CatSupervisor] recovered stale cat statuses');
+    }
+    return recovered;
+  }
+
   getStatus(catId: string): CatSupervisorStatus | undefined {
     return this.statuses.get(catId);
   }

@@ -157,6 +157,7 @@ export type {
 } from './capability.js';
 // Cat types
 export type {
+  CatCapabilityContract,
   CatColor,
   CatConfig,
   /** @deprecated clowder-ai#340: Use ClientId instead. */

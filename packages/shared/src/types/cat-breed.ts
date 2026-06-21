@@ -7,7 +7,7 @@
  * Phase 4-F: 支持多 Variant（多版本猫召唤）
  */
 
-import type { CatColor, ClientId } from './cat.js';
+import type { CatCapabilityContract, CatColor, ClientId } from './cat.js';
 import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -101,6 +101,8 @@ export interface CatVariant {
   readonly roleDescription?: string;
   readonly personality?: string;
   readonly strengths?: readonly string[];
+  /** Machine-readable task handling contract for routing and handoff checks. */
+  readonly capabilityContract?: CatCapabilityContract;
   /** F32-b P4c: Override breed-level avatar for this variant */
   readonly avatar?: string;
   /** F32-b P4c: Override breed-level color for this variant */
@@ -192,6 +194,8 @@ export interface CatBreed {
   /** F167 Phase E (KD-20): breed-level hard restrictions; variants may override.
    *  Natural-language bans (e.g. `["禁止生成图片"]`). */
   readonly restrictions?: readonly string[];
+  /** Breed-level task handling contract; variants may override. */
+  readonly capabilityContract?: CatCapabilityContract;
 }
 
 // ── F032: Roster types for collaboration rules ─────────────────────────

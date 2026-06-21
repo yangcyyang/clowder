@@ -1591,7 +1591,25 @@ describe('QueueProcessor', () => {
     });
 
     it('enqueues text-scan A2A mentions as independent autoExecute work items', async () => {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-opus-handoff',
+        events: [],
+      };
+      const updatedTasks = [];
       const nestedDeps = stubDeps({
+        taskStore: {
+          listByThread: mock.fn(async () => [sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const updated = {
+              ...sourceTask,
+              events: [...sourceTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
         router: {
           routeExecution: mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
             if (targetCats[0] === 'opus') {
@@ -1628,6 +1646,15 @@ describe('QueueProcessor', () => {
       );
       assert.ok(createdTargets.includes('pi'), 'Pi should be started via queue-backed A2A');
       assert.ok(createdTargets.includes('codex'), 'Codex should be started via queue-backed A2A');
+      assert.equal(updatedTasks.length, 2, 'each enqueued A2A target should append a handoff event');
+      assert.deepEqual(
+        updatedTasks.map((task) => task.events.at(-1).type),
+        ['handoff', 'handoff'],
+      );
+      assert.deepEqual(
+        updatedTasks.map((task) => task.events.at(-1).data.toCatId),
+        ['pi', 'codex'],
+      );
     });
   });
 

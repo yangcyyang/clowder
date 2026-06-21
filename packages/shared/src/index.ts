@@ -22,5 +22,7 @@ export * from './schemas/index.js';
 export * from './text-utils.js';
 // Export all types
 export * from './types/index.js';
+// Export shared cat capability contract helpers
+export * from './utils/cat-capability-contract.js';
 // Export subject key utilities (#320)
 export * from './utils/subject-key.js';

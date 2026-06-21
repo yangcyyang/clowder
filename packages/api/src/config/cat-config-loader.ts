@@ -60,6 +60,13 @@ const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
 
 const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
 
+const capabilityContractSchema = z.object({
+  primaryRoles: z.array(z.string().min(1)).default([]),
+  canHandle: z.array(z.string().min(1)).default([]),
+  shouldAvoid: z.array(z.string().min(1)).optional(),
+  handoffTriggers: z.array(z.string().min(1)).optional(),
+});
+
 const DEFAULT_MINIMAL_TOOLBOX_CATS = new Set(['pi', 'task-intake', 'task-decomposer']);
 const DEFAULT_FULL_TOOLBOX_CATS = new Set(['ppt-designer', 'prototype-designer', 'ui-designer', 'design-harness']);
 
@@ -67,6 +74,15 @@ function defaultToolPolicyForCat(catId: string): ToolPolicy {
   if (DEFAULT_MINIMAL_TOOLBOX_CATS.has(catId)) return 'minimal';
   if (DEFAULT_FULL_TOOLBOX_CATS.has(catId)) return 'full';
   return 'standard';
+}
+
+function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+function splitCapabilityText(text: string | undefined): string[] {
+  if (!text) return [];
+  return uniqueNonEmpty(text.split(/[、，,；;。\n]/).map((part) => part.replace(/^\s*(?:擅长|适合|负责)\s*/, '')));
 }
 
 const assetCardSchema = z.object({
@@ -104,6 +120,7 @@ const catVariantSchema = z.object({
   sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
   personality: z.string().optional(),
   strengths: z.array(z.string()).optional(),
+  capabilityContract: capabilityContractSchema.optional(),
   avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
   color: colorSchema.optional(), // F32-b P4c: override breed color
   contextBudget: contextBudgetSchema.optional(),
@@ -187,6 +204,7 @@ const catBreedSchema = z.object({
   teamStrengths: z.string().optional(), // F-Ground-3: breed-level default
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
   restrictions: z.array(z.string().min(1)).optional(), // F167 Phase E: breed-level hard task bans
+  capabilityContract: capabilityContractSchema.optional(),
 });
 
 // ── F032: Roster schema for collaboration rules ──────────────────────
@@ -440,6 +458,19 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // F167 Phase E (KD-20): variant restrictions override breed (no merge);
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
+      const capabilityContract =
+        variant.capabilityContract ??
+        breed.capabilityContract ??
+        {
+          primaryRoles: uniqueNonEmpty([breed.displayName, variant.displayName, variant.variantLabel]),
+          canHandle: uniqueNonEmpty([
+            ...splitCapabilityText(teamStrengths),
+            ...(variant.strengths ?? []),
+            ...(restrictions?.length ? [] : splitCapabilityText(breed.roleDescription).slice(0, 3)),
+          ]),
+          ...(restrictions != null && restrictions.length > 0 ? { shouldAvoid: [...restrictions] } : {}),
+          handoffTriggers: uniqueNonEmpty([...splitCapabilityText(teamStrengths), ...(variant.strengths ?? [])]),
+        };
       const projectedCommandArgs =
         variant.commandArgs ??
         (variant.clientId === 'antigravity' && variant.cli?.defaultArgs && variant.cli.defaultArgs.length > 0
@@ -479,6 +510,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         // F167 Phase E: preserve restrictions list for teammate roster + self-awareness injection
         ...(restrictions != null && restrictions.length > 0 ? { restrictions: [...restrictions] } : {}),
         ...(variant.strengths != null ? { strengths: variant.strengths } : {}),
+        ...(capabilityContract != null ? { capabilityContract } : {}),
         ...(variant.sessionChain !== undefined
           ? { sessionChain: variant.sessionChain }
           : breed.features?.sessionChain !== undefined

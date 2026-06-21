@@ -114,7 +114,7 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
 const taskEventSchema = z.object({
   ts: z.string().datetime().optional(),
   catId: z.string().min(1),
-  type: z.enum(['claimed', 'unclaimed', 'status_changed', 'completed', 'failed']),
+  type: z.enum(['claimed', 'unclaimed', 'status_changed', 'completed', 'failed', 'handoff']),
   data: z.record(z.unknown()).optional(),
 });
 
@@ -224,12 +224,14 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   // GET /api/threads/:threadId/tasks/:taskId/events — 查询任务事件账本
   app.get('/api/threads/:threadId/tasks/:taskId/events', async (request, reply) => {
     const { threadId, taskId } = request.params as { threadId: string; taskId: string };
+    const { type } = request.query as { type?: TaskEvent['type'] };
     const task = await getTaskInThread(threadId, taskId);
     if (!task) {
       reply.status(404);
       return { error: 'Task not found' };
     }
-    return { events: task.events ?? [] };
+    const events = task.events ?? [];
+    return { events: type ? events.filter((event) => event.type === type) : events };
   });
 
   // POST /api/threads/:threadId/tasks/:taskId/events — 手动追加事件（审计/迁移兜底）

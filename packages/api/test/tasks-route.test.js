@@ -325,6 +325,37 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].data.reason, 'manual audit');
   });
 
+  test('GET task events by thread endpoint filters by event type', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: { catId: 'opus', type: 'handoff', data: { toCatId: 'codex' } },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: { catId: 'system', type: 'failed', data: { reason: 'manual audit' } },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events?type=handoff`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'handoff');
+    assert.equal(response.json().events[0].data.toCatId, 'codex');
+  });
+
   test('GET task by thread and lineage endpoint return association fields', async () => {
     const app = await createApp();
     const parentRes = await app.inject({

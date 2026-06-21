@@ -66,4 +66,25 @@ describe('CatSupervisor', () => {
     const timeoutCall = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[2].status === 'timeout');
     assert.ok(timeoutCall, 'timeout status should be broadcast');
   });
+
+  it('recovers stale processing and timeout statuses to online idle', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, processingTimeoutMs: 1_000 });
+    await supervisor.syncCats({ codex: catConfig('codex'), kimi: catConfig('kimi') });
+
+    await supervisor.markProcessing('codex');
+    t.mock.timers.tick(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'timeout');
+    await supervisor.markProcessing('kimi');
+    assert.equal(supervisor.getStatus('kimi'), 'processing');
+
+    const recovered = await supervisor.recoverStaleStatuses();
+
+    assert.deepEqual(recovered.sort(), ['codex', 'kimi']);
+    assert.equal(supervisor.getStatus('codex'), 'online_idle');
+    assert.equal(supervisor.getStatus('kimi'), 'online_idle');
+    assert.equal(deps.log.info.mock.calls.at(-1).arguments[1], '[CatSupervisor] recovered stale cat statuses');
+  });
 });

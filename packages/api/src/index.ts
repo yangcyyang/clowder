@@ -1093,6 +1093,7 @@ async function main(): Promise<void> {
       agentRegistry.register(id, service);
     }
     await catSupervisor.syncCats(configs, (catId) => isCatAvailable(catId));
+    await catSupervisor.recoverStaleStatuses();
     if (router) router.refreshFromRegistry(agentRegistry);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
@@ -1281,6 +1282,7 @@ async function main(): Promise<void> {
     router: router as unknown as RouterLike,
     socketManager,
     messageStore,
+    taskStore,
     log: app.log,
     catSupervisor,
     sessionContinuationCoordinator,

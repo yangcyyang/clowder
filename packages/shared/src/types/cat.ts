@@ -40,6 +40,18 @@ export interface CatColor {
 }
 
 /**
+ * Capability contract for routing/handoff decisions.
+ * This is intentionally lightweight: it describes what a cat should or should
+ * not be asked to handle, without turning profile text into executable policy.
+ */
+export interface CatCapabilityContract {
+  readonly primaryRoles: readonly string[];
+  readonly canHandle: readonly string[];
+  readonly shouldAvoid?: readonly string[];
+  readonly handoffTriggers?: readonly string[];
+}
+
+/**
  * Cat configuration (immutable)
  */
 export interface CatConfig {
@@ -84,6 +96,8 @@ export interface CatConfig {
   readonly restrictions?: readonly string[];
   /** F127 Screen 3: editable strength tags */
   readonly strengths?: readonly string[];
+  /** Machine-readable task handling contract for routing and handoff checks. */
+  readonly capabilityContract?: CatCapabilityContract;
   /** F127 Screen 3: whether session chain is enabled for this member */
   readonly sessionChain?: boolean;
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */

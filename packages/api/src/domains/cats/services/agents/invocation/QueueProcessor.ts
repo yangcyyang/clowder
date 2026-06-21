@@ -9,6 +9,7 @@
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -143,6 +144,8 @@ export interface QueueProcessorDeps {
   threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
   /** Task #112: lightweight always-online status supervisor. */
   catSupervisor?: CatSupervisorLike;
+  /** Task event ledger — used to attach A2A handoff events to source tasks. */
+  taskStore?: Pick<ITaskStore, 'listByThread' | 'update'>;
   /** F224: owns passive continuation consume/store around single-cat invocations. */
   sessionContinuationCoordinator?: Pick<
     SessionContinuationCoordinator,
@@ -185,6 +188,42 @@ export class QueueProcessor {
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
     this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+  }
+
+  private async appendA2AHandoffTaskEvent(params: {
+    threadId: string;
+    triggerMessageId?: string;
+    callerCatId: string;
+    targetCatId: string;
+    queueEntryId: string;
+  }): Promise<void> {
+    const { taskStore } = this.deps;
+    if (!taskStore || !params.triggerMessageId) return;
+    try {
+      const tasks = await taskStore.listByThread(params.threadId);
+      const sourceTask = tasks.find((task) => task.sourceMessageId === params.triggerMessageId);
+      if (!sourceTask) return;
+      const updated = await taskStore.update(sourceTask.id, {
+        events: [
+          {
+            ts: new Date().toISOString(),
+            catId: params.callerCatId,
+            type: 'handoff',
+            data: {
+              fromCatId: params.callerCatId,
+              toCatId: params.targetCatId,
+              triggerMessageId: params.triggerMessageId,
+              queueEntryId: params.queueEntryId,
+            },
+          },
+        ],
+      });
+      if (updated) {
+        this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append A2A handoff task event failed');
+    }
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -1088,6 +1127,13 @@ export class QueueProcessor {
               if (handoff.triggerMessageId) {
                 queue.backfillMessageId(handoff.threadId, handoff.userId, result.entry.id, handoff.triggerMessageId);
               }
+              await this.appendA2AHandoffTaskEvent({
+                threadId: handoff.threadId,
+                triggerMessageId: handoff.triggerMessageId,
+                callerCatId: handoff.callerCatId,
+                targetCatId: targetCat,
+                queueEntryId: result.entry.id,
+              });
               enqueued.push(targetCat);
             }
             if (enqueued.length > 0) {

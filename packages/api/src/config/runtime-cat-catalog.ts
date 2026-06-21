@@ -4,6 +4,7 @@ import type {
   CatAssetCard,
   CatBreed,
   CatCafeConfig,
+  CatCapabilityContract,
   CatColor,
   CatVariant,
   CliConfig,
@@ -36,6 +37,7 @@ export interface RuntimeCatInput {
   teamStrengths?: string;
   caution?: string | null;
   strengths?: string[];
+  capabilityContract?: CatCapabilityContract;
   sessionChain?: boolean;
   clientId: ClientId;
   defaultModel: string;
@@ -73,6 +75,7 @@ export interface RuntimeCatUpdate {
   teamStrengths?: string;
   caution?: string | null;
   strengths?: string[];
+  capabilityContract?: CatCapabilityContract | null;
   sessionChain?: boolean;
   clientId?: ClientId;
   defaultModel?: string;
@@ -279,6 +282,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
+        ...(input.capabilityContract ? { capabilityContract: input.capabilityContract } : {}),
         ...(input.voiceConfig ? { voiceConfig: input.voiceConfig } : {}),
       },
     ],
@@ -446,6 +450,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.strengths = patch.strengths;
     } else {
       delete variant.strengths;
+    }
+  }
+  if (patch.capabilityContract !== undefined) {
+    if (patch.capabilityContract) {
+      variant.capabilityContract = patch.capabilityContract;
+    } else {
+      delete variant.capabilityContract;
     }
   }
   if (patch.sessionChain !== undefined) {
