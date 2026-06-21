@@ -15,6 +15,7 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_review: 'IN REVIEW',
   blocked: 'BLOCKED',
   done: 'DONE',
+  failed: 'FAILED',
 };
 
 const TASK_STATUS_META: Record<
@@ -56,6 +57,12 @@ const TASK_STATUS_META: Record<
     dot: 'bg-[var(--task-done)]',
     next: 'todo',
   },
+  failed: {
+    chip: 'border-[var(--task-failed)] bg-[var(--task-failed-bg)] text-[var(--task-failed-text)]',
+    badge: 'border-[var(--task-failed)] bg-[var(--task-failed-soft)] text-[var(--task-failed-text)]',
+    dot: 'bg-[var(--task-failed)]',
+    next: 'doing',
+  },
 };
 
 const taskBoardStyle: TaskBoardStyle = {
@@ -96,6 +103,10 @@ const taskBoardStyle: TaskBoardStyle = {
   '--task-done-bg': '#e7f8ec',
   '--task-done-soft': '#f1fff5',
   '--task-done-text': '#1f7a3d',
+  '--task-failed': '#d83a34',
+  '--task-failed-bg': '#ffe4e1',
+  '--task-failed-soft': '#fff3f1',
+  '--task-failed-text': '#9f211c',
 };
 
 const BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; title: string }> = [
@@ -103,6 +114,7 @@ const BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; title: string }> = [
   { status: 'doing', title: 'IN PROGRESS' },
   { status: 'in_review', title: 'IN REVIEW' },
   { status: 'blocked', title: 'BLOCKED' },
+  { status: 'failed', title: 'FAILED' },
   { status: 'done', title: 'DONE' },
 ];
 

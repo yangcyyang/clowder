@@ -1,10 +1,8 @@
 'use client';
 
-import type { TaskItem } from '@cat-cafe/shared';
+import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { CatAvatar } from './CatAvatar';
-
-type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
 
 const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   todo: 'doing',
@@ -12,6 +10,7 @@ const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   in_review: 'done',
   blocked: 'doing',
   done: 'todo',
+  failed: 'doing',
 };
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -20,6 +19,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   in_review: '待验收',
   blocked: '阻塞中',
   done: '已完成',
+  failed: '失败',
 };
 
 const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: string }> = {
@@ -47,6 +47,11 @@ const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: 
     text: 'text-conn-emerald-text',
     border: 'border-l-green-600',
     pillBg: 'bg-conn-emerald-bg text-conn-emerald-text',
+  },
+  failed: {
+    text: 'text-conn-red-text',
+    border: 'border-l-conn-red-text',
+    pillBg: 'bg-conn-red-bg text-conn-red-text',
   },
 };
 

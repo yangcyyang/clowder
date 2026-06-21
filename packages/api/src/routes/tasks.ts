@@ -24,7 +24,16 @@ export interface TasksRoutesOptions {
   socketManager: SocketManager;
 }
 
-const VALID_STATUSES = ['todo', 'doing', 'in_review', 'blocked', 'done'] as const;
+const VALID_STATUSES = ['todo', 'doing', 'in_review', 'blocked', 'done', 'failed'] as const;
+const VALID_FAILURE_CLASSES = [
+  'agent_error',
+  'build_failed',
+  'test_failed',
+  'timeout',
+  'budget_exhausted',
+  'infra_error',
+  'manual_fail',
+] as const;
 
 /** createdBy accepts any registered catId OR 'user' */
 const createdBySchema = z.union([catIdSchema(), z.literal('user')]);
@@ -60,6 +69,8 @@ const updateSchema = z
     title: z.string().min(1).max(200).optional(),
     ownerCatId: catIdSchema().nullable().optional(),
     status: z.enum(VALID_STATUSES).optional(),
+    failureClass: z.enum(VALID_FAILURE_CLASSES).optional(),
+    failureReason: z.string().max(2000).optional(),
     why: z.string().max(1000).optional(),
     sourceMessageId: z.string().optional(),
     taskThreadId: z.string().optional(),
@@ -99,6 +110,8 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   const input: UpdateTaskInput = {};
   if (data.title !== undefined) input.title = data.title;
   if (data.status !== undefined) input.status = data.status;
+  if (data.failureClass !== undefined) input.failureClass = data.failureClass;
+  if (data.failureReason !== undefined) input.failureReason = data.failureReason;
   if (data.why !== undefined) input.why = data.why;
   if (data.sourceMessageId !== undefined) input.sourceMessageId = data.sourceMessageId;
   if (data.taskThreadId !== undefined) input.taskThreadId = data.taskThreadId;

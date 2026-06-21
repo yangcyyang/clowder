@@ -98,13 +98,17 @@ export function buildTaskUpdateEvents(existing: TaskItem, input: UpdateTaskInput
       });
     }
 
-    const rawStatus = input.status as string;
-    if (rawStatus === 'failed' || rawStatus === 'closed') {
+    if (input.status === 'failed') {
       events.push({
         ts,
         catId: actor,
         type: 'failed',
-        data: { from: existing.status, to: rawStatus },
+        data: {
+          from: existing.status,
+          to: input.status,
+          ...(input.failureClass ? { failureClass: input.failureClass } : {}),
+          ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+        },
       });
     }
   }
@@ -170,6 +174,8 @@ export class TaskStore implements ITaskStore {
       title: input.title,
       ownerCatId: input.ownerCatId ?? null,
       status: 'todo',
+      failureClass: input.failureClass,
+      failureReason: input.failureReason,
       why: input.why,
       createdBy: input.createdBy,
       createdAt: now,
@@ -220,6 +226,8 @@ export class TaskStore implements ITaskStore {
           title: input.title,
           ownerCatId: input.ownerCatId ?? existing.ownerCatId,
           status: existing.kind === 'pr_tracking' && existing.status === 'done' ? 'todo' : existing.status,
+          failureClass: input.failureClass ?? existing.failureClass,
+          failureReason: input.failureReason ?? existing.failureReason,
           why: input.why,
           userId: input.userId ?? existing.userId,
           automationState: input.automationState ?? existing.automationState,
@@ -286,6 +294,8 @@ export class TaskStore implements ITaskStore {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.failureClass !== undefined ? { failureClass: input.failureClass } : {}),
+      ...(input.failureReason !== undefined ? { failureReason: input.failureReason } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
       ...(input.sourceMessageId !== undefined ? { sourceMessageId: input.sourceMessageId } : {}),
       ...(input.taskThreadId !== undefined ? { taskThreadId: input.taskThreadId } : {}),

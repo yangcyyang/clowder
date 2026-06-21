@@ -417,6 +417,35 @@ describe('RedisTaskStore unit behavior', () => {
     );
   });
 
+  it('persists failed status taxonomy in Redis hashes and failed event data', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      threadId: 'thread-failed',
+      title: 'failing task',
+      why: 'audit',
+      createdBy: 'opus',
+    });
+
+    await store.update(task.id, {
+      status: 'failed',
+      failureClass: 'build_failed',
+      failureReason: 'pnpm build failed',
+      eventCatId: 'codex',
+    });
+
+    const stored = await store.get(task.id);
+    assert.equal(stored?.status, 'failed');
+    assert.equal(stored?.failureClass, 'build_failed');
+    assert.equal(stored?.failureReason, 'pnpm build failed');
+    const failedEvent = stored?.events?.at(-1);
+    assert.equal(failedEvent?.type, 'failed');
+    assert.equal(failedEvent?.data?.failureClass, 'build_failed');
+    assert.equal(failedEvent?.data?.failureReason, 'pnpm build failed');
+  });
+
   it('clears stale subject and kind indexes when the task hash has expired', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');

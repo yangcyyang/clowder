@@ -15,7 +15,11 @@ import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-hel
 
 const updateTaskSchema = z.object({
   taskId: z.string().min(1),
-  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
+  failureClass: z
+    .enum(['agent_error', 'build_failed', 'test_failed', 'timeout', 'budget_exhausted', 'infra_error', 'manual_fail'])
+    .optional(),
+  failureReason: z.string().max(2000).optional(),
   why: z.string().max(1000).optional(),
 });
 
@@ -33,7 +37,7 @@ const createTaskSchema = z.object({
 const listTasksQuerySchema = z.object({
   threadId: z.string().min(1).optional(),
   catId: z.string().min(1).optional(),
-  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
   kind: z.enum(['work', 'pr_tracking']).optional(),
 });
 
@@ -58,7 +62,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { taskId, status, why } = parsed.data;
+    const { taskId, status, failureClass, failureReason, why } = parsed.data;
 
     const existing = await taskStore.get(taskId);
     if (!existing) {
@@ -76,6 +80,8 @@ export function registerCallbackTaskRoutes(
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
+    if (failureClass) updateData.failureClass = failureClass;
+    if (failureReason) updateData.failureReason = failureReason;
     if (why) updateData.why = why;
     updateData.eventCatId = actor.catId;
 

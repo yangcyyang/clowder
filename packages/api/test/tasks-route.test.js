@@ -276,6 +276,41 @@ describe('Tasks Routes', () => {
     assert.equal(unclaimRes.json().events.at(-1).type, 'unclaimed');
   });
 
+  test('PATCH failed status persists failure taxonomy and writes failed event data', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: {
+        status: 'failed',
+        failureClass: 'test_failed',
+        failureReason: 'queue-processor.test.js failed',
+        eventCatId: 'codex',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.status, 'failed');
+    assert.equal(body.failureClass, 'test_failed');
+    assert.equal(body.failureReason, 'queue-processor.test.js failed');
+    assert.deepEqual(
+      body.events.map((event) => event.type),
+      ['status_changed', 'failed'],
+    );
+    const failedEvent = body.events.at(-1);
+    assert.equal(failedEvent.catId, 'codex');
+    assert.equal(failedEvent.data.failureClass, 'test_failed');
+    assert.equal(failedEvent.data.failureReason, 'queue-processor.test.js failed');
+  });
+
   test('GET task events by thread endpoint returns embedded ledger', async () => {
     const app = await createApp();
     const createRes = await app.inject({

@@ -9,7 +9,15 @@
 
 import type { CatId } from './ids.js';
 
-export type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
+export type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done' | 'failed';
+export type TaskFailureClass =
+  | 'agent_error'
+  | 'build_failed'
+  | 'test_failed'
+  | 'timeout'
+  | 'budget_exhausted'
+  | 'infra_error'
+  | 'manual_fail';
 export type TaskEventType =
   | 'claimed'
   | 'unclaimed'
@@ -91,6 +99,8 @@ export interface TaskItem {
   readonly title: string;
   readonly ownerCatId: CatId | null;
   readonly status: TaskStatus;
+  readonly failureClass?: TaskFailureClass;
+  readonly failureReason?: string;
   readonly why: string;
   readonly createdBy: CatId | 'user' | 'system';
   readonly createdAt: number;
@@ -121,6 +131,8 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   kind?: TaskKind;
   subjectKey?: string | null;
   ownerCatId?: CatId | null;
+  failureClass?: TaskFailureClass;
+  failureReason?: string;
   automationState?: AutomationState;
   userId?: string;
   sourceMessageId?: string;
@@ -138,6 +150,8 @@ export type UpdateTaskInput = {
   title?: string;
   ownerCatId?: CatId | null;
   status?: TaskStatus;
+  failureClass?: TaskFailureClass;
+  failureReason?: string;
   why?: string;
   sourceMessageId?: string;
   taskThreadId?: string;

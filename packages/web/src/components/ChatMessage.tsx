@@ -60,6 +60,7 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_review: '待验收',
   blocked: '阻塞',
   done: '完成',
+  failed: '失败',
 };
 
 const TASK_BADGE_CLASS: Record<TaskStatus, string> = {
@@ -68,6 +69,7 @@ const TASK_BADGE_CLASS: Record<TaskStatus, string> = {
   in_review: 'bg-cafe-accent/15 text-cafe-accent ring-cafe-accent/25',
   blocked: 'bg-conn-amber-bg text-conn-amber-text ring-conn-amber-text/25',
   done: 'bg-conn-emerald-bg text-conn-emerald-text ring-conn-emerald-ring',
+  failed: 'bg-conn-red-bg text-conn-red-text ring-conn-red-text/25',
 };
 
 function MessageTaskBadge({ task, seq }: { task: TaskItem; seq: number }) {

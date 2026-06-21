@@ -56,8 +56,19 @@ describe('formatTaskSnapshot', () => {
     assert.ok(result.includes('▸')); // focus marker on doing task
   });
 
-  it('sorts by priority: doing > in_review > blocked > todo > done', () => {
+  it('sorts by priority: failed > doing > in_review > blocked > todo > done', () => {
     const tasks = [
+      {
+        id: 't0',
+        threadId: 'th1',
+        title: 'Failed task',
+        ownerCatId: 'codex',
+        status: 'failed',
+        why: 'build failed',
+        createdBy: 'user',
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
       {
         id: 't1',
         threadId: 'th1',
@@ -116,10 +127,12 @@ describe('formatTaskSnapshot', () => {
     ];
     const result = formatTaskSnapshot(tasks);
     const lines = result.split('\n').filter((l) => l.includes('['));
+    const failedIdx = lines.findIndex((l) => l.includes('Failed task'));
     const doingIdx = lines.findIndex((l) => l.includes('Doing task'));
     const reviewIdx = lines.findIndex((l) => l.includes('Review task'));
     const blockedIdx = lines.findIndex((l) => l.includes('Blocked task'));
     const todoIdx = lines.findIndex((l) => l.includes('Todo task'));
+    assert.ok(failedIdx < doingIdx, 'failed before doing');
     assert.ok(doingIdx < reviewIdx, 'doing before in_review');
     assert.ok(reviewIdx < blockedIdx, 'in_review before blocked');
     assert.ok(blockedIdx < todoIdx, 'blocked before todo');
