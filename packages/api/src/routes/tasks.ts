@@ -8,7 +8,7 @@
  * DELETE /api/tasks/:id     → 删除 (204)
  */
 
-import type { CatId, CreateTaskInput, UpdateTaskInput } from '@cat-cafe/shared';
+import type { CatId, CreateTaskInput, TaskEvent, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -50,6 +50,9 @@ const createSchema = z.object({
   sourceSummaryId: z.string().optional(),
   taskThreadId: z.string().optional(),
   evidence: evidenceSchema,
+  parentTaskId: z.string().optional(),
+  retryOf: z.string().optional(),
+  branchOf: z.string().optional(),
 });
 
 const updateSchema = z
@@ -61,6 +64,10 @@ const updateSchema = z
     sourceMessageId: z.string().optional(),
     taskThreadId: z.string().optional(),
     evidence: evidenceSchema,
+    parentTaskId: z.string().optional(),
+    retryOf: z.string().optional(),
+    branchOf: z.string().optional(),
+    eventCatId: z.string().min(1).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided',
@@ -81,6 +88,9 @@ function toCreateInput(data: z.infer<typeof createSchema>): CreateTaskInput {
   if (data.sourceSummaryId) input.sourceSummaryId = data.sourceSummaryId;
   if (data.taskThreadId) input.taskThreadId = data.taskThreadId;
   if (data.evidence !== undefined) input.evidence = { ...data.evidence, updatedAt: Date.now() };
+  if (data.parentTaskId) input.parentTaskId = data.parentTaskId;
+  if (data.retryOf) input.retryOf = data.retryOf;
+  if (data.branchOf) input.branchOf = data.branchOf;
   return input;
 }
 
@@ -94,8 +104,19 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   if (data.taskThreadId !== undefined) input.taskThreadId = data.taskThreadId;
   if (data.ownerCatId !== undefined) input.ownerCatId = data.ownerCatId as CatId | null;
   if (data.evidence !== undefined) input.evidence = { ...data.evidence, updatedAt: Date.now() };
+  if (data.parentTaskId !== undefined) input.parentTaskId = data.parentTaskId;
+  if (data.retryOf !== undefined) input.retryOf = data.retryOf;
+  if (data.branchOf !== undefined) input.branchOf = data.branchOf;
+  if (data.eventCatId !== undefined) input.eventCatId = data.eventCatId;
   return input;
 }
+
+const taskEventSchema = z.object({
+  ts: z.string().datetime().optional(),
+  catId: z.string().min(1),
+  type: z.enum(['claimed', 'unclaimed', 'status_changed', 'completed', 'failed']),
+  data: z.record(z.unknown()).optional(),
+});
 
 const taskThreadSchema = z.object({
   userId: z.string().min(1).max(100).optional(),
@@ -127,6 +148,28 @@ function toTaskThreadMessage(message: StoredMessage) {
 
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, threadStore, messageStore, socketManager } = opts;
+
+  async function getTaskInThread(threadId: string, taskId: string): Promise<TaskItem | null> {
+    const task = await taskStore.get(taskId);
+    if (!task || task.threadId !== threadId) return null;
+    return task;
+  }
+
+  async function buildLineage(task: TaskItem): Promise<TaskItem[]> {
+    const lineage: TaskItem[] = [];
+    const visited = new Set<string>([task.id]);
+    let cursor: TaskItem | null = task;
+    for (let depth = 0; depth < 20; depth += 1) {
+      const nextId = cursor.parentTaskId ?? cursor.retryOf ?? cursor.branchOf;
+      if (!nextId || visited.has(nextId)) break;
+      visited.add(nextId);
+      const next = await taskStore.get(nextId);
+      if (!next) break;
+      lineage.push(next);
+      cursor = next;
+    }
+    return lineage;
+  }
 
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
@@ -165,6 +208,75 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Task not found' };
     }
     return task;
+  });
+
+  // GET /api/threads/:threadId/tasks/:taskId — 获取线程内任务详情（含 lineage 字段）
+  app.get('/api/threads/:threadId/tasks/:taskId', async (request, reply) => {
+    const { threadId, taskId } = request.params as { threadId: string; taskId: string };
+    const task = await getTaskInThread(threadId, taskId);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    return task;
+  });
+
+  // GET /api/threads/:threadId/tasks/:taskId/events — 查询任务事件账本
+  app.get('/api/threads/:threadId/tasks/:taskId/events', async (request, reply) => {
+    const { threadId, taskId } = request.params as { threadId: string; taskId: string };
+    const task = await getTaskInThread(threadId, taskId);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    return { events: task.events ?? [] };
+  });
+
+  // POST /api/threads/:threadId/tasks/:taskId/events — 手动追加事件（审计/迁移兜底）
+  app.post('/api/threads/:threadId/tasks/:taskId/events', async (request, reply) => {
+    const { threadId, taskId } = request.params as { threadId: string; taskId: string };
+    const task = await getTaskInThread(threadId, taskId);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+
+    const parsed = taskEventSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const event: TaskEvent = {
+      ts: parsed.data.ts ?? new Date().toISOString(),
+      catId: parsed.data.catId,
+      type: parsed.data.type,
+      ...(parsed.data.data ? { data: parsed.data.data } : {}),
+    };
+    const updated = await taskStore.update(task.id, { events: [event] });
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to append task event' };
+    }
+
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    reply.status(201);
+    return { events: updated.events ?? [] };
+  });
+
+  // GET /api/threads/:threadId/tasks/:taskId/lineage — 返回父链/重试/分支关联
+  app.get('/api/threads/:threadId/tasks/:taskId/lineage', async (request, reply) => {
+    const { threadId, taskId } = request.params as { threadId: string; taskId: string };
+    const task = await getTaskInThread(threadId, taskId);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+
+    return {
+      task,
+      lineage: await buildLineage(task),
+    };
   });
 
   // POST /api/tasks/:id/thread — ensure and return the task discussion thread.

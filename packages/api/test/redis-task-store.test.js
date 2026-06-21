@@ -385,6 +385,38 @@ describe('RedisTaskStore unit behavior', () => {
     assert.ok(tasks.some((task) => task.kind === 'pr_tracking'));
   });
 
+  it('persists task events and lineage fields in Redis hashes', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      threadId: 'thread-events',
+      title: 'child task',
+      why: 'audit',
+      createdBy: 'opus',
+      parentTaskId: 'task-parent',
+      retryOf: 'task-retry',
+      branchOf: 'task-branch',
+    });
+
+    await store.update(task.id, {
+      ownerCatId: 'codex',
+      status: 'doing',
+      eventCatId: 'codex',
+    });
+    await store.update(task.id, { status: 'done', eventCatId: 'codex' });
+
+    const stored = await store.get(task.id);
+    assert.equal(stored?.parentTaskId, 'task-parent');
+    assert.equal(stored?.retryOf, 'task-retry');
+    assert.equal(stored?.branchOf, 'task-branch');
+    assert.deepEqual(
+      stored?.events?.map((event) => event.type),
+      ['claimed', 'status_changed', 'status_changed', 'completed'],
+    );
+  });
+
   it('clears stale subject and kind indexes when the task hash has expired', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');

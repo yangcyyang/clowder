@@ -16,7 +16,7 @@
 import type { AutomationState, CatId, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
-import { createSubjectOwnershipConflict, type ITaskStore } from '../ports/TaskStore.js';
+import { createSubjectOwnershipConflict, mergeTaskEvents, type ITaskStore } from '../ports/TaskStore.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -80,6 +80,10 @@ export class RedisTaskStore implements ITaskStore {
       sourceSummaryId: input.sourceSummaryId,
       taskThreadId: input.taskThreadId,
       evidence: input.evidence,
+      events: input.events,
+      parentTaskId: input.parentTaskId,
+      retryOf: input.retryOf,
+      branchOf: input.branchOf,
     };
 
     await this.writeTask(task);
@@ -139,6 +143,10 @@ export class RedisTaskStore implements ITaskStore {
         sourceSummaryId: input.sourceSummaryId,
         taskThreadId: input.taskThreadId,
         evidence: input.evidence,
+        events: input.events,
+        parentTaskId: input.parentTaskId,
+        retryOf: input.retryOf,
+        branchOf: input.branchOf,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -196,6 +204,10 @@ export class RedisTaskStore implements ITaskStore {
         sourceSummaryId: input.sourceSummaryId,
         taskThreadId: input.taskThreadId,
         evidence: input.evidence,
+        events: input.events,
+        parentTaskId: input.parentTaskId,
+        retryOf: input.retryOf,
+        branchOf: input.branchOf,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -221,6 +233,10 @@ export class RedisTaskStore implements ITaskStore {
       sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
       taskThreadId: input.taskThreadId ?? existing.taskThreadId,
       evidence: input.evidence ?? existing.evidence,
+      events: existing.events,
+      parentTaskId: input.parentTaskId ?? existing.parentTaskId,
+      retryOf: input.retryOf ?? existing.retryOf,
+      branchOf: input.branchOf ?? existing.branchOf,
       updatedAt: now,
     };
 
@@ -272,6 +288,7 @@ export class RedisTaskStore implements ITaskStore {
     const existing = await this.get(taskId);
     if (!existing) return null;
 
+    const now = Date.now();
     const updated: TaskItem = {
       ...existing,
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -282,7 +299,11 @@ export class RedisTaskStore implements ITaskStore {
       ...(input.taskThreadId !== undefined ? { taskThreadId: input.taskThreadId } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
       ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
-      updatedAt: Date.now(),
+      events: mergeTaskEvents(existing, input, now),
+      ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
+      ...(input.retryOf !== undefined ? { retryOf: input.retryOf } : {}),
+      ...(input.branchOf !== undefined ? { branchOf: input.branchOf } : {}),
+      updatedAt: now,
     };
 
     await this.redis.hset(TaskKeys.detail(taskId), this.serializeTask(updated));
@@ -498,12 +519,18 @@ export class RedisTaskStore implements ITaskStore {
       sourceMessageId: task.sourceMessageId ?? '',
       sourceSummaryId: task.sourceSummaryId ?? '',
       taskThreadId: task.taskThreadId ?? '',
+      parentTaskId: task.parentTaskId ?? '',
+      retryOf: task.retryOf ?? '',
+      branchOf: task.branchOf ?? '',
     };
     if (task.automationState) {
       out.automationState = JSON.stringify(task.automationState);
     }
     if (task.evidence) {
       out.evidence = JSON.stringify(task.evidence);
+    }
+    if (task.events) {
+      out.events = JSON.stringify(task.events);
     }
     return out;
   }
@@ -525,6 +552,9 @@ export class RedisTaskStore implements ITaskStore {
       sourceMessageId: data.sourceMessageId || undefined,
       sourceSummaryId: data.sourceSummaryId || undefined,
       taskThreadId: data.taskThreadId || undefined,
+      parentTaskId: data.parentTaskId || undefined,
+      retryOf: data.retryOf || undefined,
+      branchOf: data.branchOf || undefined,
     };
     let task = base;
     if (data.automationState) {
@@ -539,6 +569,14 @@ export class RedisTaskStore implements ITaskStore {
         task = { ...task, evidence: JSON.parse(data.evidence) };
       } catch {
         // Ignore corrupted optional evidence payloads.
+      }
+    }
+    if (data.events) {
+      try {
+        const events = JSON.parse(data.events);
+        task = { ...task, events: Array.isArray(events) ? events : [] };
+      } catch {
+        // Ignore corrupted optional event payloads.
       }
     }
     return task;

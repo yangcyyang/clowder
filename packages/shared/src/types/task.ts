@@ -10,6 +10,7 @@
 import type { CatId } from './ids.js';
 
 export type TaskStatus = 'todo' | 'doing' | 'in_review' | 'blocked' | 'done';
+export type TaskEventType = 'claimed' | 'unclaimed' | 'status_changed' | 'completed' | 'failed';
 
 /**
  * Task kind discriminator (#320).
@@ -60,6 +61,15 @@ export interface TaskEvidence {
   readonly updatedAt?: number;
 }
 
+/** Append-only task activity ledger, embedded with the task record. */
+export interface TaskEvent {
+  readonly ts: string;
+  /** Actor cat id, or 'user'/'system' when no cat actor exists. */
+  readonly catId: string;
+  readonly type: TaskEventType;
+  readonly data?: Record<string, unknown>;
+}
+
 export interface TaskItem {
   readonly id: string;
   /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
@@ -90,6 +100,14 @@ export interface TaskItem {
   readonly taskThreadId?: string;
   /** Human-visible delivery evidence for task acceptance. */
   readonly evidence?: TaskEvidence;
+  /** Embedded task event ledger. Missing means legacy task with no recorded events yet. */
+  readonly events?: readonly TaskEvent[];
+  /** Parent task in a decomposition tree. */
+  readonly parentTaskId?: string;
+  /** Task this one retries after a failed/blocked attempt. */
+  readonly retryOf?: string;
+  /** Task this one branches from for an alternative approach. */
+  readonly branchOf?: string;
 }
 
 export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'createdBy'> & {
@@ -102,6 +120,10 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   sourceSummaryId?: string;
   taskThreadId?: string;
   evidence?: TaskEvidence;
+  events?: readonly TaskEvent[];
+  parentTaskId?: string;
+  retryOf?: string;
+  branchOf?: string;
 };
 
 /** Mutable partial for updates — strips readonly from TaskItem fields */
@@ -114,4 +136,10 @@ export type UpdateTaskInput = {
   taskThreadId?: string;
   automationState?: AutomationState;
   evidence?: TaskEvidence;
+  events?: readonly TaskEvent[];
+  parentTaskId?: string;
+  retryOf?: string;
+  branchOf?: string;
+  /** Actor to attribute auto-generated task ledger events to. */
+  eventCatId?: string;
 };

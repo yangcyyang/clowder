@@ -77,6 +77,7 @@ export function registerCallbackTaskRoutes(
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (why) updateData.why = why;
+    updateData.eventCatId = actor.catId;
 
     const updated = await taskStore.update(taskId, updateData);
     if (!updated) {
@@ -117,6 +118,7 @@ export function registerCallbackTaskRoutes(
     const updated = await taskStore.update(taskId, {
       ownerCatId: actor.catId,
       status: 'doing',
+      eventCatId: actor.catId,
       ...(why ? { why } : {}),
     });
     if (!updated) {

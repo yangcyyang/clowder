@@ -6,7 +6,14 @@
  * ID 使用 generateSortableId 保证天然有序。
  */
 
-import type { AutomationState, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
+import type {
+  AutomationState,
+  CreateTaskInput,
+  TaskEvent,
+  TaskItem,
+  TaskKind,
+  UpdateTaskInput,
+} from '@cat-cafe/shared';
 import { generateSortableId } from './MessageStore.js';
 
 const MAX_TASKS = 500;
@@ -44,6 +51,69 @@ export function isSubjectOwnershipConflictError(
     'code' in error &&
     (error as { code?: string }).code === SUBJECT_OWNERSHIP_CONFLICT_CODE
   );
+}
+
+function actorForTaskEvent(existing: TaskItem, input: UpdateTaskInput): string {
+  return input.eventCatId ?? input.ownerCatId ?? existing.ownerCatId ?? 'system';
+}
+
+export function buildTaskUpdateEvents(existing: TaskItem, input: UpdateTaskInput, now = Date.now()): TaskEvent[] {
+  const ts = new Date(now).toISOString();
+  const events: TaskEvent[] = [];
+
+  if (input.ownerCatId !== undefined && input.ownerCatId !== existing.ownerCatId) {
+    if (existing.ownerCatId) {
+      events.push({
+        ts,
+        catId: input.eventCatId ?? existing.ownerCatId,
+        type: 'unclaimed',
+        data: { from: existing.ownerCatId, to: input.ownerCatId ?? null },
+      });
+    }
+    if (input.ownerCatId) {
+      events.push({
+        ts,
+        catId: input.eventCatId ?? input.ownerCatId,
+        type: 'claimed',
+        data: { from: existing.ownerCatId ?? null, to: input.ownerCatId },
+      });
+    }
+  }
+
+  if (input.status !== undefined && input.status !== existing.status) {
+    const actor = actorForTaskEvent(existing, input);
+    events.push({
+      ts,
+      catId: actor,
+      type: 'status_changed',
+      data: { from: existing.status, to: input.status },
+    });
+
+    if (input.status === 'done') {
+      events.push({
+        ts,
+        catId: actor,
+        type: 'completed',
+        data: { from: existing.status, to: input.status },
+      });
+    }
+
+    const rawStatus = input.status as string;
+    if (rawStatus === 'failed' || rawStatus === 'closed') {
+      events.push({
+        ts,
+        catId: actor,
+        type: 'failed',
+        data: { from: existing.status, to: rawStatus },
+      });
+    }
+  }
+
+  return events;
+}
+
+export function mergeTaskEvents(existing: TaskItem, input: UpdateTaskInput, now = Date.now()): readonly TaskEvent[] {
+  return [...(existing.events ?? []), ...buildTaskUpdateEvents(existing, input, now), ...(input.events ?? [])];
 }
 
 /**
@@ -110,6 +180,10 @@ export class TaskStore implements ITaskStore {
       sourceSummaryId: input.sourceSummaryId,
       taskThreadId: input.taskThreadId,
       evidence: input.evidence,
+      events: input.events,
+      parentTaskId: input.parentTaskId,
+      retryOf: input.retryOf,
+      branchOf: input.branchOf,
     };
 
     this.tasks.set(task.id, task);
@@ -152,6 +226,10 @@ export class TaskStore implements ITaskStore {
           sourceMessageId: input.sourceMessageId ?? existing.sourceMessageId,
           sourceSummaryId: input.sourceSummaryId ?? existing.sourceSummaryId,
           evidence: input.evidence ?? existing.evidence,
+          events: existing.events,
+          parentTaskId: input.parentTaskId ?? existing.parentTaskId,
+          retryOf: input.retryOf ?? existing.retryOf,
+          branchOf: input.branchOf ?? existing.branchOf,
           updatedAt: Date.now(),
         };
         this.tasks.set(existingId, updated);
@@ -202,6 +280,7 @@ export class TaskStore implements ITaskStore {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
 
+    const now = Date.now();
     const updated: TaskItem = {
       ...existing,
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -212,7 +291,11 @@ export class TaskStore implements ITaskStore {
       ...(input.taskThreadId !== undefined ? { taskThreadId: input.taskThreadId } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
       ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
-      updatedAt: Date.now(),
+      events: mergeTaskEvents(existing, input, now),
+      ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
+      ...(input.retryOf !== undefined ? { retryOf: input.retryOf } : {}),
+      ...(input.branchOf !== undefined ? { branchOf: input.branchOf } : {}),
+      updatedAt: now,
     };
 
     this.tasks.set(taskId, updated);

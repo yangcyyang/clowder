@@ -526,6 +526,8 @@ export type {
   ConflictAutomationState,
   CreateTaskInput,
   ReviewAutomationState,
+  TaskEvent,
+  TaskEventType,
   TaskEvidence,
   TaskItem,
   TaskKind,

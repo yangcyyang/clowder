@@ -61,6 +61,41 @@ describe('Tasks Routes', () => {
     assert.equal(body.createdBy, 'opus');
   });
 
+  test('POST accepts task lineage fields', async () => {
+    const app = await createApp();
+    const parentRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Parent task',
+        why: '',
+        createdBy: 'opus',
+      },
+    });
+    const parentId = parentRes.json().id;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Child task',
+        why: '',
+        createdBy: 'opus',
+        parentTaskId: parentId,
+        retryOf: 'task-retry-source',
+        branchOf: 'task-branch-source',
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    const body = response.json();
+    assert.equal(body.parentTaskId, parentId);
+    assert.equal(body.retryOf, 'task-retry-source');
+    assert.equal(body.branchOf, 'task-branch-source');
+  });
+
   test('POST broadcasts task_created event', async () => {
     const app = await createApp();
     await app.inject({
@@ -199,6 +234,129 @@ describe('Tasks Routes', () => {
     const events = socketManager.getEvents();
     assert.equal(events.length, 2);
     assert.equal(events[1].event, 'task_updated');
+  });
+
+  test('PATCH writes claimed, unclaimed, status_changed and completed task events', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const claimRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { ownerCatId: 'codex', status: 'doing', eventCatId: 'codex' },
+    });
+    assert.equal(claimRes.statusCode, 200);
+    assert.deepEqual(
+      claimRes.json().events.map((event) => event.type),
+      ['claimed', 'status_changed'],
+    );
+
+    const doneRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { status: 'done', eventCatId: 'codex' },
+    });
+    assert.equal(doneRes.statusCode, 200);
+    assert.deepEqual(
+      doneRes.json().events.map((event) => event.type),
+      ['claimed', 'status_changed', 'status_changed', 'completed'],
+    );
+
+    const unclaimRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { ownerCatId: null, eventCatId: 'codex' },
+    });
+    assert.equal(unclaimRes.statusCode, 200);
+    assert.equal(unclaimRes.json().events.at(-1).type, 'unclaimed');
+  });
+
+  test('GET task events by thread endpoint returns embedded ledger', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { ownerCatId: 'codex', eventCatId: 'codex' },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'claimed');
+  });
+
+  test('POST task events by thread endpoint appends manual ledger event', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: {
+        catId: 'system',
+        type: 'failed',
+        data: { reason: 'manual audit' },
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'failed');
+    assert.equal(response.json().events[0].data.reason, 'manual audit');
+  });
+
+  test('GET task by thread and lineage endpoint return association fields', async () => {
+    const app = await createApp();
+    const parentRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Parent', why: '', createdBy: 'opus' },
+    });
+    const parentId = parentRes.json().id;
+    const childRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Child', why: '', createdBy: 'opus', parentTaskId: parentId },
+    });
+    const childId = childRes.json().id;
+
+    const byThread = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${childId}`,
+    });
+    assert.equal(byThread.statusCode, 200);
+    assert.equal(byThread.json().parentTaskId, parentId);
+
+    const lineage = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${childId}/lineage`,
+    });
+    assert.equal(lineage.statusCode, 200);
+    assert.equal(lineage.json().task.id, childId);
+    assert.deepEqual(
+      lineage.json().lineage.map((task) => task.id),
+      [parentId],
+    );
   });
 
   test('PATCH accepts in_review as a first-class status', async () => {
