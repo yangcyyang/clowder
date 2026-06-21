@@ -80,6 +80,9 @@ interface LoggerLike {
 
 interface CatSupervisorLike {
   markProcessing(catIds: string | readonly string[]): Promise<void> | void;
+  markOutput?(catIds: string | readonly string[]): Promise<void> | void;
+  pauseForTool?(catIds: string | readonly string[]): Promise<void> | void;
+  resumeAfterTool?(catIds: string | readonly string[]): Promise<void> | void;
   markIdle(catIds: string | readonly string[]): Promise<void> | void;
 }
 
@@ -91,6 +94,16 @@ function isCompleteMessageDeliveryEnabled(): boolean {
 export function isParallelDispatchEnabled(): boolean {
   const value = process.env.CAT_CAFE_PARALLEL_DISPATCH?.trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+function isWatchdogOutputEvent(type: string): boolean {
+  return (
+    type !== 'done' &&
+    type !== 'session_init' &&
+    type !== 'provider_signal' &&
+    type !== 'liveness_signal' &&
+    type !== 'system_info'
+  );
 }
 
 /** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
@@ -1165,6 +1178,15 @@ export class QueueProcessor {
       )) {
         if (controller.signal.aborted) {
           break;
+        }
+        if (msg.catId) {
+          if (msg.type === 'tool_use') {
+            await this.deps.catSupervisor?.pauseForTool?.(msg.catId);
+          } else if (msg.type === 'tool_result') {
+            await this.deps.catSupervisor?.resumeAfterTool?.(msg.catId);
+          } else if (isWatchdogOutputEvent(msg.type)) {
+            await this.deps.catSupervisor?.markOutput?.(msg.catId);
+          }
         }
         if (msg.type === 'tool_use') {
           await invocationRecordStore.update(invocationId, { phase: 'tool_calling' });

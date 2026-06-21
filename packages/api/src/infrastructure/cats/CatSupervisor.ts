@@ -20,8 +20,17 @@ export interface CatSupervisorDeps {
   log: LoggerLike;
   userId?: string;
   heartbeatMs?: number;
+  connectTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  /**
+   * Backward compatibility for the old flat timeout. When this is the only
+   * timeout option supplied, CatSupervisor keeps the original single-timer
+   * behavior instead of using the two-stage stream watchdog.
+   */
   processingTimeoutMs?: number;
 }
+
+type WatchdogPhase = 'connect' | 'idle' | 'paused';
 
 /**
  * CatSupervisor keeps the lightweight "always online" contract for cats.
@@ -36,10 +45,13 @@ export class CatSupervisor {
   private readonly log: LoggerLike;
   private readonly userId: string;
   private readonly heartbeatMs: number;
-  private readonly processingTimeoutMs: number;
+  private readonly connectTimeoutMs: number;
+  private readonly idleTimeoutMs: number;
+  private readonly legacyProcessingTimeoutMs: number | null;
   private readonly statuses = new Map<string, CatSupervisorStatus>();
   private readonly enabledCats = new Set<string>();
   private readonly timeoutTimers = new Map<string, NodeJS.Timeout>();
+  private readonly watchdogPhases = new Map<string, WatchdogPhase>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: CatSupervisorDeps) {
@@ -48,7 +60,12 @@ export class CatSupervisor {
     this.log = deps.log;
     this.userId = deps.userId ?? 'default-user';
     this.heartbeatMs = deps.heartbeatMs ?? 30_000;
-    this.processingTimeoutMs = deps.processingTimeoutMs ?? 60_000;
+    this.connectTimeoutMs = deps.connectTimeoutMs ?? 30_000;
+    this.idleTimeoutMs = deps.idleTimeoutMs ?? 120_000;
+    this.legacyProcessingTimeoutMs =
+      deps.processingTimeoutMs !== undefined && deps.connectTimeoutMs === undefined && deps.idleTimeoutMs === undefined
+        ? deps.processingTimeoutMs
+        : null;
   }
 
   start(): void {
@@ -66,6 +83,7 @@ export class CatSupervisor {
     this.heartbeatTimer = null;
     for (const timer of this.timeoutTimers.values()) clearTimeout(timer);
     this.timeoutTimers.clear();
+    this.watchdogPhases.clear();
   }
 
   async syncCats(
@@ -97,7 +115,38 @@ export class CatSupervisor {
     for (const catId of this.normalizeCatIds(catIds)) {
       if (!this.enabledCats.has(catId)) this.enabledCats.add(catId);
       await this.setStatus(catId, 'processing');
-      this.armTimeout(catId);
+      if (this.legacyProcessingTimeoutMs !== null) {
+        this.armLegacyTimeout(catId);
+      } else {
+        this.armConnectTimeout(catId);
+      }
+    }
+  }
+
+  async markOutput(catIds: string | readonly string[]): Promise<void> {
+    if (this.legacyProcessingTimeoutMs !== null) return;
+    for (const catId of this.normalizeCatIds(catIds)) {
+      if (this.statuses.get(catId) !== 'processing') continue;
+      if (this.watchdogPhases.get(catId) === 'paused') continue;
+      this.armIdleTimeout(catId);
+    }
+  }
+
+  async pauseForTool(catIds: string | readonly string[]): Promise<void> {
+    if (this.legacyProcessingTimeoutMs !== null) return;
+    for (const catId of this.normalizeCatIds(catIds)) {
+      if (this.statuses.get(catId) !== 'processing') continue;
+      this.clearTimeoutTimer(catId);
+      this.watchdogPhases.set(catId, 'paused');
+    }
+  }
+
+  async resumeAfterTool(catIds: string | readonly string[]): Promise<void> {
+    if (this.legacyProcessingTimeoutMs !== null) return;
+    for (const catId of this.normalizeCatIds(catIds)) {
+      if (this.statuses.get(catId) !== 'processing') continue;
+      if (this.watchdogPhases.get(catId) !== 'paused') continue;
+      this.armIdleTimeout(catId);
     }
   }
 
@@ -143,19 +192,40 @@ export class CatSupervisor {
     return this.statuses.get(catId);
   }
 
-  private armTimeout(catId: string): void {
-    this.clearProcessingTimeout(catId);
+  private armLegacyTimeout(catId: string): void {
+    this.armTimeout(catId, this.legacyProcessingTimeoutMs ?? 60_000);
+  }
+
+  private armConnectTimeout(catId: string): void {
+    this.watchdogPhases.set(catId, 'connect');
+    this.armTimeout(catId, this.connectTimeoutMs);
+  }
+
+  private armIdleTimeout(catId: string): void {
+    this.watchdogPhases.set(catId, 'idle');
+    this.armTimeout(catId, this.idleTimeoutMs);
+  }
+
+  private armTimeout(catId: string, timeoutMs: number): void {
+    this.clearTimeoutTimer(catId);
     const timer = setTimeout(() => {
       if (this.statuses.get(catId) !== 'processing') return;
+      this.timeoutTimers.delete(catId);
+      this.watchdogPhases.delete(catId);
       void this.setStatus(catId, 'timeout').catch((err) => {
         this.log.warn({ err, catId }, '[CatSupervisor] timeout status update failed');
       });
-    }, this.processingTimeoutMs);
+    }, timeoutMs);
     timer.unref?.();
     this.timeoutTimers.set(catId, timer);
   }
 
   private clearProcessingTimeout(catId: string): void {
+    this.clearTimeoutTimer(catId);
+    this.watchdogPhases.delete(catId);
+  }
+
+  private clearTimeoutTimer(catId: string): void {
     const timer = this.timeoutTimers.get(catId);
     if (!timer) return;
     clearTimeout(timer);

@@ -67,6 +67,80 @@ describe('CatSupervisor', () => {
     assert.ok(timeoutCall, 'timeout status should be broadcast');
   });
 
+  it('keeps legacy flat timeout behavior when only processingTimeoutMs is configured', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, processingTimeoutMs: 1_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex');
+    t.mock.timers.tick(500);
+    await supervisor.markOutput('codex');
+    t.mock.timers.tick(500);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(supervisor.getStatus('codex'), 'timeout');
+  });
+
+  it('marks processing cats as timeout when no first output arrives before connect timeout', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, connectTimeoutMs: 1_000, idleTimeoutMs: 5_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex');
+    t.mock.timers.tick(999);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'processing');
+
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'timeout');
+  });
+
+  it('switches to idle timeout after first output and resets it on later output', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, connectTimeoutMs: 1_000, idleTimeoutMs: 2_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex');
+    t.mock.timers.tick(500);
+    await supervisor.markOutput('codex');
+
+    t.mock.timers.tick(1_500);
+    await supervisor.markOutput('codex');
+    t.mock.timers.tick(1_999);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'processing');
+
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'timeout');
+  });
+
+  it('pauses idle timeout during tool execution and resumes after tool result', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, connectTimeoutMs: 1_000, idleTimeoutMs: 2_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex');
+    await supervisor.pauseForTool('codex');
+    t.mock.timers.tick(10_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'processing');
+
+    await supervisor.resumeAfterTool('codex');
+    t.mock.timers.tick(1_999);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'processing');
+
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(supervisor.getStatus('codex'), 'timeout');
+  });
+
   it('recovers stale processing and timeout statuses to online idle', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const deps = makeDeps();
