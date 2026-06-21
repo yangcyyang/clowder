@@ -7,6 +7,10 @@
  * - processNext（用户级）：铲屎官手动触发处理自己的下一条
  */
 
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
+import type { TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
@@ -31,6 +35,9 @@ import type {
 import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
+
+const execFileAsync = promisify(execFile);
+const GIT_ARTIFACT_MAX_FILE_BYTES = 1024 * 1024;
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
@@ -86,6 +93,20 @@ interface CatSupervisorLike {
   markIdle(catIds: string | readonly string[]): Promise<void> | void;
 }
 
+interface GitArtifactFile {
+  path: string;
+  added: number;
+  removed: number;
+}
+
+interface GitArtifactSnapshot {
+  files: GitArtifactFile[];
+  totalAdded: number;
+  totalRemoved: number;
+}
+
+type GitArtifactCollector = () => Promise<GitArtifactSnapshot>;
+
 function isCompleteMessageDeliveryEnabled(): boolean {
   const value = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY?.trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
@@ -104,6 +125,74 @@ function isWatchdogOutputEvent(type: string): boolean {
     type !== 'liveness_signal' &&
     type !== 'system_info'
   );
+}
+
+function parseNumstat(stdout: string): GitArtifactSnapshot {
+  const files: GitArtifactFile[] = [];
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const [addedRaw, removedRaw, path] = line.split('\t');
+    if (!path) continue;
+    const added = Number.parseInt(addedRaw ?? '0', 10);
+    const removed = Number.parseInt(removedRaw ?? '0', 10);
+    files.push({
+      path,
+      added: Number.isFinite(added) ? added : 0,
+      removed: Number.isFinite(removed) ? removed : 0,
+    });
+  }
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    files,
+    totalAdded: files.reduce((sum, file) => sum + file.added, 0),
+    totalRemoved: files.reduce((sum, file) => sum + file.removed, 0),
+  };
+}
+
+async function collectUntrackedGitFiles(): Promise<GitArtifactFile[]> {
+  const { stdout } = await execFileAsync('git', ['ls-files', '--others', '--exclude-standard', '-z'], {
+    cwd: process.cwd(),
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+    encoding: 'buffer',
+  });
+  const paths = stdout
+    .toString('utf8')
+    .split('\0')
+    .map((path) => path.trim())
+    .filter(Boolean);
+  const files: GitArtifactFile[] = [];
+  for (const path of paths) {
+    let added = 0;
+    try {
+      const content = await readFile(path);
+      if (content.length <= GIT_ARTIFACT_MAX_FILE_BYTES && !content.includes(0)) {
+        const text = content.toString('utf8');
+        added = text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+      }
+    } catch {
+      // Best-effort artifact index: keep the file path even if line counting fails.
+    }
+    files.push({ path, added, removed: 0 });
+  }
+  return files;
+}
+
+async function collectGitDiffArtifactSnapshot(): Promise<GitArtifactSnapshot> {
+  const { stdout } = await execFileAsync('git', ['diff', '--numstat', 'HEAD', '--'], {
+    cwd: process.cwd(),
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  });
+  const snapshot = parseNumstat(stdout);
+  const trackedPaths = new Set(snapshot.files.map((file) => file.path));
+  const untracked = (await collectUntrackedGitFiles()).filter((file) => !trackedPaths.has(file.path));
+  const files = [...snapshot.files, ...untracked].sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    files,
+    totalAdded: files.reduce((sum, file) => sum + file.added, 0),
+    totalRemoved: files.reduce((sum, file) => sum + file.removed, 0),
+  };
 }
 
 /** Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
@@ -157,8 +246,10 @@ export interface QueueProcessorDeps {
   threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
   /** Task #112: lightweight always-online status supervisor. */
   catSupervisor?: CatSupervisorLike;
-  /** Task event ledger — used to attach A2A handoff events to source tasks. */
-  taskStore?: Pick<ITaskStore, 'listByThread' | 'update'>;
+  /** Task event ledger — used to attach A2A handoff/artifact events to source tasks. */
+  taskStore?: Pick<ITaskStore, 'listByThread' | 'update'> & Partial<Pick<ITaskStore, 'listByKind'>>;
+  /** Test seam for git artifact tracking; production defaults to `git diff --numstat HEAD --`. */
+  gitArtifactCollector?: GitArtifactCollector;
   /** F224: owns passive continuation consume/store around single-cat invocations. */
   sessionContinuationCoordinator?: Pick<
     SessionContinuationCoordinator,
@@ -236,6 +327,91 @@ export class QueueProcessor {
       }
     } catch (err) {
       this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append A2A handoff task event failed');
+    }
+  }
+
+  private diffArtifactSnapshots(
+    before: GitArtifactSnapshot | null,
+    after: GitArtifactSnapshot | null,
+  ): GitArtifactSnapshot | null {
+    if (!after || after.files.length === 0) return null;
+    const beforeByPath = new Map((before?.files ?? []).map((file) => [file.path, file]));
+    const changedFiles = after.files.filter((file) => {
+      const previous = beforeByPath.get(file.path);
+      return !previous || previous.added !== file.added || previous.removed !== file.removed;
+    });
+    if (changedFiles.length === 0) return null;
+    return {
+      files: changedFiles,
+      totalAdded: changedFiles.reduce((sum, file) => sum + file.added, 0),
+      totalRemoved: changedFiles.reduce((sum, file) => sum + file.removed, 0),
+    };
+  }
+
+  private async collectGitArtifacts(threadId: string): Promise<GitArtifactSnapshot | null> {
+    try {
+      return await (this.deps.gitArtifactCollector ?? collectGitDiffArtifactSnapshot)();
+    } catch (err) {
+      this.deps.log.warn({ err, threadId }, '[QueueProcessor] collect git artifacts failed');
+      return null;
+    }
+  }
+
+  private async findSourceTaskForArtifact(params: {
+    threadId: string;
+    sourceMessageIds: readonly string[];
+  }): Promise<TaskItem | null> {
+    const { taskStore } = this.deps;
+    if (!taskStore) return null;
+    const sourceMessageIds = new Set(params.sourceMessageIds.filter(Boolean));
+    const tasks = await taskStore.listByThread(params.threadId);
+    const byMessage = tasks.find((task) => task.sourceMessageId && sourceMessageIds.has(task.sourceMessageId));
+    if (byMessage) return byMessage;
+    const byTaskThread = tasks.find((task) => task.taskThreadId === params.threadId);
+    if (byTaskThread) return byTaskThread;
+    if (taskStore.listByKind) {
+      const workTasks = await taskStore.listByKind('work');
+      return workTasks.find((task) => task.taskThreadId === params.threadId) ?? null;
+    }
+    return null;
+  }
+
+  private async appendArtifactTaskEvent(params: {
+    threadId: string;
+    catId: string;
+    sourceMessageIds: readonly string[];
+    before: GitArtifactSnapshot | null;
+    after: GitArtifactSnapshot | null;
+  }): Promise<void> {
+    const { taskStore } = this.deps;
+    if (!taskStore) return;
+    const artifact = this.diffArtifactSnapshots(params.before, params.after);
+    if (!artifact) return;
+    try {
+      const sourceTask = await this.findSourceTaskForArtifact({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      if (!sourceTask) return;
+      const updated = await taskStore.update(sourceTask.id, {
+        events: [
+          {
+            ts: new Date().toISOString(),
+            catId: params.catId,
+            type: 'artifact',
+            data: {
+              files: artifact.files,
+              totalAdded: artifact.totalAdded,
+              totalRemoved: artifact.totalRemoved,
+            },
+          },
+        ],
+      });
+      if (updated) {
+        this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append artifact task event failed');
     }
   }
 
@@ -1059,6 +1235,7 @@ export class QueueProcessor {
           );
         }
       }
+      const artifactBaseline = this.deps.taskStore ? await this.collectGitArtifacts(threadId) : null;
 
       // F122B B6: Collect response text for completion hook (multi-mention aggregation).
       const hook = this.entryCompleteHooks.get(entry.id);
@@ -1365,6 +1542,17 @@ export class QueueProcessor {
         deliveredTurnIndices,
         threadMeta,
       );
+
+      if (artifactBaseline) {
+        const artifactAfter = await this.collectGitArtifacts(threadId);
+        await this.appendArtifactTaskEvent({
+          threadId,
+          catId: primaryCat,
+          sourceMessageIds: allMessageIds,
+          before: artifactBaseline,
+          after: artifactAfter,
+        });
+      }
 
       return 'succeeded';
     } catch (err) {

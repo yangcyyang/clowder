@@ -1656,6 +1656,63 @@ describe('QueueProcessor', () => {
         ['pi', 'codex'],
       );
     });
+
+    it('appends artifact task event with git diff stats after successful execution', async () => {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-task',
+        events: [],
+      };
+      const snapshots = [
+        { files: [], totalAdded: 0, totalRemoved: 0 },
+        {
+          files: [{ path: 'packages/api/src/index.ts', added: 4, removed: 2 }],
+          totalAdded: 4,
+          totalRemoved: 2,
+        },
+      ];
+      const updatedTasks = [];
+      const artifactDeps = stubDeps({
+        gitArtifactCollector: mock.fn(async () => snapshots.shift() ?? snapshots.at(-1)),
+        taskStore: {
+          listByThread: mock.fn(async () => [sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const updated = {
+              ...sourceTask,
+              events: [...sourceTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'text', catId: 'opus', content: 'done', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const artifactProcessor = new QueueProcessor(artifactDeps);
+      const entry = enqueueEntry(artifactDeps.queue, {
+        userId: 'u1',
+        targetCats: ['opus'],
+      });
+      artifactDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      await artifactProcessor.processNext('t1', 'u1');
+      await new Promise((r) => setTimeout(r, 80));
+
+      assert.equal(updatedTasks.length, 1);
+      const event = updatedTasks[0].events.at(-1);
+      assert.equal(event.type, 'artifact');
+      assert.equal(event.catId, 'opus');
+      assert.deepEqual(event.data.files, [{ path: 'packages/api/src/index.ts', added: 4, removed: 2 }]);
+      assert.equal(event.data.totalAdded, 4);
+      assert.equal(event.data.totalRemoved, 2);
+      assert.equal(artifactDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
+    });
   });
 
   // ── Tracker guard: prevent duplicate execution for CLI-active cats ──

@@ -356,6 +356,41 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].data.toCatId, 'codex');
   });
 
+  test('POST task events accepts artifact event payload and filters it', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const postRes = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: {
+        catId: 'codex',
+        type: 'artifact',
+        data: {
+          files: [{ path: 'packages/api/src/index.ts', added: 3, removed: 1 }],
+          totalAdded: 3,
+          totalRemoved: 1,
+        },
+      },
+    });
+    assert.equal(postRes.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events?type=artifact`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'artifact');
+    assert.equal(response.json().events[0].data.totalAdded, 3);
+  });
+
   test('GET task by thread and lineage endpoint return association fields', async () => {
     const app = await createApp();
     const parentRes = await app.inject({
