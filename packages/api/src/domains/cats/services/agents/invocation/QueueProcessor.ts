@@ -14,6 +14,7 @@ import type { TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
+import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -319,6 +320,8 @@ export interface QueueProcessorDeps {
   catSupervisor?: CatSupervisorLike;
   /** Task event ledger — used to attach A2A handoff/artifact events to source tasks. */
   taskStore?: Pick<ITaskStore, 'listByThread' | 'update'> & Partial<Pick<ITaskStore, 'listByKind'>>;
+  /** Test seam for project scaffold files; production defaults to monorepo root. */
+  projectRoot?: string;
   /** Test seam for git artifact tracking; production defaults to `git diff --numstat HEAD --`. */
   gitArtifactCollector?: GitArtifactCollector;
   /** F224: owns passive continuation consume/store around single-cat invocations. */
@@ -371,6 +374,7 @@ export class QueueProcessor {
     callerCatId: string;
     targetCatId: string;
     queueEntryId: string;
+    summary?: string;
   }): Promise<void> {
     const { taskStore } = this.deps;
     if (!taskStore || !params.triggerMessageId) return;
@@ -378,10 +382,11 @@ export class QueueProcessor {
       const tasks = await taskStore.listByThread(params.threadId);
       const sourceTask = tasks.find((task) => task.sourceMessageId === params.triggerMessageId);
       if (!sourceTask) return;
+      const timestamp = new Date().toISOString();
       const updated = await taskStore.update(sourceTask.id, {
         events: [
           {
-            ts: new Date().toISOString(),
+            ts: timestamp,
             catId: params.callerCatId,
             type: 'handoff',
             data: {
@@ -389,11 +394,23 @@ export class QueueProcessor {
               toCatId: params.targetCatId,
               triggerMessageId: params.triggerMessageId,
               queueEntryId: params.queueEntryId,
+              summary: params.summary,
             },
           },
         ],
       });
       if (updated) {
+        await appendProjectHandoffLogForPromptProjects(
+          {
+            timestamp,
+            fromCatId: params.callerCatId,
+            toCatId: params.targetCatId,
+            status: updated.status,
+            summary: params.summary,
+          },
+          undefined,
+          this.deps.projectRoot,
+        );
         this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
       }
     } catch (err) {
@@ -1461,6 +1478,7 @@ export class QueueProcessor {
                 callerCatId: handoff.callerCatId,
                 targetCatId: targetCat,
                 queueEntryId: result.entry.id,
+                summary: handoff.content,
               });
               enqueued.push(targetCat);
             }

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, it, mock } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -1591,14 +1594,21 @@ describe('QueueProcessor', () => {
     });
 
     it('enqueues text-scan A2A mentions as independent autoExecute work items', async () => {
+      const previousProjectIds = process.env.CAT_CAFE_PROJECT_CONTEXT_IDS;
+      const projectRoot = await mkdtemp(join(tmpdir(), 'queue-handoff-project-'));
+      await mkdir(join(projectRoot, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+      await writeFile(join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'), '# demo — 交接日志\n');
+      process.env.CAT_CAFE_PROJECT_CONTEXT_IDS = 'demo';
       const sourceTask = {
         id: 'task-source',
         threadId: 't1',
         sourceMessageId: 'msg-opus-handoff',
+        status: 'doing',
         events: [],
       };
       const updatedTasks = [];
       const nestedDeps = stubDeps({
+        projectRoot,
         taskStore: {
           listByThread: mock.fn(async () => [sourceTask]),
           update: mock.fn(async (_taskId, input) => {
@@ -1629,32 +1639,53 @@ describe('QueueProcessor', () => {
         },
       });
       const nestedProcessor = new QueueProcessor(nestedDeps);
-      const entry = enqueueEntry(nestedDeps.queue, {
-        userId: 'u1',
-        source: 'agent',
-        targetCats: ['opus'],
-        autoExecute: true,
-        callerCatId: 'claude',
-      });
-      nestedDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-root');
+      try {
+        const entry = enqueueEntry(nestedDeps.queue, {
+          userId: 'u1',
+          source: 'agent',
+          targetCats: ['opus'],
+          autoExecute: true,
+          callerCatId: 'claude',
+        });
+        nestedDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-root');
 
-      await nestedProcessor.tryAutoExecute('t1');
-      await new Promise((r) => setTimeout(r, 100));
+        await nestedProcessor.tryAutoExecute('t1');
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const targets = nestedDeps.invocationRecordStore.create.mock.calls.map(
+            (call) => call.arguments[0].targetCats[0],
+          );
+          if (targets.includes('pi') && targets.includes('codex')) break;
+          await new Promise((r) => setTimeout(r, 25));
+        }
 
-      const createdTargets = nestedDeps.invocationRecordStore.create.mock.calls.map(
-        (call) => call.arguments[0].targetCats[0],
-      );
-      assert.ok(createdTargets.includes('pi'), 'Pi should be started via queue-backed A2A');
-      assert.ok(createdTargets.includes('codex'), 'Codex should be started via queue-backed A2A');
-      assert.equal(updatedTasks.length, 2, 'each enqueued A2A target should append a handoff event');
-      assert.deepEqual(
-        updatedTasks.map((task) => task.events.at(-1).type),
-        ['handoff', 'handoff'],
-      );
-      assert.deepEqual(
-        updatedTasks.map((task) => task.events.at(-1).data.toCatId),
-        ['pi', 'codex'],
-      );
+        const createdTargets = nestedDeps.invocationRecordStore.create.mock.calls.map(
+          (call) => call.arguments[0].targetCats[0],
+        );
+        assert.ok(createdTargets.includes('pi'), 'Pi should be started via queue-backed A2A');
+        assert.ok(createdTargets.includes('codex'), 'Codex should be started via queue-backed A2A');
+        assert.equal(updatedTasks.length, 2, 'each enqueued A2A target should append a handoff event');
+        assert.deepEqual(
+          updatedTasks.map((task) => task.events.at(-1).type),
+          ['handoff', 'handoff'],
+        );
+        assert.deepEqual(
+          updatedTasks.map((task) => task.events.at(-1).data.toCatId),
+          ['pi', 'codex'],
+        );
+        const handoffLog = await readFile(join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'), 'utf-8');
+        assert.ok(handoffLog.includes('**from**: opus'), 'handoff-log should include sender');
+        assert.ok(handoffLog.includes('**to**: pi'), 'handoff-log should include first target');
+        assert.ok(handoffLog.includes('**to**: codex'), 'handoff-log should include second target');
+        assert.ok(handoffLog.includes('**状态**: doing'), 'handoff-log should include source task status');
+        assert.ok(handoffLog.includes('@Pi 做 A，@codex 做 B'), 'handoff-log should include handoff summary');
+      } finally {
+        if (previousProjectIds === undefined) {
+          delete process.env.CAT_CAFE_PROJECT_CONTEXT_IDS;
+        } else {
+          process.env.CAT_CAFE_PROJECT_CONTEXT_IDS = previousProjectIds;
+        }
+        await rm(projectRoot, { recursive: true, force: true });
+      }
     });
 
     it('appends artifact task event with git diff stats after successful execution', async () => {

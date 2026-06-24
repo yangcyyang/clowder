@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { appendFile, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 
@@ -32,6 +32,11 @@ export function getProjectProgressPath(projectId: string, projectRoot = findMono
 export function getProjectBriefPath(projectId: string, projectRoot = findMonorepoRoot()): string {
   assertSafeProjectId(projectId);
   return join(getProjectProgressDir(projectRoot), projectId, 'brief.md');
+}
+
+export function getProjectHandoffLogPath(projectId: string, projectRoot = findMonorepoRoot()): string {
+  assertSafeProjectId(projectId);
+  return join(getProjectProgressDir(projectRoot), projectId, 'handoff-log.md');
 }
 
 export async function readProjectBrief(
@@ -125,4 +130,51 @@ export async function readProjectProgressForPrompt(
   } catch {
     return null;
   }
+}
+
+export interface ProjectHandoffLogEntry {
+  timestamp: string;
+  fromCatId: string;
+  toCatId: string;
+  status: string;
+  summary?: string;
+}
+
+function singleLine(value: string | undefined): string {
+  return (value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export async function appendProjectHandoffLogForPromptProjects(
+  entry: ProjectHandoffLogEntry,
+  projectIds = getConfiguredProjectProgressIds(),
+  projectRoot = findMonorepoRoot(),
+): Promise<number> {
+  if (projectIds.length === 0) return 0;
+  let appended = 0;
+  for (const projectId of projectIds) {
+    try {
+      const path = getProjectHandoffLogPath(projectId, projectRoot);
+      if (!existsSync(path)) continue;
+      const summary = singleLine(entry.summary) || '未提供摘要';
+      await appendFile(
+        path,
+        [
+          '',
+          '---',
+          '',
+          `## ${entry.timestamp}`,
+          `- **from**: ${singleLine(entry.fromCatId) || 'unknown'}`,
+          `- **to**: ${singleLine(entry.toCatId) || 'unknown'}`,
+          `- **状态**: ${singleLine(entry.status) || 'unknown'}`,
+          `- **摘要**: ${summary}`,
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      appended += 1;
+    } catch {
+      // Handoff log write is best-effort; invalid/missing project config must not break A2A.
+    }
+  }
+  return appended;
 }

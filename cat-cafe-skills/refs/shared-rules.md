@@ -27,6 +27,7 @@
 
 ### P7. 长期项目维护进度文档
 跨 session 项目，完成子任务后更新 `.cat-cafe/projects/{project}/progress.md`。
+新项目启动时，先用 `project-init` skill 生成标准骨架，再填写 `brief.md`。
 
 ### 费曼解释协议
 
