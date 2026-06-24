@@ -628,7 +628,7 @@ export interface StaticIdentityOptions {
    */
   lessonsContext?: string | null;
   /**
-   * Project-level progress board from .cat-cafe/projects/{project}/progress.md.
+   * Project-level brief/progress board from .cat-cafe/projects/{project}/brief.md and progress.md.
    * Read-only reference for long-running work; injected only when manually selected.
    */
   projectContext?: string | null;
@@ -776,9 +776,10 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   if (projectContext && shouldInjectProjectContext(lines.join('\n'), projectContext, options?.maxPromptTokens)) {
     lines.push(
       '',
-      '## 项目进度（只读参考）',
-      '这些内容来自 `.cat-cafe/projects/{project}/progress.md`，用于恢复长期项目阶段、决策和验收状态；只作参考，不覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
-      '参与跨 session 项目时，完成子任务后要更新对应 progress.md。',
+      '## 项目简介与进度（只读参考）',
+      '项目简介来自 `.cat-cafe/projects/{project}/brief.md`，用于快速理解项目目标、约束和验收标准。',
+      '项目进度来自 `.cat-cafe/projects/{project}/progress.md`，用于恢复长期项目阶段、决策和验收状态；只作参考，不覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
+      '参与跨 session 项目时，完成子任务后要更新对应 progress.md；若提示 needs_brief，先补 brief.md 再推进长期任务。',
       '',
       '```markdown',
       projectContext,

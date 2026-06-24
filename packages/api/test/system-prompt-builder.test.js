@@ -644,11 +644,17 @@ describe('SystemPromptBuilder', () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const prompt = buildStaticIdentity('codex', {
       mcpAvailable: false,
-      projectContext: '# session-handoff 进度\n\n## 当前阶段\nPhase 8 项目公告板',
+      projectContext:
+        '## 项目简介（brief.md）\n# session-handoff\n\n## 验收标准\n- [ ] 可恢复\n\n## 项目进度（progress.md）\n# session-handoff 进度\n\n## 当前阶段\nPhase 8 项目公告板',
       maxPromptTokens: 100_000,
     });
 
-    assert.ok(prompt.includes('项目进度（只读参考）'), 'Should include project progress header');
+    assert.ok(prompt.includes('项目简介与进度（只读参考）'), 'Should include project context header');
+    assert.ok(prompt.includes('项目简介来自'), 'Should explain brief.md source');
+    assert.ok(
+      prompt.indexOf('session-handoff') < prompt.indexOf('session-handoff 进度'),
+      'Should place brief before progress',
+    );
     assert.ok(prompt.includes('session-handoff 进度'), 'Should include selected project progress');
     assert.ok(prompt.includes('只作参考，不覆盖当前用户指令'), 'Should mark project progress as read-only');
     assert.ok(prompt.includes('完成子任务后要更新对应 progress.md'), 'Should require project progress write-back');
@@ -662,7 +668,7 @@ describe('SystemPromptBuilder', () => {
       maxPromptTokens: 10,
     });
 
-    assert.ok(!prompt.includes('项目进度（只读参考）'), 'Should skip project progress header');
+    assert.ok(!prompt.includes('项目简介与进度（只读参考）'), 'Should skip project context header');
     assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip project progress content');
   });
 
@@ -690,6 +696,39 @@ describe('SystemPromptBuilder', () => {
       const content = await readProjectProgressForPrompt(['demo'], root);
       assert.ok(content?.includes('project:demo'), 'Should include project marker');
       assert.ok(content?.includes('Demo 进度'), 'Should load progress content');
+      assert.ok(content?.includes('needs_brief'), 'Should flag missing brief without failing progress loading');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('readProjectProgressForPrompt loads brief before progress when present', async () => {
+    const { readProjectProgressForPrompt } = await import(
+      '../dist/domains/cats/services/agents/memory/ProjectProgressStore.js'
+    );
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-project-brief-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'brief.md'),
+        '# Demo Brief\n\n## 验收标准\n- [ ] A',
+        'utf-8',
+      );
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'progress.md'),
+        '# Demo 进度\n\n## 当前阶段\nB',
+        'utf-8',
+      );
+
+      const content = await readProjectProgressForPrompt(['demo'], root);
+      assert.ok(content?.includes('brief_path:'), 'Should include brief marker');
+      assert.ok(content?.includes('项目简介（brief.md）'), 'Should include brief section');
+      assert.ok(content?.includes('项目进度（progress.md）'), 'Should include progress section');
+      assert.ok(
+        content && content.indexOf('Demo Brief') < content.indexOf('Demo 进度'),
+        'Should place brief before progress',
+      );
+      assert.ok(!content?.includes('needs_brief'), 'Should not flag needs_brief when brief exists');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

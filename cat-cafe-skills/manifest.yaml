@@ -100,6 +100,28 @@ skills:
     sop_step: null
     merged_from: ["brainstorming", "multi-cat-brainstorm", "discussion-convergence"]
 
+  # ── 项目脚手架 ──
+  project-init:
+    description: >
+      初始化 Clowder 长期项目脚手架，创建 .cat-cafe/projects/{name}/ 下的
+      brief.md、progress.md、handoff-log.md，并可选创建 security.md。
+      Use when: 新项目、初始化项目、project init、给项目建 brief/progress/handoff 档案。
+      Not for: 已有项目的日常进度更新、代码实现、交接日志自动追加。
+      Output: 项目目录 + 3 个核心项目文件 + 可选 security.md + git commit。
+    triggers:
+      - "新项目"
+      - "初始化项目"
+      - "project init"
+      - "项目脚手架"
+      - "项目身份证"
+    not_for:
+      - "更新 progress"
+      - "写代码"
+      - "自动交接日志"
+    output: ".cat-cafe/projects/{name}/ project scaffold"
+    next: ["feat-lifecycle", "writing-plans"]
+    sop_step: null
+
   # ── 专家辩论团 ──
   expert-panel:
     description: >
