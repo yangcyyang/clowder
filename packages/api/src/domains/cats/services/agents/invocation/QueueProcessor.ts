@@ -35,6 +35,7 @@ import type {
   SessionContinuationCoordinator,
 } from './SessionContinuationCoordinator.js';
 import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
+import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -360,6 +361,7 @@ export class QueueProcessor {
   private processingSlotTtlMs: number;
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
+  private fastLaneRouter = new FastLaneRouter();
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
   private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
 
@@ -1156,6 +1158,19 @@ export class QueueProcessor {
     let consumedContinuation: ConsumedContinuationToken | undefined;
 
     try {
+      if (isFastLaneEnabled()) {
+        const fastLaneDecision = this.fastLaneRouter.decide(entry);
+        log.info(
+          {
+            threadId,
+            entryId: entry.id,
+            catId: primaryCat,
+            decision: fastLaneDecision,
+          },
+          '[QueueProcessor] fast lane decision',
+        );
+      }
+
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
       // Connector-sourced entries use connector-${messageId} to match the direct-execution
       // idempotency path, so retries after queue processing are also caught persistently.

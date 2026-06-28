@@ -323,6 +323,50 @@ describe('QueueProcessor', () => {
     assert.equal(result.started, false);
   });
 
+  it('CAT_CAFE_FAST_LANE disabled preserves slow lane for project-init-like messages', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    delete process.env.CAT_CAFE_FAST_LANE;
+    try {
+      enqueueEntry(deps.queue, { content: '帮我初始化项目 wechat-cli' });
+
+      const result = await processor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(deps.router.routeExecution.mock.calls.length, 1, 'flag off must keep existing slow lane path');
+      const decisionCall = deps.log.info.mock.calls.find(
+        (c) => c.arguments[1] === '[QueueProcessor] fast lane decision',
+      );
+      assert.equal(decisionCall, undefined, 'flag off must not run fast-lane classification');
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 classifies project-init but still executes slow lane in Phase 1', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    try {
+      enqueueEntry(deps.queue, { content: '帮我初始化项目 wechat-cli' });
+
+      const result = await processor.processNext('t1', 'u1');
+
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(deps.router.routeExecution.mock.calls.length, 1, 'Phase 1 must not short-circuit without executor');
+      const decisionCall = deps.log.info.mock.calls.find(
+        (c) => c.arguments[1] === '[QueueProcessor] fast lane decision',
+      );
+      assert.ok(decisionCall, 'should log fast-lane decision when flag is enabled');
+      assert.equal(decisionCall.arguments[0].decision.lane, 'fast');
+      assert.equal(decisionCall.arguments[0].decision.workflowId, 'project-init');
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+    }
+  });
+
   it('CAT_CAFE_PARALLEL_DISPATCH=1 starts multiple free cat slots in one processNext call', async () => {
     const previous = process.env.CAT_CAFE_PARALLEL_DISPATCH;
     process.env.CAT_CAFE_PARALLEL_DISPATCH = '1';
