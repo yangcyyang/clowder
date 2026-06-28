@@ -2,6 +2,8 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import type { TaskItem } from '@cat-cafe/shared';
+import { useTaskStore } from '@/stores/taskStore';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
@@ -68,6 +70,34 @@ describe('MarkdownContent task list rendering', () => {
     // task-list-item class is consumed by li handler → replaced with our styling
     expect(html).toContain('list-none');
     expect(html).toContain('-ml-5');
+  });
+});
+
+/* ── Task references ─────────────────────────────────── */
+describe('MarkdownContent task reference rendering', () => {
+  it('renders task #N as a clickable task token', () => {
+    const task: TaskItem = {
+      id: 'task-1',
+      kind: 'work',
+      threadId: 'thread-1',
+      subjectKey: null,
+      title: '验收快车道',
+      ownerCatId: null,
+      status: 'in_review',
+      why: '',
+      createdBy: 'user',
+      createdAt: 1,
+      updatedAt: 1,
+      sourceMessageId: 'msg-1',
+    };
+    useTaskStore.setState({ tasks: [task] });
+
+    const html = render('请看 task #1 的验收状态');
+
+    expect(html).toContain('data-task-ref-link');
+    expect(html).toContain('task #1');
+
+    useTaskStore.setState({ tasks: [] });
   });
 });
 

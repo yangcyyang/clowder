@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessage } from '@/components/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { useTaskStore, type TaskItem } from '@/stores/taskStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -46,6 +47,25 @@ function makeUserMessage(): ChatMessageType {
   } as unknown as ChatMessageType;
 }
 
+function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
+  return {
+    id: 'task-1',
+    kind: 'work',
+    threadId: 'thread-1',
+    subjectKey: null,
+    title: '验收快车道',
+    ownerCatId: null,
+    status: 'in_review',
+    why: '',
+    createdBy: 'user',
+    createdAt: 1,
+    updatedAt: 1,
+    sourceMessageId: 'm-thread-parent',
+    evidence: { tests: 'passed' },
+    ...overrides,
+  };
+}
+
 describe('ChatMessage thread reply badge', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -64,6 +84,7 @@ describe('ChatMessage thread reply badge', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    useTaskStore.setState({ tasks: [] });
     vi.restoreAllMocks();
   });
 
@@ -99,5 +120,17 @@ describe('ChatMessage thread reply badge', () => {
     });
 
     expect(onOpenThread).toHaveBeenCalledWith('m-thread-parent');
+  });
+
+  it('renders an inline task badge with readable status and context', () => {
+    useTaskStore.setState({ tasks: [makeTask()] });
+
+    act(() => {
+      root.render(<ChatMessage message={makeUserMessage()} getCatById={() => undefined} />);
+    });
+
+    expect(container.textContent).toContain('task #1');
+    expect(container.textContent).toContain('待验收');
+    expect(container.textContent).toContain('证据 1/5');
   });
 });

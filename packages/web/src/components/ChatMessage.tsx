@@ -54,6 +54,8 @@ function sanitizeAgentVisibleContent(content: string): string {
   return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const TASK_EVIDENCE_KEYS = ['tests', 'build', 'screenshot', 'review', 'lesson'] as const;
+
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
   doing: '进行中',
@@ -64,23 +66,58 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 const TASK_BADGE_CLASS: Record<TaskStatus, string> = {
-  todo: 'bg-[var(--cafe-accent)]/15 text-[var(--cafe-accent)] ring-[var(--cafe-accent)]/25',
-  doing: 'bg-cafe-crosspost/15 text-cafe-crosspost ring-cafe-crosspost/25',
-  in_review: 'bg-cafe-accent/15 text-cafe-accent ring-cafe-accent/25',
-  blocked: 'bg-conn-amber-bg text-conn-amber-text ring-conn-amber-text/25',
-  done: 'bg-conn-emerald-bg text-conn-emerald-text ring-conn-emerald-ring',
-  failed: 'bg-conn-red-bg text-conn-red-text ring-conn-red-text/25',
+  todo: 'border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-[var(--cafe-text)]',
+  doing: 'border-[var(--slock-border-color)] bg-cafe-crosspost/15 text-cafe-crosspost',
+  in_review:
+    'border-[var(--slock-border-color)] bg-[var(--console-active-bg)] text-[var(--cafe-accent)] shadow-[var(--slock-shadow-chip)]',
+  blocked: 'border-conn-amber-text bg-conn-amber-bg text-conn-amber-text',
+  done: 'border-conn-emerald-text bg-conn-emerald-bg text-conn-emerald-text',
+  failed: 'border-conn-red-text bg-conn-red-bg text-conn-red-text',
 };
+
+function countTaskEvidence(task: TaskItem): number {
+  const evidence = task.evidence;
+  if (!evidence) return 0;
+  return TASK_EVIDENCE_KEYS.filter((key) => Boolean(evidence[key]?.trim())).length;
+}
+
+function getTaskMetaLabels(task: TaskItem): string[] {
+  const labels: string[] = [];
+  const failedEvents = task.events?.filter((event) => event.type === 'failed').length ?? 0;
+  const evidenceCount = countTaskEvidence(task);
+
+  if (failedEvents > 0) labels.push(`失败 ${failedEvents}`);
+  if (task.retryOf) labels.push('重试');
+  if (task.parentTaskId) labels.push('子任务');
+  if (task.branchOf) labels.push('分支');
+  if (evidenceCount > 0) labels.push(`证据 ${evidenceCount}/5`);
+
+  return labels.slice(0, 2);
+}
 
 function MessageTaskBadge({ task, seq }: { task: TaskItem; seq: number }) {
   const status = task.status;
+  const statusLabel = TASK_STATUS_LABELS[status] ?? status;
+  const metaLabels = getTaskMetaLabels(task);
   return (
     <div className="mt-1.5">
       <span
-        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ring-1 ${TASK_BADGE_CLASS[status] ?? TASK_BADGE_CLASS.todo}`}
+        className={`inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 px-2 py-1 text-[11px] font-bold leading-none ${TASK_BADGE_CLASS[status] ?? TASK_BADGE_CLASS.todo}`}
         title={`${TASK_STATUS_LABELS[status] ?? status}: ${task.title}`}
       >
-        #{seq}
+        <span className="shrink-0">task #{seq}</span>
+        <span aria-hidden="true" className="opacity-60">
+          ·
+        </span>
+        <span className="shrink-0">{statusLabel}</span>
+        {metaLabels.map((label) => (
+          <span
+            key={label}
+            className="shrink-0 rounded-[var(--slock-radius-sm)] border border-current/35 px-1 py-0.5 text-[10px] font-semibold opacity-85"
+          >
+            {label}
+          </span>
+        ))}
       </span>
     </div>
   );
@@ -203,8 +240,9 @@ export function ChatMessage({
   const hasToolEvents = toolEvents.length > 0;
   const lastToolLabel = toolEvents[toolEvents.length - 1]?.label;
   const taskEntry = tasks
+    .filter((task) => task.kind !== 'pr_tracking')
     .map((task, index) => ({ task, seq: index + 1 }))
-    .find(({ task }) => task.kind !== 'pr_tracking' && task.sourceMessageId === message.id);
+    .find(({ task }) => task.sourceMessageId === message.id);
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
   const isSchedulerReply = isSchedulerReplyPreview(message.replyPreview);

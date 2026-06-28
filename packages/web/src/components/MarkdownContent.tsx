@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { useChatStore } from '@/stores/chatStore';
+import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
@@ -92,6 +93,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
 const PROJECT_ROOT = process.env.NEXT_PUBLIC_PROJECT_ROOT ?? '';
 const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\w.@-]+)+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const REL_PATH_RE = /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
+const TASK_REF_RE = /(^|[\s（(「『【\[])(task\s+#(\d+))(?![\w-])/giu;
 const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
 const LOCAL_FILE_NAME_RE =
   /(?:^|[\s（(「『【\[])(`?)([^`"'<>/\\|:：\s]+(?:[\s-][^`"'<>/\\|:：\s]+)*\.(?:html?|mdx?|pdf|pptx?|docx?|xlsx?|txt|json|png|jpe?g|svg|webp))(`?)(?=$|[\s，。；;、）)」』】\].,!?！？])/giu;
@@ -282,6 +284,94 @@ function LocalFileNameLink({ fileName }: { fileName: string }) {
   );
 }
 
+function linkifyTaskReferences(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+
+  TASK_REF_RE.lastIndex = 0;
+  while ((m = TASK_REF_RE.exec(text)) !== null) {
+    const leading = m[1] ?? '';
+    const label = m[2];
+    const seq = Number(m[3]);
+    if (!label || !Number.isFinite(seq)) continue;
+
+    const start = m.index + leading.length;
+    if (start > lastIdx) parts.push(text.slice(lastIdx, start));
+    parts.push(<TaskReferenceLink key={`task${m.index}`} seq={seq} label={label} />);
+    lastIdx = m.index + m[0].length;
+  }
+
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return parts.length > 0 ? parts : [text];
+}
+
+function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
+  const tasks = useTaskStore((state) => state.tasks);
+  const addToast = useToastStore((state) => state.addToast);
+  const task = tasks.filter((item) => item.kind !== 'pr_tracking')[seq - 1];
+
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      if (!task) {
+        addToast({
+          type: 'error',
+          title: '未找到任务',
+          message: `${label} 不在当前可见任务列表中。`,
+          duration: 3200,
+        });
+        return;
+      }
+
+      const sourceMessageId = task.sourceMessageId;
+      if (!sourceMessageId) {
+        addToast({
+          type: 'info',
+          title: '任务暂无来源消息',
+          message: '可在 TASKS 面板查看任务详情。',
+          duration: 3200,
+        });
+        return;
+      }
+
+      const target = document.querySelector<HTMLElement>(`[data-message-id="${sourceMessageId}"]`);
+      if (!target) {
+        addToast({
+          type: 'info',
+          title: '任务来源不在当前视图',
+          message: '切到对应频道或 TASKS 面板查看任务详情。',
+          duration: 3200,
+        });
+        return;
+      }
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.animate?.(
+        [
+          { outlineColor: 'transparent', outlineOffset: '0px' },
+          { outlineColor: 'var(--cafe-accent)', outlineOffset: '4px' },
+          { outlineColor: 'transparent', outlineOffset: '0px' },
+        ],
+        { duration: 900, easing: 'ease-out' },
+      );
+    },
+    [addToast, label, task],
+  );
+
+  return (
+    <button
+      type="button"
+      data-task-ref-link
+      onClick={handleClick}
+      className="inline rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1 py-0.5 font-mono text-[0.85em] font-semibold text-[var(--clowder-markdown-chip-text)] hover:underline"
+      title={task ? `${label} · ${task.title}` : `${label} · 未找到当前可见任务`}
+    >
+      {label}
+    </button>
+  );
+}
+
 /** Process string children → @mentions + file path links */
 function withMentionsAndLinks(children: ReactNode): ReactNode {
   return Children.map(children, (child) => {
@@ -296,9 +386,17 @@ function withMentionsAndLinks(children: ReactNode): ReactNode {
           const localLinked = linkifyLocalFileNames(node);
           return (
             <span key={i}>
-              {localLinked.map((localNode, j) =>
-                typeof localNode === 'string' ? <span key={j}>{highlightMentions(localNode)}</span> : localNode,
-              )}
+              {localLinked.map((localNode, j) => {
+                if (typeof localNode !== 'string') return localNode;
+                const taskLinked = linkifyTaskReferences(localNode);
+                return (
+                  <span key={j}>
+                    {taskLinked.map((taskNode, k) =>
+                      typeof taskNode === 'string' ? <span key={k}>{highlightMentions(taskNode)}</span> : taskNode,
+                    )}
+                  </span>
+                );
+              })}
             </span>
           );
         })}
