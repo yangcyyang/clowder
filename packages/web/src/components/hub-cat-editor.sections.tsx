@@ -7,6 +7,7 @@ import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
   autoSlug,
+  CODEX_FAST_MODE_ARG,
   CLIENT_OPTIONS,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
@@ -880,6 +881,25 @@ export function AccountSection({
                 ]}
                 onChange={(value) => onChange({ cliEffort: value as HubCatEditorFormState['cliEffort'] })}
               />
+            ) : null}
+            {form.clientId === 'openai' ? (
+              <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-start sm:gap-[14px]">
+                <span className="text-[12px] font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0 sm:pt-1">
+                  Fast Mode
+                </span>
+                <span className="flex min-w-0 flex-1 items-start gap-2 rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Codex Fast Mode"
+                    checked={Boolean(form.cliFastMode)}
+                    onChange={(event) => onChange({ cliFastMode: event.target.checked })}
+                    className="mt-0.5 size-4 accent-[var(--cafe-accent)]"
+                  />
+                  <span className="text-xs leading-5 text-cafe-secondary">
+                    开启 Codex 快速模式，保存时写入 <code>{CODEX_FAST_MODE_ARG}</code>。
+                  </span>
+                </span>
+              </label>
             ) : null}
             <SelectField
               label="工具箱等级"

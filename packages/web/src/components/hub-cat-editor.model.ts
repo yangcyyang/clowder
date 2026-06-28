@@ -51,6 +51,7 @@ export interface HubCatEditorFormState {
   commandArgs: string;
   cliConfigArgs: string[];
   cliEffort: CliEffortValue | '';
+  cliFastMode?: boolean;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider: string;
   sessionChain: SessionChainValue;
@@ -149,9 +150,14 @@ export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: strin
 export const DEFAULT_ANTIGRAVITY_COMMAND_ARGS = '. --remote-debugging-port=9000';
 
 const GOOGLE_OWNED_DOMAINS = ['generativelanguage.googleapis.com', 'googleapis.com'];
+export const CODEX_FAST_MODE_ARG = '--enable fast_mode';
 
 function isCliEffortValue(value: string | undefined): value is CliEffortValue {
   return value !== undefined && CLI_EFFORT_VALUES.includes(value as CliEffortValue);
+}
+
+export function isCodexFastModeArg(value: string): boolean {
+  return /^--enable(?:=|\s+)fast_mode$/.test(value.trim());
 }
 
 export function getCliEffortOptionsForClient(client: ClientValue): readonly CliEffortValue[] | null {
@@ -377,6 +383,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: isCliEffortValue(persistedCliEffort) ? persistedCliEffort : '',
+    cliFastMode: (cat?.cliConfigArgs ?? []).some(isCodexFastModeArg),
     provider: cat?.provider ?? '',
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
     maxPromptTokens: cat?.contextBudget ? String(cat.contextBudget.maxPromptTokens) : '',

@@ -1,8 +1,10 @@
 import type { CatData } from '@/hooks/useCatData';
 import {
+  CODEX_FAST_MODE_ARG,
   type ClientId,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type HubCatEditorFormState,
+  isCodexFastModeArg,
   normalizeMentionPattern,
   splitCommandArgs,
   splitMentionPatterns,
@@ -49,6 +51,14 @@ export const validateModelFormatForClient = hintModelFormatForClient;
 
 function resolveFormAccountRef(form: HubCatEditorFormState): string {
   return trimText(form.accountRef);
+}
+
+function buildCliConfigArgs(form: HubCatEditorFormState): string[] {
+  const args = (form.cliConfigArgs ?? []).map((arg) => arg.trim()).filter((arg) => arg.length > 0);
+  if (form.clientId !== 'openai') return args;
+
+  const withoutFastMode = args.filter((arg) => !isCodexFastModeArg(arg));
+  return form.cliFastMode ? Array.from(new Set([...withoutFastMode, CODEX_FAST_MODE_ARG])) : withoutFastMode;
 }
 
 export function buildContextBudget(form: HubCatEditorFormState) {
@@ -154,7 +164,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     ...mcpSupportPatch,
     ...cliPatch,
     defaultModel: trimText(form.defaultModel),
-    cliConfigArgs: (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0),
+    cliConfigArgs: buildCliConfigArgs(form),
     ...(form.clientId === 'opencode' && trimText(form.provider)
       ? { provider: trimText(form.provider) }
       : cat?.provider

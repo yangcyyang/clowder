@@ -304,6 +304,53 @@ describe('HubCatEditor', () => {
     expect(payload.cliConfigArgs).toEqual(['--config model_provider="custom"']);
   });
 
+  it('buildCatPayload maps Codex Fast Mode to cliConfigArgs', () => {
+    const form = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '严谨',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: ['--config model_provider="custom"'],
+      cliEffort: '',
+      cliFastMode: true,
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
+    } as HubCatEditorFormState;
+
+    const enabledPayload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(enabledPayload.cliConfigArgs).toEqual(['--config model_provider="custom"', '--enable fast_mode']);
+
+    const disabledPayload = buildCatPayload(
+      { ...form, cliFastMode: false, cliConfigArgs: ['--config model_provider="custom"', '--enable fast_mode'] },
+      null,
+    ) as Record<string, unknown>;
+    expect(disabledPayload.cliConfigArgs).toEqual(['--config model_provider="custom"']);
+  });
+
   it('splitCommandArgs preserves quoted segments', () => {
     expect(splitCommandArgs('chat --mode "agent bridge" --path "/tmp/work tree"')).toEqual([
       'chat',
@@ -394,6 +441,11 @@ describe('HubCatEditor', () => {
     ]);
     await changeField(effortSelect, 'high', 'change');
     expect(container.textContent).not.toContain('CLI Effort');
+    const fastModeToggle = queryField<HTMLInputElement>(container, 'input[aria-label="Codex Fast Mode"]');
+    expect(fastModeToggle.checked).toBe(false);
+    await act(async () => {
+      fastModeToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
     await act(async () => {
@@ -410,6 +462,7 @@ describe('HubCatEditor', () => {
     expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
     expect(payload.cli).toEqual({ effort: 'high' });
+    expect(payload.cliConfigArgs).toEqual(['--enable fast_mode']);
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
