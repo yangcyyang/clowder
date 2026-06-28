@@ -51,6 +51,14 @@ export function registerCallbackTaskRoutes(
 ): void {
   const { taskStore, socketManager, threadStore } = deps;
 
+  function emitTaskAttention(previousStatus: string | undefined, task: { kind?: string; status: string; userId?: string }): void {
+    if (task.kind === 'pr_tracking') return;
+    if (!task.userId) return;
+    if (previousStatus === task.status) return;
+    if (task.status !== 'in_review' && task.status !== 'blocked' && task.status !== 'failed') return;
+    socketManager.emitToUser(task.userId, 'task_attention', task);
+  }
+
   app.post('/api/callbacks/update-task', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
@@ -92,6 +100,7 @@ export function registerCallbackTaskRoutes(
     }
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    emitTaskAttention(existing.status, updated);
     return { status: 'ok', task: updated };
   });
 

@@ -14,6 +14,9 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       events.push({ room, event, data });
     },
+    emitToUser(userId, event, data) {
+      events.push({ userId, event, data });
+    },
     getEvents() {
       return events;
     },
@@ -265,6 +268,65 @@ describe('Tasks Routes', () => {
     const events = socketManager.getEvents();
     assert.equal(events.length, 2);
     assert.equal(events[1].event, 'task_updated');
+  });
+
+  test('PATCH emits user task_attention when work task enters review', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Ready for review',
+        why: '',
+        createdBy: 'user',
+        userId: 'user-1',
+      },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { status: 'in_review' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const events = socketManager.getEvents();
+    const attention = events.find((event) => event.event === 'task_attention');
+    assert.equal(attention.userId, 'user-1');
+    assert.equal(attention.data.id, taskId);
+    assert.equal(attention.data.status, 'in_review');
+  });
+
+  test('PATCH does not emit task_attention when status is unchanged', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Already review',
+        why: '',
+        createdBy: 'user',
+        userId: 'user-1',
+      },
+    });
+    const taskId = createRes.json().id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { status: 'in_review' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { why: 'updated reason' },
+    });
+
+    const attentionEvents = socketManager.getEvents().filter((event) => event.event === 'task_attention');
+    assert.equal(attentionEvents.length, 1);
   });
 
   test('PATCH writes claimed, unclaimed, status_changed and completed task events', async () => {

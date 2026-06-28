@@ -85,6 +85,7 @@ describe('TaskBoardPanel', () => {
     const { TaskBoardPanel } = await import('../TaskBoardPanel');
     const html = renderToStaticMarkup(<TaskBoardPanel />);
     expect(html).toContain('毛线球');
+    expect(html).toContain('待处理 2');
   });
 
   it('renders blocked section with red highlight', async () => {

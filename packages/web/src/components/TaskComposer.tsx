@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { getUserId } from '@/utils/userId';
 
 export function TaskComposer({ threadId, onClose }: { threadId: string; onClose: () => void }) {
   const [title, setTitle] = useState('');
@@ -23,6 +24,7 @@ export function TaskComposer({ threadId, onClose }: { threadId: string; onClose:
           title: title.trim(),
           why: why.trim() || undefined,
           createdBy: 'user',
+          userId: getUserId(),
         }),
       });
       if (!res.ok) {

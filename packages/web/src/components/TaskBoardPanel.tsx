@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
+import { countAttentionTasks } from '@/utils/taskAttention';
 import { TaskCard } from './TaskCard';
 import { TaskComposer } from './TaskComposer';
 
@@ -163,6 +164,7 @@ export function TaskBoardPanel() {
   };
 
   const tasks = globalTasks ?? storeTasks;
+  const attentionCount = countAttentionTasks(tasks);
   const grouped = SECTIONS.map((section) => ({
     section,
     tasks: tasks.filter((t) => t.status === section.key),
@@ -182,6 +184,11 @@ export function TaskBoardPanel() {
         <span className="text-xs font-semibold text-cafe-secondary">
           毛线球 · {tasks.length === 0 ? '暂无任务' : globalTasks ? '全局任务' : '当前对话任务'}
         </span>
+        {attentionCount > 0 && (
+          <span className="text-[10px] font-semibold text-cafe-accent border border-cafe-accent bg-cafe-accent/10 px-2 py-0.5 rounded-full">
+            待处理 {attentionCount}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setComposerOpen(true)}

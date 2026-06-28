@@ -54,6 +54,7 @@ const createSchema = z.object({
   title: z.string().min(1).max(200),
   why: z.string().max(1000).default(''),
   createdBy: createdBySchema,
+  userId: z.string().min(1).max(100).optional(),
   ownerCatId: catIdSchema().nullable().optional(),
   sourceMessageId: z.string().optional(),
   sourceSummaryId: z.string().optional(),
@@ -95,6 +96,7 @@ function toCreateInput(data: z.infer<typeof createSchema>): CreateTaskInput {
   if (data.ownerCatId != null) {
     input.ownerCatId = data.ownerCatId as CatId;
   }
+  if (data.userId) input.userId = data.userId;
   if (data.sourceMessageId) input.sourceMessageId = data.sourceMessageId;
   if (data.sourceSummaryId) input.sourceSummaryId = data.sourceSummaryId;
   if (data.taskThreadId) input.taskThreadId = data.taskThreadId;
@@ -170,6 +172,18 @@ function toTaskThreadMessage(message: StoredMessage) {
     ...(message.editedAt ? { editedAt: message.editedAt } : {}),
     ...(message.origin ? { origin: message.origin } : {}),
   };
+}
+
+function shouldEmitTaskAttention(previous: TaskItem | null, current: TaskItem): boolean {
+  if (current.kind === 'pr_tracking') return false;
+  if (!current.userId) return false;
+  if (previous?.status === current.status) return false;
+  return current.status === 'in_review' || current.status === 'blocked' || current.status === 'failed';
+}
+
+function emitTaskAttention(socketManager: SocketManager, previous: TaskItem | null, current: TaskItem): void {
+  if (!shouldEmitTaskAttention(previous, current) || !current.userId) return;
+  socketManager.emitToUser(current.userId, 'task_attention', current);
 }
 
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
@@ -389,6 +403,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
+    const previous = await taskStore.get(id);
     const updated = await taskStore.update(id, toUpdateInput(result.data));
     if (!updated) {
       reply.status(404);
@@ -396,6 +411,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    emitTaskAttention(socketManager, previous, updated);
 
     return updated;
   });

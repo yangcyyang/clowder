@@ -13,6 +13,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { getTaskAttentionToast } from '@/utils/taskAttention';
 import { getUserId } from '@/utils/userId';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
@@ -750,6 +751,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('task_updated', (task: Record<string, unknown>) => {
       callbacksRef.current.onTaskUpdated?.(task);
+    });
+
+    socket.on('task_attention', (task: Record<string, unknown>) => {
+      const toast = getTaskAttentionToast(task as unknown as import('@cat-cafe/shared').TaskItem);
+      if (!toast) return;
+      useToastStore.getState().addToast({
+        ...toast,
+        threadId: typeof task.threadId === 'string' ? task.threadId : undefined,
+        duration: 6000,
+      });
     });
 
     // thread_summary listener removed (clowder-ai#343): summaries no longer injected into chat flow.
