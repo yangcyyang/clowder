@@ -465,6 +465,49 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].data.costUsd, 0.00045);
   });
 
+  test('POST task events accepts fast lane completion payload and filters it', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const postRes = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: {
+        catId: 'codex',
+        type: 'fast_lane_completed',
+        data: {
+          workflowId: 'project-init',
+          routeExecutionBypassed: true,
+          durationMs: 12,
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            costUsd: 0,
+          },
+        },
+      },
+    });
+    assert.equal(postRes.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events?type=fast_lane_completed`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'fast_lane_completed');
+    assert.equal(response.json().events[0].data.workflowId, 'project-init');
+    assert.equal(response.json().events[0].data.routeExecutionBypassed, true);
+    assert.equal(response.json().events[0].data.tokenUsage.totalTokens, 0);
+  });
+
   test('GET task by thread and lineage endpoint return association fields', async () => {
     const app = await createApp();
     const parentRes = await app.inject({
