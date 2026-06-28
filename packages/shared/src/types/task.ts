@@ -26,7 +26,11 @@ export type TaskEventType =
   | 'failed'
   | 'handoff'
   | 'artifact'
-  | 'usage';
+  | 'usage'
+  | 'fast_lane_decision'
+  | 'fast_lane_started'
+  | 'fast_lane_completed'
+  | 'fast_lane_failed';
 
 /**
  * Task kind discriminator (#320).

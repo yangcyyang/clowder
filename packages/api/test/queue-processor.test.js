@@ -344,7 +344,7 @@ describe('QueueProcessor', () => {
     }
   });
 
-  it('CAT_CAFE_FAST_LANE=1 classifies project-init but still executes slow lane in Phase 1', async () => {
+  it('CAT_CAFE_FAST_LANE=1 keeps project-init mentions on slow lane without explicit command', async () => {
     const previous = process.env.CAT_CAFE_FAST_LANE;
     process.env.CAT_CAFE_FAST_LANE = '1';
     try {
@@ -359,11 +359,154 @@ describe('QueueProcessor', () => {
         (c) => c.arguments[1] === '[QueueProcessor] fast lane decision',
       );
       assert.ok(decisionCall, 'should log fast-lane decision when flag is enabled');
-      assert.equal(decisionCall.arguments[0].decision.lane, 'fast');
-      assert.equal(decisionCall.arguments[0].decision.workflowId, 'project-init');
+      assert.equal(decisionCall.arguments[0].decision.lane, 'slow');
+      assert.match(decisionCall.arguments[0].decision.reason, /without explicit/);
     } finally {
       if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
       else process.env.CAT_CAFE_FAST_LANE = previous;
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 executes explicit project-init command without routeExecution', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    const projectRoot = await mkdtemp(join(tmpdir(), 'cat-fast-lane-project-'));
+    try {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-task',
+        events: [],
+      };
+      const snapshots = [
+        { files: [], totalAdded: 0, totalRemoved: 0 },
+        {
+          files: [
+            { path: '.cat-cafe/projects/wechat-cli/brief.md', added: 10, removed: 0 },
+            { path: '.cat-cafe/projects/wechat-cli/progress.md', added: 10, removed: 0 },
+            { path: '.cat-cafe/projects/wechat-cli/handoff-log.md', added: 10, removed: 0 },
+          ],
+          totalAdded: 30,
+          totalRemoved: 0,
+        },
+      ];
+      const updatedTasks = [];
+      const fastDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async () => ({ id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
+        gitArtifactCollector: mock.fn(async () => snapshots.shift() ?? snapshots.at(-1)),
+        taskStore: {
+          listByThread: mock.fn(async () => [updatedTasks.at(-1) ?? sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previousTask = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previousTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+      });
+      const fastProcessor = new QueueProcessor(fastDeps);
+      const entry = enqueueEntry(fastDeps.queue, {
+        content: `/project-init wechat-cli --root ${projectRoot} --creator tester`,
+        targetCats: ['opus'],
+      });
+      fastDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      const result = await fastProcessor.processNext('t1', 'u1');
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 200));
+
+      assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'fast lane must bypass routeExecution');
+      assert.match(
+        await readFile(join(projectRoot, '.cat-cafe', 'projects', 'wechat-cli', 'brief.md'), 'utf-8'),
+        /wechat-cli/,
+      );
+      const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
+      assert.deepEqual(eventTypes, [
+        'fast_lane_decision',
+        'fast_lane_started',
+        'fast_lane_completed',
+        'artifact',
+      ]);
+      const completed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_completed');
+      assert.equal(completed.data.workflowId, 'project-init');
+      assert.equal(completed.data.routeExecutionBypassed, true);
+      assert.equal(completed.data.tokenUsage.totalTokens, 0);
+      assert.equal(completed.data.artifactCount, 3);
+      const textMessage = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
+        (call) => call.arguments[0].type === 'text',
+      );
+      assert.match(textMessage.arguments[0].content, /project-init 快车道已完成/);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 fails closed when project-init refuses to overwrite existing project', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    const projectRoot = await mkdtemp(join(tmpdir(), 'cat-fast-lane-existing-'));
+    await mkdir(join(projectRoot, '.cat-cafe', 'projects', 'existing'), { recursive: true });
+    try {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-task',
+        events: [],
+      };
+      const updatedTasks = [];
+      const fastDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async () => ({ id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [updatedTasks.at(-1) ?? sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previousTask = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previousTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+      });
+      const fastProcessor = new QueueProcessor(fastDeps);
+      const entry = enqueueEntry(fastDeps.queue, {
+        content: `/project-init existing --root ${projectRoot}`,
+        targetCats: ['opus'],
+      });
+      fastDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      const result = await fastProcessor.processNext('t1', 'u1');
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 200));
+
+      assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'post-spawn failure must not rerun slow lane');
+      const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
+      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_failed']);
+      const failed = updatedTasks.at(-1).events.at(-1);
+      assert.match(failed.data.stderr, /拒绝覆盖/);
+      const errorMessage = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
+        (call) => call.arguments[0].type === 'error',
+      );
+      assert.match(errorMessage.arguments[0].error, /拒绝覆盖/);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+      await rm(projectRoot, { recursive: true, force: true });
     }
   });
 

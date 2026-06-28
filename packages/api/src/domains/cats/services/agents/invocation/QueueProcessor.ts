@@ -10,8 +10,9 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import type { TaskItem } from '@cat-cafe/shared';
+import type { TaskEvent, TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
@@ -35,6 +36,7 @@ import type {
   SessionContinuationCoordinator,
 } from './SessionContinuationCoordinator.js';
 import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
+import { FastLaneExecutor, type FastLaneExecutionResult } from './FastLaneExecutor.js';
 import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
@@ -362,6 +364,7 @@ export class QueueProcessor {
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
   private fastLaneRouter = new FastLaneRouter();
+  private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
   private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
 
@@ -569,6 +572,44 @@ export class QueueProcessor {
     } catch (err) {
       this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append artifact task event failed');
     }
+  }
+
+  private async appendFastLaneTaskEvent(params: {
+    threadId: string;
+    catId: string;
+    sourceMessageIds: readonly string[];
+    type: Extract<TaskEvent['type'], 'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'>;
+    data: Record<string, unknown>;
+  }): Promise<void> {
+    const { taskStore } = this.deps;
+    if (!taskStore) return;
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      if (!sourceTask) return;
+      const updated = await taskStore.update(sourceTask.id, {
+        events: [
+          {
+            ts: new Date().toISOString(),
+            catId: params.catId,
+            type: params.type,
+            data: params.data,
+          },
+        ],
+      });
+      if (updated) {
+        this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append fast lane task event failed');
+    }
+  }
+
+  private formatFastLaneSuccessMessage(result: Extract<FastLaneExecutionResult, { status: 'succeeded' }>): string {
+    const files = result.files.map((file) => `- ${file}`).join('\n');
+    return `project-init 快车道已完成。\n\n生成文件：\n${files}`;
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -1158,19 +1199,6 @@ export class QueueProcessor {
     let consumedContinuation: ConsumedContinuationToken | undefined;
 
     try {
-      if (isFastLaneEnabled()) {
-        const fastLaneDecision = this.fastLaneRouter.decide(entry);
-        log.info(
-          {
-            threadId,
-            entryId: entry.id,
-            catId: primaryCat,
-            decision: fastLaneDecision,
-          },
-          '[QueueProcessor] fast lane decision',
-        );
-      }
-
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
       // Connector-sourced entries use connector-${messageId} to match the direct-execution
       // idempotency path, so retries after queue processing are also caught persistently.
@@ -1406,6 +1434,168 @@ export class QueueProcessor {
         }
       }
       const artifactBaseline = this.deps.taskStore ? await this.collectGitArtifacts(threadId) : null;
+
+      const fastLaneDecision = isFastLaneEnabled() ? this.fastLaneRouter.decide({ content, intent }) : null;
+      if (fastLaneDecision) {
+        log.info(
+          {
+            threadId,
+            entryId: entry.id,
+            catId: primaryCat,
+            decision: fastLaneDecision,
+          },
+          '[QueueProcessor] fast lane decision',
+        );
+        await this.appendFastLaneTaskEvent({
+          threadId,
+          catId: primaryCat,
+          sourceMessageIds: allMessageIds,
+          type: 'fast_lane_decision',
+          data: {
+            ...fastLaneDecision,
+            routeExecutionBypassed: false,
+          },
+        });
+      }
+
+      if (fastLaneDecision?.lane === 'fast') {
+        if (contentBlocks.length > 0) {
+          await this.appendFastLaneTaskEvent({
+            threadId,
+            catId: primaryCat,
+            sourceMessageIds: allMessageIds,
+            type: 'fast_lane_decision',
+            data: {
+              lane: 'slow',
+              workflowId: fastLaneDecision.workflowId,
+              reason: 'contentBlocks present; fast lane supports text-only project-init command',
+              fallbackReason: 'content_blocks_present',
+            },
+          });
+        } else {
+          await this.appendFastLaneTaskEvent({
+            threadId,
+            catId: primaryCat,
+            sourceMessageIds: allMessageIds,
+            type: 'fast_lane_started',
+            data: {
+              workflowId: fastLaneDecision.workflowId,
+              workflowVersion: '1',
+              input: fastLaneDecision.input,
+            },
+          });
+          const result = await this.fastLaneExecutor.executeProjectInit(fastLaneDecision.input);
+          if (result.status === 'skipped') {
+            await this.appendFastLaneTaskEvent({
+              threadId,
+              catId: primaryCat,
+              sourceMessageIds: allMessageIds,
+              type: 'fast_lane_decision',
+              data: {
+                lane: 'slow',
+                workflowId: fastLaneDecision.workflowId,
+                reason: result.reason,
+                fallbackReason: 'preflight_skipped',
+                durationMs: result.durationMs,
+              },
+            });
+          } else if (result.status === 'succeeded') {
+            const artifactAfter = artifactBaseline ? await this.collectGitArtifacts(threadId) : null;
+            const artifact = this.diffArtifactSnapshots(artifactBaseline, artifactAfter);
+            await invocationRecordStore.update(invocationId, {
+              status: 'succeeded',
+              phase: 'done',
+            });
+            finalStatus = 'succeeded';
+            responseText = this.formatFastLaneSuccessMessage(result);
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'text',
+                catId: primaryCat,
+                content: responseText,
+                origin: 'fast_lane',
+                timestamp: Date.now(),
+                invocationId,
+              },
+              threadId,
+            );
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'done',
+                catId: primaryCat,
+                timestamp: Date.now(),
+                invocationId,
+              },
+              threadId,
+            );
+            await this.appendFastLaneTaskEvent({
+              threadId,
+              catId: primaryCat,
+              sourceMessageIds: allMessageIds,
+              type: 'fast_lane_completed',
+              data: {
+                workflowId: fastLaneDecision.workflowId,
+                workflowVersion: '1',
+                durationMs: result.durationMs,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                files: result.files,
+                artifactCount: artifact?.files.length ?? 0,
+                routeExecutionBypassed: true,
+                tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+                estimatedTokensSaved: 'slow lane not invoked',
+              },
+            });
+            if (artifactBaseline) {
+              await this.appendArtifactTaskEvent({
+                threadId,
+                catId: primaryCat,
+                sourceMessageIds: allMessageIds,
+                before: artifactBaseline,
+                after: artifactAfter,
+              });
+            }
+            return 'succeeded';
+          } else {
+            await invocationRecordStore.update(invocationId, {
+              status: 'failed',
+              phase: 'done',
+              error: result.stderr || result.reason,
+            });
+            await this.appendFastLaneTaskEvent({
+              threadId,
+              catId: primaryCat,
+              sourceMessageIds: allMessageIds,
+              type: 'fast_lane_failed',
+              data: {
+                workflowId: fastLaneDecision.workflowId,
+                workflowVersion: '1',
+                durationMs: result.durationMs,
+                reason: result.reason,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                ...(result.exitCode != null ? { exitCode: result.exitCode } : {}),
+                ...(result.signal ? { signal: result.signal } : {}),
+                routeExecutionBypassed: true,
+              },
+            });
+            socketManager.broadcastAgentMessage(
+              {
+                type: 'error',
+                catId: primaryCat,
+                error: result.stderr || result.reason,
+                isFinal: true,
+                origin: 'fast_lane',
+                timestamp: Date.now(),
+                invocationId,
+              },
+              threadId,
+            );
+            finalStatus = 'failed';
+            return 'failed';
+          }
+        }
+      }
 
       // F122B B6: Collect response text for completion hook (multi-mention aggregation).
       const hook = this.entryCompleteHooks.get(entry.id);
