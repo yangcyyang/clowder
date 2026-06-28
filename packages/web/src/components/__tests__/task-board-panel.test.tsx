@@ -28,7 +28,8 @@ function makeTasks(): TaskItem[] {
 let mockTasks: TaskItem[] = [];
 
 vi.mock('@/stores/taskStore', () => ({
-  useTaskStore: (selector: (s: { tasks: TaskItem[] }) => unknown) => selector({ tasks: mockTasks }),
+  useTaskStore: (selector: (s: { tasks: TaskItem[]; updateTask: (task: TaskItem) => void }) => unknown) =>
+    selector({ tasks: mockTasks, updateTask: vi.fn() }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({

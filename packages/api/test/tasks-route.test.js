@@ -180,6 +180,37 @@ describe('Tasks Routes', () => {
     assert.equal(response.statusCode, 400);
   });
 
+  test('GET lists all work tasks across threads when scope=all', async () => {
+    const app = await createApp();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-2', title: 'Task B', why: '', createdBy: 'codex' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${createRes.json().id}`,
+      payload: { status: 'in_review' },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/tasks?scope=all&kind=work&status=in_review',
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.tasks.length, 1);
+    assert.equal(body.tasks[0].threadId, 'thread-2');
+    assert.equal(body.tasks[0].title, 'Task B');
+  });
+
   // ---- GET /api/tasks/:id ----
 
   test('GET by id returns task', async () => {

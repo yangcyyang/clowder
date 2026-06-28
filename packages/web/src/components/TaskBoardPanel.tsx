@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import type { TaskItem } from '@cat-cafe/shared';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { apiFetch } from '@/utils/api-client';
 import { TaskCard } from './TaskCard';
 import { TaskComposer } from './TaskComposer';
 
@@ -29,6 +31,22 @@ const SECTION_STYLES: Record<SectionKey, { text: string; border: string; section
   todo: { text: 'text-cafe-muted', border: 'border-l-cafe-muted', sectionBg: '' },
   done: { text: 'text-conn-emerald-text', border: 'border-l-[var(--color-conn-emerald-text)]', sectionBg: '' },
 };
+
+function sortTasks(tasks: TaskItem[]): TaskItem[] {
+  const rank: Record<SectionKey, number> = {
+    in_review: 0,
+    doing: 1,
+    blocked: 2,
+    todo: 3,
+    done: 4,
+  };
+  return [...tasks].sort((a, b) => {
+    const rankA = rank[a.status as SectionKey] ?? 99;
+    const rankB = rank[b.status as SectionKey] ?? 99;
+    if (rankA !== rankB) return rankA - rankB;
+    return (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+  });
+}
 
 function getDefaultCollapsed(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = { doing: false, in_review: false, blocked: false, todo: true, done: true };
@@ -96,21 +114,41 @@ function EmptyState({ onCreateFirst }: { onCreateFirst: () => void }) {
   );
 }
 
-function handleStatusChange(taskId: string, newStatus: string) {
-  fetch(`/api/tasks/${taskId}`, {
+async function updateTaskStatus(taskId: string, newStatus: string): Promise<TaskItem | null> {
+  const res = await apiFetch(`/api/tasks/${taskId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status: newStatus }),
-  }).catch(() => {
-    /* socket task_updated will sync state */
   });
+  if (!res.ok) return null;
+  return (await res.json()) as TaskItem;
 }
 
 export function TaskBoardPanel() {
-  const tasks = useTaskStore((s) => s.tasks);
+  const storeTasks = useTaskStore((s) => s.tasks);
+  const updateStoreTask = useTaskStore((s) => s.updateTask);
   const threadId = useChatStore((s) => s.currentThreadId);
+  const [globalTasks, setGlobalTasks] = useState<TaskItem[] | null>(null);
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(getDefaultCollapsed);
   const [composerOpen, setComposerOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/tasks?scope=all&kind=work')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as { tasks?: TaskItem[] };
+      })
+      .then((data) => {
+        if (!cancelled) setGlobalTasks(sortTasks(data.tasks ?? []));
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalTasks(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggle = (key: SectionKey) => {
     setCollapsed((prev) => {
@@ -124,17 +162,25 @@ export function TaskBoardPanel() {
     });
   };
 
+  const tasks = globalTasks ?? storeTasks;
   const grouped = SECTIONS.map((section) => ({
     section,
     tasks: tasks.filter((t) => t.status === section.key),
   }));
+
+  async function handleStatusChange(taskId: string, newStatus: string) {
+    const updated = await updateTaskStatus(taskId, newStatus);
+    if (!updated) return;
+    updateStoreTask(updated);
+    setGlobalTasks((current) => (current ? sortTasks(current.map((task) => (task.id === updated.id ? updated : task))) : current));
+  }
 
   return (
     <div className="flex flex-col h-full bg-cafe-surface">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--console-border-soft)]">
         <span className="text-xs font-semibold text-cafe-secondary">
-          毛线球 · {tasks.length === 0 ? '暂无任务' : '当前对话任务'}
+          毛线球 · {tasks.length === 0 ? '暂无任务' : globalTasks ? '全局任务' : '当前对话任务'}
         </span>
         <button
           type="button"

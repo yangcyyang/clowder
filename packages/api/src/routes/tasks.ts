@@ -213,8 +213,21 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   });
 
   // GET /api/tasks?threadId=xxx[&kind=work|pr_tracking]
+  // GET /api/tasks?scope=all[&kind=work|pr_tracking][&status=in_review]
   app.get('/api/tasks', async (request, reply) => {
-    const { threadId, kind } = request.query as { threadId?: string; kind?: string };
+    const { threadId, kind, scope, status } = request.query as {
+      threadId?: string;
+      kind?: string;
+      scope?: string;
+      status?: string;
+    };
+    if (scope === 'all') {
+      const taskKind = kind === 'pr_tracking' ? 'pr_tracking' : 'work';
+      let tasks = await taskStore.listByKind(taskKind);
+      if (status) tasks = tasks.filter((t) => t.status === status);
+      return { tasks };
+    }
+
     if (!threadId) {
       reply.status(400);
       return { error: 'Missing threadId query parameter' };
@@ -222,6 +235,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     let tasks = await taskStore.listByThread(threadId);
     if (kind) tasks = tasks.filter((t) => t.kind === kind);
+    if (status) tasks = tasks.filter((t) => t.status === status);
     return { tasks };
   });
 
