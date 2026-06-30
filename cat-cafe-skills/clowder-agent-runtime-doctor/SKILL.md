@@ -14,6 +14,9 @@ triggers:
   - “3004”
   - “Agent 不见”
   - “clowder 挂了”
+  - “clowder 崩溃”
+  - “重启 clowder”
+  - “Clowder 白屏”
   - “401”
   - “Failed to authenticate”
 ---
@@ -33,8 +36,12 @@ triggers:
 pnpm start:status
 curl -sS http://127.0.0.1:3004/api/ready
 curl -sS http://127.0.0.1:3004/api/cats | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s); const a=j.cats||j; console.log(a.length); console.log(a.map(c=>c.id).join(', '));})"
+curl -sS -I http://127.0.0.1:3003 | head
 lsof -nP -iTCP:3003 -sTCP:LISTEN
 lsof -nP -iTCP:3004 -sTCP:LISTEN
+pm2 status
+pm2 logs clowder-api --lines 80 --nostream
+pm2 logs clowder-web --lines 80 --nostream
 tail -n 120 cat-cafe-daemon.log
 ```
 
@@ -45,6 +52,8 @@ tail -n 120 cat-cafe-daemon.log
 - `/api/cats` 返回 0 或请求失败：检查 `CatRegistry initialized` 日志和 `.cat-cafe/cat-catalog.json`。
 - 日志出现 `better-sqlite3 NODE_MODULE_VERSION`：Node ABI 不兼容，需要用当前运行 Node 重新编译 native module。
 - Web 仍显示旧状态但 `/api/cats` 正常：让用户 `Cmd+Shift+R` 硬刷新，或重启 3003。
+- `pm2 status` 显示 `clowder-api/clowder-web online` 且 `/api/ready` 正常：后端没崩；优先判断浏览器缓存、Electron 桌面壳或前端运行时异常。
+- PM2 `↺` 重启次数增加但当前 online：服务已被 PM2 拉起；要从 `pm2 logs` 找上一次退出原因，而不是盲目反复重启。
 
 ## 启动自检为什么可能没兜住
 
@@ -104,7 +113,41 @@ pnpm start:direct --quick
 如果 `pnpm start:status` 显示 daemon stale，但 `direct api-3004/web-3003` 正常，说明服务已经可用，
 但后台管理 PID 不干净；先向用户说明“不影响当前可用性”，再单独排 daemon wrapper。
 
-### 3. 重启后验证
+### 3. PM2 托管环境
+
+如果 Clowder 已由 PM2 托管，优先使用 PM2 观察和恢复，避免再开一个 direct 进程抢端口或 Redis lease。
+
+```bash
+pm2 status
+pm2 restart clowder-api clowder-web
+pm2 logs clowder-api --lines 80 --nostream
+pm2 logs clowder-web --lines 80 --nostream
+```
+
+判定：
+
+- `online` + `/api/ready` ready：服务已恢复，用户侧硬刷新即可。
+- `errored` 或反复重启：读取 error log 的第一条 fatal error，先修根因。
+- 日志出现 `Redis namespace already has a live API instance`：说明已有 API 持有 lease，新的 API 被拒绝启动；不要继续叠加启动，先确认谁在监听 3004。
+- 日志出现持续外部集成 DNS/网络失败但 API ready：通常不是 Clowder 崩溃根因，只影响对应集成。
+
+### 4. 服务健康但页面显示崩溃
+
+如果以下三项都成立，后端可判定健康：
+
+```text
+3003 HTTP 200
+/api/ready ready
+/api/cats 返回 Agent 数量 > 0
+```
+
+这时不要重启后端，先处理用户侧：
+
+1. 浏览器页面：`Cmd+Shift+R` 硬刷新。
+2. Electron 桌面壳：退出 App 后重开。
+3. 仍白屏：打开 DevTools Console，抓第一条 client-side exception；这是前端组件/数据状态问题，不是 3004 API 崩溃。
+
+### 5. 重启后验证
 
 必须拿到这些证据才算修复完成：
 
@@ -122,7 +165,7 @@ pnpm start:direct --quick
 包含：gpt52, kimi, pi, ppt-designer, requirements-analyst 等
 ```
 
-## 场景 4：服务完全无响应（3003/3004 都 connection refused）
+## 场景 6：服务完全无响应（3003/3004 都 connection refused）
 
 **症状**：`curl -m 3 http://localhost:3003/api/ready` 直接 curl: (7)，不是 timeout 而是立刻失败。
 
@@ -151,7 +194,7 @@ pnpm start:direct --quick
 
 ---
 
-## 场景 5：Claude agent 报 401（Failed to authenticate）
+## 场景 7：Claude agent 报 401（Failed to authenticate）
 
 **症状**：@布偶猫4.5 等 Claude agent 回复 `Failed to authenticate. API Error: 401 Invalid authentication credentials` + `Error: Claude CLI: CLI 异常退出 (code: 1, signal: none)`。
 
