@@ -285,7 +285,7 @@ export interface ChatMessage {
     /** F070: Governance blocked data for actionable bootstrap card */
     governanceBlocked?: {
       projectPath: string;
-      reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
+      reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing' | 'permission_denied';
       invocationId?: string;
     };
     /** P2-3: Aggregated emoji reactions keyed by message. */

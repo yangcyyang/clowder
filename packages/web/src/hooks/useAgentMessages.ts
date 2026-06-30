@@ -630,7 +630,7 @@ export function consumeBackgroundSystemInfo(
         extra: {
           governanceBlocked: {
             projectPath,
-            reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing',
+            reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing' | 'permission_denied',
             invocationId: invId,
           },
         },
@@ -3902,7 +3902,11 @@ export function useAgentMessages() {
               extra: {
                 governanceBlocked: {
                   projectPath,
-                  reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing',
+                  reasonKind: reasonKind as
+                    | 'needs_bootstrap'
+                    | 'needs_confirmation'
+                    | 'files_missing'
+                    | 'permission_denied',
                   invocationId: invId,
                 },
               },

@@ -146,6 +146,13 @@ import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './
 const sessionMutex = new SessionMutex();
 const SESSION_MUTEX_WAIT_TIMEOUT_MS = Number(process.env.CAT_CAFE_SESSION_MUTEX_WAIT_TIMEOUT_MS) || 90_000;
 
+function isFilesystemPermissionError(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return code === 'EPERM' || code === 'EACCES' || /operation not permitted|permission denied/i.test(message);
+}
+
 /**
  * F089: Race an async iterator's .next() against an AbortSignal.
  * Returns the iterator result, or throws the abort reason if the signal fires first.
@@ -765,17 +772,37 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F070: Governance gate for external project dispatch
     if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
       const catCafeRoot = hostProjectRoot;
-      const { tryGovernanceBootstrap } = await import('../../../../../config/capabilities/capability-orchestrator.js');
-      await tryGovernanceBootstrap(workingDirectory, catCafeRoot);
-      const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
-      const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
+      let preflight: Awaited<
+        ReturnType<typeof import('../../../../../config/governance/governance-preflight.js').checkGovernancePreflight>
+      >;
+      try {
+        const { tryGovernanceBootstrap } = await import(
+          '../../../../../config/capabilities/capability-orchestrator.js'
+        );
+        await tryGovernanceBootstrap(workingDirectory, catCafeRoot);
+        const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
+        preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
+      } catch (err) {
+        if (!isFilesystemPermissionError(err)) throw err;
+        log.warn({ catId, workingDirectory, err }, 'Governance preflight permission denied');
+        preflight = {
+          ready: false,
+          needsPermission: true,
+          reason:
+            `Clowder cannot read ${workingDirectory}. ` +
+            'macOS may be blocking protected folders such as Documents/Desktop/Downloads. ' +
+            'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
+        };
+      }
       if (!preflight.ready) {
-        const reasonKind = preflight.needsBootstrap
-          ? 'needs_bootstrap'
-          : preflight.needsConfirmation
-            ? 'needs_confirmation'
-            : 'files_missing';
+        const reasonKind = preflight.needsPermission
+          ? 'permission_denied'
+          : preflight.needsBootstrap
+            ? 'needs_bootstrap'
+            : preflight.needsConfirmation
+              ? 'needs_confirmation'
+              : 'files_missing';
         // F070: Structured governance_blocked event — frontend renders actionable card
         yield {
           type: 'system_info',
@@ -794,7 +821,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           type: 'done',
           catId,
           isFinal: params.isLastCat,
-          errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+          errorCode: preflight.needsPermission ? 'PROJECT_PERMISSION_DENIED' : 'GOVERNANCE_BOOTSTRAP_REQUIRED',
           timestamp: Date.now(),
         };
         didComplete = true;

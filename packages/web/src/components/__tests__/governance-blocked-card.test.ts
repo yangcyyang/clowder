@@ -69,6 +69,22 @@ describe('GovernanceBlockedCard', () => {
     expect(container.textContent).toContain('治理初始化待确认');
   });
 
+  it('renders permission guidance without bootstrap button', () => {
+    act(() => {
+      root.render(
+        React.createElement(GovernanceBlockedCard, {
+          projectPath: '/Users/cy/Documents/demo',
+          reasonKind: 'permission_denied',
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('项目目录权限不足');
+    expect(container.textContent).toContain('完全磁盘访问权限');
+    expect(container.textContent).toContain('重启 Clowder');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
   it('calls confirm then retry on button click', async () => {
     mockApiFetch
       .mockResolvedValueOnce({ ok: true, json: async () => ({}) })

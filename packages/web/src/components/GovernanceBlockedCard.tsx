@@ -4,7 +4,7 @@ import { GovernanceShieldIcon } from './icons/GovernanceShieldIcon';
 
 interface GovernanceBlockedCardProps {
   projectPath: string;
-  reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
+  reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing' | 'permission_denied';
   invocationId?: string;
 }
 
@@ -12,6 +12,7 @@ const REASON_LABELS: Record<string, string> = {
   needs_bootstrap: '尚未初始化治理',
   needs_confirmation: '治理初始化待确认',
   files_missing: '治理文件缺失',
+  permission_denied: '项目目录权限不足',
 };
 
 type CardState = 'idle' | 'confirming' | 'retrying' | 'done' | 'error';
@@ -69,6 +70,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
   }, [projectPath, invocationId]);
 
   const dirName = projectPath.split(/[/\\]/).pop() ?? projectPath;
+  const isPermissionDenied = reasonKind === 'permission_denied';
 
   return (
     <div data-testid="governance-blocked-card" className="flex justify-center mb-3">
@@ -81,11 +83,18 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
               {REASON_LABELS[reasonKind] ?? '治理状态异常'}
             </p>
             <p className="text-xs text-conn-amber-text mt-1">
-              初始化将写入治理规则（CLAUDE.md 等）、Skills 链接和方法论模板到目标项目。已有文件不会被覆盖。
+              {isPermissionDenied
+                ? 'Clowder 当前进程无法读取这个项目目录。常见原因是 macOS 隐私权限拦截了 Documents / Desktop / Downloads。'
+                : '初始化将写入治理规则（CLAUDE.md 等）、Skills 链接和方法论模板到目标项目。已有文件不会被覆盖。'}
             </p>
 
             <div className="mt-3">
-              {state === 'idle' && (
+              {isPermissionDenied ? (
+                <div className="text-xs text-conn-amber-text leading-relaxed">
+                  处理方式：打开「系统设置 → 隐私与安全性 → 完全磁盘访问权限」，给运行 Clowder 的终端、
+                  PM2/Node 所在 App 或 Clowder 桌面 App 授权；然后完全重启 Clowder 再重试。
+                </div>
+              ) : state === 'idle' ? (
                 <button
                   type="button"
                   onClick={handleBootstrap}
@@ -93,7 +102,7 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
                 >
                   初始化治理并继续
                 </button>
-              )}
+              ) : null}
               {state === 'confirming' && <span className="text-sm text-conn-amber-text">正在初始化治理...</span>}
               {state === 'retrying' && <span className="text-sm text-conn-amber-text">治理已就绪，正在重试...</span>}
               {state === 'done' && (

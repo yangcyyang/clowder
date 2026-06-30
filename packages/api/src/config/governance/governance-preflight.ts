@@ -18,6 +18,7 @@ export interface PreflightResult {
   reason?: string;
   needsBootstrap?: boolean;
   needsConfirmation?: boolean;
+  needsPermission?: boolean;
   bootstrapCommand?: string;
 }
 
@@ -41,6 +42,24 @@ const PROVIDER_SKILLS_DIR: Record<Provider, string> = {
   gemini: '.gemini/skills',
   kimi: '.kimi/skills',
 };
+
+function isFilesystemPermissionError(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return code === 'EPERM' || code === 'EACCES' || /operation not permitted|permission denied/i.test(message);
+}
+
+function permissionDeniedResult(projectPath: string, target: string): PreflightResult {
+  return {
+    ready: false,
+    needsPermission: true,
+    reason:
+      `Clowder cannot read ${target} under ${projectPath}. ` +
+      'macOS may be blocking protected folders such as Documents/Desktop/Downloads. ' +
+      'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
+  };
+}
 
 export async function checkGovernancePreflight(
   projectPath: string,
@@ -88,7 +107,10 @@ export async function checkGovernancePreflight(
         bootstrapCommand: `POST /api/governance/confirm { "projectPath": "${projectPath}" }`,
       };
     }
-  } catch {
+  } catch (err) {
+    if (isFilesystemPermissionError(err)) {
+      return permissionDeniedResult(projectPath, configFile);
+    }
     return {
       ready: false,
       needsBootstrap: true,
@@ -125,7 +147,10 @@ export async function checkGovernancePreflight(
         }
         if (hasSkillsSetup) break;
       }
-    } catch {
+    } catch (err) {
+      if (isFilesystemPermissionError(err)) {
+        return permissionDeniedResult(projectPath, dir);
+      }
       // directory doesn't exist — continue
     }
   }

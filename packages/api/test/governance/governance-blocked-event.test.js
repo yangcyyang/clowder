@@ -42,7 +42,7 @@ describe('F070: governance_blocked event contract', () => {
     assert.equal(payload.type, 'governance_blocked');
     assert.equal(typeof payload.projectPath, 'string');
     assert.ok(payload.projectPath.length > 0);
-    assert.ok(['needs_bootstrap', 'needs_confirmation', 'files_missing'].includes(payload.reasonKind));
+    assert.ok(['needs_bootstrap', 'needs_confirmation', 'files_missing', 'permission_denied'].includes(payload.reasonKind));
     assert.equal(typeof payload.reason, 'string');
     assert.equal(payload.invocationId, 'inv-test-123');
   });
@@ -70,6 +70,26 @@ describe('F070: governance_blocked event contract', () => {
     assert.equal(doneEvent.type, 'done');
     assert.equal(doneEvent.errorCode, 'GOVERNANCE_BOOTSTRAP_REQUIRED');
     assert.equal(doneEvent.isFinal, true);
+  });
+
+  it('permission denied payload uses a non-bootstrap reason and error code', () => {
+    const payload = {
+      type: 'governance_blocked',
+      projectPath: externalProject,
+      reasonKind: 'permission_denied',
+      reason: 'Clowder cannot read protected project directory.',
+      invocationId: 'inv-perm',
+    };
+    const doneEvent = {
+      type: 'done',
+      catId: 'opus',
+      isFinal: true,
+      errorCode: 'PROJECT_PERMISSION_DENIED',
+      timestamp: Date.now(),
+    };
+
+    assert.equal(payload.reasonKind, 'permission_denied');
+    assert.equal(doneEvent.errorCode, 'PROJECT_PERMISSION_DENIED');
   });
 
   it('errorCode on done signals routes to mark invocation as failed', () => {
