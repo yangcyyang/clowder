@@ -2240,6 +2240,98 @@ describe('QueueProcessor', () => {
       }
     });
 
+    it('codex output gate buffers process chatter and broadcasts sanitized final answer only', async () => {
+      const previous = process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+      process.env.CAT_CAFE_CODEX_OUTPUT_GATE = '1';
+      try {
+        const hookDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* () {
+              yield {
+                type: 'text',
+                catId: 'gpt52',
+                content: '**🔍 我开始做指南**\n\n我现在认领当前消息，再并行读源文件和目标目录。\n\n',
+                timestamp: 1000,
+              };
+              yield {
+                type: 'text',
+                catId: 'gpt52',
+                content: '**✅ 已完成**\n\n交付：已修复输出闸门。\n\n**验证证据**\n\n- 单测通过',
+                timestamp: 1001,
+              };
+              yield { type: 'done', catId: 'gpt52', timestamp: 1002 };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+          threadMetaLookup: mock.fn(async () => undefined),
+        });
+        const hookProcessor = new QueueProcessor(hookDeps);
+
+        const entry = enqueueEntry(hookDeps.queue, { targetCats: ['gpt52'] });
+        hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+        await hookProcessor.processNext('t1', 'u1');
+        await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 2);
+
+        const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+        const textMessages = agentMessages.filter((msg) => msg.type === 'text');
+        const doneMessages = agentMessages.filter((msg) => msg.type === 'done');
+        const roomEvents = hookDeps.socketManager.broadcastToRoom.mock.calls.map((call) => call.arguments[1]);
+
+        assert.equal(textMessages.length, 1, 'codex gate should not broadcast intermediate text chunks');
+        assert.ok(textMessages[0].content.includes('**✅ 已完成**'));
+        assert.ok(textMessages[0].content.includes('交付：已修复输出闸门。'));
+        assert.ok(!textMessages[0].content.includes('我开始做指南'));
+        assert.ok(!textMessages[0].content.includes('我现在认领当前消息'));
+        assert.equal(doneMessages.length, 1, 'done lifecycle event should still be broadcast');
+        assert.ok(roomEvents.includes('spawn_started'), 'liveness signal should still be visible while buffered');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+        } else {
+          process.env.CAT_CAFE_CODEX_OUTPUT_GATE = previous;
+        }
+      }
+    });
+
+    it('codex output gate does not change non-codex streaming behavior', async () => {
+      const previous = process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+      process.env.CAT_CAFE_CODEX_OUTPUT_GATE = '1';
+      try {
+        const hookDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* () {
+              yield { type: 'text', catId: 'opus', content: '第一段。', timestamp: 1000 };
+              yield { type: 'text', catId: 'opus', content: '第二段。', timestamp: 1001 };
+              yield { type: 'done', catId: 'opus', timestamp: 1002 };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+          threadMetaLookup: mock.fn(async () => undefined),
+        });
+        const hookProcessor = new QueueProcessor(hookDeps);
+
+        const entry = enqueueEntry(hookDeps.queue, { targetCats: ['opus'] });
+        hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+        await hookProcessor.processNext('t1', 'u1');
+        await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 3);
+
+        const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+        const textMessages = agentMessages.filter((msg) => msg.type === 'text');
+
+        assert.equal(textMessages.length, 2, 'non-codex cats should still stream text chunks normally');
+        assert.equal(textMessages[0].content, '第一段。');
+        assert.equal(textMessages[1].content, '第二段。');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+        } else {
+          process.env.CAT_CAFE_CODEX_OUTPUT_GATE = previous;
+        }
+      }
+    });
+
     it('multi-cat execution: outboundHook.deliver called per-turn with each catId', async () => {
       const deliverCalls = [];
       const outboundHook = {

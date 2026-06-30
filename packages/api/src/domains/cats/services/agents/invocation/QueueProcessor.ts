@@ -10,7 +10,7 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import type { TaskEvent, TaskItem } from '@cat-cafe/shared';
+import { catRegistry, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
@@ -38,6 +38,7 @@ import type {
 import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
 import { FastLaneExecutor, type FastLaneExecutionResult } from './FastLaneExecutor.js';
 import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
+import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -185,6 +186,21 @@ function getMessageMetadata(msg: { metadata?: unknown }): MessageMetadata | unde
 function isCompleteMessageDeliveryEnabled(): boolean {
   const value = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY?.trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+function isCodexOutputGateEnabled(): boolean {
+  const value = process.env.CAT_CAFE_CODEX_OUTPUT_GATE?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function isCodexRuntimeCat(catId: string): boolean {
+  if (catId === 'codex' || catId === 'gpt52') return true;
+  const config = catRegistry.tryGet(catId)?.config;
+  return config?.cli?.command === 'codex';
+}
+
+function isOutputGateEnabledForTargets(targetCats: readonly string[]): boolean {
+  return isCodexOutputGateEnabled() && targetCats.some(isCodexRuntimeCat);
 }
 
 export function isParallelDispatchEnabled(): boolean {
@@ -1410,7 +1426,8 @@ export class QueueProcessor {
         richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
       }> = [];
       let currentTurnCatId: string | undefined;
-      const completeMessageDeliveryEnabled = isCompleteMessageDeliveryEnabled();
+      const completeMessageDeliveryEnabled =
+        isCompleteMessageDeliveryEnabled() || isOutputGateEnabledForTargets(targetCats);
       const completedSocketTurnIndices = new Set<number>();
       const tokenUsageAggregates = new Map<string, TokenUsageAggregate>();
 
@@ -1839,7 +1856,7 @@ export class QueueProcessor {
             if (completedSocketTurnIndices.has(i)) continue;
             const turn = outboundTurns[i];
             if (!turn || turn.catId !== msg.catId) continue;
-            const turnContent = turn.textParts.join('');
+            const turnContent = sanitizeAgentVisibleOutput(turn.textParts.join(''));
             if (!turnContent) continue;
             socketManager.broadcastAgentMessage(
               {
