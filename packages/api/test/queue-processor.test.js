@@ -1969,7 +1969,7 @@ describe('QueueProcessor', () => {
               metadata: {
                 provider: 'openai',
                 model: 'gpt-4o-mini',
-                usage: { inputTokens: 1000, outputTokens: 500 },
+                usage: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 300, durationMs: 1234 },
               },
             };
             yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -1995,6 +1995,8 @@ describe('QueueProcessor', () => {
       assert.equal(event.data.inputTokens, 1000);
       assert.equal(event.data.outputTokens, 500);
       assert.equal(event.data.totalTokens, 1500);
+      assert.equal(event.data.cacheReadTokens, 300);
+      assert.equal(event.data.durationMs, 1234);
       assert.ok(Math.abs(event.data.costUsd - 0.00045) < 1e-10);
       assert.equal(usageDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
     });

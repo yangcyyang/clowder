@@ -2,6 +2,7 @@
 
 import { useCountUp } from '@/hooks/useCountUp';
 import type { ContextHealthData, TokenUsage } from '@/stores/chat-types';
+import { isInvocationCostPanelEnabled } from '@/utils/invocationCostPanel';
 import { ContextHealthBar } from './ContextHealthBar';
 import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
 import { TokenCacheBar } from './TokenCacheBar';
@@ -67,6 +68,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
     : null;
   const contextResetDay = usage.contextResetsAtMs != null ? formatMonthDay(usage.contextResetsAtMs) : '';
   const contextResetLabel = contextResetDay ? `(resets ${contextResetDay})` : null;
+  const showCostPanel = isInvocationCostPanelEnabled();
 
   return (
     <div className="mt-1.5 space-y-1 animate-fade-in" data-testid={`token-usage-${catId}`}>
@@ -106,6 +108,12 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
 
       {/* Cost + duration row */}
       <div className="flex items-center gap-2 text-[10px]">
+        {showCostPanel && usage.cacheReadTokens != null && (
+          <span className="text-conn-emerald-text tabular-nums">cacheRead {formatTokenCount(usage.cacheReadTokens)}</span>
+        )}
+        {showCostPanel && usage.cacheCreationTokens != null && (
+          <span className="text-cafe-muted tabular-nums">cacheCreate {formatTokenCount(usage.cacheCreationTokens)}</span>
+        )}
         {usage.costUsd != null && (
           <span className="text-conn-amber-text font-medium tabular-nums animate-cost-glow">
             {formatCost(usage.costUsd)}
@@ -116,6 +124,9 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
         )}
         {usage.durationApiMs != null && (
           <span className="text-cafe-muted">API {formatDuration(usage.durationApiMs)}</span>
+        )}
+        {showCostPanel && usage.durationMs != null && (
+          <span className="text-cafe-muted">duration {formatDuration(usage.durationMs)}</span>
         )}
       </div>
 

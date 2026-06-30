@@ -538,6 +538,8 @@ export class QueueProcessor {
                   ? { cacheCreationTokens: aggregate.usage.cacheCreationTokens }
                   : {}),
                 ...(costUsd != null ? { costUsd } : {}),
+                ...(aggregate.usage.durationMs != null ? { durationMs: aggregate.usage.durationMs } : {}),
+                ...(aggregate.usage.durationApiMs != null ? { durationApiMs: aggregate.usage.durationApiMs } : {}),
               },
             },
           ],

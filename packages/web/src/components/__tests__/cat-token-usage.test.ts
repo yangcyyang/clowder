@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CatTokenUsage } from '../CatTokenUsage';
 
 function render(catId: string, usage: Parameters<typeof CatTokenUsage>[0]['usage']): string {
@@ -12,6 +12,11 @@ function render(catId: string, usage: Parameters<typeof CatTokenUsage>[0]['usage
 }
 
 describe('F8: CatTokenUsage (dynamic redesign)', () => {
+  beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL;
+    delete process.env.NEXT_PUBLIC_CAT_CAFE_USAGE_COST_PANEL;
+  });
+
   it('renders nothing when usage has no token fields', () => {
     const html = render('opus', {});
     expect(html).toBe('');
@@ -81,6 +86,29 @@ describe('F8: CatTokenUsage (dynamic redesign)', () => {
     });
 
     expect(html).toContain('API 3.9s');
+  });
+
+  it('shows exact cache creation and total duration only when cost panel flag is enabled', () => {
+    const disabledHtml = render('opus', {
+      inputTokens: 1000,
+      cacheReadTokens: 300,
+      cacheCreationTokens: 100,
+      durationMs: 4200,
+    });
+    expect(disabledHtml).not.toContain('cacheRead 300');
+    expect(disabledHtml).not.toContain('cacheCreate 100');
+    expect(disabledHtml).not.toContain('duration 4.2s');
+
+    process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL = '1';
+    const enabledHtml = render('opus', {
+      inputTokens: 1000,
+      cacheReadTokens: 300,
+      cacheCreationTokens: 100,
+      durationMs: 4200,
+    });
+    expect(enabledHtml).toContain('cacheRead 300');
+    expect(enabledHtml).toContain('cacheCreate 100');
+    expect(enabledHtml).toContain('duration 4.2s');
   });
 
   it('has correct data-testid attribute', () => {

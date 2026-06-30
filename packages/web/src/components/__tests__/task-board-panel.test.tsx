@@ -44,6 +44,8 @@ vi.mock('../TaskComposer', () => ({
 describe('TaskBoardPanel', () => {
   beforeEach(() => {
     mockTasks = [];
+    delete process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL;
+    delete process.env.NEXT_PUBLIC_CAT_CAFE_USAGE_COST_PANEL;
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('taskboard-collapsed');
     }
@@ -117,5 +119,57 @@ describe('TaskBoardPanel', () => {
     expect(html).toContain('Todo task');
     // done section is still collapsed
     expect(html).not.toContain('Done task');
+  });
+
+  it('hides invocation cost summary by default even when usage events exist', async () => {
+    mockTasks = [
+      {
+        ...makeTasks()[0],
+        events: [
+          {
+            ts: new Date().toISOString(),
+            catId: 'codex',
+            type: 'usage',
+            data: { inputTokens: 1000, outputTokens: 500, totalTokens: 1500, costUsd: 0.12, durationMs: 2300 },
+          },
+        ],
+      },
+    ];
+    const { TaskBoardPanel } = await import('../TaskBoardPanel');
+    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    expect(html).not.toContain('1.5k tok');
+    expect(html).not.toContain('$0.12');
+  });
+
+  it('shows invocation token cost summary when feature flag is enabled', async () => {
+    process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL = '1';
+    mockTasks = [
+      {
+        ...makeTasks()[0],
+        events: [
+          {
+            ts: new Date().toISOString(),
+            catId: 'codex',
+            type: 'usage',
+            data: {
+              provider: 'openai',
+              model: 'gpt-5.5',
+              inputTokens: 1000,
+              cacheReadTokens: 300,
+              cacheCreationTokens: 100,
+              outputTokens: 500,
+              totalTokens: 1500,
+              costUsd: 0.12,
+              durationMs: 2300,
+            },
+          },
+        ],
+      },
+    ];
+    const { TaskBoardPanel } = await import('../TaskBoardPanel');
+    const html = renderToStaticMarkup(<TaskBoardPanel />);
+    expect(html).toContain('1.5k tok');
+    expect(html).toContain('$0.12');
+    expect(html).toContain('2.3s');
   });
 });

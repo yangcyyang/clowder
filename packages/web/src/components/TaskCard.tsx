@@ -2,7 +2,14 @@
 
 import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
 import { useState } from 'react';
+import {
+  isInvocationCostPanelEnabled,
+  readTaskUsageSummaries,
+  summarizeTaskUsage,
+  type InvocationUsageSummary,
+} from '@/utils/invocationCostPanel';
 import { CatAvatar } from './CatAvatar';
+import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
 
 const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   todo: 'doing',
@@ -66,6 +73,48 @@ function formatRelativeTime(timestamp: number): string {
   return `${days}天前`;
 }
 
+function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-cafe-muted">
+      {usage.totalTokens != null && (
+        <span className="rounded-full border border-[var(--console-border-soft)] bg-cafe-surface px-1.5 py-0.5 tabular-nums">
+          {formatTokenCount(usage.totalTokens)} tok
+        </span>
+      )}
+      {usage.costUsd != null && (
+        <span className="rounded-full border border-conn-amber-text/40 bg-conn-amber-bg/40 px-1.5 py-0.5 text-conn-amber-text tabular-nums">
+          {formatCost(usage.costUsd)}
+        </span>
+      )}
+      {usage.durationMs != null && (
+        <span className="rounded-full border border-[var(--console-border-soft)] bg-cafe-surface px-1.5 py-0.5 tabular-nums">
+          {formatDuration(usage.durationMs)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
+  const label = [usage.catId, usage.model].filter(Boolean).join(' · ');
+  return (
+    <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-[10px]">
+      <div className="mb-1 flex items-center gap-1 text-cafe-muted">
+        <span className="font-semibold text-cafe-secondary">{label || usage.catId}</span>
+        {usage.provider && <span>· {usage.provider}</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-cafe-muted tabular-nums">
+        {usage.inputTokens != null && <span>input {formatTokenCount(usage.inputTokens)}</span>}
+        {usage.cacheReadTokens != null && <span>cacheRead {formatTokenCount(usage.cacheReadTokens)}</span>}
+        {usage.cacheCreationTokens != null && <span>cacheCreate {formatTokenCount(usage.cacheCreationTokens)}</span>}
+        {usage.outputTokens != null && <span>output {formatTokenCount(usage.outputTokens)}</span>}
+        {usage.costUsd != null && <span className="text-conn-amber-text">cost {formatCost(usage.costUsd)}</span>}
+        {usage.durationMs != null && <span>duration {formatDuration(usage.durationMs)}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function TaskCard({
   task,
   onStatusChange,
@@ -76,6 +125,9 @@ export function TaskCard({
   const [expanded, setExpanded] = useState(false);
   const status = task.status as TaskStatus;
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.todo;
+  const showCostPanel = isInvocationCostPanelEnabled();
+  const usageEvents = showCostPanel ? readTaskUsageSummaries(task) : [];
+  const usageTotal = summarizeTaskUsage(usageEvents);
 
   return (
     <div
@@ -104,6 +156,8 @@ export function TaskCard({
         </button>
       </div>
 
+      {showCostPanel && usageTotal && <UsageChip usage={usageTotal} />}
+
       {/* Expanded details */}
       {expanded && (
         <div className="mt-2 pt-2 border-t border-[var(--console-border-soft)]">
@@ -111,6 +165,14 @@ export function TaskCard({
           <p className="text-[10px] text-cafe-muted mt-1">
             {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? '铲屎官' : task.createdBy}
           </p>
+          {showCostPanel && usageEvents.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              <p className="text-[10px] font-semibold text-cafe-muted">Invocation 成本明细</p>
+              {usageEvents.map((usage, index) => (
+                <UsageDetailRow key={`${usage.catId}-${index}`} usage={usage} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -538,9 +538,12 @@ describe('Tasks Routes', () => {
           provider: 'openai',
           model: 'gpt-4o-mini',
           inputTokens: 1000,
+          cacheReadTokens: 600,
+          cacheCreationTokens: 100,
           outputTokens: 500,
           totalTokens: 1500,
           costUsd: 0.00045,
+          durationMs: 2345,
         },
       },
     });
@@ -556,6 +559,9 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].type, 'usage');
     assert.equal(response.json().events[0].data.totalTokens, 1500);
     assert.equal(response.json().events[0].data.costUsd, 0.00045);
+    assert.equal(response.json().events[0].data.cacheReadTokens, 600);
+    assert.equal(response.json().events[0].data.cacheCreationTokens, 100);
+    assert.equal(response.json().events[0].data.durationMs, 2345);
   });
 
   test('POST task events accepts fast lane completion payload and filters it', async () => {
