@@ -540,6 +540,7 @@ export class QueueProcessor {
                 ...(costUsd != null ? { costUsd } : {}),
                 ...(aggregate.usage.durationMs != null ? { durationMs: aggregate.usage.durationMs } : {}),
                 ...(aggregate.usage.durationApiMs != null ? { durationApiMs: aggregate.usage.durationApiMs } : {}),
+                ...(aggregate.usage.sourceBreakdown ? { sourceBreakdown: aggregate.usage.sourceBreakdown } : {}),
               },
             },
           ],

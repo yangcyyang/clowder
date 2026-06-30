@@ -161,6 +161,13 @@ describe('TaskBoardPanel', () => {
               totalTokens: 1500,
               costUsd: 0.12,
               durationMs: 2300,
+              sourceBreakdown: {
+                totalEstimatedTokens: 1000,
+                sources: [
+                  { source: 'history', chars: 2400, estimatedTokens: 600 },
+                  { source: 'rules', chars: 1600, estimatedTokens: 400 },
+                ],
+              },
             },
           },
         ],

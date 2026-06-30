@@ -21,6 +21,19 @@ export interface FileContent {
 
 export type MessageContent = TextContent | ImageContent | FileContent;
 
+export type PromptSource = 'history' | 'project' | 'skill' | 'rules' | 'memory';
+
+export interface PromptSourceBreakdownItem {
+  source: PromptSource;
+  chars: number;
+  estimatedTokens: number;
+}
+
+export interface PromptSourceBreakdown {
+  totalEstimatedTokens: number;
+  sources: PromptSourceBreakdownItem[];
+}
+
 /** F8: Token usage data from CLI invocations.
  *  inputTokens = TOTAL input (normalised across providers).
  *  cacheReadTokens = subset of inputTokens served from cache. */
@@ -40,6 +53,8 @@ export interface TokenUsage {
   contextUsedTokens?: number;
   /** F24: reset timestamp (epoch ms) for context quota hint */
   contextResetsAtMs?: number;
+  /** Estimated prompt-source composition. Display-only, not provider billing truth. */
+  sourceBreakdown?: PromptSourceBreakdown;
 }
 
 export interface ChatMessageMetadata {

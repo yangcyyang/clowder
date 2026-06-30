@@ -8,8 +8,17 @@ import {
   summarizeTaskUsage,
   type InvocationUsageSummary,
 } from '@/utils/invocationCostPanel';
+import type { PromptSource, PromptSourceBreakdown } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
 import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
+
+const SOURCE_LABELS: Record<PromptSource, string> = {
+  history: 'history',
+  project: 'project',
+  skill: 'skill',
+  rules: 'rules',
+  memory: 'memory',
+};
 
 const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   todo: 'doing',
@@ -110,6 +119,32 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
         {usage.outputTokens != null && <span>output {formatTokenCount(usage.outputTokens)}</span>}
         {usage.costUsd != null && <span className="text-conn-amber-text">cost {formatCost(usage.costUsd)}</span>}
         {usage.durationMs != null && <span>duration {formatDuration(usage.durationMs)}</span>}
+      </div>
+      {usage.sourceBreakdown && <UsageSourceBreakdown breakdown={usage.sourceBreakdown} />}
+    </div>
+  );
+}
+
+function UsageSourceBreakdown({ breakdown }: { breakdown: PromptSourceBreakdown }) {
+  const sources = breakdown.sources
+    .filter((source) => source.estimatedTokens > 0)
+    .sort((a, b) => b.estimatedTokens - a.estimatedTokens);
+  if (sources.length === 0 || breakdown.totalEstimatedTokens <= 0) return null;
+  return (
+    <div className="mt-1.5 border-t border-[var(--console-border-soft)] pt-1.5">
+      <div className="mb-1 text-[10px] font-semibold text-cafe-muted">来源估算</div>
+      <div className="flex flex-wrap gap-1">
+        {sources.map((source) => {
+          const ratio = Math.round((source.estimatedTokens / breakdown.totalEstimatedTokens) * 100);
+          return (
+            <span
+              key={source.source}
+              className="rounded-full border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-1.5 py-0.5 text-[10px] text-cafe-muted tabular-nums"
+            >
+              {SOURCE_LABELS[source.source]} {ratio}% · {formatTokenCount(source.estimatedTokens)}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

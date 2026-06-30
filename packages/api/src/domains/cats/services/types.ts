@@ -7,6 +7,19 @@ import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 
+export type PromptSource = 'history' | 'project' | 'skill' | 'rules' | 'memory';
+
+export interface PromptSourceBreakdownItem {
+  source: PromptSource;
+  chars: number;
+  estimatedTokens: number;
+}
+
+export interface PromptSourceBreakdown {
+  totalEstimatedTokens: number;
+  sources: PromptSourceBreakdownItem[];
+}
+
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
  *  so that the field has the same semantics regardless of provider.
@@ -30,13 +43,28 @@ export interface TokenUsage {
   contextUsedTokens?: number;
   /** Codex session token_count: reset timestamp (epoch ms) for display-only hint. */
   contextResetsAtMs?: number;
+  /** Estimated prompt-source composition. Display-only, not provider billing truth. */
+  sourceBreakdown?: PromptSourceBreakdown;
 }
+
+type NumericTokenUsageKey =
+  | 'inputTokens'
+  | 'outputTokens'
+  | 'totalTokens'
+  | 'cacheReadTokens'
+  | 'cacheCreationTokens'
+  | 'costUsd'
+  | 'durationMs'
+  | 'durationApiMs'
+  | 'numTurns';
+
+type LatestTokenUsageKey = 'contextWindowSize' | 'lastTurnInputTokens' | 'contextUsedTokens' | 'contextResetsAtMs';
 
 /** F8: Accumulate token usage — adds numeric fields from `incoming` into `existing` */
 export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: TokenUsage): TokenUsage {
   if (!existing) return { ...incoming };
   const result = { ...existing };
-  const numericKeys: (keyof TokenUsage)[] = [
+  const numericKeys: NumericTokenUsageKey[] = [
     'inputTokens',
     'outputTokens',
     'totalTokens',
@@ -50,21 +78,19 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
   for (const key of numericKeys) {
     const val = incoming[key];
     if (val != null) {
-      result[key] = ((result[key] as number) ?? 0) + (val as number);
+      result[key] = (result[key] ?? 0) + val;
     }
   }
   // Non-aggregating contextual fields should keep the most recent snapshot.
-  const latestKeys: (keyof TokenUsage)[] = [
-    'contextWindowSize',
-    'lastTurnInputTokens',
-    'contextUsedTokens',
-    'contextResetsAtMs',
-  ];
+  const latestKeys: LatestTokenUsageKey[] = ['contextWindowSize', 'lastTurnInputTokens', 'contextUsedTokens', 'contextResetsAtMs'];
   for (const key of latestKeys) {
     const val = incoming[key];
     if (val != null) {
       result[key] = val;
     }
+  }
+  if (incoming.sourceBreakdown) {
+    result.sourceBreakdown = incoming.sourceBreakdown;
   }
   return result;
 }

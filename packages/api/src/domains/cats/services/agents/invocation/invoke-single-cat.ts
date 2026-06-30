@@ -59,6 +59,7 @@ import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
+import { estimatePromptSourceBreakdown } from '../../context/prompt-source-breakdown.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { autoUpdateAgentMemory } from '../memory/AgentMemoryAutoWriter.js';
@@ -1204,6 +1205,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       injectSystemPrompt && params.systemPrompt
         ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
         : `${promptWithMission}`;
+    const promptSourceBreakdown = estimatePromptSourceBreakdown({
+      systemPrompt: injectSystemPrompt ? params.systemPrompt : undefined,
+      userPrompt: promptWithMission,
+    });
 
     capturePromptIfEnabled({
       catId: catId as string,
@@ -1477,6 +1482,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
         // F8: Push token usage for frontend cost/token display
         if (msg.metadata?.usage) {
+          if (promptSourceBreakdown && !msg.metadata.usage.sourceBreakdown) {
+            msg.metadata.usage = { ...msg.metadata.usage, sourceBreakdown: promptSourceBreakdown };
+          }
           // F152: Record OTel token usage + LLM call duration
           const modelBucket = normalizeModel(msg.metadata.model ?? '');
           const providerSystem = provider ?? 'unknown';
