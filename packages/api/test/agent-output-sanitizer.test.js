@@ -76,4 +76,77 @@ describe('agent output sanitizer', () => {
 
     assert.equal(output, '结论：这里应该只输出用户可用的判断。');
   });
+
+  test('drops markdown progress sections before final delivery', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '**🔍 我开始做指南**',
+      '',
+      '**📌 证据不够细**',
+      '',
+      '搜索只确认了同一条线程的大方向，具体可执行内容要以本地文件为准。我现在认领当前消息，再并行读源文件和目标目录。',
+      '',
+      '**⚠️ 真相源路径有偏差**',
+      '',
+      '导航给的路径不存在。我会先重新定位真实文件，再继续写入目标目录。',
+      '',
+      '**🛠️ 准备落盘**',
+      '',
+      '我已经确认目标目录和索引位置，现在开始写文件、补索引、回写记忆。',
+      '',
+      '**✅ 已完成**',
+      '',
+      '已沉淀 `design-compiler-guide.md`，并补充 `README.md` 索引。',
+      '',
+      '**验证证据**',
+      '',
+      '- 目标文件存在',
+      '- API build 通过',
+      '',
+      '**费曼版**',
+      '',
+      '这份 skill 是把设计风格翻译成可复用操作手册。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.ok(output.includes('**✅ 已完成**'));
+    assert.ok(output.includes('design-compiler-guide.md'));
+    assert.ok(output.includes('**验证证据**'));
+    assert.ok(output.includes('**费曼版**'));
+    assert.ok(!output.includes('我开始做指南'));
+    assert.ok(!output.includes('证据不够细'));
+    assert.ok(!output.includes('我现在认领当前消息'));
+    assert.ok(!output.includes('准备落盘'));
+    assert.ok(!output.includes('回写记忆'));
+  });
+
+  test('preserves markdown conclusion after progress chatter', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '**🔍 我先独立看问题**',
+      '',
+      '我会先读链接消息，再检查协议和规则是否影响输出。',
+      '',
+      '**📌 证据命中较宽**',
+      '',
+      '需要继续扩一圈看路由和清洗链路。',
+      '',
+      '**🎯 结论**',
+      '',
+      '问题不在前端排版，而在 agent 把执行日志写进了最终正文。',
+      '',
+      '**建议**',
+      '',
+      '在写入前清洗过程段落，只保留结论、交付和验证。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.ok(output.includes('**🎯 结论**'));
+    assert.ok(output.includes('问题不在前端排版'));
+    assert.ok(output.includes('**建议**'));
+    assert.ok(!output.includes('我先独立看问题'));
+    assert.ok(!output.includes('继续扩一圈'));
+  });
 });

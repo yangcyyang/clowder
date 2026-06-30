@@ -29,7 +29,26 @@ const INTERNAL_PROGRESS_LINE_PATTERNS = [
   /按家规查/,
   /加载.*技能/,
   /Task\s+更新/i,
+  /我开始做/,
+  /证据不够细/,
+  /真相源.*偏差/,
+  /真相源确认/,
+  /结构已明确/,
+  /准备落盘/,
+  /开始写文件/,
+  /已落盘.*验证/,
+  /补索引/,
+  /收尾验证/,
+  /回写记忆/,
+  /切任务状态/,
+  /我先独立看/,
+  /证据命中/,
+  /本地布局事实/,
+  /我再扩一圈/,
 ];
+
+const USER_FACING_LINE_RE =
+  /^(结论|建议|结果|交付|验证|验证证据|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议|费曼版|总结|最终判断|核心判断)(?:\s|[：:]|$)/;
 
 function stripInlineArtifacts(text: string): string {
   return text
@@ -44,13 +63,23 @@ function isInternalProtocolBlock(block: string): boolean {
   return INTERNAL_PROTOCOL_PATTERNS.some((pattern) => pattern.test(block));
 }
 
+function normalizeSignalLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^[#>*\-\s\d.)（(]+/, '')
+    .replace(/^(\*\*|__)+/, '')
+    .replace(/(\*\*|__)+$/, '')
+    .replace(/^[^\p{Letter}\p{Number}]+/u, '')
+    .trim();
+}
+
 function isInternalProgressLine(line: string): boolean {
-  const normalized = line.trim().replace(/^[#>*\-\s\d.)（(]+/, '').trim();
+  const normalized = normalizeSignalLine(line);
   return INTERNAL_PROGRESS_LINE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function isUserFacingLine(line: string): boolean {
-  return /^(结论|建议|结果|交付|验证|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议)[：:]/.test(line.trim());
+  return USER_FACING_LINE_RE.test(normalizeSignalLine(line));
 }
 
 /**
@@ -65,15 +94,22 @@ export function sanitizeAgentVisibleOutput(content: string): string {
   const normalized = content.replace(/\r\n/g, '\n');
   const blocks = normalized.split(/\n{2,}/);
   const cleanedBlocks: string[] = [];
+  let suppressNarrativeAfterProgress = false;
 
   for (const block of blocks) {
     if (!block.trim()) continue;
     if (isInternalProtocolBlock(block)) continue;
 
     const rawLines = block.split('\n').map((line) => stripInlineArtifacts(line).replace(/[ \t]{2,}/g, ' ').trimEnd());
-    if (rawLines.some(isInternalProgressLine) && !rawLines.some(isUserFacingLine)) {
+    const hasInternalProgress = rawLines.some(isInternalProgressLine);
+    const hasUserFacingLine = rawLines.some(isUserFacingLine);
+
+    if (hasInternalProgress && !hasUserFacingLine) {
+      suppressNarrativeAfterProgress = true;
       continue;
     }
+    if (suppressNarrativeAfterProgress && !hasUserFacingLine) continue;
+    if (hasUserFacingLine) suppressNarrativeAfterProgress = false;
 
     const cleanedLines = rawLines
       .filter((line) => !isInternalProgressLine(line))
