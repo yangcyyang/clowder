@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Space_Grotesk } from 'next/font/google';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
 import { GuideOverlay } from '@/components/GuideOverlay';
@@ -11,6 +12,12 @@ import './theme-tokens.css';
 import './globals.css';
 import './console-shell.css';
 import './console-controls.css';
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-raft-ui',
+});
 
 const visualThemeBootstrapScript = `
 (() => {
@@ -61,7 +68,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" data-visual-theme="slock" suppressHydrationWarning>
-      <body className="min-h-screen">
+      <body className={`${spaceGrotesk.variable} min-h-screen`}>
         <script dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }} />
         <SessionBootstrap />
         <ThemeProvider>

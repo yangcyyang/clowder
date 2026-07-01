@@ -47,10 +47,10 @@ export function ChatContainerHeader({
 
   return (
     <header className="safe-area-top">
-      <div className="h-11 border-b border-[var(--slock-border-color)] px-5 flex items-center gap-2">
+      <div className="slock-chat-header h-11 border-b border-[var(--slock-border-color)] px-5 flex items-center gap-2">
         <button
           onClick={onToggleSidebar}
-          className="p-1 rounded-md hover:bg-[var(--console-hover-bg)] transition-colors md:hidden"
+          className="slock-header-action slock-header-action--icon inline-flex md:hidden"
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
@@ -70,7 +70,7 @@ export function ChatContainerHeader({
         <button
           type="button"
           onClick={openSkillDashboard}
-          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-1 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          className="slock-header-action slock-header-action--label hidden sm:inline-flex"
           title="打开静态 Skill 仪表板"
           aria-label="打开静态 Skill 仪表板"
         >
@@ -79,7 +79,7 @@ export function ChatContainerHeader({
         <button
           type="button"
           onClick={onOpenKnowledgeCapture}
-          className="hidden rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--cafe-text-secondary)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)] sm:inline-flex"
+          className="slock-header-action slock-header-action--label hidden sm:inline-flex"
           title="沉淀为知识"
           aria-label="沉淀为知识"
         >
@@ -89,7 +89,7 @@ export function ChatContainerHeader({
           <button
             type="button"
             onClick={onOpenChannelSettings}
-            className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1"
+            className="slock-header-action slock-header-action--icon ml-1 inline-flex"
             title="频道设置"
             aria-label="频道设置"
           >
@@ -112,7 +112,7 @@ export function ChatContainerHeader({
         )}
         <button
           onClick={onOpenMobileStatus}
-          className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1 lg:hidden"
+          className="slock-header-action slock-header-action--icon ml-1 inline-flex lg:hidden"
           title="打开状态面板"
           aria-label="打开状态面板"
         >
@@ -229,11 +229,11 @@ function RightPanelToggle({
   return (
     <button
       onClick={handleClick}
-      className={`p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1 hidden lg:block ${
+      className={`slock-header-action slock-header-action--icon ml-1 hidden lg:inline-flex ${
         statusPanelOpen
           ? isWorkspace
-            ? 'bg-[var(--color-cafe-accent)]/5 text-[var(--color-cafe-accent)]'
-            : 'bg-cafe-surface-elevated'
+            ? 'slock-header-action--active'
+            : 'slock-header-action--muted-active'
           : ''
       }`}
       aria-label={label}

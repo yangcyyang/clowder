@@ -60,7 +60,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
       <button
         onClick={() => setMenuOpen((v) => !v)}
         disabled={loading}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--console-pill-bg)] transition-colors hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="slock-header-action slock-header-action--icon inline-flex disabled:cursor-not-allowed disabled:opacity-50"
         title="导出对话"
         aria-label="导出对话"
       >

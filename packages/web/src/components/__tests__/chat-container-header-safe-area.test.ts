@@ -55,7 +55,8 @@ describe('ChatContainerHeader safe-area', () => {
 
     const innerRow = header?.querySelector('div');
     expect(innerRow).not.toBeNull();
-    expect(innerRow?.className).toContain('h-[54px]');
+    expect(innerRow?.className).toContain('slock-chat-header');
+    expect(innerRow?.className).toContain('h-11');
     expect(container.querySelector('[data-testid="hub-button"]')).toBeNull();
     expect(container.textContent).toContain('技能库');
     expect(container.querySelector('[aria-label="打开静态 Skill 仪表板"]')).not.toBeNull();
