@@ -96,14 +96,25 @@ describe('Marketplace Routes', () => {
     }
   });
 
-  it('GET /api/marketplace/search returns 400 without q param', async () => {
+  it('GET /api/marketplace/search browses all results without q param', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/marketplace/search',
     });
-    assert.strictEqual(res.statusCode, 400);
+    assert.strictEqual(res.statusCode, 200);
     const body = res.json();
-    assert.ok(body.error.includes('q'));
+    assert.ok(Array.isArray(body.results));
+    assert.ok(body.results.length > 0);
+  });
+
+  it('GET /api/marketplace/search treats blank q as browse', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/marketplace/search?q=',
+    });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.ok(Array.isArray(body.results));
   });
 
   it('POST /api/marketplace/install/plan returns install plan', async () => {

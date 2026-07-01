@@ -104,6 +104,41 @@ describe('marketplaceStore', () => {
     expect(useMarketplaceStore.getState().loading).toBe(false);
   });
 
+  it('search sets error on non-2xx response', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: 'Missing required query parameter: q' }),
+    });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().search('');
+
+    expect(useMarketplaceStore.getState().error).toBe('Missing required query parameter: q');
+    expect(useMarketplaceStore.getState().loading).toBe(false);
+    expect(useMarketplaceStore.getState().results).toEqual([]);
+  });
+
+  it('search falls back to empty results when API omits results', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().search('memory');
+
+    expect(useMarketplaceStore.getState().results).toEqual([]);
+    expect(useMarketplaceStore.getState().loading).toBe(false);
+  });
+
+  it('browse calls search endpoint without a dangling query string', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [MOCK_RESULT] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+
+    await useMarketplaceStore.getState().browse();
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/marketplace/search');
+    expect(useMarketplaceStore.getState().results).toHaveLength(1);
+  });
+
   it('getInstallPlan fetches plan via POST', async () => {
     mocks.apiFetch.mockResolvedValueOnce({ json: () => Promise.resolve({ plan: MOCK_PLAN }) });
     const { useMarketplaceStore } = await import('../marketplaceStore');

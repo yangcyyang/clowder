@@ -30,6 +30,18 @@ interface MarketplaceState {
   clearSelection: () => void;
 }
 
+async function readSearchResults(res: Response): Promise<MarketplaceSearchResult[]> {
+  if (res.ok === false) {
+    const message = await res
+      .json()
+      .then((body: { error?: string }) => body.error)
+      .catch(() => null);
+    throw new Error(message ?? `Marketplace search failed (${res.status})`);
+  }
+  const data = (await res.json()) as { results?: MarketplaceSearchResult[] };
+  return Array.isArray(data.results) ? data.results : [];
+}
+
 export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   results: [],
   selectedResult: null,
@@ -56,8 +68,8 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
         params.set('artifactKinds', artifactKindsFilter.join(','));
       }
       const res = await apiFetch(`/api/marketplace/search?${params}`);
-      const data = (await res.json()) as { results: MarketplaceSearchResult[] };
-      set({ results: data.results, loading: false });
+      const results = await readSearchResults(res);
+      set({ results, loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Search failed', loading: false });
     }
@@ -71,9 +83,10 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       if (ecosystemFilter.length > 0) params.set('ecosystems', ecosystemFilter.join(','));
       if (trustFilter.length > 0) params.set('trustLevels', trustFilter.join(','));
       if (artifactKindsFilter.length > 0) params.set('artifactKinds', artifactKindsFilter.join(','));
-      const res = await apiFetch(`/api/marketplace/search?${params}`);
-      const data = (await res.json()) as { results: MarketplaceSearchResult[] };
-      set({ results: data.results, loading: false });
+      const path = params.size > 0 ? `/api/marketplace/search?${params}` : '/api/marketplace/search';
+      const res = await apiFetch(path);
+      const results = await readSearchResults(res);
+      set({ results, loading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Browse failed', loading: false });
     }
