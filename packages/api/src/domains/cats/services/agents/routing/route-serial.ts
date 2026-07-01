@@ -45,6 +45,7 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
+import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
 import {
   buildGovernanceSourceContext,
   buildInvocationContext,
@@ -416,7 +417,12 @@ export async function* routeSerial(
       }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
       const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
-      const projectContext = loadStandardContext ? await readProjectProgressForPrompt() : null;
+      const contextLayerPlan = resolveContextLayerPlan({
+        message,
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+        loadStandardContext,
+      });
+      const projectContext = contextLayerPlan.l2ProjectContext ? await readProjectProgressForPrompt() : null;
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
         packBlocks,
@@ -728,6 +734,7 @@ export async function* routeSerial(
         hasAgentMemory: Boolean(agentMemoryContext),
         hasLessonsContext: Boolean(lessonsContext && staticIdentity.includes('公共踩坑记录（LESSONS.md，低优先级）')),
         hasProjectContext: Boolean(projectContext && staticIdentity.includes('项目进度（只读参考）')),
+        projectContextDeferred: contextLayerPlan.projectContextDeferred,
         ...(skillRouterContext ? { skillRouterMatchedSkills: skillRouterContext.matchedSkillNames } : {}),
         governanceTier,
         governanceEstimatedTokens,

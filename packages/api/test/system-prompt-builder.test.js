@@ -672,6 +672,49 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip project progress content');
   });
 
+  test('resolveContextLayerPlan defers project context for lightweight discussion', async () => {
+    const { resolveContextLayerPlan } = await import('../dist/domains/cats/services/context/ContextLayerRouter.js');
+    const plan = resolveContextLayerPlan({
+      message: '用费曼解释一下 Skill Router 是什么',
+      toolPolicy: 'standard',
+      loadStandardContext: true,
+    });
+
+    assert.equal(plan.mode, 'layered');
+    assert.equal(plan.l2ProjectContext, false);
+    assert.equal(plan.projectContextDeferred, true);
+    assert.ok(plan.signals.includes('feynman'));
+  });
+
+  test('resolveContextLayerPlan loads project context for engineering work', async () => {
+    const { resolveContextLayerPlan } = await import('../dist/domains/cats/services/context/ContextLayerRouter.js');
+    const plan = resolveContextLayerPlan({
+      message: '帮我修复 packages/api/src/routes/messages.ts 里的任务状态 bug，并跑 build',
+      toolPolicy: 'standard',
+      loadStandardContext: true,
+    });
+
+    assert.equal(plan.mode, 'layered');
+    assert.equal(plan.l2ProjectContext, true);
+    assert.equal(plan.projectContextDeferred, false);
+    assert.ok(plan.signals.includes('code-action'));
+    assert.ok(plan.signals.includes('local-reference'));
+  });
+
+  test('resolveContextLayerPlan preserves legacy injection when disabled', async () => {
+    const { resolveContextLayerPlan } = await import('../dist/domains/cats/services/context/ContextLayerRouter.js');
+    const plan = resolveContextLayerPlan({
+      message: '用费曼解释一下 Skill Router 是什么',
+      toolPolicy: 'standard',
+      loadStandardContext: true,
+      env: { CAT_CAFE_CONTEXT_LAYERS: '0' },
+    });
+
+    assert.equal(plan.mode, 'legacy');
+    assert.equal(plan.l2ProjectContext, true);
+    assert.equal(plan.projectContextDeferred, false);
+  });
+
   test('readLessonsForPrompt loads .cat-cafe/LESSONS.md content', async () => {
     const { readLessonsForPrompt } = await import('../dist/domains/cats/services/agents/memory/LessonStore.js');
     const content = await readLessonsForPrompt();

@@ -190,6 +190,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasAgentMemory: boolean;
   hasLessonsContext: boolean;
   hasProjectContext?: boolean;
+  projectContextDeferred?: boolean;
   skillRouterMatchedSkills?: readonly string[];
   governanceTier: 'core' | 'operational';
   governanceEstimatedTokens: number;
@@ -202,6 +203,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.hasAgentMemory) loadedBlocks.push('agent-memory');
   if (input.hasLessonsContext) loadedBlocks.push('lessons');
   if (input.hasProjectContext) loadedBlocks.push('project-progress');
+  if (input.projectContextDeferred) loadedBlocks.push('project-progress:on-demand');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
   if (input.hasWorldContext) loadedBlocks.push('world-context');
@@ -220,6 +222,9 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   const skippedBlocks: string[] = [];
   if (!input.loadStandardContext) {
     skippedBlocks.push('pack-blocks', 'world-context', 'session-bootstrap', 'lessons', 'project-progress');
+  }
+  if (input.projectContextDeferred) {
+    skippedBlocks.push('project-progress');
   }
   if (!input.loadFullContext) {
     skippedBlocks.push('signal-articles', 'always-on-docs', 'sop-hint', 'guide-context');

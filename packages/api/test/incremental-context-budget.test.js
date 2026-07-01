@@ -133,6 +133,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
       hasAgentMemory: false,
       hasLessonsContext: true,
       hasProjectContext: true,
+      projectContextDeferred: false,
       governanceTier: 'core',
       governanceEstimatedTokens: 120,
       hasGovernanceSourceContext: true,
@@ -146,6 +147,41 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.ok(snapshot.loadedBlocks.includes('governance-source'));
     assert.ok(snapshot.loadedBlocks.includes('lessons'));
     assert.ok(snapshot.loadedBlocks.includes('project-progress'));
+  });
+
+  test('runtime context budget snapshot exposes deferred project context', async () => {
+    const budget = getCatContextBudget('opus');
+    const snapshot = buildRuntimeContextBudgetSnapshot({
+      threadId: 'thread-1',
+      toolPolicy: 'standard',
+      toolPolicySource: 'agent-default',
+      mode: 'serial',
+      prompt: '费曼解释一下 skill router',
+      staticIdentity: 'identity',
+      historyCount: 0,
+      includedHistoryCount: 0,
+      loadStandardContext: true,
+      loadFullContext: false,
+      hasPackBlocks: false,
+      hasWorldContext: false,
+      hasSessionBootstrap: false,
+      hasSignalArticles: false,
+      hasAlwaysOnDocs: false,
+      hasSopHint: false,
+      hasGuideContext: false,
+      hasMcpInstructions: false,
+      hasAgentMemory: false,
+      hasLessonsContext: false,
+      hasProjectContext: false,
+      projectContextDeferred: true,
+      governanceTier: 'operational',
+      governanceEstimatedTokens: 120,
+      hasGovernanceSourceContext: false,
+      catBudget: budget,
+    });
+
+    assert.ok(snapshot.loadedBlocks.includes('project-progress:on-demand'));
+    assert.ok(snapshot.skippedBlocks.includes('project-progress'));
   });
 
   test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {
