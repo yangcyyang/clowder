@@ -231,8 +231,8 @@
 }
 
 [data-visual-theme="slockv1"] {
-  --console-shell-bg: #ffffff;
-  --console-panel-bg: #fffaef;
+  --console-shell-bg: var(--slock-workspace-bg);
+  --console-panel-bg: var(--slock-workspace-bg);
   --console-card-bg: #ffffff;
   --console-card-soft-bg: #fffaef;
   --console-code-bg: #111827;
@@ -269,8 +269,8 @@
 }
 
 [data-visual-theme="slock"] {
-  --console-shell-bg: var(--slock-cream);
-  --console-panel-bg: var(--slock-cream);
+  --console-shell-bg: var(--slock-workspace-bg);
+  --console-panel-bg: var(--slock-workspace-bg);
   --console-card-bg: var(--slock-white);
   --console-card-soft-bg: var(--slock-cream);
   --console-code-bg: var(--slock-warm-yellow);
@@ -1008,6 +1008,84 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-chat-header {
+  height: 40px;
+  background: var(--console-shell-bg);
+}
+
+.slock-header-action {
+  height: 32px;
+  min-width: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--slock-border-color);
+  border-radius: var(--slock-radius-md);
+  background: var(--console-card-soft-bg);
+  color: var(--cafe-text-secondary);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.slock-header-action--icon {
+  width: 32px;
+  padding: 0;
+}
+
+.slock-header-action--label {
+  gap: 4px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.slock-header-action:hover {
+  background: var(--console-hover-bg);
+  color: var(--cafe-text);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action {
+  height: 28px;
+  min-width: 28px;
+  border: 1px solid color-mix(in srgb, var(--slock-ink) 18%, transparent);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--slock-secondary-text);
+  box-shadow: none;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action--icon {
+  width: 28px;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action--label {
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action:hover {
+  border-color: color-mix(in srgb, var(--slock-ink) 30%, transparent);
+  background: color-mix(in srgb, var(--slock-warm-yellow) 38%, #ffffff);
+  color: var(--slock-ink);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-header-action--active {
+  border-color: color-mix(in srgb, var(--slock-pink-active) 70%, var(--slock-ink));
+  background: color-mix(in srgb, var(--slock-pink-active) 18%, #ffffff);
+  color: var(--slock-ink);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-header-action--muted-active {
+  background: color-mix(in srgb, var(--slock-warm-yellow) 28%, #ffffff);
+  color: var(--slock-ink);
 }
 
 [data-visual-theme="slock"] .slock-tab-button:hover {
