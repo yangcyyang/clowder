@@ -8,15 +8,33 @@ import { TagEditor } from './hub-tag-editor';
 
 const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'];
 
-/** Suggested models per client — kept in sync with cat-template.json clientDefaults. */
-const MODEL_SUGGESTIONS: Partial<Record<BuiltinAccountClient, string[]>> = {
-  anthropic: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-  openai: ['gpt-5.5', 'gpt-5', 'o4-mini', 'codex-mini'],
-  google: ['gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  kimi: ['kimi-code/kimi-for-coding'],
-  dare: ['claude-fable-5'],
-  opencode: ['xiaomi-mimo/mimo-v2.5-pro', 'claude-opus-4-6'],
-};
+type ModelSuggestionsByClient = Partial<Record<BuiltinAccountClient, string[]>>;
+
+interface CatModelOptionsResponse {
+  clients?: Partial<Record<BuiltinAccountClient, string[] | { models?: string[] }>>;
+}
+
+function uniqueModels(models: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const model of models) {
+    const value = model.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+  return next;
+}
+
+function parseModelSuggestionsResponse(body: CatModelOptionsResponse): ModelSuggestionsByClient {
+  const next: ModelSuggestionsByClient = {};
+  for (const [clientId, preset] of Object.entries(body.clients ?? {})) {
+    const models = Array.isArray(preset) ? preset : preset?.models;
+    if (!Array.isArray(models)) continue;
+    next[clientId as BuiltinAccountClient] = uniqueModels(models);
+  }
+  return next;
+}
 
 export interface UnifiedAuthEditData {
   id: string;
@@ -54,6 +72,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   const [advancedOpen, setAdvancedOpen] = useState(
     Boolean(editProfile?.envVars && Object.keys(editProfile.envVars).length > 0),
   );
+  const [modelSuggestionsByClient, setModelSuggestionsByClient] = useState<ModelSuggestionsByClient>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,9 +96,33 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     prevOpenRef.current = open;
   }, [open, editProfile, initialClientId]);
 
+  useEffect(() => {
+    if (!open) {
+      setModelSuggestionsByClient({});
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => apiFetch('/api/cat-model-options'))
+      .then(async (res) => {
+        if (!res.ok) throw new Error('load failed');
+        return (await res.json()) as CatModelOptionsResponse;
+      })
+      .then((body) => {
+        if (!cancelled) setModelSuggestionsByClient(parseModelSuggestionsResponse(body));
+      })
+      .catch(() => {
+        if (!cancelled) setModelSuggestionsByClient({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const isOAuth = authMode === 'oauth';
+  const modelSuggestions = modelSuggestionsByClient[initialClientId ?? clientId] ?? [];
 
   /** POSIX env var key: must start with uppercase or _, rest alphanumeric + _. */
   const ENV_KEY_RE = /^[A-Z_][A-Za-z0-9_]*$/;
@@ -333,10 +376,10 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
               onChange={setModels}
               minCount={0}
             />
-            {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
+            {modelSuggestions.filter((m) => !models.includes(m)).length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <span className="text-label text-cafe-secondary">推荐</span>
-                {(MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? [])
+                {modelSuggestions
                   .filter((m) => !models.includes(m))
                   .map((m) => (
                     <button

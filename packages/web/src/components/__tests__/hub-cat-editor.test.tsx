@@ -466,6 +466,73 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it('loads model candidates from /api/cat-model-options for the model picker', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                mode: 'subscription',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(
+          jsonResponse({
+            clients: {
+              anthropic: {
+                defaultModel: 'claude-sonnet-5',
+                models: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-4-7'],
+              },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'anthropic', accountRef: 'claude-oauth', defaultModel: 'claude-opus-4-8' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    await act(async () => {
+      modelInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/cat-model-options');
+    expect(container.textContent).toContain('claude-sonnet-5');
+    expect(container.textContent).toContain('claude-opus-4-7');
+    expect(container.textContent).toContain('claude-opus-4-6');
+  });
+
   it('AC-C2: defaults API-key member aliases to the selected model name', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string) => {

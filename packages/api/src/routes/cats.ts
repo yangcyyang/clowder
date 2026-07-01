@@ -197,6 +197,96 @@ const reloadAssetCardSchema = z.object({
 
 const DEFAULT_AVATAR_PATH = '/avatars/default.png';
 
+interface CatModelOptionPreset {
+  defaultModel: string;
+  models: string[];
+}
+
+const CAT_MODEL_OPTION_PRESETS: Partial<Record<ClientId, CatModelOptionPreset>> = {
+  anthropic: {
+    defaultModel: 'claude-sonnet-5',
+    models: [
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-opus-3',
+      'claude-sonnet-4-6',
+    ],
+  },
+  openai: {
+    defaultModel: 'gpt-5.5',
+    models: [
+      'gpt-5.5',
+      'gpt-5.5-pro',
+      'gpt-5.4',
+      'gpt-5.4-pro',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5',
+      'gpt-5-pro',
+      'gpt-5-mini',
+      'gpt-5-codex',
+      'o4-mini',
+      'codex-mini',
+    ],
+  },
+  google: {
+    defaultModel: 'gemini-3.1-pro-preview',
+    models: ['gemini-3.1-pro-preview', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+  },
+  kimi: {
+    defaultModel: 'kimi-code/kimi-for-coding',
+    models: ['kimi-code/kimi-for-coding'],
+  },
+  dare: {
+    defaultModel: 'claude-fable-5',
+    models: ['claude-fable-5'],
+  },
+  opencode: {
+    defaultModel: 'xiaomi-mimo/mimo-v2.5-pro',
+    models: [
+      'xiaomi-mimo/mimo-v2.5-pro',
+      'xiaomi/mimo-v2.5-pro',
+      'anthropic/claude-opus-4.8',
+      'anthropic/claude-opus-4.7',
+      'anthropic/claude-opus-4.6',
+      'openai/gpt-5.5',
+      'openai/gpt-5.4',
+    ],
+  },
+  pi: {
+    defaultModel: 'mimo/mimo-v2.5-pro',
+    models: ['mimo/mimo-v2.5-pro', 'mimo/mimo-v2.5', 'xiaomi/mimo-v2.5-pro', 'openrouter/auto'],
+  },
+};
+
+function uniqueModels(models: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const model of models) {
+    const value = model.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    next.push(value);
+  }
+  return next;
+}
+
+function getCatModelOptionPresets(): Partial<Record<ClientId, CatModelOptionPreset>> {
+  return Object.fromEntries(
+    Object.entries(CAT_MODEL_OPTION_PRESETS).map(([clientId, preset]) => [
+      clientId,
+      {
+        defaultModel: preset.defaultModel,
+        models: uniqueModels(preset.models),
+      },
+    ]),
+  ) as Partial<Record<ClientId, CatModelOptionPreset>>;
+}
+
 function resolveResponseAvatar(projectRoot: string, avatar: string | undefined): string {
   const value = avatar?.trim() || DEFAULT_AVATAR_PATH;
   if (!value.startsWith('/avatars/')) return value;
@@ -565,6 +655,12 @@ interface CatsRoutesOptions {
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+  // GET /api/cat-model-options - 模型候选唯一来源；前端不再各处硬编码 provider 列表。
+  app.get('/api/cat-model-options', async () => ({
+    source: 'static-presets-v1',
+    clients: getCatModelOptionPresets(),
+  }));
+
   // GET /api/cat-templates - 获取角色模板（纯灵魂层，不含 client/model 绑定）
   app.get('/api/cat-templates', async () => {
     try {

@@ -45,13 +45,21 @@ interface HubCatEditorProps {
   hideDelete?: boolean;
 }
 
-const MODEL_PRESETS_BY_CLIENT: Partial<Record<HubCatEditorFormState['clientId'], string[]>> = {
-  anthropic: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-  openai: ['gpt-5.5', 'gpt-5', 'o4-mini', 'codex-mini'],
-  google: ['gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  kimi: ['kimi-code/kimi-for-coding'],
-  opencode: ['xiaomi-mimo/mimo-v2.5-pro', 'claude-opus-4-6'],
-};
+type ModelOptionsByClient = Partial<Record<HubCatEditorFormState['clientId'], string[]>>;
+
+interface CatModelOptionsResponse {
+  clients?: Partial<Record<HubCatEditorFormState['clientId'], string[] | { models?: string[] }>>;
+}
+
+function parseModelOptionsResponse(body: CatModelOptionsResponse): ModelOptionsByClient {
+  const next: ModelOptionsByClient = {};
+  for (const [clientId, preset] of Object.entries(body.clients ?? {})) {
+    const models = Array.isArray(preset) ? preset : preset?.models;
+    if (!Array.isArray(models)) continue;
+    next[clientId as HubCatEditorFormState['clientId']] = uniqueModelOptions(models);
+  }
+  return next;
+}
 
 function uniqueModelOptions(...groups: Array<string[] | undefined>): string[] {
   const seen = new Set<string>();
@@ -98,6 +106,7 @@ export function HubCatEditor({
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
+  const [modelOptionsByClient, setModelOptionsByClient] = useState<ModelOptionsByClient>({});
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
@@ -106,8 +115,8 @@ export function HubCatEditor({
   );
   const modelOptions = useMemo(() => {
     if (form.clientId === 'antigravity') return [];
-    return uniqueModelOptions(selectedProfile?.models, MODEL_PRESETS_BY_CLIENT[form.clientId]);
-  }, [form.clientId, selectedProfile?.models]);
+    return uniqueModelOptions(selectedProfile?.models, modelOptionsByClient[form.clientId]);
+  }, [form.clientId, selectedProfile?.models, modelOptionsByClient]);
   const showCodexSettings = form.clientId === 'openai';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
@@ -166,6 +175,29 @@ export function HubCatEditor({
       cancelled = true;
     };
   }, [open, cat]);
+
+  useEffect(() => {
+    if (!open) {
+      setModelOptionsByClient({});
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => apiFetch('/api/cat-model-options'))
+      .then(async (res) => {
+        if (!res.ok) throw new Error('load failed');
+        return (await res.json()) as CatModelOptionsResponse;
+      })
+      .then((body) => {
+        if (!cancelled) setModelOptionsByClient(parseModelOptionsResponse(body));
+      })
+      .catch(() => {
+        if (!cancelled) setModelOptionsByClient({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

@@ -248,6 +248,33 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     await app.close();
   });
 
+  it('GET /api/cat-model-options returns the shared model candidate source', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cat-model-options' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.source, 'static-presets-v1');
+    assert.deepEqual(body.clients.anthropic.models, [
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-opus-3',
+      'claude-sonnet-4-6',
+    ]);
+    assert.equal(body.clients.openai.defaultModel, 'gpt-5.5');
+    assert.ok(body.clients.opencode.models.includes('anthropic/claude-opus-4.8'));
+
+    await app.close();
+  });
+
   it('GET /api/cats returns roster metadata without source field', async () => {
     const templateConfig = makeVersion2Config('template-cat', '模板猫', {
       family: 'ragdoll',
