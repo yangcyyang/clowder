@@ -71,6 +71,9 @@ describe('QueueProcessor', () => {
   let processor;
 
   beforeEach(() => {
+    process.env.CAT_CAFE_AGENT_OUTPUT_GATE = '0';
+    delete process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY;
+    delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
     deps = stubDeps();
     processor = new QueueProcessor(deps);
   });
@@ -2349,6 +2352,61 @@ describe('QueueProcessor', () => {
           delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
         } else {
           process.env.CAT_CAFE_CODEX_OUTPUT_GATE = previous;
+        }
+      }
+    });
+
+    it('agent output gate defaults on for claude/gemini/kimi targets and preserves lifecycle broadcasts', async () => {
+      const previous = process.env.CAT_CAFE_AGENT_OUTPUT_GATE;
+      delete process.env.CAT_CAFE_AGENT_OUTPUT_GATE;
+      try {
+        for (const catId of ['opus', 'gemini', 'kimi']) {
+          const hookDeps = stubDeps({
+            router: {
+              routeExecution: mock.fn(async function* () {
+                yield {
+                  type: 'text',
+                  catId,
+                  content: '**🔍 我先取上下文**\n\n我正在读取目录并准备执行。\n\n',
+                  timestamp: 1000,
+                };
+                yield {
+                  type: 'text',
+                  catId,
+                  content: '**✅ 已完成**\n\n交付：输出闸门已覆盖该 runtime。',
+                  timestamp: 1001,
+                };
+                yield { type: 'done', catId, timestamp: 1002 };
+              }),
+              ackCollectedCursors: mock.fn(async () => {}),
+            },
+            threadMetaLookup: mock.fn(async () => undefined),
+          });
+          const hookProcessor = new QueueProcessor(hookDeps);
+
+          const entry = enqueueEntry(hookDeps.queue, { targetCats: [catId] });
+          hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, `msg-${catId}`);
+
+          await hookProcessor.processNext('t1', 'u1');
+          await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 2);
+
+          const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+          const textMessages = agentMessages.filter((msg) => msg.type === 'text');
+          const doneMessages = agentMessages.filter((msg) => msg.type === 'done');
+          const roomEvents = hookDeps.socketManager.broadcastToRoom.mock.calls.map((call) => call.arguments[1]);
+
+          assert.equal(textMessages.length, 1, `${catId} should not broadcast intermediate text chunks`);
+          assert.ok(textMessages[0].content.includes('**✅ 已完成**'));
+          assert.ok(textMessages[0].content.includes('交付：输出闸门已覆盖该 runtime。'));
+          assert.ok(!textMessages[0].content.includes('我先取上下文'));
+          assert.equal(doneMessages.length, 1, `${catId} done lifecycle event should still be broadcast`);
+          assert.ok(roomEvents.includes('spawn_started'), `${catId} liveness signal should still be visible`);
+        }
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_AGENT_OUTPUT_GATE;
+        } else {
+          process.env.CAT_CAFE_AGENT_OUTPUT_GATE = previous;
         }
       }
     });

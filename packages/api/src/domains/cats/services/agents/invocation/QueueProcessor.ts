@@ -184,13 +184,26 @@ function getMessageMetadata(msg: { metadata?: unknown }): MessageMetadata | unde
 }
 
 function isCompleteMessageDeliveryEnabled(): boolean {
-  const value = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY?.trim().toLowerCase();
-  return value === '1' || value === 'true' || value === 'yes';
+  return parseFeatureFlag(process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY) === true;
+}
+
+function parseFeatureFlag(value: string | undefined): boolean | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return undefined;
+}
+
+function isAgentOutputGateEnabled(): boolean {
+  const value = parseFeatureFlag(process.env.CAT_CAFE_AGENT_OUTPUT_GATE);
+  // Default on: the gate protects the main chat from process chatter while
+  // still forwarding lifecycle/liveness events below.
+  return value ?? true;
 }
 
 function isCodexOutputGateEnabled(): boolean {
-  const value = process.env.CAT_CAFE_CODEX_OUTPUT_GATE?.trim().toLowerCase();
-  return value === '1' || value === 'true' || value === 'yes';
+  return parseFeatureFlag(process.env.CAT_CAFE_CODEX_OUTPUT_GATE) === true;
 }
 
 function isCodexRuntimeCat(catId: string): boolean {
@@ -199,7 +212,31 @@ function isCodexRuntimeCat(catId: string): boolean {
   return config?.cli?.command === 'codex';
 }
 
+function isAgentOutputGateRuntimeCat(catId: string): boolean {
+  const config = catRegistry.tryGet(catId)?.config;
+  const command = config?.cli?.command?.toLowerCase();
+  if (command === 'claude' || command === 'codex' || command === 'gemini' || command === 'kimi') return true;
+
+  const clientId = config?.clientId?.toLowerCase();
+  if (clientId === 'anthropic' || clientId === 'openai' || clientId === 'google' || clientId === 'kimi') return true;
+
+  // Fallback for bootstrapping/tests before runtime config is registered.
+  return (
+    catId === 'opus' ||
+    catId === 'sonnet' ||
+    catId === 'opus-45' ||
+    catId === 'opus-47' ||
+    catId === 'codex' ||
+    catId === 'gpt52' ||
+    catId === 'spark' ||
+    catId === 'gemini' ||
+    catId === 'gemini25' ||
+    catId === 'kimi'
+  );
+}
+
 function isOutputGateEnabledForTargets(targetCats: readonly string[]): boolean {
+  if (isAgentOutputGateEnabled() && targetCats.some(isAgentOutputGateRuntimeCat)) return true;
   return isCodexOutputGateEnabled() && targetCats.some(isCodexRuntimeCat);
 }
 
