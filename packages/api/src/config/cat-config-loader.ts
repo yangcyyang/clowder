@@ -85,6 +85,34 @@ function splitCapabilityText(text: string | undefined): string[] {
   return uniqueNonEmpty(text.split(/[、，,；;。\n]/).map((part) => part.replace(/^\s*(?:擅长|适合|负责)\s*/, '')));
 }
 
+function deriveModelVariantLabel(model: string | undefined): string | undefined {
+  const value = model?.trim();
+  if (!value) return undefined;
+
+  const claudeMatch = value.match(/claude-(opus|sonnet|haiku)-(\d+)-(\d+)/i);
+  if (claudeMatch) {
+    const family = claudeMatch[1][0].toUpperCase() + claudeMatch[1].slice(1).toLowerCase();
+    return `${family}${claudeMatch[2]}.${claudeMatch[3]}`;
+  }
+
+  const gptMatch = value.match(/\bgpt[-_]?(\d+(?:\.\d+)?)/i);
+  if (gptMatch) return `GPT-${gptMatch[1]}`;
+
+  return undefined;
+}
+
+function isModelVersionLabel(label: string | undefined): boolean {
+  if (!label) return false;
+  return /^(?:opus|sonnet|haiku)\s*\d/i.test(label.trim()) || /^gpt[-\s]?\d/i.test(label.trim());
+}
+
+function normalizeVariantLabelForModel(label: string | undefined, model: string | undefined): string | undefined {
+  if (!label) return undefined;
+  const derived = deriveModelVariantLabel(model);
+  if (!derived) return label;
+  return isModelVersionLabel(label) && label.replace(/\s+/g, '') !== derived ? derived : label;
+}
+
 const assetCardSchema = z.object({
   path: z.string().min(1),
   version: z.string().min(1).optional(),
@@ -458,11 +486,12 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // F167 Phase E (KD-20): variant restrictions override breed (no merge);
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
+      const variantLabel = normalizeVariantLabelForModel(variant.variantLabel, variant.defaultModel);
       const capabilityContract =
         variant.capabilityContract ??
         breed.capabilityContract ??
         {
-          primaryRoles: uniqueNonEmpty([breed.displayName, variant.displayName, variant.variantLabel]),
+          primaryRoles: uniqueNonEmpty([breed.displayName, variant.displayName, variantLabel]),
           canHandle: uniqueNonEmpty([
             ...splitCapabilityText(teamStrengths),
             ...(variant.strengths ?? []),
@@ -502,7 +531,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,
         breedDisplayName: breed.displayName,
-        ...(variant.variantLabel != null ? { variantLabel: variant.variantLabel } : {}),
+        ...(variantLabel != null ? { variantLabel } : {}),
         isDefaultVariant: isDefault,
         ...(teamStrengths != null ? { teamStrengths } : {}),
         // R1 fix: preserve null (explicit no-caution) in CatConfig; only omit if undefined

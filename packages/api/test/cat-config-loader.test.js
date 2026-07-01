@@ -662,6 +662,24 @@ describe('F32-b: toAllCatConfigs (multi-variant)', () => {
     assert.equal(all['opus-45'].displayName, '布偶猫 4.5');
   });
 
+  it('normalizes stale model-family variantLabel from defaultModel', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[0].variants[1].variantLabel = 'Sonnet4.6';
+    cfg.breeds[0].variants[1].defaultModel = 'claude-opus-4-8';
+    const config = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(config);
+    assert.equal(all['opus-45'].variantLabel, 'Opus4.8');
+  });
+
+  it('preserves non-model business variantLabel', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[0].variants[1].variantLabel = 'asset-card';
+    cfg.breeds[0].variants[1].defaultModel = 'gpt-5.5';
+    const config = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(config);
+    assert.equal(all['opus-45'].variantLabel, 'asset-card');
+  });
+
   it('variants without avatar/color inherit breed-level values', () => {
     const config = loadCatConfig(writeTempConfig(multiVariantConfig()));
     const all = toAllCatConfigs(config);
