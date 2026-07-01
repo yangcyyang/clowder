@@ -14,6 +14,7 @@ export interface ContextLayerPlan {
 }
 
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disabled', 'no']);
+const ENABLED_VALUES = new Set(['1', 'true', 'on', 'enabled', 'yes']);
 
 const PROJECT_CONTEXT_SIGNALS: readonly { name: string; pattern: RegExp }[] = [
   { name: 'explicit-project', pattern: /项目|工程|仓库|repo|repository|worktree|工作区|代码库/i },
@@ -30,7 +31,7 @@ const LIGHTWEIGHT_DISCUSSION_SIGNALS: readonly { name: string; pattern: RegExp }
 
 export function isContextLayerRoutingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.CAT_CAFE_CONTEXT_LAYERS?.trim().toLowerCase();
-  return raw ? !DISABLED_VALUES.has(raw) : true;
+  return raw ? ENABLED_VALUES.has(raw) && !DISABLED_VALUES.has(raw) : false;
 }
 
 function collectSignals(message: string, specs: readonly { name: string; pattern: RegExp }[]): string[] {

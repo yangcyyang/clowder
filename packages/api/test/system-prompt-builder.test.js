@@ -678,6 +678,7 @@ describe('SystemPromptBuilder', () => {
       message: '用费曼解释一下 Skill Router 是什么',
       toolPolicy: 'standard',
       loadStandardContext: true,
+      env: { CAT_CAFE_CONTEXT_LAYERS: '1' },
     });
 
     assert.equal(plan.mode, 'layered');
@@ -692,6 +693,7 @@ describe('SystemPromptBuilder', () => {
       message: '帮我修复 packages/api/src/routes/messages.ts 里的任务状态 bug，并跑 build',
       toolPolicy: 'standard',
       loadStandardContext: true,
+      env: { CAT_CAFE_CONTEXT_LAYERS: '1' },
     });
 
     assert.equal(plan.mode, 'layered');
@@ -708,6 +710,20 @@ describe('SystemPromptBuilder', () => {
       toolPolicy: 'standard',
       loadStandardContext: true,
       env: { CAT_CAFE_CONTEXT_LAYERS: '0' },
+    });
+
+    assert.equal(plan.mode, 'legacy');
+    assert.equal(plan.l2ProjectContext, true);
+    assert.equal(plan.projectContextDeferred, false);
+  });
+
+  test('resolveContextLayerPlan defaults to legacy injection unless explicitly enabled', async () => {
+    const { resolveContextLayerPlan } = await import('../dist/domains/cats/services/context/ContextLayerRouter.js');
+    const plan = resolveContextLayerPlan({
+      message: '用费曼解释一下 Skill Router 是什么',
+      toolPolicy: 'standard',
+      loadStandardContext: true,
+      env: {},
     });
 
     assert.equal(plan.mode, 'legacy');
