@@ -118,8 +118,8 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
   ];
 
   return (
-    <div className="flex h-7 flex-shrink-0 items-end border-b border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] px-5">
-      <div className="flex h-full items-end gap-1">
+    <div className="flex h-7 flex-shrink-0 items-end bg-[var(--console-shell-bg)] px-5">
+      <div className="flex h-full w-fit items-end border-b border-[var(--slock-border-color)]">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -128,7 +128,7 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
               type="button"
               onClick={() => onTabChange(tab.id)}
               data-active={isActive ? 'true' : 'false'}
-              className={`slock-tab-button relative h-full px-2.5 text-[11px] tracking-[0.14em] transition-colors ${
+              className={`slock-tab-button relative h-full px-3 text-[11px] tracking-[0.14em] transition-colors ${
                 isActive
                   ? 'font-semibold text-[var(--cafe-text)]'
                   : 'text-[var(--cafe-text-muted)] hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]'
