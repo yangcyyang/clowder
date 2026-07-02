@@ -45,6 +45,8 @@ interface MessageSearchResult {
   type: 'user' | 'assistant' | 'connector' | 'system';
 }
 
+const SIDEBAR_SECTION_COLLAPSE_KEY = 'clowder:thread-sidebar:collapsed-sections:v1';
+
 function notifyThreadCreateFailure(message: string) {
   useToastStore.getState().addToast({
     type: 'error',
@@ -87,6 +89,36 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
+function SectionCollapseButton({
+  collapsed,
+  onClick,
+  label,
+}: {
+  collapsed: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="slock-sidebar-section-collapse flex h-5 w-5 items-center justify-center border border-transparent text-[var(--clowder-sidebar-row-muted)] transition-colors hover:border-[var(--slock-border-color)] hover:bg-[var(--console-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]"
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={label}
+    >
+      <svg
+        className={`h-3 w-3 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path d="M6 3.5a.75.75 0 011.28-.53l4.5 4.5a.75.75 0 010 1.06l-4.5 4.5A.75.75 0 116.22 11.97L10.19 8 6.22 4.03A.75.75 0 016 3.5z" />
+      </svg>
+    </button>
+  );
+}
+
 export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const {
     threads,
@@ -118,6 +150,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [showTrash, setShowTrash] = useState(false);
   const [trashedThreads, setTrashedThreads] = useState<Thread[]>([]);
   const [isLoadingTrash, setIsLoadingTrash] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
 
   // F095 Phase E: scroll anchor for reorder stability
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -181,6 +214,34 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       window.removeEventListener(SAVED_MESSAGES_VIEW_EVENT, syncSavedView);
       window.removeEventListener('popstate', syncSavedView);
     };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(SIDEBAR_SECTION_COLLAPSE_KEY) ?? '[]');
+      if (Array.isArray(parsed)) {
+        setCollapsedSections(new Set(parsed.filter((value): value is string => typeof value === 'string')));
+      }
+    } catch {
+      // Corrupt localStorage should not break the sidebar.
+    }
+  }, []);
+
+  const toggleSidebarSection = useCallback((section: 'channels' | 'direct-messages') => {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
+      }
+      try {
+        localStorage.setItem(SIDEBAR_SECTION_COLLAPSE_KEY, JSON.stringify([...next]));
+      } catch {
+        // localStorage is best-effort only.
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -597,6 +658,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const existingProjects = useMemo(() => getProjectPaths(sidebarThreads), [sidebarThreads]);
   const showDefaultThread =
     !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
+  const channelsCollapsed = normalizedQuery.length === 0 && collapsedSections.has('channels');
+  const directMessagesCollapsed = collapsedSections.has('direct-messages');
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
@@ -755,19 +818,25 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           <div className="slock-sidebar-section mt-2 border-t border-[var(--clowder-sidebar-border)] pt-2">
             <div className="px-3 pb-1 pt-1">
               <div className="flex items-center justify-between gap-2">
-                <div className="relative" ref={sortMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowSortMenu((v) => !v)}
-                    className="slock-sidebar-section-title flex items-center gap-1 font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)] transition-colors hover:text-[var(--clowder-sidebar-row-active-text)]"
-                    title="排序方式"
-                  >
-                    CHANNELS
-                    <span className="slock-sidebar-section-count">{sortedChannelThreads.length + (showDefaultThread ? 1 : 0)}</span>
-                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M4 5h8a.5.5 0 010 1H4a.5.5 0 010-1zm1 2h6a.5.5 0 010 1H5a.5.5 0 010-1zm1 2h4a.5.5 0 010 1H6a.5.5 0 010-1z" />
-                    </svg>
-                  </button>
+                <div className="flex min-w-0 items-center gap-1">
+                  <SectionCollapseButton
+                    collapsed={channelsCollapsed}
+                    onClick={() => toggleSidebarSection('channels')}
+                    label={channelsCollapsed ? '展开频道' : '折叠频道'}
+                  />
+                  <div className="relative min-w-0" ref={sortMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowSortMenu((v) => !v)}
+                      className="slock-sidebar-section-title flex items-center gap-1 font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)] transition-colors hover:text-[var(--clowder-sidebar-row-active-text)]"
+                      title="排序方式"
+                    >
+                      CHANNELS
+                      <span className="slock-sidebar-section-count">{sortedChannelThreads.length + (showDefaultThread ? 1 : 0)}</span>
+                      <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M4 5h8a.5.5 0 010 1H4a.5.5 0 010-1zm1 2h6a.5.5 0 010 1H5a.5.5 0 010-1zm1 2h4a.5.5 0 010 1H6a.5.5 0 010-1z" />
+                      </svg>
+                    </button>
                   {showSortMenu && (
                     <div className="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-[var(--clowder-sidebar-border)] bg-[var(--cafe-surface)] shadow-md">
                       {(['recent', 'az'] as const).map((opt) => (
@@ -792,6 +861,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       ))}
                     </div>
                   )}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -805,11 +875,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               </div>
             </div>
 
+            {!channelsCollapsed && (
             <>
               {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
 
               {sortedChannelThreads.map(renderChannelRow)}
             </>
+            )}
           </div>
 
           {normalizedQuery.length > 0 && (
@@ -834,11 +906,19 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           {/* Hide the normal DM section in Inbox mode — unread DMs are shown inline above */}
           <div className={`slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}>
             <div className="px-3 pb-1 pt-1">
-              <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
-                DIRECT MESSAGES
-              </span>
+              <div className="flex items-center gap-1">
+                <SectionCollapseButton
+                  collapsed={directMessagesCollapsed}
+                  onClick={() => toggleSidebarSection('direct-messages')}
+                  label={directMessagesCollapsed ? '展开私信' : '折叠私信'}
+                />
+                <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
+                  DIRECT MESSAGES
+                </span>
+                <span className="slock-sidebar-section-count">{cats.length}</span>
+              </div>
             </div>
-            <div className="space-y-0.5 px-2">
+            {!directMessagesCollapsed && <div className="space-y-0.5 px-2">
               {cats.length === 0 ? (
                 <div className="px-2 py-1.5 text-xs text-[var(--clowder-sidebar-row-muted)]">暂无 Agent</div>
               ) : (
@@ -882,7 +962,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                   );
                 })
               )}
-            </div>
+            </div>}
           </div>
 
           {(normalizedQuery.length > 0 || showUnreadOnly) &&

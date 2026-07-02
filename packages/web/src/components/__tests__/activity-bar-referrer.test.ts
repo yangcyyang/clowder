@@ -80,6 +80,21 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     expect(mockPush).toHaveBeenCalledWith('/mission-hub?from=thread-abc');
   });
 
+  it('appends ?from=threadId when navigating to global search', () => {
+    React.act(() => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    const searchBtn = container.querySelector('button[title="搜索"]') as HTMLElement;
+    expect(searchBtn).toBeTruthy();
+
+    React.act(() => {
+      searchBtn.click();
+    });
+
+    expect(mockPush).toHaveBeenCalledWith('/search?from=thread-abc');
+  });
+
   it('appends ?from=threadId when navigating to memory', () => {
     React.act(() => {
       root.render(React.createElement(ActivityBar));

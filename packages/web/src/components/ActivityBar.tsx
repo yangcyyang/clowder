@@ -17,10 +17,21 @@ const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slockv1', 'slock', 'kami']
 const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
 const NAV_ITEMS = [
+  { id: 'search', path: '/search', label: '搜索', match: (p: string) => p.startsWith('/search') },
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
   { id: 'mission', path: '/mission-hub', label: '任务', match: (p: string) => p.startsWith('/mission') },
   { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
 ] as const;
+
+function SearchIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className={className}>
+      <title>搜索</title>
+      <circle cx="11" cy="11" r="7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 20l-3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 function ChatIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
@@ -121,6 +132,7 @@ function normalizeVisualTheme(theme: string | null): VisualTheme {
 }
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
+  search: SearchIcon,
   home: ChatIcon,
   memory: MemoryIcon,
   mission: MissionIcon,
