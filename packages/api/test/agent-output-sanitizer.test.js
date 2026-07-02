@@ -149,4 +149,36 @@ describe('agent output sanitizer', () => {
     assert.ok(!output.includes('我先独立看问题'));
     assert.ok(!output.includes('继续扩一圈'));
   });
+
+  test('drops codex anchor lookup progress headings before the real answer', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '🔍 我先按消息锚点查上下文',
+      '',
+      '你给的是 thread 内某条消息的锚点。我会先用证据库按 ID 精确查，再尝试读本地页面。',
+      '',
+      '🔎 本地页面没有直接吐出消息内容',
+      '',
+      'curl 只能拿到 Next.js 外壳，没拿到那条消息。',
+      '',
+      '🧭 我有两个事实了',
+      '',
+      '1. curl 打开的是 3003 的应用外壳。',
+      '2. 当前磁盘上的文件不在原路径了。',
+      '',
+      '✅ 找到可用 API',
+      '',
+      '3003 的 `/api/messages?threadId=...` 能返回完整消息。',
+      '',
+      '✅ 我看完锚点上下文了',
+      '',
+      '这条链接锚到的是一次试跑，不是最终源文件。',
+      '',
+      '结论：锚点消息说明当前任务应该先确认来源文件，再继续执行。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：锚点消息说明当前任务应该先确认来源文件，再继续执行。');
+  });
 });
