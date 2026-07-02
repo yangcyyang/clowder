@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
+import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
@@ -19,6 +20,15 @@ function showErrorToast(title: string, body?: Record<string, unknown>) {
     message: (body?.error as string) ?? '操作未成功，请重试',
     duration: 4000,
   });
+}
+
+function formatTaskTitleFromMessage(message: ChatMessage): string {
+  const firstLine = message.content
+    .split('\n')
+    .map((line) => line.replace(/[#*_`>[\]()]/g, '').trim())
+    .find(Boolean);
+  const base = firstLine || '跟进这条消息';
+  return base.length > 80 ? `${base.slice(0, 79)}…` : base;
 }
 
 type DialogState =
@@ -51,6 +61,8 @@ export function MessageActions({
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const patchMessage = useChatStore((s) => s.patchMessage);
+  const existingTask = useTaskStore((s) => s.tasks.find((task) => task.sourceMessageId === message.id));
+  const addTask = useTaskStore((s) => s.addTask);
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -90,6 +102,48 @@ export function MessageActions({
   }, [message, onEditMessage]);
 
   const handleBranchDirect = useCallback(() => setDialog({ type: 'branch-direct' }), []);
+  const handleConvertToTask = useCallback(async () => {
+    if (existingTask) {
+      useToastStore.getState().addToast({
+        type: 'info',
+        title: '这条消息已有任务',
+        message: `已关联：${existingTask.title}`,
+        duration: 2600,
+      });
+      return;
+    }
+
+    try {
+      const res = await apiFetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId,
+          title: formatTaskTitleFromMessage(message),
+          why: '由消息转为任务',
+          createdBy: 'user',
+          userId: getUserId(),
+          sourceMessageId: message.id,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showErrorToast('转任务失败', body);
+        return;
+      }
+
+      addTask(body as TaskItem);
+      useToastStore.getState().addToast({
+        type: 'success',
+        title: '已转为任务',
+        message: '可在 TASKS 面板查看。',
+        duration: 2400,
+      });
+    } catch {
+      showErrorToast('转任务失败');
+    }
+  }, [addTask, existingTask, message, threadId]);
+
   const handleReply = useCallback(() => {
     window.dispatchEvent(new CustomEvent('chat:set-reply', { detail: { messageId: message.id } }));
     useToastStore.getState().addToast({
@@ -362,7 +416,7 @@ export function MessageActions({
           content={message.content}
           onClose={() => setCtxMenu(null)}
           onSave={handleSave}
-          onConvertToTask={handleBranchDirect}
+          onConvertToTask={handleConvertToTask}
           onShare={handleSharePlaceholder}
           onPin={onPinMessage ? handlePin : undefined}
           onEdit={isUser ? (canInlineEdit ? handleInlineEdit : handleEdit) : undefined}

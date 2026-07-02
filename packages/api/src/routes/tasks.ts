@@ -8,7 +8,7 @@
  * DELETE /api/tasks/:id     → 删除 (204)
  */
 
-import type { CatId, CreateTaskInput, TaskEvent, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
+import type { CatId, ConnectorSource, CreateTaskInput, TaskEvent, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -189,6 +189,13 @@ function emitTaskAttention(socketManager: SocketManager, previous: TaskItem | nu
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, threadStore, messageStore, socketManager } = opts;
 
+  const taskSystemNoticeSource = (tone: 'info' | 'success' | 'warning' = 'info'): ConnectorSource => ({
+    connector: 'task-system',
+    label: 'Task',
+    icon: '📋',
+    meta: { presentation: 'system_notice', noticeTone: tone },
+  });
+
   async function getTaskInThread(threadId: string, taskId: string): Promise<TaskItem | null> {
     const task = await taskStore.get(taskId);
     if (!task || task.threadId !== threadId) return null;
@@ -211,6 +218,73 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return lineage;
   }
 
+  async function getTaskLabel(task: TaskItem): Promise<string> {
+    const tasks = (await taskStore.listByThread(task.threadId)).filter((item) => item.kind !== 'pr_tracking');
+    const index = tasks.findIndex((item) => item.id === task.id);
+    return index >= 0 ? `task #${index + 1}` : 'task';
+  }
+
+  async function appendTaskSystemNotice(
+    task: TaskItem,
+    content: string,
+    tone: 'info' | 'success' | 'warning' = 'info',
+  ): Promise<void> {
+    if (!messageStore) return;
+    try {
+      const source = taskSystemNoticeSource(tone);
+      const stored = await messageStore.append({
+        userId: 'system',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: task.threadId,
+        source,
+      });
+      socketManager.broadcastToRoom(`thread:${task.threadId}`, 'connector_message', {
+        threadId: task.threadId,
+        message: {
+          id: stored.id,
+          type: 'connector',
+          content: stored.content,
+          source,
+          timestamp: stored.timestamp,
+        },
+      });
+    } catch (err) {
+      app.log.warn({ err, taskId: task.id }, '[tasks] failed to append task system notice');
+    }
+  }
+
+  async function appendTaskCreateNotice(task: TaskItem): Promise<void> {
+    const label = await getTaskLabel(task);
+    const verb = task.sourceMessageId ? '已从消息创建' : '已创建';
+    await appendTaskSystemNotice(task, `📋 ${verb} ${label}：${task.title}`);
+  }
+
+  async function appendTaskUpdateNotices(previous: TaskItem | null, current: TaskItem): Promise<void> {
+    if (!previous) return;
+    const label = await getTaskLabel(current);
+
+    if (previous.ownerCatId !== current.ownerCatId) {
+      if (current.ownerCatId) {
+        await appendTaskSystemNotice(current, `👤 ${label} 已由 ${current.ownerCatId} 认领。`);
+      } else if (previous.ownerCatId) {
+        await appendTaskSystemNotice(current, `👤 ${label} 已取消认领。`);
+      }
+    }
+
+    if (previous.status !== current.status) {
+      if (current.status === 'done') {
+        await appendTaskSystemNotice(current, `✅ ${label} 已完成：${current.title}`, 'success');
+      } else if (current.status === 'blocked' || current.status === 'failed') {
+        await appendTaskSystemNotice(current, `⚠️ ${label} 状态：${previous.status} → ${current.status}。`, 'warning');
+      } else {
+        await appendTaskSystemNotice(current, `🔁 ${label} 状态：${previous.status} → ${current.status}。`);
+      }
+    }
+  }
+
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
     const result = createSchema.safeParse(request.body);
@@ -221,6 +295,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     const task = await taskStore.create(toCreateInput(result.data));
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
+    await appendTaskCreateNotice(task);
 
     reply.status(201);
     return task;
@@ -412,6 +487,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     emitTaskAttention(socketManager, previous, updated);
+    await appendTaskUpdateNotices(previous, updated);
 
     return updated;
   });

@@ -26,17 +26,32 @@ function createMockSocketManager() {
 describe('Tasks Routes', () => {
   let taskStore;
   let socketManager;
+  let messageStore;
 
   beforeEach(async () => {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     taskStore = new TaskStore();
     socketManager = createMockSocketManager();
+    messageStore = {
+      messages: [],
+      async append(input) {
+        const stored = { ...input, id: `msg-${this.messages.length + 1}`, threadId: input.threadId ?? 'default' };
+        this.messages.push(stored);
+        return stored;
+      },
+      async getById(id) {
+        return this.messages.find((message) => message.id === id) ?? null;
+      },
+      async getByThread(threadId) {
+        return this.messages.filter((message) => message.threadId === threadId);
+      },
+    };
   });
 
   async function createApp() {
     const { tasksRoutes } = await import('../dist/routes/tasks.js');
     const app = Fastify();
-    await app.register(tasksRoutes, { taskStore, socketManager });
+    await app.register(tasksRoutes, { taskStore, messageStore, socketManager });
     return app;
   }
 
@@ -113,10 +128,32 @@ describe('Tasks Routes', () => {
     });
 
     const events = socketManager.getEvents();
-    assert.equal(events.length, 1);
+    assert.equal(events.length, 2);
     assert.equal(events[0].room, 'thread:thread-1');
     assert.equal(events[0].event, 'task_created');
     assert.equal(events[0].data.title, 'Test task');
+    assert.equal(events[1].event, 'connector_message');
+    assert.match(events[1].data.message.content, /已创建 task #1/);
+  });
+
+  test('POST with sourceMessageId leaves a visible conversion notice', async () => {
+    const app = await createApp();
+    await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Convert me',
+        why: '',
+        createdBy: 'user',
+        sourceMessageId: 'msg-source-1',
+      },
+    });
+
+    const notice = messageStore.messages.at(-1);
+    assert.equal(notice.userId, 'system');
+    assert.equal(notice.source.meta.presentation, 'system_notice');
+    assert.match(notice.content, /已从消息创建 task #1：Convert me/);
   });
 
   test('POST rejects missing required fields', async () => {
@@ -264,10 +301,11 @@ describe('Tasks Routes', () => {
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().status, 'doing');
 
-    // Should have 2 events: task_created + task_updated
+    // task_created + create notice + task_updated + status notice
     const events = socketManager.getEvents();
-    assert.equal(events.length, 2);
-    assert.equal(events[1].event, 'task_updated');
+    assert.equal(events.length, 4);
+    assert.equal(events[2].event, 'task_updated');
+    assert.match(events[3].data.message.content, /状态：todo → doing/);
   });
 
   test('PATCH emits user task_attention when work task enters review', async () => {
@@ -367,6 +405,31 @@ describe('Tasks Routes', () => {
     });
     assert.equal(unclaimRes.statusCode, 200);
     assert.equal(unclaimRes.json().events.at(-1).type, 'unclaimed');
+  });
+
+  test('PATCH writes visible notices for claim and done', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { ownerCatId: 'codex', eventCatId: 'codex' },
+    });
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { status: 'done', eventCatId: 'codex' },
+    });
+
+    const notices = messageStore.messages.map((message) => message.content);
+    assert.ok(notices.some((content) => /task #1 已由 codex 认领/.test(content)));
+    assert.ok(notices.some((content) => /task #1 已完成：Task A/.test(content)));
   });
 
   test('PATCH failed status persists failure taxonomy and writes failed event data', async () => {
@@ -689,9 +752,9 @@ describe('Tasks Routes', () => {
     assert.equal(typeof body.evidence.updatedAt, 'number');
 
     const events = socketManager.getEvents();
-    assert.equal(events.length, 2);
-    assert.equal(events[1].event, 'task_updated');
-    assert.equal(events[1].data.evidence.review, '@专家-Claude review passed');
+    assert.equal(events.length, 3);
+    assert.equal(events[2].event, 'task_updated');
+    assert.equal(events[2].data.evidence.review, '@专家-Claude review passed');
   });
 
   test('PATCH returns 404 for nonexistent task', async () => {
