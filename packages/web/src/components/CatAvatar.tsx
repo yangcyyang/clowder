@@ -43,7 +43,6 @@ export function CatAvatar({
   catId,
   size = 32,
   status,
-  tone = 'default',
   callbackAuthStatus,
   activityStatus,
   callbackAuthLabel,
@@ -57,13 +56,12 @@ export function CatAvatar({
 
   const isStreaming = status === 'streaming';
   const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
-  const visibleRingColor = tone === 'quiet' && !isStreaming ? 'var(--clowder-avatar-quiet-ring)' : ringColor;
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
   // White ring lifts it off the avatar and survives most cat colors.
   const dotSize = Math.max(8, Math.round(size * 0.28));
-  const dotBorder = Math.max(1, Math.round(dotSize * 0.18));
+  const dotBorder = 1;
 
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
@@ -75,10 +73,8 @@ export function CatAvatar({
         style={{
           width: size,
           height: size,
-          border: '2px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
+          border: '1px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
           borderRadius: 0,
-          outline: `1px solid ${visibleRingColor}`,
-          outlineOffset: -3,
           boxShadow: glowShadow,
         }}
       >

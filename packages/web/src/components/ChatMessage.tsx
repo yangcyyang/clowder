@@ -382,7 +382,6 @@ export function ChatMessage({
 
   if (isUser) {
     const coCreatorPrimary = coCreator.color?.primary ?? '#815b5b';
-    const coCreatorSecondary = coCreator.color?.secondary ?? '#FFDDD2';
     return (
       <div
         data-message-id={message.id}
@@ -394,10 +393,8 @@ export function ChatMessage({
           className="h-10 w-10 overflow-hidden flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)] cursor-pointer hover:opacity-80 transition-opacity"
           style={{
             backgroundColor: coCreatorPrimary,
-            border: '2px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
+            border: '1px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
             borderRadius: 0,
-            outline: `1px solid ${coCreatorSecondary}`,
-            outlineOffset: -3,
           }}
           title={coCreator.name}
         >
