@@ -13,7 +13,15 @@ function foldLabel(content: string, lineCount: number): string {
   return `查看完整内容 ▾ (+${lineCount - TEXT_FOLD_THRESHOLD} 行)`;
 }
 
-export function CollapsibleMarkdown({ content, className }: { content: string; className?: string }) {
+export function CollapsibleMarkdown({
+  content,
+  className,
+  searchHighlight,
+}: {
+  content: string;
+  className?: string;
+  searchHighlight?: string;
+}) {
   const fold = shouldFoldText(content);
   const foldReason = getTextFoldReason(content);
   const [expanded, setExpanded] = useState(false);
@@ -34,7 +42,7 @@ export function CollapsibleMarkdown({ content, className }: { content: string; c
   const toggle = useCallback(() => setExpanded((v) => !v), []);
 
   if (!fold) {
-    return <MarkdownContent content={content} className={className} />;
+    return <MarkdownContent content={content} className={className} searchHighlight={searchHighlight} />;
   }
 
   if (foldReason === 'structured-agent') {
@@ -50,7 +58,7 @@ export function CollapsibleMarkdown({ content, className }: { content: string; c
         </button>
         {expanded && (
           <div className="mt-2 border-t border-cafe-border/60 pt-2">
-            <MarkdownContent content={content} className={className} />
+            <MarkdownContent content={content} className={className} searchHighlight={searchHighlight} />
           </div>
         )}
       </div>
@@ -63,7 +71,7 @@ export function CollapsibleMarkdown({ content, className }: { content: string; c
         className="overflow-hidden transition-[max-height] duration-200"
         style={collapsed ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
       >
-        <MarkdownContent content={content} className={className} />
+        <MarkdownContent content={content} className={className} searchHighlight={searchHighlight} />
       </div>
       <button
         type="button"

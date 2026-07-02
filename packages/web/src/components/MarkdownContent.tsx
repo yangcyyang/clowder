@@ -1,6 +1,6 @@
 'use client';
 
-import { Children, isValidElement, type ReactNode, useCallback, useRef, useState } from 'react';
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -33,6 +33,54 @@ function highlightMentions(text: string): ReactNode[] {
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
   return parts;
+}
+
+function splitSearchHighlight(text: string, query?: string): ReactNode[] {
+  const needle = query?.trim();
+  if (!needle) return [text];
+
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let index = lowerText.indexOf(lowerNeedle, cursor);
+
+  while (index >= 0) {
+    if (index > cursor) parts.push(text.slice(cursor, index));
+    const end = index + needle.length;
+    parts.push(
+      <mark
+        key={`sh${index}`}
+        className="rounded-[var(--slock-radius-sm)] border border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-0.5 font-semibold text-[var(--cafe-text)]"
+      >
+        {text.slice(index, end)}
+      </mark>,
+    );
+    cursor = end;
+    index = lowerText.indexOf(lowerNeedle, cursor);
+  }
+
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
+
+function withSearchHighlight(children: ReactNode, query?: string): ReactNode {
+  if (!query?.trim()) return children;
+
+  return Children.map(children, (child) => {
+    if (typeof child === 'string') return splitSearchHighlight(child, query);
+    if (!isValidElement(child)) return child;
+
+    // Avoid changing code/copy surfaces. Search in Thread is a reading aid, not
+    // a markdown rewriter.
+    if (child.type === 'code' || child.type === 'pre') return child;
+
+    const props = child.props as { children?: ReactNode };
+    if (props.children === undefined) return child;
+    return cloneElement(child as ReactElement<{ children?: ReactNode }>, {
+      children: withSearchHighlight(props.children, query),
+    });
+  });
 }
 
 /** Process immediate string children → highlight @mentions */
@@ -642,10 +690,82 @@ const mdComponents: Components = {
   ),
 };
 
+function createSearchMdComponents(searchHighlight?: string): Components {
+  const query = searchHighlight?.trim();
+  if (!query) return mdComponents;
+
+  const decorate = (children: ReactNode) => withSearchHighlight(children, query);
+
+  return {
+    ...mdComponents,
+    p: ({ children }) => {
+      const sectionTitle = isSectionTitle(children);
+      return (
+        <p
+          className={
+            sectionTitle
+              ? 'mb-2 last:mb-0 leading-relaxed rounded bg-[var(--clowder-section-title-bg)] px-1.5 py-0.5'
+              : 'mb-2 last:mb-0 leading-relaxed'
+          }
+        >
+          {decorate(withMentionsAndLinks(children))}
+        </p>
+      );
+    },
+    strong: ({ children }) => <strong className="font-semibold">{decorate(withMentions(children))}</strong>,
+    em: ({ children }) => <em>{decorate(withMentions(children))}</em>,
+    del: ({ children }) => <del className="opacity-60">{decorate(withMentions(children))}</del>,
+    h1: ({ children }) => <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h1>,
+    h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h2>,
+    h3: ({ children }) => <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h3>,
+    h4: ({ children }) => <h4 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h4>,
+    h5: ({ children }) => (
+      <h5 className="text-xs font-semibold mb-1 mt-1.5 first:mt-0 uppercase tracking-wide">
+        {decorate(withMentions(children))}
+      </h5>
+    ),
+    h6: ({ children }) => (
+      <h6 className="text-xs font-medium mb-1 mt-1.5 first:mt-0 text-cafe-secondary">
+        {decorate(withMentions(children))}
+      </h6>
+    ),
+    li: ({ children, className }) => (
+      <li className={className === 'task-list-item' ? 'list-none -ml-5 flex items-start gap-1.5' : undefined}>
+        {decorate(withMentions(children))}
+      </li>
+    ),
+    a: ({ href, children }) => {
+      const isExternal = href?.startsWith('http://') || href?.startsWith('https://') || href?.startsWith('vscode://');
+      if (!isExternal) {
+        return <span className="text-[var(--color-cafe-accent)] break-all">{decorate(withMentions(children))}</span>;
+      }
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[var(--color-cafe-accent)] hover:underline break-all"
+        >
+          {decorate(withMentions(children))}
+        </a>
+      );
+    },
+    th: ({ children }) => (
+      <th className="border border-[var(--console-border-soft)] px-2 py-1 text-left font-semibold text-xs">
+        {decorate(withMentions(children))}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="border border-[var(--console-border-soft)] px-2 py-1">{decorate(withMentions(children))}</td>
+    ),
+  };
+}
+
 /* ── Exported component ────────────────────────────────────── */
 interface Props {
   content: string;
   className?: string;
+  searchHighlight?: string;
   /** Skip slash-command prefix detection (e.g. for rich block bodyMarkdown) */
   disableCommandPrefix?: boolean;
   /** Base directory path for resolving relative links (e.g. "docs/features") */
@@ -674,11 +794,11 @@ export function resolveRelativePath(base: string, relative: string): string {
   return parts.join('/');
 }
 
-export function MarkdownContent({ content, className, disableCommandPrefix, basePath, worktreeId }: Props) {
+export function MarkdownContent({ content, className, searchHighlight, disableCommandPrefix, basePath, worktreeId }: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = cmdMatch ? content.slice(cmdMatch[1].length) : content;
 
-  let components = mdComponents;
+  let components = createSearchMdComponents(searchHighlight);
   if (basePath != null) {
     components = { ...components, a: createWorkspaceLinkComponent(basePath, withMentions) };
     if (worktreeId) {

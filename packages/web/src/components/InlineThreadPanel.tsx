@@ -50,6 +50,7 @@ const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
 
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
+export type InlineThreadSearchHit = { id: string; index: number };
 
 export function shouldShowInlineThreadRuntimeStatus(status: CatStatusType): boolean {
   return status !== 'done' && status !== 'alive_but_silent';
@@ -73,6 +74,26 @@ export function normalizeInlineThreadMessage(message: InlineThreadApiMessage): C
   };
   delete normalized.isDraft;
   return normalized;
+}
+
+function normalizeSearchText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function getInlineThreadSearchHits(messages: ChatMessageData[], query: string): InlineThreadSearchHit[] {
+  const needle = normalizeSearchText(query);
+  if (!needle) return [];
+
+  return messages.reduce<InlineThreadSearchHit[]>((hits, message, index) => {
+    const haystack = normalizeSearchText([message.content, message.thinking].filter(Boolean).join('\n'));
+    if (haystack.includes(needle)) hits.push({ id: message.id, index });
+    return hits;
+  }, []);
+}
+
+export function getNextInlineThreadSearchIndex(current: number, total: number, direction: 1 | -1): number {
+  if (total <= 0) return 0;
+  return (current + direction + total) % total;
 }
 
 function detectSlashCommand(value: string, cursor: number): string | null {
@@ -119,6 +140,10 @@ export function InlineThreadPanel({
   const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [queueActiveInvocations, setQueueActiveInvocations] = useState<InlineThreadActiveInvocation[]>([]);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartedAtRef = useRef<number>(0);
@@ -299,6 +324,65 @@ export function InlineThreadPanel({
 
     return messages.filter((msg) => msg.timestamp > sourceMessage.timestamp);
   }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
+
+  const searchableMessages = useMemo(() => [sourceMessage, ...replyMessages], [replyMessages, sourceMessage]);
+  const searchHits = useMemo(
+    () => getInlineThreadSearchHits(searchableMessages, searchQuery),
+    [searchQuery, searchableMessages],
+  );
+  const activeSearchHit = searchHits[activeSearchIndex] ?? null;
+
+  useEffect(() => {
+    setActiveSearchIndex(0);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!searchQuery.trim() || activeSearchIndex < searchHits.length) return;
+    setActiveSearchIndex(Math.max(0, searchHits.length - 1));
+  }, [activeSearchIndex, searchHits.length, searchQuery]);
+
+  useEffect(() => {
+    if (!searchOpen || !activeSearchHit) return;
+    const raf = requestAnimationFrame(() => {
+      const selector = `[data-inline-thread-message-id="${CSS.escape(activeSearchHit.id)}"]`;
+      document.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeSearchHit, searchOpen]);
+
+  const openThreadSearch = useCallback(() => {
+    setSearchOpen(true);
+    setTimeout(() => searchInputRef.current?.focus(), 0);
+  }, []);
+
+  const closeThreadSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setActiveSearchIndex(0);
+  }, []);
+
+  const moveSearchHit = useCallback(
+    (direction: 1 | -1) => {
+      setActiveSearchIndex((current) => getNextInlineThreadSearchIndex(current, searchHits.length, direction));
+    },
+    [searchHits.length],
+  );
+
+  const handleSearchKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        moveSearchHit(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeThreadSearch();
+      }
+    },
+    [closeThreadSearch, moveSearchHit],
+  );
 
   const sourceThreadMessageId = useMemo(() => {
     const sourceInBranch = messages.find(
@@ -507,6 +591,7 @@ export function InlineThreadPanel({
             <button
               type="button"
               className="slock-header-action slock-header-action--icon"
+              onClick={openThreadSearch}
               aria-label="搜索 Thread"
               title="搜索 Thread"
             >
@@ -540,6 +625,57 @@ export function InlineThreadPanel({
             </button>
           </div>
         </div>
+        {searchOpen && (
+          <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 border-2 border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] px-2 py-1">
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="7" cy="7" r="4" />
+                <path d="m10.2 10.2 3 3" />
+              </svg>
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search in thread"
+                className="min-w-0 flex-1 bg-transparent text-sm text-[var(--cafe-text)] outline-none placeholder:text-[var(--cafe-text-muted)]"
+                aria-label="搜索当前 Thread"
+              />
+              <span className="flex-shrink-0 font-mono text-[11px] text-[var(--cafe-text-muted)]">
+                {searchQuery.trim() ? `${searchHits.length === 0 ? 0 : activeSearchIndex + 1}/${searchHits.length}` : '0/0'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => moveSearchHit(-1)}
+              disabled={searchHits.length === 0}
+              className="slock-header-action slock-header-action--icon disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="上一条搜索结果"
+              title="上一条"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => moveSearchHit(1)}
+              disabled={searchHits.length === 0}
+              className="slock-header-action slock-header-action--icon disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="下一条搜索结果"
+              title="下一条"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onClick={closeThreadSearch}
+              className="slock-header-action slock-header-action--icon"
+              aria-label="关闭 Thread 搜索"
+              title="关闭搜索"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {runtimeCats.length > 0 && (
           <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
@@ -566,11 +702,19 @@ export function InlineThreadPanel({
         )}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
           <div className="mb-4">
-            <div className="px-1 py-1">
+            <div
+              className={`px-1 py-1 transition-colors ${
+                activeSearchHit?.id === sourceMessage.id
+                  ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)]'
+                  : ''
+              }`}
+              data-inline-thread-message-id={sourceMessage.id}
+            >
               <ChatMessage
                 message={sourceMessage}
                 getCatById={getCatById}
                 showRuntimeMetadata
+                searchHighlight={searchHits.some((hit) => hit.id === sourceMessage.id) ? searchQuery : undefined}
               />
             </div>
           </div>
@@ -583,14 +727,26 @@ export function InlineThreadPanel({
           ) : replyMessages.length === 0 ? (
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
           ) : (
-            replyMessages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                getCatById={getCatById}
-                showRuntimeMetadata
-              />
-            ))
+            replyMessages.map((msg) => {
+              const isHit = searchHits.some((hit) => hit.id === msg.id);
+              const isActiveHit = activeSearchHit?.id === msg.id;
+              return (
+                <div
+                  key={msg.id}
+                  data-inline-thread-message-id={msg.id}
+                  className={`transition-colors ${
+                    isActiveHit ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-1 py-1' : ''
+                  }`}
+                >
+                  <ChatMessage
+                    message={msg}
+                    getCatById={getCatById}
+                    showRuntimeMetadata
+                    searchHighlight={isHit ? searchQuery : undefined}
+                  />
+                </div>
+              );
+            })
           )}
         </div>
 

@@ -213,6 +213,7 @@ interface ChatMessageProps {
   onCancelEdit?: () => void;
   disableContentCollapse?: boolean;
   showRuntimeMetadata?: boolean;
+  searchHighlight?: string;
 }
 
 export function ChatMessage({
@@ -229,6 +230,7 @@ export function ChatMessage({
   onCancelEdit,
   disableContentCollapse = false,
   showRuntimeMetadata = false,
+  searchHighlight,
 }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -480,9 +482,9 @@ export function ChatMessage({
             ) : hasBlocks ? (
               <ContentBlocks blocks={message.contentBlocks!} />
             ) : disableContentCollapse ? (
-              <MarkdownContent content={message.content} />
+              <MarkdownContent content={message.content} searchHighlight={searchHighlight} />
             ) : (
-              <CollapsibleMarkdown content={message.content} />
+              <CollapsibleMarkdown content={message.content} searchHighlight={searchHighlight} />
             )}
           </div>
           {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
@@ -599,9 +601,9 @@ export function ChatMessage({
           {hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />
           ) : disableContentCollapse && hasTextContent ? (
-            <MarkdownContent content={visibleContent} className={catStyle?.font} />
+            <MarkdownContent content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
           ) : hasTextContent ? (
-            <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} />
+            <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
           ) : hasToolEvents ? (
             <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2 text-cafe-secondary">
               <div className="text-sm font-medium text-cafe-text">执行已完成，但没有返回文本</div>
