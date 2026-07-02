@@ -566,7 +566,7 @@ export function InlineThreadPanel({
         )}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
           <div className="mb-4">
-            <div className="max-h-44 overflow-y-auto overscroll-contain px-1 py-1 pr-2">
+            <div className="px-1 py-1">
               <ChatMessage
                 message={sourceMessage}
                 getCatById={getCatById}
