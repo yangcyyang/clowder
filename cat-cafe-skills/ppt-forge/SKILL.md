@@ -9,6 +9,8 @@ description: >
 
 # PPT Forge — AI 演示文稿生产线
 
+> 顶层 PPT-Agent 流程以 `docs/ppt-agent-skill-registry.md` 和 `scripts/ppt-agent/SKILL.md` 为准；ppt-forge 是纪律层，负责制作规范、视觉审查和导出验收，不覆盖顶层调度流程。
+
 ## 核心原则
 
 **PPT 不是一个人的活，是多猫流水线。** 角色按当前 roster 可用猫分配。
