@@ -152,8 +152,8 @@ export function GlobalSearchPage() {
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-[var(--slock-border-color)] bg-[var(--cafe-surface)] text-3xl">
               ⌕
             </div>
-            <div className="font-semibold text-[var(--cafe-text)]">Search everything</div>
-            <p className="mt-2 text-sm">输入关键词后，可检索频道、私信和历史消息。</p>
+            <div className="font-semibold text-[var(--cafe-text)]">搜索全部内容</div>
+            <p className="mt-2 text-sm">输入关键词后，可检索频道、私信和历史消息。快捷键：⌘K / Ctrl+K。</p>
           </div>
         )}
 
@@ -162,10 +162,10 @@ export function GlobalSearchPage() {
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--clowder-muted-soft)]">
-                  Channels & DMs
+                  频道与私信
                 </h2>
                 <span className="text-xs text-[var(--clowder-muted-soft)]">
-                  {isLoadingThreads ? '加载中...' : `${matchingThreads.length} results`}
+                  {isLoadingThreads ? '加载中...' : `${matchingThreads.length} 个结果`}
                 </span>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
@@ -191,10 +191,10 @@ export function GlobalSearchPage() {
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--clowder-muted-soft)]">
-                  Messages
+                  消息
                 </h2>
                 <span className="text-xs text-[var(--clowder-muted-soft)]">
-                  {isSearchingMessages ? '搜索中...' : `${messages.length} results`}
+                  {isSearchingMessages ? '搜索中...' : `${messages.length} 个结果`}
                 </span>
               </div>
               <div className="space-y-2">

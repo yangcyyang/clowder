@@ -1,9 +1,10 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { ActivityBar } from './ActivityBar';
+import { buildGlobalSearchHref } from './global-search-navigation';
 import { ThreadSidebar } from './ThreadSidebar';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
@@ -20,6 +21,7 @@ const SIDEBAR_MAX_WIDTH = 340;
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
+  const router = useRouter();
   const [isExport, setIsExport] = useState(false);
   const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = usePersistedState(
     'cat-cafe:sidebarWidth',
@@ -35,6 +37,25 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     setIsExport(new URLSearchParams(window.location.search).get('export') === 'true');
   }, [pathname]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'k') return;
+
+      event.preventDefault();
+      if (pathname.startsWith('/search')) {
+        document.querySelector<HTMLInputElement>('[data-testid="global-search-input"]')?.focus();
+        return;
+      }
+      router.push(buildGlobalSearchHref(pathname, window.location.search));
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pathname, router]);
+
   if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
     return <>{children}</>;
   }
