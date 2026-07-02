@@ -25,6 +25,7 @@ import {
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
+import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
 import {
   buildGovernanceSourceContext,
   buildInvocationContext,
@@ -33,7 +34,6 @@ import {
   getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
-import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
@@ -51,9 +51,9 @@ import { readProjectProgressForPrompt } from '../memory/ProjectProgressStore.js'
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import { sanitizeAgentVisibleOutput } from './agent-output-sanitizer.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
-import { sanitizeAgentVisibleOutput } from './agent-output-sanitizer.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -376,7 +376,15 @@ export async function* routeParallel(
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const contextUsageWarning = buildContextUsageWarning({
           estimatedTokens: estimateTokens(
-            [staticIdentity, invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions, inc.contextText, message]
+            [
+              staticIdentity,
+              invocationContext,
+              parCatModePrompt,
+              bootstrapCtx,
+              mcpInstructions,
+              inc.contextText,
+              message,
+            ]
               .filter(Boolean)
               .join('\n\n'),
           ),
@@ -435,7 +443,15 @@ export async function* routeParallel(
         const parCatModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const contextUsageWarning = buildContextUsageWarning({
           estimatedTokens: estimateTokens(
-            [staticIdentity, invocationContext, parCatModePromptLegacy, bootstrapCtx, mcpInstructions, catContextHistory, message]
+            [
+              staticIdentity,
+              invocationContext,
+              parCatModePromptLegacy,
+              bootstrapCtx,
+              mcpInstructions,
+              catContextHistory,
+              message,
+            ]
               .filter(Boolean)
               .join('\n\n'),
           ),
@@ -554,175 +570,151 @@ export async function* routeParallel(
   }
 
   const invocationStartedAt = Date.now();
-  for await (const msg of mergeStreams(streams, (idx, err) => {
-    log.error({ streamIndex: idx, err }, 'Parallel stream error');
-  })) {
-    const effectiveMsgs: AgentMessage[] = [];
-    if (msg.type === 'text' && msg.content && msg.catId) {
-      effectiveMsgs.push({ ...msg, content: getPayloadStripper(msg.catId).push(msg.content) });
-    } else if (msg.type === 'done' && msg.catId) {
-      if (msg.metadata && !catMeta.has(msg.catId)) {
-        catMeta.set(msg.catId, msg.metadata);
-      }
-      const flushedText = getPayloadStripper(msg.catId).flush();
-      if (flushedText) {
-        effectiveMsgs.push({
-          type: 'text',
-          catId: msg.catId,
-          content: flushedText,
-          timestamp: msg.timestamp,
-        });
-      }
-    } else {
-      effectiveMsgs.push(msg);
-    }
-
-    for (const effectiveMsg of effectiveMsgs) {
-      // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
-      // Keep forwarding this boundary event so frontend can reset stale task progress.
-      if (
-        effectiveMsg.type === 'system_info' &&
-        effectiveMsg.content &&
-        effectiveMsg.catId &&
-        !catInvocationId.has(effectiveMsg.catId)
-      ) {
-        try {
-          const parsed = JSON.parse(effectiveMsg.content);
-          if (parsed.type === 'invocation_created') {
-            catInvocationId.set(effectiveMsg.catId, parsed.invocationId);
-            // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
-            catFlushTime.set(effectiveMsg.catId, Date.now());
-            // Issue #83: Start a single keepalive timer that touches all active drafts.
-            if (deps.draftStore && !keepaliveStarted) {
-              keepaliveStarted = true;
-              keepaliveTimer = setInterval(() => {
-                for (const [, invId] of catInvocationId) {
-                  deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
-                }
-              }, KEEPALIVE_INTERVAL_MS);
-            }
-          }
-        } catch {
-          /* ignore parse errors */
+  try {
+    for await (const msg of mergeStreams(streams, (idx, err) => {
+      log.error({ streamIndex: idx, err }, 'Parallel stream error');
+    })) {
+      const effectiveMsgs: AgentMessage[] = [];
+      if (msg.type === 'text' && msg.content && msg.catId) {
+        effectiveMsgs.push({ ...msg, content: getPayloadStripper(msg.catId).push(msg.content) });
+      } else if (msg.type === 'done' && msg.catId) {
+        if (msg.metadata && !catMeta.has(msg.catId)) {
+          catMeta.set(msg.catId, msg.metadata);
         }
-      }
-      if (effectiveMsg.type === 'text' && effectiveMsg.content && effectiveMsg.catId) {
-        catText.set(
-          effectiveMsg.catId,
-          accumulateTextAggregate(
-            catText.get(effectiveMsg.catId) ?? '',
-            effectiveMsg.content,
-            (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
-          ),
-        );
-      }
-      // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
-      if (effectiveMsg.type === 'system_info' && effectiveMsg.content && effectiveMsg.catId) {
-        if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
-          catSawUserFacingSystemInfo.set(effectiveMsg.catId, true);
+        const flushedText = getPayloadStripper(msg.catId).flush();
+        if (flushedText) {
+          effectiveMsgs.push({
+            type: 'text',
+            catId: msg.catId,
+            content: flushedText,
+            timestamp: msg.timestamp,
+          });
         }
-        try {
-          const parsed = JSON.parse(effectiveMsg.content);
-          if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-            const prev = catThinking.get(effectiveMsg.catId) ?? [];
-            catThinking.set(effectiveMsg.catId, appendThinkingChunk(prev, parsed.text));
-          }
-          // F060: Collect inline rich_block for persistence (P1 fix)
-          if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
-            const arr = catStreamRichBlocks.get(effectiveMsg.catId) ?? [];
-            arr.push(parsed.block);
-            catStreamRichBlocks.set(effectiveMsg.catId, arr);
-          }
-          // F153: Accumulate invocation tokens for route aggregate
-          if (parsed.type === 'invocation_usage' && parsed.usage) {
-            routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
-          }
-        } catch {
-          /* ignore parse errors */
-        }
-      }
-      if (effectiveMsg.type === 'error' && effectiveMsg.catId) {
-        catHadError.add(effectiveMsg.catId);
-        // #267: errors before abort are real provider failures; errors after abort are cleanup
-        if (!signal?.aborted) catHadProviderError.add(effectiveMsg.catId);
-        if (effectiveMsg.error) {
-          const prev = catErrorText.get(effectiveMsg.catId) ?? '';
-          catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
-        }
-      }
-      // Accumulate tool events per cat
-      const toolEvt = toStoredToolEvent(effectiveMsg);
-      if (toolEvt && effectiveMsg.catId) {
-        const arr = catToolEvents.get(effectiveMsg.catId) ?? [];
-        arr.push(toolEvt);
-        catToolEvents.set(effectiveMsg.catId, arr);
+      } else {
+        effectiveMsgs.push(msg);
       }
 
-      // F148 OQ-2: Collect tool names for context eval
-      if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName && effectiveMsg.catId) {
-        const names = catToolNames.get(effectiveMsg.catId) ?? [];
-        names.push(effectiveMsg.toolName);
-        catToolNames.set(effectiveMsg.catId, names);
-      }
-
-      // F150: Fire-and-forget tool usage counter
-      if (effectiveMsg.type === 'tool_use' && deps.toolUsageCounter && effectiveMsg.catId) {
-        deps.toolUsageCounter.recordToolUse(
-          effectiveMsg.catId as string,
-          effectiveMsg.toolName ?? 'unknown',
-          effectiveMsg.toolInput as Record<string, unknown> | undefined,
-        );
-      }
-      if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
-        catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
-      }
-
-      // #80: Draft flush — fire-and-forget periodic persistence per cat
-      if (deps.draftStore && effectiveMsg.catId && catInvocationId.has(effectiveMsg.catId)) {
-        const invId = catInvocationId.get(effectiveMsg.catId)!;
-        const now = Date.now();
-        const lastFlush = catFlushTime.get(effectiveMsg.catId) ?? now;
-        const lastLen = catFlushLen.get(effectiveMsg.catId) ?? 0;
-        const curText = catText.get(effectiveMsg.catId) ?? '';
-        const charDelta = curText.length - lastLen;
-        const isReplaceText = (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode === 'replace';
-
-        const lastToolLen = catFlushToolLen.get(effectiveMsg.catId) ?? 0;
-        const curTools = catToolEvents.get(effectiveMsg.catId);
-        const curToolLen = curTools?.length ?? 0;
-
-        const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
+      for (const effectiveMsg of effectiveMsgs) {
+        // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
+        // Keep forwarding this boundary event so frontend can reset stale task progress.
         if (
-          effectiveMsg.type === 'text' &&
-          charDelta !== 0 &&
-          (neverFlushedCat || isReplaceText || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+          effectiveMsg.type === 'system_info' &&
+          effectiveMsg.content &&
+          effectiveMsg.catId &&
+          !catInvocationId.has(effectiveMsg.catId)
         ) {
-          const curThinking = catThinking.get(effectiveMsg.catId);
-          deps.draftStore
-            .upsert({
-              userId,
-              threadId,
-              invocationId: invId,
-              catId: effectiveMsg.catId as CatId,
-              content: curText,
-              ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-              ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
-              updatedAt: now,
-            })
-            ?.catch?.(noop);
-          catFlushTime.set(effectiveMsg.catId, now);
-          catFlushLen.set(effectiveMsg.catId, curText.length);
-          catFlushToolLen.set(effectiveMsg.catId, curToolLen);
-        } else if (
-          (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result') &&
-          // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
-          // must create a draft immediately, not wait 2s for the interval gate.
-          (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS)
-        ) {
-          // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
-          // tool-first invocations (no text yet) must still create a draft record.
-          if (curText.length > lastLen || curToolLen > lastToolLen) {
-            const curThinkingTool = catThinking.get(effectiveMsg.catId);
+          try {
+            const parsed = JSON.parse(effectiveMsg.content);
+            if (parsed.type === 'invocation_created') {
+              catInvocationId.set(effectiveMsg.catId, parsed.invocationId);
+              // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
+              catFlushTime.set(effectiveMsg.catId, Date.now());
+              // Issue #83: Start a single keepalive timer that touches all active drafts.
+              if (deps.draftStore && !keepaliveStarted) {
+                keepaliveStarted = true;
+                keepaliveTimer = setInterval(() => {
+                  for (const [, invId] of catInvocationId) {
+                    deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
+                  }
+                }, KEEPALIVE_INTERVAL_MS);
+              }
+            }
+          } catch {
+            /* ignore parse errors */
+          }
+        }
+        if (effectiveMsg.type === 'text' && effectiveMsg.content && effectiveMsg.catId) {
+          catText.set(
+            effectiveMsg.catId,
+            accumulateTextAggregate(
+              catText.get(effectiveMsg.catId) ?? '',
+              effectiveMsg.content,
+              (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
+            ),
+          );
+        }
+        // F045: Accumulate thinking blocks per cat for persistence (F5 recovery)
+        if (effectiveMsg.type === 'system_info' && effectiveMsg.content && effectiveMsg.catId) {
+          if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
+            catSawUserFacingSystemInfo.set(effectiveMsg.catId, true);
+          }
+          try {
+            const parsed = JSON.parse(effectiveMsg.content);
+            if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+              const prev = catThinking.get(effectiveMsg.catId) ?? [];
+              catThinking.set(effectiveMsg.catId, appendThinkingChunk(prev, parsed.text));
+            }
+            // F060: Collect inline rich_block for persistence (P1 fix)
+            if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
+              const arr = catStreamRichBlocks.get(effectiveMsg.catId) ?? [];
+              arr.push(parsed.block);
+              catStreamRichBlocks.set(effectiveMsg.catId, arr);
+            }
+            // F153: Accumulate invocation tokens for route aggregate
+            if (parsed.type === 'invocation_usage' && parsed.usage) {
+              routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
+            }
+          } catch {
+            /* ignore parse errors */
+          }
+        }
+        if (effectiveMsg.type === 'error' && effectiveMsg.catId) {
+          catHadError.add(effectiveMsg.catId);
+          // #267: errors before abort are real provider failures; errors after abort are cleanup
+          if (!signal?.aborted) catHadProviderError.add(effectiveMsg.catId);
+          if (effectiveMsg.error) {
+            const prev = catErrorText.get(effectiveMsg.catId) ?? '';
+            catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
+          }
+        }
+        // Accumulate tool events per cat
+        const toolEvt = toStoredToolEvent(effectiveMsg);
+        if (toolEvt && effectiveMsg.catId) {
+          const arr = catToolEvents.get(effectiveMsg.catId) ?? [];
+          arr.push(toolEvt);
+          catToolEvents.set(effectiveMsg.catId, arr);
+        }
+
+        // F148 OQ-2: Collect tool names for context eval
+        if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName && effectiveMsg.catId) {
+          const names = catToolNames.get(effectiveMsg.catId) ?? [];
+          names.push(effectiveMsg.toolName);
+          catToolNames.set(effectiveMsg.catId, names);
+        }
+
+        // F150: Fire-and-forget tool usage counter
+        if (effectiveMsg.type === 'tool_use' && deps.toolUsageCounter && effectiveMsg.catId) {
+          deps.toolUsageCounter.recordToolUse(
+            effectiveMsg.catId as string,
+            effectiveMsg.toolName ?? 'unknown',
+            effectiveMsg.toolInput as Record<string, unknown> | undefined,
+          );
+        }
+        if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
+          catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
+        }
+
+        // #80: Draft flush — fire-and-forget periodic persistence per cat
+        if (deps.draftStore && effectiveMsg.catId && catInvocationId.has(effectiveMsg.catId)) {
+          const invId = catInvocationId.get(effectiveMsg.catId)!;
+          const now = Date.now();
+          const lastFlush = catFlushTime.get(effectiveMsg.catId) ?? now;
+          const lastLen = catFlushLen.get(effectiveMsg.catId) ?? 0;
+          const curText = catText.get(effectiveMsg.catId) ?? '';
+          const charDelta = curText.length - lastLen;
+          const isReplaceText = (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode === 'replace';
+
+          const lastToolLen = catFlushToolLen.get(effectiveMsg.catId) ?? 0;
+          const curTools = catToolEvents.get(effectiveMsg.catId);
+          const curToolLen = curTools?.length ?? 0;
+
+          const neverFlushedCat = lastLen === 0 && lastToolLen === 0;
+          if (
+            effectiveMsg.type === 'text' &&
+            charDelta !== 0 &&
+            (neverFlushedCat || isReplaceText || now - lastFlush >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
+          ) {
+            const curThinking = catThinking.get(effectiveMsg.catId);
             deps.draftStore
               .upsert({
                 userId,
@@ -731,167 +723,122 @@ export async function* routeParallel(
                 catId: effectiveMsg.catId as CatId,
                 content: curText,
                 ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
-                ...(curThinkingTool && curThinkingTool.length > 0
-                  ? { thinking: renderThinkingChunks(curThinkingTool) }
-                  : {}),
+                ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
                 updatedAt: now,
               })
               ?.catch?.(noop);
+            catFlushTime.set(effectiveMsg.catId, now);
             catFlushLen.set(effectiveMsg.catId, curText.length);
             catFlushToolLen.set(effectiveMsg.catId, curToolLen);
-          } else {
-            deps.draftStore.touch(userId, threadId, invId)?.catch?.(noop);
-          }
-          catFlushTime.set(effectiveMsg.catId, now);
-        }
-      }
-
-      if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
-      yield effectiveMsg;
-    }
-
-    if (msg.type === 'done' && msg.catId) {
-      completedCount++;
-
-      // F148 OQ-2: Log briefing→invocation link + context eval signals
-      const doneBriefingId = catBriefingMessageId.get(msg.catId);
-      const doneInvId = catInvocationId.get(msg.catId);
-      if (doneBriefingId && doneInvId) {
-        const doneCoverage = catCoverageMap.get(msg.catId);
-        const evalSignals = doneCoverage
-          ? extractContextEvalSignals({
-              coverageMap: doneCoverage,
-              toolNames: catToolNames.get(msg.catId) ?? [],
-              responseTokenEstimate: estimateTokens(catText.get(msg.catId) ?? ''),
-            })
-          : undefined;
-        log.info({
-          f148: 'briefing-invocation-link',
-          briefingMessageId: doneBriefingId,
-          invocationId: doneInvId,
-          catId: msg.catId,
-          threadId,
-          hadError: catHadProviderError.has(msg.catId),
-          ...(evalSignals ? { eval: evalSignals } : {}),
-        });
-      }
-
-      // F22: Consume MCP-buffered rich blocks BEFORE text/empty branch —
-      // blocks must be persisted even when the cat emits no text (cloud Codex P1).
-      const ownInvId = catInvocationId.get(msg.catId);
-      // Issue #83 P2 fix: Remove completed cat from keepalive set.
-      // Without this, the shared keepalive timer would touch() a deleted draft,
-      // recreating an orphan Redis hash key via HSET.
-      catInvocationId.delete(msg.catId);
-      const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
-      // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
-      // parentInvocationId for live bubble identity. Persist formal messages with
-      // the same id; otherwise IDB/live bubbles use parent id while hydration uses
-      // per-cat invocation_created id, creating duplicate bubbles after refresh.
-      const persistedInvocationId = options.parentInvocationId ?? ownInvId;
-      let catProducedOutput = false;
-      const text = catText.get(msg.catId);
-      if (text) {
-        catProducedOutput = true;
-        const meta = catMeta.get(msg.catId);
-        const sanitized = sanitizeInjectedContent(text);
-        // F22: Extract cc_rich blocks from text + merge with buffered
-        const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
-        const storedContent = sanitizeAgentVisibleOutput(cleanText);
-        let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
-        // F34-b: synthesize text-only audio blocks (voice messages)
-        // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
-        if (!voiceMode) {
-          const voiceSynth = getVoiceBlockSynthesizer();
-          if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-            try {
-              allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
-            } catch (err) {
-              log.error({ catId: msg.catId, err }, 'Voice block synthesis failed');
+          } else if (
+            (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result') &&
+            // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
+            // must create a draft immediately, not wait 2s for the interval gate.
+            (neverFlushedCat || now - lastFlush >= FLUSH_INTERVAL_MS)
+          ) {
+            // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
+            // tool-first invocations (no text yet) must still create a draft record.
+            if (curText.length > lastLen || curToolLen > lastToolLen) {
+              const curThinkingTool = catThinking.get(effectiveMsg.catId);
+              deps.draftStore
+                .upsert({
+                  userId,
+                  threadId,
+                  invocationId: invId,
+                  catId: effectiveMsg.catId as CatId,
+                  content: curText,
+                  ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
+                  ...(curThinkingTool && curThinkingTool.length > 0
+                    ? { thinking: renderThinkingChunks(curThinkingTool) }
+                    : {}),
+                  updatedAt: now,
+                })
+                ?.catch?.(noop);
+              catFlushLen.set(effectiveMsg.catId, curText.length);
+              catFlushToolLen.set(effectiveMsg.catId, curToolLen);
+            } else {
+              deps.draftStore.touch(userId, threadId, invId)?.catch?.(noop);
             }
+            catFlushTime.set(effectiveMsg.catId, now);
           }
         }
-        const catTools = catToolEvents.get(msg.catId);
-        // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
-        // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
-        // L2 suppression log below still surfaces the raw @ tokens from the text for observability.
-        const thinking = catThinking.get(msg.catId);
-        try {
-          await deps.messageStore.append({
-            userId,
-            catId: msg.catId as CatId,
-            content: storedContent,
-            mentions: [],
-            origin: 'stream',
-            timestamp: invocationStartedAt,
+
+        if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
+        yield effectiveMsg;
+      }
+
+      if (msg.type === 'done' && msg.catId) {
+        completedCount++;
+
+        // F148 OQ-2: Log briefing→invocation link + context eval signals
+        const doneBriefingId = catBriefingMessageId.get(msg.catId);
+        const doneInvId = catInvocationId.get(msg.catId);
+        if (doneBriefingId && doneInvId) {
+          const doneCoverage = catCoverageMap.get(msg.catId);
+          const evalSignals = doneCoverage
+            ? extractContextEvalSignals({
+                coverageMap: doneCoverage,
+                toolNames: catToolNames.get(msg.catId) ?? [],
+                responseTokenEstimate: estimateTokens(catText.get(msg.catId) ?? ''),
+              })
+            : undefined;
+          log.info({
+            f148: 'briefing-invocation-link',
+            briefingMessageId: doneBriefingId,
+            invocationId: doneInvId,
+            catId: msg.catId,
             threadId,
-            ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
-            ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
-            ...(meta ? { metadata: meta } : {}),
-            ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
-            extra: {
-              ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
-              ...(msg.tracing ? { tracing: msg.tracing } : {}),
-            },
+            hadError: catHadProviderError.has(msg.catId),
+            ...(evalSignals ? { eval: evalSignals } : {}),
           });
-          // F088-P3: Stash rich blocks for outbound delivery
-          if (options.persistenceContext && allRichBlocks.length > 0) {
-            options.persistenceContext.richBlocks = [
-              ...(options.persistenceContext.richBlocks ?? []),
-              ...allRichBlocks,
-            ];
-          }
-          // #80: Clean up draft only after successful append
-          if (deps.draftStore && ownInvId) {
-            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
-          }
-          // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
-          if (deps.invocationDeps.threadStore) {
-            try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(
-                threadId,
-                msg.catId as CatId,
-                // #267: only errors before abort are provider failures
-                !catHadProviderError.has(msg.catId),
-              );
-            } catch (activityErr) {
-              log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+        }
+
+        // F22: Consume MCP-buffered rich blocks BEFORE text/empty branch —
+        // blocks must be persisted even when the cat emits no text (cloud Codex P1).
+        const ownInvId = catInvocationId.get(msg.catId);
+        // Issue #83 P2 fix: Remove completed cat from keepalive set.
+        // Without this, the shared keepalive timer would touch() a deleted draft,
+        // recreating an orphan Redis hash key via HSET.
+        catInvocationId.delete(msg.catId);
+        const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
+        // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
+        // parentInvocationId for live bubble identity. Persist formal messages with
+        // the same id; otherwise IDB/live bubbles use parent id while hydration uses
+        // per-cat invocation_created id, creating duplicate bubbles after refresh.
+        const persistedInvocationId = options.parentInvocationId ?? ownInvId;
+        let catProducedOutput = false;
+        const text = catText.get(msg.catId);
+        if (text) {
+          catProducedOutput = true;
+          const meta = catMeta.get(msg.catId);
+          const sanitized = sanitizeInjectedContent(text);
+          // F22: Extract cc_rich blocks from text + merge with buffered
+          const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
+          const storedContent = sanitizeAgentVisibleOutput(cleanText);
+          let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+          // F34-b: synthesize text-only audio blocks (voice messages)
+          // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
+          if (!voiceMode) {
+            const voiceSynth = getVoiceBlockSynthesizer();
+            if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+              try {
+                allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
+              } catch (err) {
+                log.error({ catId: msg.catId, err }, 'Voice block synthesis failed');
+              }
             }
           }
-        } catch (err) {
-          log.error({ catId: msg.catId, err }, 'messageStore.append failed, degrading');
-          if (options.persistenceContext) {
-            options.persistenceContext.failed = true;
-            options.persistenceContext.errors.push({
-              catId: msg.catId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-      } else if (!catHadError.has(msg.catId)) {
-        // No text content and no error.
-        // Persist assistant bubbles only when there is visible rich payload.
-        // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
-        const meta = catMeta.get(msg.catId);
-        const catTools = catToolEvents.get(msg.catId);
-        const thinking = catThinking.get(msg.catId);
-        const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
-        const hasRichBlocks = noTextBlocks.length > 0;
-        const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
-        const shouldPersistNoTextMessage = hasRichBlocks;
-        const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
+          const catTools = catToolEvents.get(msg.catId);
+          // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
+          // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
+          // L2 suppression log below still surfaces the raw @ tokens from the text for observability.
 
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
-          catProducedOutput = true;
-        }
-
-        if (shouldPersistNoTextMessage) {
+          const thinking = catThinking.get(msg.catId);
           try {
             await deps.messageStore.append({
               userId,
               catId: msg.catId as CatId,
-              content: '',
+              content: storedContent,
               mentions: [],
               origin: 'stream',
               timestamp: invocationStartedAt,
@@ -901,16 +848,16 @@ export async function* routeParallel(
               ...(meta ? { metadata: meta } : {}),
               ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               extra: {
-                ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
               },
             });
-            // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-            if (options.persistenceContext && noTextBlocks.length > 0) {
+            // F088-P3: Stash rich blocks for outbound delivery
+            if (options.persistenceContext && allRichBlocks.length > 0) {
               options.persistenceContext.richBlocks = [
                 ...(options.persistenceContext.richBlocks ?? []),
-                ...noTextBlocks,
+                ...allRichBlocks,
               ];
             }
             // #80: Clean up draft only after successful append
@@ -940,19 +887,108 @@ export async function* routeParallel(
               });
             }
           }
-        }
+        } else if (!catHadError.has(msg.catId)) {
+          // No text content and no error.
+          // Persist assistant bubbles only when there is visible rich payload.
+          // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
+          const meta = catMeta.get(msg.catId);
+          const catTools = catToolEvents.get(msg.catId);
+          const thinking = catThinking.get(msg.catId);
+          const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+          const hasRichBlocks = noTextBlocks.length > 0;
+          const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
+          const shouldPersistNoTextMessage = hasRichBlocks;
+          const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
 
-        if (shouldPersistSilentNotice) {
-          const persistedNotice = await persistSilentCompletionNotice(deps, {
-            threadId,
-            catId: msg.catId,
-            displayName: catRegistry.tryGet(msg.catId)?.config.displayName,
-            toolCount: catTools?.length ?? 0,
-            provider: meta?.provider,
-            model: meta?.model,
-            invocationId: ownInvId,
-          });
-          if (!persistedNotice) {
+          if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
+            catProducedOutput = true;
+          }
+
+          if (shouldPersistNoTextMessage) {
+            try {
+              await deps.messageStore.append({
+                userId,
+                catId: msg.catId as CatId,
+                content: '',
+                mentions: [],
+                origin: 'stream',
+                timestamp: invocationStartedAt,
+                threadId,
+                ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
+                ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
+                ...(meta ? { metadata: meta } : {}),
+                ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
+                extra: {
+                  ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                  ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                  ...(msg.tracing ? { tracing: msg.tracing } : {}),
+                },
+              });
+              // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
+              if (options.persistenceContext && noTextBlocks.length > 0) {
+                options.persistenceContext.richBlocks = [
+                  ...(options.persistenceContext.richBlocks ?? []),
+                  ...noTextBlocks,
+                ];
+              }
+              // #80: Clean up draft only after successful append
+              if (deps.draftStore && ownInvId) {
+                deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+              }
+              // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
+              if (deps.invocationDeps.threadStore) {
+                try {
+                  await deps.invocationDeps.threadStore.updateParticipantActivity(
+                    threadId,
+                    msg.catId as CatId,
+                    // #267: only errors before abort are provider failures
+                    !catHadProviderError.has(msg.catId),
+                  );
+                } catch (activityErr) {
+                  log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+                }
+              }
+            } catch (err) {
+              log.error({ catId: msg.catId, err }, 'messageStore.append failed, degrading');
+              if (options.persistenceContext) {
+                options.persistenceContext.failed = true;
+                options.persistenceContext.errors.push({
+                  catId: msg.catId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+          }
+
+          if (shouldPersistSilentNotice) {
+            const persistedNotice = await persistSilentCompletionNotice(deps, {
+              threadId,
+              catId: msg.catId,
+              displayName: catRegistry.tryGet(msg.catId)?.config.displayName,
+              toolCount: catTools?.length ?? 0,
+              provider: meta?.provider,
+              model: meta?.model,
+              invocationId: ownInvId,
+            });
+            if (!persistedNotice) {
+              yield {
+                type: 'system_info' as AgentMessageType,
+                catId: msg.catId,
+                content: JSON.stringify({
+                  type: 'silent_completion',
+                  detail: `${msg.catId} completed without textual output.`,
+                  toolCount: catToolEvents.get(msg.catId)?.length ?? 0,
+                  provider: catMeta.get(msg.catId)?.provider,
+                  model: catMeta.get(msg.catId)?.model,
+                  invocationId: ownInvId,
+                }),
+                timestamp: Date.now(),
+              } as AgentMessage;
+            }
+            if (!shouldPersistNoTextMessage && deps.draftStore && ownInvId) {
+              deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+            }
+          } else if (!shouldPersistNoTextMessage && !sawUserFacingSystemInfo) {
             yield {
               type: 'system_info' as AgentMessageType,
               catId: msg.catId,
@@ -966,164 +1002,153 @@ export async function* routeParallel(
               }),
               timestamp: Date.now(),
             } as AgentMessage;
-          }
-          if (!shouldPersistNoTextMessage && deps.draftStore && ownInvId) {
-            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
-          }
-        } else if (!shouldPersistNoTextMessage && !sawUserFacingSystemInfo) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId: msg.catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${msg.catId} completed without textual output.`,
-              toolCount: catToolEvents.get(msg.catId)?.length ?? 0,
-              provider: catMeta.get(msg.catId)?.provider,
-              model: catMeta.get(msg.catId)?.model,
-              invocationId: ownInvId,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-          // No persisted message for fully silent turns.
-          if (deps.draftStore && ownInvId) {
-            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
-          }
-        } else if (deps.draftStore && ownInvId) {
-          deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
-        }
-      } else {
-        // hadError but toolEvents exist — persist tool record so refresh shows what was attempted
-        const catTools = catToolEvents.get(msg.catId);
-        if (catTools && catTools.length > 0) {
-          const meta = catMeta.get(msg.catId);
-          const thinking = catThinking.get(msg.catId);
-          try {
-            await deps.messageStore.append({
-              userId,
-              catId: msg.catId as CatId,
-              content: '',
-              mentions: [],
-              origin: 'stream',
-              timestamp: invocationStartedAt,
-              threadId,
-              ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
-              ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
-              ...(meta ? { metadata: meta } : {}),
-              toolEvents: catTools,
-              ...(persistedInvocationId || msg.tracing
-                ? {
-                    extra: {
-                      ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
-                      ...(msg.tracing ? { tracing: msg.tracing } : {}),
-                    },
-                  }
-                : {}),
-            });
-            // #80: Clean up draft only after successful append
+            // No persisted message for fully silent turns.
             if (deps.draftStore && ownInvId) {
               deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
             }
-            // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
-            if (deps.invocationDeps.threadStore) {
-              try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(
-                  threadId,
-                  msg.catId as CatId,
-                  // #267: only errors before abort are provider failures
-                  !catHadProviderError.has(msg.catId),
-                );
-              } catch (activityErr) {
-                log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+          } else if (deps.draftStore && ownInvId) {
+            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+          }
+        } else {
+          // hadError but toolEvents exist — persist tool record so refresh shows what was attempted
+          const catTools = catToolEvents.get(msg.catId);
+          if (catTools && catTools.length > 0) {
+            const meta = catMeta.get(msg.catId);
+            const thinking = catThinking.get(msg.catId);
+            try {
+              await deps.messageStore.append({
+                userId,
+                catId: msg.catId as CatId,
+                content: '',
+                mentions: [],
+                origin: 'stream',
+                timestamp: invocationStartedAt,
+                threadId,
+                ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
+                ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
+                ...(meta ? { metadata: meta } : {}),
+                toolEvents: catTools,
+                ...(persistedInvocationId || msg.tracing
+                  ? {
+                      extra: {
+                        ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                        ...(msg.tracing ? { tracing: msg.tracing } : {}),
+                      },
+                    }
+                  : {}),
+              });
+              // #80: Clean up draft only after successful append
+              if (deps.draftStore && ownInvId) {
+                deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+              }
+              // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
+              if (deps.invocationDeps.threadStore) {
+                try {
+                  await deps.invocationDeps.threadStore.updateParticipantActivity(
+                    threadId,
+                    msg.catId as CatId,
+                    // #267: only errors before abort are provider failures
+                    !catHadProviderError.has(msg.catId),
+                  );
+                } catch (activityErr) {
+                  log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+                }
+              }
+            } catch (err) {
+              log.error({ catId: msg.catId, err }, 'messageStore.append (error+tools) failed, degrading');
+              if (options.persistenceContext) {
+                options.persistenceContext.failed = true;
+                options.persistenceContext.errors.push({
+                  catId: msg.catId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
               }
             }
+          }
+        }
+
+        // Persist error as system message so it survives F5 reload but does NOT
+        // re-enter the prompt as a cat message (aligned with route-serial.ts).
+        // Previously errors were mixed into catText and persisted with userId=user,
+        // which polluted the conversation history and caused "context poisoning".
+        const errorText = catErrorText.get(msg.catId);
+        if (errorText) {
+          try {
+            await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              content: `Error: ${errorText}`,
+              mentions: [],
+              origin: 'stream',
+              timestamp: Date.now(),
+              threadId,
+            });
           } catch (err) {
-            log.error({ catId: msg.catId, err }, 'messageStore.append (error+tools) failed, degrading');
-            if (options.persistenceContext) {
-              options.persistenceContext.failed = true;
-              options.persistenceContext.errors.push({
-                catId: msg.catId,
-                error: err instanceof Error ? err.message : String(err),
-              });
+            log.error({ catId: msg.catId, err }, 'messageStore.append (error system msg) failed');
+          }
+        }
+
+        // Ack cursor regardless of error: messages were assembled into the prompt
+        // and delivered to the cat. Not acking causes infinite re-delivery.
+        if (incrementalMode) {
+          const boundaryId = boundaryByCat.get(msg.catId as CatId);
+          if (boundaryId) {
+            if (options.cursorBoundaries) {
+              // ADR-008 S3: defer ack — caller acks after invocation succeeds
+              upsertMaxBoundary(options.cursorBoundaries, msg.catId, boundaryId);
+            } else if (deps.deliveryCursorStore) {
+              // Legacy: ack immediately
+              try {
+                await deps.deliveryCursorStore.ackCursor(userId, msg.catId as CatId, threadId, boundaryId);
+              } catch (err) {
+                log.error({ catId: msg.catId, err }, 'ackCursor failed');
+              }
             }
           }
         }
-      }
 
-      // Persist error as system message so it survives F5 reload but does NOT
-      // re-enter the prompt as a cat message (aligned with route-serial.ts).
-      // Previously errors were mixed into catText and persisted with userId=user,
-      // which polluted the conversation history and caused "context poisoning".
-      const errorText = catErrorText.get(msg.catId);
-      if (errorText) {
-        try {
-          await deps.messageStore.append({
-            userId: 'system',
-            catId: null,
-            content: `Error: ${errorText}`,
-            mentions: [],
-            origin: 'stream',
-            timestamp: Date.now(),
+        // F155: Ack guide completion only after cat produced visible output.
+        if (deps.invocationDeps.threadStore) {
+          const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
+          const sessionStore = deps.invocationDeps.guideSessionStore!;
+          await ackGuideCompletion({
+            ctx: guideCtx,
+            catId: msg.catId as string,
+            catProducedOutput,
+            targetCatIds,
             threadId,
+            userId,
+            guideStore: createGuideStoreBridge(sessionStore),
+            threadStore: deps.invocationDeps.threadStore!,
           });
-        } catch (err) {
-          log.error({ catId: msg.catId, err }, 'messageStore.append (error system msg) failed');
         }
-      }
 
-      // Ack cursor regardless of error: messages were assembled into the prompt
-      // and delivered to the cat. Not acking causes infinite re-delivery.
-      if (incrementalMode) {
-        const boundaryId = boundaryByCat.get(msg.catId as CatId);
-        if (boundaryId) {
-          if (options.cursorBoundaries) {
-            // ADR-008 S3: defer ack — caller acks after invocation succeeds
-            upsertMaxBoundary(options.cursorBoundaries, msg.catId, boundaryId);
-          } else if (deps.deliveryCursorStore) {
-            // Legacy: ack immediately
-            try {
-              await deps.deliveryCursorStore.ackCursor(userId, msg.catId as CatId, threadId, boundaryId);
-            } catch (err) {
-              log.error({ catId: msg.catId, err }, 'ackCursor failed');
+        const isFinal = completedCount === targetCats.length;
+
+        // F167 L2: parallel 模式 @ 无路由语义（independent thinking），
+        // 不 emit a2a_followup_available 提示，避免引导用户/猫猫误以为 @ 真的转移了球权。
+        // 若文本里仍出现 @句柄，仅记录 suppressedInParallel 日志用于观测。
+        if (isFinal) {
+          for (const [cid, text] of catText.entries()) {
+            const ms = parseA2AMentions(text, cid as CatId);
+            if (ms.length > 0) {
+              log.info(
+                { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },
+                'F167 L2: parallel-mode @ mentions suppressed (no routing, no followup hint)',
+              );
             }
           }
         }
+
+        yield { ...msg, isFinal };
+        if (isFinal) yieldedFinalDone = true;
       }
-
-      // F155: Ack guide completion only after cat produced visible output.
-      if (deps.invocationDeps.threadStore) {
-        const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
-        const sessionStore = deps.invocationDeps.guideSessionStore!;
-        await ackGuideCompletion({
-          ctx: guideCtx,
-          catId: msg.catId as string,
-          catProducedOutput,
-          targetCatIds,
-          threadId,
-          userId,
-          guideStore: createGuideStoreBridge(sessionStore),
-          threadStore: deps.invocationDeps.threadStore!,
-        });
-      }
-
-      const isFinal = completedCount === targetCats.length;
-
-      // F167 L2: parallel 模式 @ 无路由语义（independent thinking），
-      // 不 emit a2a_followup_available 提示，避免引导用户/猫猫误以为 @ 真的转移了球权。
-      // 若文本里仍出现 @句柄，仅记录 suppressedInParallel 日志用于观测。
-      if (isFinal) {
-        for (const [cid, text] of catText.entries()) {
-          const ms = parseA2AMentions(text, cid as CatId);
-          if (ms.length > 0) {
-            log.info(
-              { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },
-              'F167 L2: parallel-mode @ mentions suppressed (no routing, no followup hint)',
-            );
-          }
-        }
-      }
-
-      yield { ...msg, isFinal };
-      if (isFinal) yieldedFinalDone = true;
+    }
+  } finally {
+    // Issue #83: Stop keepalive timer on normal completion, cancel, and thrown provider errors.
+    if (keepaliveTimer) {
+      clearInterval(keepaliveTimer);
+      keepaliveTimer = undefined;
     }
   }
 
@@ -1145,9 +1170,4 @@ export async function* routeParallel(
     } as AgentMessage;
   }
 
-  // Issue #83: Stop keepalive timer — streaming loop has exited.
-  if (keepaliveTimer) {
-    clearInterval(keepaliveTimer);
-    keepaliveTimer = undefined;
-  }
 }
