@@ -173,6 +173,27 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('没人认领的任务留在 board 可见'));
   });
 
+  test('shared-rules and prompt keep claim-before-action hard gate', async () => {
+    const { readFileSync } = await import('node:fs');
+    const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
+    const rulesText = readFileSync(rulesPath, 'utf8');
+
+    assert.match(rulesText, /认领（claim）或复用任务/);
+    assert.match(rulesText, /没有完成认领（claim）前，不写文件、不改代码、不启动构建/);
+    assert.match(rulesText, /认领\/claim 失败就停止/);
+
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+
+    assert.ok(prompt.includes('先认领（claim）或复用任务'));
+    assert.ok(prompt.includes('未认领/claim 前不写文件/改代码/启动构建'));
+  });
+
   test('is deterministic (identical inputs produce identical output)', async () => {
     const build = await getBuilder();
     const ctx = {
