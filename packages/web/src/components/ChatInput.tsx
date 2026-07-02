@@ -911,7 +911,7 @@ export function ChatInput({
   }, [showPromptPrefixMenu]);
 
   return (
-    <div className="relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
+    <div className="slock-composer-shell relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
 
       {pathCompletion.isOpen && !activeMenu && !showSlashCommands && (
         <PathCompletionMenu

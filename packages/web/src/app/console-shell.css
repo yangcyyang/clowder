@@ -1140,7 +1140,12 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button > span {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-composer-shell {
+  border-top: 0;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-unread-badge {
