@@ -96,6 +96,13 @@ export function getNextInlineThreadSearchIndex(current: number, total: number, d
   return (current + direction + total) % total;
 }
 
+export function isUnsafeInlineThreadTarget(
+  threadId: string,
+  sourceMessage: Pick<ChatMessageData, 'threadId'>,
+): boolean {
+  return !!sourceMessage.threadId && sourceMessage.threadId === threadId;
+}
+
 function detectSlashCommand(value: string, cursor: number): string | null {
   if (!value.startsWith('/') || cursor <= 0) return null;
   const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
@@ -406,6 +413,9 @@ export function InlineThreadPanel({
     setSending(true);
     setSendError(null);
     try {
+      if (isUnsafeInlineThreadTarget(threadId, sourceMessage)) {
+        throw new Error('Thread 未创建成功，已阻止把回复写入主频道');
+      }
       const res = await apiFetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -438,7 +448,7 @@ export function InlineThreadPanel({
     replyMessages.length,
     sending,
     sourceThreadMessageId,
-    sourceMessage.id,
+    sourceMessage,
     startReplyPolling,
     threadId,
   ]);

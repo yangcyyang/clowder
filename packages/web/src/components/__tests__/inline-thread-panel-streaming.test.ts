@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getInlineThreadSearchHits,
   getNextInlineThreadSearchIndex,
+  isUnsafeInlineThreadTarget,
   normalizeInlineThreadMessage,
   shouldShowInlineThreadRuntimeStatus,
 } from '@/components/InlineThreadPanel';
@@ -52,6 +53,16 @@ describe('InlineThreadPanel runtime status visibility', () => {
     expect(shouldShowInlineThreadRuntimeStatus('streaming')).toBe(true);
     expect(shouldShowInlineThreadRuntimeStatus('suspected_stall')).toBe(true);
     expect(shouldShowInlineThreadRuntimeStatus('error')).toBe(true);
+  });
+});
+
+describe('InlineThreadPanel thread target guard', () => {
+  it('blocks fallback panels that would send replies into the source/main thread', () => {
+    expect(isUnsafeInlineThreadTarget('thread-main', { threadId: 'thread-main' })).toBe(true);
+  });
+
+  it('allows real branch threads to receive replies', () => {
+    expect(isUnsafeInlineThreadTarget('thread-branch', { threadId: 'thread-main' })).toBe(false);
   });
 });
 

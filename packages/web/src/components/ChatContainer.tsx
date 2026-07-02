@@ -393,11 +393,25 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           body: JSON.stringify({ fromMessageId: sourceMessage.id, userId: getUserId() }),
         });
         if (!res.ok) {
-          openInlineThread({ threadId: sourceThreadId, sourceMessage });
+          addToast({
+            type: 'error',
+            title: 'Thread 创建失败',
+            message: '已阻止把 Thread 回复写入主频道，请刷新后重试。',
+            duration: 4200,
+          });
           return;
         }
         const data = (await res.json()) as { threadId?: string };
         const branchThreadId = data.threadId ?? sourceThreadId;
+        if (branchThreadId === sourceThreadId) {
+          addToast({
+            type: 'error',
+            title: 'Thread 创建失败',
+            message: '服务没有返回独立 Thread，已阻止把回复写入主频道。',
+            duration: 4200,
+          });
+          return;
+        }
         openInlineThread({ threadId: branchThreadId, sourceMessage });
         handleInlineThreadReplyCountChange(sourceMessage.id, branchThreadId, 0);
         const threadsRes = await apiFetch('/api/threads');
@@ -406,10 +420,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           setThreads(threadsData.threads);
         }
       } catch {
-        openInlineThread({ threadId: sourceMessage.threadId ?? threadId, sourceMessage });
+        addToast({
+          type: 'error',
+          title: 'Thread 创建失败',
+          message: '网络请求未完成，已阻止把回复写入主频道。',
+          duration: 4200,
+        });
       }
     },
-    [clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, openInlineThread, setThreads, threadId],
+    [addToast, clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, openInlineThread, setThreads, threadId],
   );
   const handleOpenInlineThread = useCallback(
     async (messageId: string) => {
