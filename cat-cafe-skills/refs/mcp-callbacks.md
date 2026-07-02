@@ -42,6 +42,20 @@ curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVO
 curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&catId=gpt52&keyword=search"
 ```
 
+### Search Messages
+```bash
+curl "$CAT_CAFE_API_URL/api/callbacks/message-search?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&q=Claude额度&limit=5"
+```
+
+跨历史检索可见消息。适合用户提到“之前 / 上次 / 旧讨论 / 更久远历史”时使用，
+避免把全量历史塞进上下文。
+
+可选 query 参数：
+- `q`：必填，搜索关键词
+- `limit`：返回数量上限（默认 20，最大 50）
+- `threadId`：只搜指定 thread
+- `catId`：`user` 或具体猫句柄（如 `codex`、`gpt52`、`opus`）
+
 ### List Threads
 ```bash
 curl "$CAT_CAFE_API_URL/api/callbacks/list-threads?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"

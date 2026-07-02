@@ -21,10 +21,14 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { hydrateReplyPreview, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  hydrateReplyPreview,
+  type IMessageStore,
+  type StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
+import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -175,6 +179,13 @@ const threadContextQuerySchema = z.object({
   keyword: z.string().min(1).optional(),
 });
 
+const messageSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  threadId: z.string().min(1).optional(),
+  catId: z.string().min(1).optional(),
+});
+
 const listThreadsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   activeSince: z.coerce.number().int().min(0).optional(),
@@ -195,6 +206,28 @@ const pendingMentionsQuerySchema = z.object({
 const ackMentionsSchema = z.object({
   upToMessageId: z.string().min(1),
 });
+
+function isMessageVisibleToPrincipalUser(message: StoredMessage, userId: string): boolean {
+  if (message.deletedAt) return false;
+  if (message.userId === userId || isSystemUserMessage(message)) return true;
+  // Agent / connector messages belong to the shared thread surface even when
+  // persisted with a different technical userId.
+  return Boolean(message.catId || message.source);
+}
+
+async function resolveCallbackThreadTitle(
+  threadStore: IThreadStore | undefined,
+  threadId: string,
+  cache: Map<string, string>,
+): Promise<string> {
+  const cached = cache.get(threadId);
+  if (cached) return cached;
+
+  const thread = await Promise.resolve(threadStore?.get(threadId)).catch(() => null);
+  const title = thread?.title || (threadId === 'default' ? '大厅' : '未命名对话');
+  cache.set(threadId, title);
+  return title;
+}
 
 /** F22: Rich block creation schema — validates shape + kind-specific fields (cloud Codex P1) */
 const richChecklistItemSchema = z.object({ id: z.string(), text: z.string(), checked: z.boolean().optional() });
@@ -1240,6 +1273,103 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
       })),
       ...(workflowSop ? { workflowSop } : {}),
+    };
+  });
+
+  app.get('/api/callbacks/message-search', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = messageSearchQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query parameters', details: parsed.error.issues };
+    }
+
+    const { q, limit, threadId: requestedThreadId, catId: filterCatId } = parsed.data;
+
+    if (filterCatId && filterCatId !== 'user' && !catRegistry.has(filterCatId)) {
+      reply.status(400);
+      return { error: `Unknown catId filter: ${filterCatId}` };
+    }
+
+    let effectiveThreadId = requestedThreadId;
+    if (principal.kind === 'agent_key' && requestedThreadId) {
+      const threadResult = await resolvePrincipalThread(principal, requestedThreadId, { threadStore });
+      if (!threadResult.ok) {
+        reply.status(threadResult.statusCode);
+        return { error: threadResult.error };
+      }
+      effectiveThreadId = threadResult.threadId;
+    }
+
+    const requestedLimit = limit ?? 20;
+    const queryTerms = tokenizeKeyword(q);
+    const normalizedQuery = q.toLowerCase();
+    const principalCatId = principal.catId;
+    const principalUserId = principal.userId;
+    const viewer = { type: 'cat' as const, catId: createCatId(principalCatId) };
+    const threadTitleCache = new Map<string, string>();
+    const recentMessages = await messageStore.getRecent(10000);
+
+    const compactQuery = normalizedQuery.replace(/\s+/g, '');
+    const getSearchScore = (content: string): number => {
+      const relevanceScore = scoreKeywordRelevance(content, queryTerms);
+      if (relevanceScore > 0) return relevanceScore;
+      const lower = content.toLowerCase();
+      if (lower.includes(normalizedQuery)) return 1;
+      if (compactQuery && lower.replace(/\s+/g, '').includes(compactQuery)) return 1;
+      return 0;
+    };
+
+    const matchesAuthorFilter = (item: StoredMessage): boolean => {
+      if (!filterCatId) return true;
+      if (filterCatId === 'user') return item.catId === null;
+      return item.catId === filterCatId;
+    };
+
+    const rawMatches = recentMessages
+      .filter((item) => {
+        if (!isMessageVisibleToPrincipalUser(item, principalUserId)) return false;
+        if (!canViewMessage(item, viewer)) return false;
+        if (effectiveThreadId && item.threadId !== effectiveThreadId) return false;
+        if (item.origin === 'briefing') return false;
+        if (!matchesAuthorFilter(item)) return false;
+        if (!item.content?.trim()) return false;
+        return getSearchScore(item.content) > 0;
+      })
+      .sort((a, b) => {
+        const scoreDelta = getSearchScore(b.content) - getSearchScore(a.content);
+        return scoreDelta || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
+      })
+      .slice(0, requestedLimit);
+
+    const messages = await Promise.all(
+      rawMatches.map(async (item) => ({
+        id: item.id,
+        threadId: item.threadId,
+        threadTitle: await resolveCallbackThreadTitle(threadStore, item.threadId, threadTitleCache),
+        userId: item.userId,
+        catId: item.catId,
+        content: item.content,
+        timestamp: item.timestamp,
+        ...(item.editedAt ? { editedAt: item.editedAt } : {}),
+        relevanceScore: getSearchScore(item.content),
+        type: (item.catId
+          ? isSystemUserMessage(item)
+            ? 'system'
+            : 'assistant'
+          : item.source
+            ? 'connector'
+            : isSystemUserMessage(item)
+              ? 'system'
+              : 'user') as 'user' | 'assistant' | 'connector' | 'system',
+      })),
+    );
+
+    return {
+      query: q,
+      messages,
     };
   });
 

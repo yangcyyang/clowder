@@ -143,6 +143,73 @@ describe('Callback routes: agent-key auth path', () => {
     assert.ok(Array.isArray(body.messages));
   });
 
+  // ---- GET /api/callbacks/message-search ----
+
+  test('message-search with agent-key finds owned historical messages globally', async () => {
+    messageStore.append({
+      userId: TEST_USER,
+      catId: null,
+      content: '远历史：Claude 额度归因需要检索，不要全量上下文。',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId: ownedThreadId,
+    });
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/message-search?q=Claude额度&limit=5',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.query, 'Claude额度');
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].threadId, ownedThreadId);
+    assert.equal(body.messages[0].threadTitle, 'Agent Key Test');
+    assert.equal(body.messages[0].type, 'user');
+  });
+
+  test('message-search with agent-key does not leak other users private messages', async () => {
+    const otherThread = await threadStore.create('someone-else', 'Private Thread');
+    messageStore.append({
+      userId: 'someone-else',
+      catId: null,
+      content: 'other-user-private-anchor should stay hidden',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: otherThread.id,
+    });
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/message-search?q=other-user-private-anchor',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.messages, []);
+  });
+
+  test('message-search with agent-key + unowned threadId returns 403', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const otherThread = await threadStore.create('someone-else', 'Other Thread');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/message-search?threadId=${otherThread.id}&q=anything`,
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 403);
+  });
+
   // ---- GET /api/callbacks/list-threads ----
 
   test('list-threads with agent-key succeeds (no threadId needed)', async () => {

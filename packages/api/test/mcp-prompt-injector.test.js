@@ -45,6 +45,7 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('post-message'), 'should list post-message');
     assert.ok(instructions.includes('register-pr-tracking'), 'should list register-pr-tracking');
     assert.ok(instructions.includes('thread-context'), 'should list thread-context');
+    assert.ok(instructions.includes('message-search'), 'should list message-search');
     assert.ok(instructions.includes('list-threads'), 'should list list-threads');
     assert.ok(instructions.includes('feat-index'), 'should list feat-index');
     assert.ok(instructions.includes('list-tasks'), 'should list list-tasks');
@@ -52,6 +53,7 @@ describe('McpPromptInjector', () => {
     assert.ok(!instructions.includes('search-messages'), 'should not list non-HTTP endpoint alias');
     assert.ok(instructions.includes('catId'), 'should mention catId query filter');
     assert.ok(instructions.includes('keyword'), 'should mention keyword query filter');
+    assert.ok(instructions.includes('q'), 'should mention q query filter');
     assert.ok(instructions.includes('pending-mentions'), 'should list pending-mentions');
     assert.ok(instructions.includes('update-task'), 'should list update-task');
     assert.ok(instructions.includes('create-rich-block'), 'should list create-rich-block');
