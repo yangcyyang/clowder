@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { clearClaudeRuntimeSteerChannelsForTests, registerClaudeRuntimeSteerChannel } = await import(
+  '../dist/domains/cats/services/agents/providers/claude-runtime-steer.js'
+);
 
 /** Build deps with stubs */
 function buildDeps(overrides = {}) {
@@ -497,6 +500,82 @@ describe('Queue Management API', () => {
     const doneCall = broadcastCalls.find((c) => c.arguments[0].type === 'done');
     assert.ok(doneCall, 'should broadcast done event to clear frontend loading state');
     assert.equal(doneCall.arguments[0].isFinal, true);
+  });
+
+  it('POST /queue/:entryId/steer immediate injects into active Claude runtime when steer v2 flag is enabled', async () => {
+    await app.close();
+    const deliveredAtValues = [];
+    deps = buildDeps({
+      messageStore: {
+        markDelivered: mock.fn(async (id, deliveredAt) => {
+          deliveredAtValues.push(deliveredAt);
+          return {
+            id,
+            content: 'runtime steer',
+            catId: null,
+            timestamp: 123,
+            mentions: [],
+            userId: 'user-a',
+          };
+        }),
+      },
+    });
+    const { queueRoutes } = await import('../dist/routes/queue.js');
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const previousFlag = process.env.CAT_CAFE_STEER_V2_CLAUDE;
+    process.env.CAT_CAFE_STEER_V2_CLAUDE = '1';
+    clearClaudeRuntimeSteerChannelsForTests();
+    const writes = [];
+    const unregister = registerClaudeRuntimeSteerChannel({
+      threadId: 't1',
+      catId: 'opus',
+      userId: 'user-a',
+      invocationId: 'inv-1',
+      sink: {
+        writeLine: () => true,
+        writeJsonLine: (value) => {
+          writes.push(value);
+          return true;
+        },
+        end: () => {},
+      },
+    });
+
+    try {
+      const r1 = enqueueEntry(deps.invocationQueue, { content: 'runtime steer', targetCats: ['opus'] });
+      deps.invocationQueue.backfillMessageId('t1', 'user-a', r1.entry.id, 'msg-1');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/threads/t1/queue/${r1.entry.id}/steer`,
+        headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+        payload: { mode: 'immediate' },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(body.injected, true);
+      assert.equal(body.mode, 'runtime');
+      assert.deepEqual(writes[0], { type: 'user', message: { role: 'user', content: 'runtime steer' } });
+      assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0, 'runtime steer must not cancel active Claude');
+      assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0, 'runtime steer must not start a new invocation');
+      assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0, 'injected entry should leave the queue');
+      assert.equal(deps.messageStore.markDelivered.mock.calls.length, 1);
+      assert.equal(deps.messageStore.markDelivered.mock.calls[0].arguments[0], 'msg-1');
+      assert.ok(deliveredAtValues[0] > 0);
+      const delivered = deps.socketManager.emitToUser.mock.calls.find(
+        (c) => c.arguments[1] === 'messages_delivered',
+      );
+      assert.ok(delivered, 'runtime-steered queued message should be delivered to the timeline');
+    } finally {
+      unregister();
+      clearClaudeRuntimeSteerChannelsForTests();
+      if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
+      else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
+    }
   });
 
   it('POST /queue/:entryId/steer immediate releases QueueProcessor mutex after cancel (P2 race)', async () => {

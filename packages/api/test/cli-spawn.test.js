@@ -97,6 +97,36 @@ test('spawnCli yields parsed JSON events from stdout', async () => {
   assert.deepEqual(spawnFn.mock.calls[0].arguments[1], ['--json']);
 });
 
+test('spawnCli opens stdin only when stdinLineSink is provided', async () => {
+  const proc = createMockProcess();
+  proc.stdin = new PassThrough();
+  const stdinChunks = [];
+  proc.stdin.on('data', (chunk) => stdinChunks.push(chunk.toString()));
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'test-cli',
+        args: [],
+        stdinLineSink: (sink) => {
+          sink.writeJsonLine({ type: 'user', text: 'hello' });
+        },
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write('{"type":"ok"}\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  assert.deepEqual(results, [{ type: 'ok' }]);
+  assert.deepEqual(spawnFn.mock.calls[0].arguments[2].stdio, ['pipe', 'pipe', 'pipe']);
+  assert.equal(stdinChunks.join(''), '{"type":"user","text":"hello"}\n');
+});
+
 test('spawnCli does not yield stderr data', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

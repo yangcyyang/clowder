@@ -142,6 +142,16 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         addToast({ type: 'error', title: 'Steer 失败', message: msg, threadId, duration: 5000 });
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      if (data?.injected === true) {
+        addToast({
+          type: 'success',
+          title: '已注入当前回合',
+          message: '这条排队消息已写入正在运行的 Claude 会话。',
+          threadId,
+          duration: 3500,
+        });
+      }
       setSteerEntryId(null);
     } catch {
       addToast({ type: 'error', title: 'Steer 失败', message: 'Steer 失败，请重试', threadId, duration: 5000 });

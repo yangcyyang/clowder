@@ -51,9 +51,9 @@ export function SteerQueuedEntryModal({
                 : 'border-[var(--console-border-soft)] hover:border-[var(--console-border-soft)] bg-cafe-surface'
             }`}
           >
-            <div className="text-sm font-medium text-cafe">立即执行（必要时中断目标猫）</div>
+            <div className="text-sm font-medium text-cafe">引导当前回合 / 立即执行</div>
             <div className="text-xs text-cafe-secondary mt-1">
-              若目标猫正在执行，会先 cancel 该猫当前 invocation；若目标猫空闲，则直接执行这条排队消息。
+              若目标 Claude 正在执行且 steer v2 已开启，会直接注入当前回合；否则回落为立即执行。
             </div>
           </button>
 

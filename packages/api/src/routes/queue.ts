@@ -16,8 +16,10 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   type InvocationQueue,
+  type QueueEntry,
   isSystemPinnedQueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import { injectClaudeRuntimeSteer } from '../domains/cats/services/agents/providers/claude-runtime-steer.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -113,6 +115,60 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     } catch (err) {
       app.log.warn({ err, threadId, userId, catId }, '[queue] failed to clean canceled cat drafts');
       return 0;
+    }
+  }
+
+  async function markQueueEntryDelivered(threadId: string, userId: string, entry: QueueEntry): Promise<void> {
+    if (!messageStore) return;
+    const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
+    if (messageIds.length === 0) return;
+
+    const deliveredAt = Date.now();
+    const deliveredIds: string[] = [];
+    const deliveredMessages: Array<{
+      id: string;
+      content: string;
+      catId: string | null;
+      timestamp: number;
+      mentions: readonly string[];
+      userId: string;
+      contentBlocks?: readonly unknown[];
+      extra?: Record<string, unknown>;
+      origin?: string;
+      replyTo?: string;
+      mentionsUser?: boolean;
+    }> = [];
+
+    for (const messageId of messageIds) {
+      try {
+        const result = await messageStore.markDelivered(messageId, deliveredAt);
+        if (!result) continue;
+        deliveredIds.push(messageId);
+        deliveredMessages.push({
+          id: result.id,
+          content: result.content,
+          catId: result.catId,
+          timestamp: result.timestamp,
+          mentions: result.mentions,
+          userId: result.userId,
+          contentBlocks: result.contentBlocks,
+          ...(result.extra ? { extra: result.extra as Record<string, unknown> } : {}),
+          ...(result.origin ? { origin: result.origin } : {}),
+          ...(result.replyTo ? { replyTo: result.replyTo } : {}),
+          ...(result.mentionsUser ? { mentionsUser: true } : {}),
+        });
+      } catch (err) {
+        app.log.warn({ err, threadId, userId, messageId }, '[queue] failed to mark runtime-steered message delivered');
+      }
+    }
+
+    if (deliveredIds.length > 0) {
+      socketManager.emitToUser(userId, 'messages_delivered', {
+        threadId,
+        messageIds: deliveredIds,
+        deliveredAt,
+        messages: deliveredMessages,
+      });
     }
   }
 
@@ -232,6 +288,19 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       // mode === 'immediate'
       const steerCatId = entry.targetCats[0] ?? 'unknown';
+      const runtimeSteerResult = injectClaudeRuntimeSteer(threadId, steerCatId, guard.userId, entry.content);
+      if (runtimeSteerResult.ok) {
+        const removed = invocationQueue.remove(threadId, guard.userId, entryId);
+        queueProcessor.unregisterEntryCompleteHook?.(entryId);
+        await markQueueEntryDelivered(threadId, guard.userId, removed ?? entry);
+        socketManager.emitToUser(guard.userId, 'queue_updated', {
+          threadId,
+          queue: invocationQueue.list(threadId, guard.userId),
+          action: 'steer_runtime_injected',
+        });
+        return { ok: true, injected: true, mode: 'runtime' };
+      }
+
       if (invocationTracker.has(threadId, steerCatId)) {
         const activeUserId = invocationTracker.getUserId(threadId, steerCatId);
         if (activeUserId && activeUserId !== guard.userId) {

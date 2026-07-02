@@ -15,6 +15,9 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
   '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
 );
+const { clearClaudeRuntimeSteerChannelsForTests, injectClaudeRuntimeSteer } = await import(
+  '../dist/domains/cats/services/agents/providers/claude-runtime-steer.js'
+);
 
 ensureFakeCliOnPath('claude');
 
@@ -196,6 +199,53 @@ test('does not include --resume when no sessionId', async () => {
 
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(!args.includes('--resume'));
+});
+
+test('steer v2 flag enables Claude stream-json stdin and runtime injection', async () => {
+  const previousFlag = process.env.CAT_CAFE_STEER_V2_CLAUDE;
+  process.env.CAT_CAFE_STEER_V2_CLAUDE = '1';
+  clearClaudeRuntimeSteerChannelsForTests();
+
+  const proc = createMockProcess();
+  proc.stdin = new PassThrough();
+  const stdinChunks = [];
+  proc.stdin.on('data', (chunk) => stdinChunks.push(chunk.toString()));
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ catId: 'opus', spawnFn, model: 'claude-test-model' });
+
+  try {
+    const promise = collect(
+      service.invoke('first prompt', {
+        auditContext: {
+          invocationId: 'inv-1',
+          threadId: 'thread-1',
+          userId: 'user-a',
+          catId: 'opus',
+        },
+      }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--input-format'));
+    assert.ok(args.includes('stream-json'));
+    assert.equal(args.includes('first prompt'), false, 'stream-json mode should send prompt via stdin, not argv');
+
+    const injected = injectClaudeRuntimeSteer('thread-1', 'opus', 'user-a', 'second prompt');
+    assert.equal(injected.ok, true);
+
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const stdinText = stdinChunks.join('');
+    assert.ok(stdinText.includes('"content":"first prompt"'), 'initial prompt should be written to stdin');
+    assert.ok(stdinText.includes('"content":"second prompt"'), 'runtime steer should append to stdin');
+  } finally {
+    clearClaudeRuntimeSteerChannelsForTests();
+    if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
+    else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
+  }
 });
 
 test('passes cwd from workingDirectory option', async () => {

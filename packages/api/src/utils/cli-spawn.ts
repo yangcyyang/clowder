@@ -100,13 +100,31 @@ export async function* spawnCli(
     '[cli-spawn] Spawning CLI process',
   );
 
+  let stdinCleanup: (() => void) | undefined;
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
     env: buildChildEnv(options.env),
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [options.stdinLineSink ? 'pipe' : 'ignore', 'pipe', 'pipe'],
   });
 
   log.debug({ pid: child.pid, command: options.command }, 'CLI process spawned');
+
+  if (options.stdinLineSink && child.stdin) {
+    const cleanup = options.stdinLineSink({
+      writeLine(line: string): boolean {
+        return child.stdin?.write(line.endsWith('\n') ? line : `${line}\n`) ?? false;
+      },
+      writeJsonLine(value: unknown): boolean {
+        return child.stdin?.write(`${JSON.stringify(value)}\n`) ?? false;
+      },
+      end(): void {
+        child.stdin?.end();
+      },
+    });
+    if (typeof cleanup === 'function') stdinCleanup = cleanup;
+  } else if (options.stdinLineSink) {
+    log.warn({ command: options.command }, 'stdinLineSink requested but child stdin is unavailable');
+  }
 
   // F153 Phase B: Create CLI session child span under invocation span
   let cliSpan: Span | undefined;
@@ -451,6 +469,11 @@ export async function* spawnCli(
     }
     process.off('exit', exitHandler);
     probe?.stop();
+    try {
+      stdinCleanup?.();
+    } catch {
+      // Best-effort cleanup only. The child process is killed below if still alive.
+    }
     // F152: Unregister probe from OTel gauge
     if (options.invocationId) unregisterLivenessProbe(options.invocationId);
     killChild();
@@ -548,7 +571,7 @@ function defaultSpawn(
   options: {
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
-    stdio: ['ignore', 'pipe', 'pipe'];
+    stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {

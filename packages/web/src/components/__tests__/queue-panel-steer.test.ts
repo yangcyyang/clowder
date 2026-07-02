@@ -114,7 +114,7 @@ describe('QueuePanel steer (F047)', () => {
     expect(callArgs.body).toContain('"mode":"promote"');
   });
 
-  it('shows conditional copy for immediate steer (only interrupts when target cat is busy)', () => {
+  it('shows runtime-steer aware copy for immediate steer', () => {
     useChatStore.setState({ queue: [QUEUED_ENTRY] });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
@@ -124,8 +124,8 @@ describe('QueuePanel steer (F047)', () => {
     expect(steerBtn).not.toBeNull();
     act(() => steerBtn?.click());
 
-    expect(container.textContent).toContain('立即执行（必要时中断目标猫）');
-    expect(container.textContent).toContain('若目标猫正在执行，会先 cancel 该猫当前 invocation');
+    expect(container.textContent).toContain('引导当前回合 / 立即执行');
+    expect(container.textContent).toContain('若目标 Claude 正在执行且 steer v2 已开启，会直接注入当前回合');
     expect(container.textContent).not.toContain('会先 cancel 当前 invocation');
   });
 });

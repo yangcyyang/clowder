@@ -3,7 +3,7 @@
  * CLI 子进程解析器的共享类型定义
  */
 
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import type { CatId } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { AgentMessage } from '../domains/cats/services/types.js';
@@ -46,6 +46,17 @@ export interface CliSpawnOptions {
   semanticCompletionSignal?: AbortSignal;
   /** F153 Phase B: Parent OTel span for creating CLI session child span */
   parentSpan?: Span;
+  /**
+   * Optional stdin bridge for CLIs that support streaming input.
+   * Default is no stdin, preserving the historical one-shot CLI behavior.
+   */
+  stdinLineSink?: (sink: CliStdinSink) => void | (() => void);
+}
+
+export interface CliStdinSink {
+  writeLine(line: string): boolean;
+  writeJsonLine(value: unknown): boolean;
+  end(): void;
 }
 
 /**
@@ -62,6 +73,7 @@ export type CliTransformer = (event: unknown, catId: CatId) => AgentMessage | Ag
 export interface ChildProcessLike {
   readonly stdout: Readable | null;
   readonly stderr: Readable | null;
+  readonly stdin?: Writable | null;
   readonly pid?: number | undefined;
   kill(signal?: NodeJS.Signals): boolean;
   on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
@@ -81,6 +93,6 @@ export type SpawnFn = (
   options: {
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
-    stdio: ['ignore', 'pipe', 'pipe'];
+    stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
   },
 ) => ChildProcessLike;

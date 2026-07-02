@@ -25,11 +25,16 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
-import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import type { CliStdinSink, SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
+import {
+  buildClaudeStreamJsonUserMessage,
+  isClaudeRuntimeSteerEnabled,
+  registerClaudeRuntimeSteerChannel,
+} from './claude-runtime-steer.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 
 const log = createModuleLogger('claude-agent');
@@ -189,9 +194,11 @@ export class ClaudeAgentService implements AgentService {
     const effectiveModel = options?.callbackEnv?.[ANTHROPIC_MODEL_OVERRIDE_KEY]?.trim() || this.model;
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
     const useEnvModelOverride = isApiKeyMode && !isKnownAnthropicModel(effectiveModel);
+    const useRuntimeSteer =
+      isClaudeRuntimeSteerEnabled() && options?.auditContext !== undefined && options.spawnCliOverride === undefined;
     const args: string[] = [
       '-p',
-      effectivePrompt,
+      ...(useRuntimeSteer ? ['--input-format', 'stream-json'] : [effectivePrompt]),
       '--output-format',
       'stream-json',
       '--include-partial-messages',
@@ -346,6 +353,20 @@ export class ClaudeAgentService implements AgentService {
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+        ...(useRuntimeSteer && options.auditContext
+          ? {
+              stdinLineSink: (sink: CliStdinSink) => {
+                sink.writeJsonLine(buildClaudeStreamJsonUserMessage(effectivePrompt));
+                return registerClaudeRuntimeSteerChannel({
+                  threadId: options.auditContext!.threadId,
+                  catId: options.auditContext!.catId,
+                  userId: options.auditContext!.userId,
+                  invocationId: options.auditContext!.invocationId,
+                  sink,
+                });
+              },
+            }
+          : {}),
       };
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
