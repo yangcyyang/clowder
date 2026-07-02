@@ -256,10 +256,10 @@
   --console-modal-close-fg: #141111;
   --console-cat-fallback: #ffd440;
   --console-status-connected: #a9d877;
-  --chat-code-bg: #101827;
-  --chat-code-text: #e5edf7;
-  --chat-code-btn-bg: #111827;
-  --chat-code-btn-text: #cbd5e1;
+  --chat-code-bg: #fffaef;
+  --chat-code-text: #141111;
+  --chat-code-btn-bg: #ffffff;
+  --chat-code-btn-text: #141111;
   --chat-code-border: #141111;
   --chat-code-border-width: 2px;
   --chat-code-radius: 0;
@@ -296,10 +296,10 @@
   --console-modal-close-fg: var(--slock-ink);
   --console-cat-fallback: var(--slock-ink);
   --console-status-connected: var(--slock-success);
-  --chat-code-bg: #101827;
-  --chat-code-text: #e5edf7;
-  --chat-code-btn-bg: #111827;
-  --chat-code-btn-text: #cbd5e1;
+  --chat-code-bg: var(--slock-cream);
+  --chat-code-text: var(--slock-ink);
+  --chat-code-btn-bg: var(--slock-white);
+  --chat-code-btn-text: var(--slock-ink);
   --chat-code-border: var(--slock-ink);
   --chat-code-border-width: 2px;
   --chat-code-radius: 0;
@@ -1308,13 +1308,22 @@
   padding: 2px;
 }
 
-[data-visual-theme="slock"] .markdown-content code:not([class*="language-"]) {
+[data-visual-theme="slock"] .markdown-content code:not([class*="language-"]):not(.markdown-code-block-code) {
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
   font-weight: 700;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .markdown-content pre > code.markdown-code-block-code {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-weight: inherit;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))

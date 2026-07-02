@@ -21,6 +21,22 @@ describe('MarkdownContent code block copy button', () => {
     expect(preMatch).toBeTruthy();
     expect(preMatch?.[1]).not.toContain('复制');
   });
+
+  it('does not apply inline code chip classes inside fenced code without language', () => {
+    const html = render('```\npnpm --dir packages/web build\n```');
+    const preMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/);
+
+    expect(preMatch).toBeTruthy();
+    expect(preMatch?.[1]).toContain('markdown-code-block-code');
+    expect(preMatch?.[1]).not.toContain('clowder-markdown-chip');
+  });
+
+  it('keeps inline code chip styling for prose code', () => {
+    const html = render('运行 `pnpm build` 后再验收。');
+
+    expect(html).toContain('clowder-markdown-chip');
+    expect(html).not.toContain('markdown-code-block-code');
+  });
 });
 
 describe('MarkdownContent file path linking', () => {

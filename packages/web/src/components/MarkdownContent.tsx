@@ -62,6 +62,26 @@ function CodeBlock({ children }: { children: ReactNode }) {
     timerRef.current = setTimeout(() => setCopied(false), 1500);
   }, []);
 
+  const normalizedChildren = Children.map(children, (child) => {
+    if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) {
+      return child;
+    }
+
+    // Fenced code without a language is rendered by react-markdown as <pre><code>.
+    // Strip inline-code chip classes here so prose `code` and fenced code stay visually distinct.
+    const languageClasses = (child.props.className ?? '')
+      .split(/\s+/)
+      .filter((cls) => cls.startsWith('language-'))
+      .join(' ');
+    const className = `${languageClasses} markdown-code-block-code`.trim();
+
+    return (
+      <code key={child.key ?? undefined} className={className}>
+        {child.props.children}
+      </code>
+    );
+  });
+
   return (
     <div className="relative group my-3">
       <button
@@ -83,7 +103,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
         ref={preRef}
         className={`overflow-x-auto rounded-[var(--chat-code-radius)] border-[length:var(--chat-code-border-width)] border-[var(--chat-code-border)] bg-[var(--chat-code-bg)] px-4 py-3.5 pr-16 text-[var(--chat-code-text)] shadow-[var(--chat-code-shadow)] [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit ${hasLanguage ? 'font-mono text-[12px] leading-6' : 'font-mono text-[13px] leading-6'}`}
       >
-        {children}
+        {normalizedChildren}
       </pre>
     </div>
   );
