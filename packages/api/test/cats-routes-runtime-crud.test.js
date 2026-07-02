@@ -1949,6 +1949,47 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(JSON.parse(clearRes.body).cat.variantLabel, undefined);
   });
 
+  it('PATCH /api/cats/:id rebases stale model-family variant labels when defaultModel changes', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus-45',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        defaultModel: 'claude-fable-5',
+        variantLabel: 'Opus4.8',
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200, patchRes.body);
+    assert.equal(JSON.parse(patchRes.body).cat.defaultModel, 'claude-fable-5');
+    assert.equal(JSON.parse(patchRes.body).cat.variantLabel, 'Fable 5');
+
+    const businessLabelRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus-45',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        defaultModel: 'claude-opus-4-8',
+        variantLabel: 'asset-card',
+      }),
+    });
+    assert.equal(businessLabelRes.statusCode, 200, businessLabelRes.body);
+    assert.equal(JSON.parse(businessLabelRes.body).cat.variantLabel, 'asset-card');
+  });
+
   it('DELETE /api/cats/:id allows deletion of any member', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

@@ -85,7 +85,7 @@ function splitCapabilityText(text: string | undefined): string[] {
   return uniqueNonEmpty(text.split(/[、，,；;。\n]/).map((part) => part.replace(/^\s*(?:擅长|适合|负责)\s*/, '')));
 }
 
-function deriveModelVariantLabel(model: string | undefined): string | undefined {
+export function deriveModelVariantLabel(model: string | undefined): string | undefined {
   const value = model?.trim();
   if (!value) return undefined;
 
@@ -95,22 +95,36 @@ function deriveModelVariantLabel(model: string | undefined): string | undefined 
     return `${family}${claudeMatch[2]}.${claudeMatch[3]}`;
   }
 
+  const fableMatch = value.match(/claude-fable-(\d+(?:\.\d+)?)/i);
+  if (fableMatch) return `Fable ${fableMatch[1]}`;
+
   const gptMatch = value.match(/\bgpt[-_]?(\d+(?:\.\d+)?)/i);
   if (gptMatch) return `GPT-${gptMatch[1]}`;
 
   return undefined;
 }
 
-function isModelVersionLabel(label: string | undefined): boolean {
+export function isModelVersionLabel(label: string | undefined): boolean {
   if (!label) return false;
-  return /^(?:opus|sonnet|haiku)\s*\d/i.test(label.trim()) || /^gpt[-\s]?\d/i.test(label.trim());
+  return /^(?:opus|sonnet|haiku|fable)\s*\d/i.test(label.trim()) || /^gpt[-\s]?\d/i.test(label.trim());
 }
 
-function normalizeVariantLabelForModel(label: string | undefined, model: string | undefined): string | undefined {
+function modelVersionLabelFamily(label: string | undefined): string | undefined {
+  const value = label?.trim().toLowerCase();
+  if (!value) return undefined;
+  const familyMatch = value.match(/^(opus|sonnet|haiku|fable)\s*\d/);
+  if (familyMatch) return familyMatch[1];
+  if (/^gpt[-\s]?\d/.test(value)) return 'gpt';
+  return undefined;
+}
+
+export function normalizeVariantLabelForModel(label: string | undefined, model: string | undefined): string | undefined {
   if (!label) return undefined;
   const derived = deriveModelVariantLabel(model);
   if (!derived) return label;
-  return isModelVersionLabel(label) && label.replace(/\s+/g, '') !== derived ? derived : label;
+  const labelFamily = modelVersionLabelFamily(label);
+  const derivedFamily = modelVersionLabelFamily(derived);
+  return labelFamily && derivedFamily && labelFamily !== derivedFamily ? derived : label;
 }
 
 const assetCardSchema = z.object({

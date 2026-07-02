@@ -16,7 +16,14 @@ import type {
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
-import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
+import {
+  _resetCachedConfig,
+  deriveModelVariantLabel,
+  isModelVersionLabel,
+  loadCatConfig,
+  normalizeVariantLabelForModel,
+  toAllCatConfigs,
+} from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
@@ -467,7 +474,19 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     }
   }
   if (patch.clientId !== undefined) variant.clientId = patch.clientId;
-  if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
+  if (patch.defaultModel !== undefined) {
+    variant.defaultModel = patch.defaultModel;
+    const derivedVariantLabel = deriveModelVariantLabel(patch.defaultModel);
+    const normalizedVariantLabel =
+      isModelVersionLabel(variant.variantLabel) && derivedVariantLabel
+        ? derivedVariantLabel
+        : normalizeVariantLabelForModel(variant.variantLabel, patch.defaultModel);
+    if (normalizedVariantLabel) {
+      variant.variantLabel = normalizedVariantLabel;
+    } else if (variant.variantLabel !== undefined) {
+      delete variant.variantLabel;
+    }
+  }
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
   if (patch.toolPolicy !== undefined) {
     if (patch.toolPolicy) {
