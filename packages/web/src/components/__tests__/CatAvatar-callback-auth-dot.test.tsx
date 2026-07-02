@@ -33,6 +33,13 @@ describe('CatAvatar callback-auth status dot (F174 D2b-2)', () => {
     expect(html).not.toContain('data-testid="callback-auth-dot"');
   });
 
+  it('uses the Raft square frame: 2px border and zero radius', () => {
+    const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} />);
+    expect(html).toContain('data-testid="cat-avatar-frame"');
+    expect(html).toContain('border:2px solid var(--slock-ink');
+    expect(html).toContain('border-radius:0');
+  });
+
   it('renders green dot for healthy', () => {
     const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} callbackAuthStatus="healthy" />);
     expect(html).toContain('data-testid="callback-auth-dot"');

@@ -391,8 +391,14 @@ export function ChatMessage({
         <button
           type="button"
           onClick={() => useChatStore.getState().openCoCreatorEditor()}
-          className="w-8 h-8 rounded-md overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)] cursor-pointer hover:opacity-80 transition-opacity"
-          style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
+          className="h-10 w-10 overflow-hidden flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-[var(--cafe-surface)] cursor-pointer hover:opacity-80 transition-opacity"
+          style={{
+            backgroundColor: coCreatorPrimary,
+            border: '2px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
+            borderRadius: 0,
+            outline: `1px solid ${coCreatorSecondary}`,
+            outlineOffset: -3,
+          }}
           title={coCreator.name}
         >
           {coCreator.avatar ? (
@@ -400,8 +406,8 @@ export function ChatMessage({
             <img
               src={coCreator.avatar}
               alt={coCreator.name}
-              width={32}
-              height={32}
+              width={40}
+              height={40}
               className="object-cover w-full h-full"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
@@ -510,13 +516,13 @@ export function ChatMessage({
         >
           <CatAvatar
             catId={message.catId!}
-            size={32}
+            size={40}
             status={message.isStreaming ? 'streaming' : undefined}
             activityStatus={catActivityStatus}
           />
         </button>
       )}
-      {catData && isAssistantContinuation && <div className="w-8 flex-shrink-0" aria-hidden="true" />}
+      {catData && isAssistantContinuation && <div className="w-10 flex-shrink-0" aria-hidden="true" />}
       <div className="max-w-[85%] md:max-w-[1120px] min-w-0">
         {catStyle && !isAssistantContinuation && (
           <div className="mb-1 flex flex-col gap-1 min-w-0 [line-height:var(--clowder-leading-tight)]">

@@ -56,9 +56,8 @@ export function CatAvatar({
   const cat = getCatById(catId);
 
   const isStreaming = status === 'streaming';
-  const isError = status === 'error';
   const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
-  const visibleRingColor = tone === 'quiet' && !isStreaming && !isError ? 'var(--clowder-avatar-quiet-ring)' : ringColor;
+  const visibleRingColor = tone === 'quiet' && !isStreaming ? 'var(--clowder-avatar-quiet-ring)' : ringColor;
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
   // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
@@ -69,18 +68,22 @@ export function CatAvatar({
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
       <div
-        className={`rounded-md ring-2 overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
+        data-testid="cat-avatar-frame"
+        className={`overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
           isStreaming ? 'animate-pulse' : ''
         }`}
         style={{
           width: size,
           height: size,
-          ['--tw-ring-color' as string]: isError ? 'var(--console-stop)' : visibleRingColor,
+          border: '2px solid var(--slock-ink, var(--console-border-strong, var(--cafe-border)))',
+          borderRadius: 0,
+          outline: `1px solid ${visibleRingColor}`,
+          outlineOffset: -3,
           boxShadow: glowShadow,
         }}
       >
         {imgError ? (
-          <PawIcon className="text-base" />
+          <PawIcon className="h-1/2 w-1/2" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -88,7 +91,7 @@ export function CatAvatar({
             alt={cat?.displayName ?? catId}
             width={size}
             height={size}
-            className="object-cover"
+            className="h-full w-full object-cover"
             onError={() => setImgError(true)}
           />
         )}
@@ -109,7 +112,7 @@ export function CatAvatar({
             height: dotSize,
             backgroundColor:
               activityStatus === 'active' ? 'var(--conn-amber-text)' : 'var(--conn-emerald-text)',
-            border: `${dotBorder}px solid var(--cafe-surface)`,
+            border: `${dotBorder}px solid var(--slock-white, var(--cafe-surface))`,
           }}
         />
       )}
@@ -140,7 +143,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid var(--cafe-surface)`,
+                border: `${dotBorder}px solid var(--slock-white, var(--cafe-surface))`,
               }}
             />
           ) : (
@@ -155,7 +158,7 @@ export function CatAvatar({
                 width: dotSize,
                 height: dotSize,
                 backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
-                border: `${dotBorder}px solid var(--cafe-surface)`,
+                border: `${dotBorder}px solid var(--slock-white, var(--cafe-surface))`,
               }}
             />
           )}
