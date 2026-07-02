@@ -784,31 +784,33 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-rail {
-  border-right: var(--slock-rail-border-width) solid var(--slock-ink);
+  background: color-mix(in srgb, var(--slock-rail-yellow) 62%, #ffffff);
+  border-right: var(--slock-border-width) solid var(--slock-ink);
+  padding-inline: 4px;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-button {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-white);
   color: var(--slock-ink);
-  box-shadow: var(--slock-shadow-icon);
+  box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button:hover {
-  background: var(--slock-warm-yellow);
+  background: color-mix(in srgb, var(--slock-warm-yellow) 72%, #ffffff);
   transform: none;
-  box-shadow: var(--slock-shadow-soft);
+  box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button:active {
   transform: none;
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
@@ -820,10 +822,10 @@
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button[data-active="true"]::after {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 14px;
-  height: 14px;
+  top: -5px;
+  right: -5px;
+  width: 10px;
+  height: 10px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-pink-active);
@@ -1021,15 +1023,28 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button {
-  align-self: flex-end;
+  flex: 0 0 auto;
   height: 28px;
+  min-width: 76px;
+  justify-content: center;
   border-right: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-white);
   color: var(--slock-secondary-text);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-segmented {
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 0;
+  background: var(--slock-white);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button:last-child {
+  border-right: 0;
 }
 
 .slock-header-action {
@@ -1120,13 +1135,13 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button:hover {
-  background: var(--slock-warm-yellow);
+  background: color-mix(in srgb, var(--slock-warm-yellow) 68%, #ffffff);
   color: var(--slock-ink);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-tab-button[data-active="true"] {
-  background: var(--slock-rail-yellow);
+  background: color-mix(in srgb, var(--slock-rail-yellow) 74%, #ffffff);
   color: var(--slock-ink);
 }
 
@@ -1253,14 +1268,21 @@
   border-radius: 0;
 }
 
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-action-button {
+  min-height: 20px;
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1.15;
+}
+
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tool-button:hover,
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-control:hover,
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-message-action-button:hover {
-  border-color: var(--slock-ink);
-  background: var(--slock-warm-yellow);
+  border-color: color-mix(in srgb, var(--slock-ink) 28%, transparent);
+  background: color-mix(in srgb, var(--slock-warm-yellow) 58%, #ffffff);
   color: var(--slock-ink);
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tool-button:active,
@@ -1281,9 +1303,10 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-toolbar {
-  border: var(--slock-border-width) solid var(--slock-ink);
+  border: 1px solid color-mix(in srgb, var(--slock-ink) 42%, transparent);
   border-radius: 0;
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
+  padding: 2px;
 }
 
 [data-visual-theme="slock"] .markdown-content code:not([class*="language-"]) {
@@ -1293,6 +1316,21 @@
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
   font-weight: 700;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .markdown-content code.markdown-file-code:not([class*="language-"]),
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .markdown-content .markdown-file-link {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--slock-ink) 35%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--slock-warm-yellow) 22%, #ffffff);
+  color: var(--slock-ink);
+  box-shadow: none;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-send-button,

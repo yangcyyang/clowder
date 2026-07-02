@@ -93,6 +93,8 @@ function CodeBlock({ children }: { children: ReactNode }) {
 const PROJECT_ROOT = process.env.NEXT_PUBLIC_PROJECT_ROOT ?? '';
 const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\w.@-]+)+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const REL_PATH_RE = /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
+const INLINE_FILE_PATH_RE =
+  /^(?:\/[\w.@-]+)+(?:\.[\w]+)(?::\d+)?$|^(?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::\d+)?$/;
 const TASK_REF_RE = /(^|[\s（(「『【\[])(task\s+#(\d+))(?![\w-])/giu;
 const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
 const LOCAL_FILE_NAME_RE =
@@ -155,6 +157,17 @@ function linkifyFilePaths(text: string): ReactNode[] {
   return parts.length > 0 ? parts : [text];
 }
 
+function getInlineCodeText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
+    .join('')
+    .trim();
+}
+
+function isInlineFilePath(children: ReactNode): boolean {
+  return INLINE_FILE_PATH_RE.test(getInlineCodeText(children));
+}
+
 /** F063: File path link — click opens in workspace panel, Cmd/Ctrl+click opens in VSCode */
 function FilePathLink({
   display,
@@ -186,7 +199,7 @@ function FilePathLink({
     <a
       href={href}
       onClick={handleClick}
-      className="text-[var(--color-cafe-accent)] hover:opacity-80 hover:underline font-mono text-[0.85em] cursor-pointer"
+      className="markdown-file-link text-[var(--color-cafe-accent)] hover:opacity-80 hover:underline font-mono text-[0.85em] cursor-pointer"
       title={`点击在工作区中查看 · Cmd+Click 打开 VSCode\n${display}`}
     >
       {display}
@@ -583,7 +596,9 @@ const mdComponents: Components = {
 
     return (
       <code
-        className={`${className ?? ''} rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
+        className={`${className ?? ''} ${
+          isInlineFilePath(children) ? 'markdown-file-code' : ''
+        } rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
       >
         {children}
       </code>

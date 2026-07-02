@@ -111,15 +111,15 @@ function formatPinnedMessagePreview(message: ChatMessageData): string {
 }
 
 function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabChange: (tab: ChannelTab) => void }) {
-  const tabs: Array<{ id: ChannelTab; label: string }> = [
-    { id: 'chat', label: 'CHAT' },
-    { id: 'tasks', label: 'TASKS' },
-    { id: 'files', label: 'FILES' },
+  const tabs: Array<{ id: ChannelTab; icon: string; label: string }> = [
+    { id: 'chat', icon: '💬', label: 'CHAT' },
+    { id: 'tasks', icon: '☰', label: 'TASKS' },
+    { id: 'files', icon: '📎', label: 'FILES' },
   ];
 
   return (
-    <div className="flex h-7 flex-shrink-0 items-end bg-[var(--console-shell-bg)] px-5">
-      <div className="flex h-full w-fit items-end border-b border-[var(--slock-border-color)]">
+    <div className="flex h-8 flex-shrink-0 items-center bg-[var(--console-shell-bg)] px-5">
+      <div className="slock-tab-segmented flex h-7 w-fit overflow-hidden">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -128,15 +128,17 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
               type="button"
               onClick={() => onTabChange(tab.id)}
               data-active={isActive ? 'true' : 'false'}
-              className={`slock-tab-button relative h-full px-3 text-[11px] tracking-[0.14em] transition-colors ${
+              className={`slock-tab-button relative flex h-full items-center gap-1.5 px-3 text-[11px] tracking-[0.12em] transition-colors ${
                 isActive
                   ? 'font-semibold text-[var(--cafe-text)]'
                   : 'text-[var(--cafe-text-muted)] hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]'
               }`}
               aria-pressed={isActive}
             >
-              {tab.label}
-              {isActive && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--cafe-accent)]" />}
+              <span aria-hidden="true" className="text-[12px] leading-none">
+                {tab.icon}
+              </span>
+              <span>{tab.label}</span>
             </button>
           );
         })}

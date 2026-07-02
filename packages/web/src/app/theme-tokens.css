@@ -134,7 +134,7 @@
 
   /* Slock-like semantic tokens (Phase 1) */
   --slock-sidebar-bg: var(--console-rail-bg);
-  --slock-rail-width: 52px;
+  --slock-rail-width: 44px;
   --slock-sidebar-width: 260px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
@@ -388,7 +388,7 @@
   --border-radius-base: 0;
 
   --slock-sidebar-bg: var(--slock-cream);
-  --slock-rail-width: 52px;
+  --slock-rail-width: 44px;
   --slock-sidebar-width: 248px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
@@ -788,7 +788,7 @@
   --text-secondary: var(--cafe-text-secondary);
 
   --slock-sidebar-bg: var(--slock-cream);
-  --slock-rail-width: 52px;
+  --slock-rail-width: 44px;
   --slock-sidebar-width: 260px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
