@@ -270,7 +270,7 @@ export function MessageActions({
 
       {canAct && (
         <div
-          className={`slock-message-toolbar opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
+          className={`slock-message-toolbar opacity-0 group-hover:opacity-100 focus-within:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
         >
           <button
             type="button"

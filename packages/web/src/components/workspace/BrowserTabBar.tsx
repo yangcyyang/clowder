@@ -32,7 +32,7 @@ export function BrowserTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }: B
                 e.stopPropagation();
                 onClose(tab.id);
               }}
-              className="ml-1 opacity-0 group-hover:opacity-100 text-cafe-secondary/40 hover:text-cafe-secondary"
+              className="ml-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-cafe-secondary/40 hover:text-cafe-secondary"
               role="button"
               tabIndex={-1}
               onKeyDown={() => {}}

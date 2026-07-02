@@ -161,7 +161,7 @@ export function ThreadItem({
               className={`p-0.5 rounded transition-all ${
                 isPinned
                   ? 'text-cafe-accent'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
+                  : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-cafe-muted hover:text-cafe-accent'
               }`}
               title={isPinned ? '取消置顶' : '置顶'}
             >
@@ -178,7 +178,7 @@ export function ThreadItem({
               className={`p-0.5 rounded transition-all ${
                 isFavorited
                   ? 'text-conn-amber-text'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-conn-amber-text'
+                  : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-cafe-muted hover:text-conn-amber-text'
               }`}
               title={isFavorited ? '取消收藏' : '收藏'}
             >
@@ -199,7 +199,7 @@ export function ThreadItem({
                 e.stopPropagation();
                 setIsEditing(true);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
               title="重命名对话"
             >
               <svg className="w-3 h-3 text-cafe-muted hover:text-cafe-accent" viewBox="0 0 16 16" fill="currentColor">
@@ -215,7 +215,7 @@ export function ThreadItem({
                 e.stopPropagation();
                 window.open(`${API_URL}/api/export/thread/${id}?format=md`);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
               title="导出对话"
             >
               <svg
@@ -235,7 +235,7 @@ export function ThreadItem({
                 e.stopPropagation();
                 onDelete(id);
               }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-0.5 rounded hover:bg-[var(--console-hover-bg)] transition-all"
               title="删除对话"
             >
               <svg className="w-3 h-3 text-cafe-muted hover:text-conn-red-text" viewBox="0 0 16 16" fill="currentColor">

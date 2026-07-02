@@ -206,7 +206,7 @@ export function SectionGroup({
             }}
             title="新建对话"
             testId="quick-create-btn"
-            className="opacity-0 group-hover/section:opacity-100"
+            className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
           >
             <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z" />
           </ActionButton>
@@ -220,7 +220,7 @@ export function SectionGroup({
             }}
             title="更多操作"
             testId="project-menu-btn"
-            className="opacity-0 group-hover/section:opacity-100"
+            className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
           >
             <path d="M8 4a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2z" />
           </ActionButton>

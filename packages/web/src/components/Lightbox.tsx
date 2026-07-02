@@ -36,7 +36,7 @@ export function CopyButton({ url }: { url: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="absolute top-2 right-2 bg-[var(--console-overlay-control)] hover:bg-[var(--console-overlay-control-hover)] text-[var(--cafe-surface)] rounded-md px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+      className="absolute top-2 right-2 bg-[var(--console-overlay-control)] hover:bg-[var(--console-overlay-control-hover)] text-[var(--cafe-surface)] rounded-md px-2 py-1 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
       title={copied ? 'Copied!' : 'Copy image'}
     >
       {copied ? 'Copied!' : 'Copy'}

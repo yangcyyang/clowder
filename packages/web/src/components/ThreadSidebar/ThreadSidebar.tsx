@@ -939,7 +939,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                   <button
                     type="button"
                     onClick={() => handleRestore(t.id)}
-                    className="sm:opacity-0 sm:group-hover:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-accent/80 transition-all shrink-0"
+                    className="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 text-[10px] text-cafe-accent hover:text-cafe-accent/80 transition-all shrink-0"
                     data-testid={`restore-btn-${t.id}`}
                   >
                     恢复
