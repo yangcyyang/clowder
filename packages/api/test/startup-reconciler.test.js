@@ -406,8 +406,8 @@ describe('StartupReconciler', () => {
     assert.equal(result.requeued, 1);
     assert.equal(result.notifiedThreads, 1);
     assert.equal(appendedMessages.length, 1);
-    assert.ok(appendedMessages[0].content.includes('已自动恢复'));
-    assert.ok(appendedMessages[0].content.includes('正在继续回复'));
+    assert.ok(appendedMessages[0].content.includes('运行服务已恢复'));
+    assert.ok(appendedMessages[0].content.includes('已自动接续'));
   });
 
   test('clears task progress for swept records', async () => {
@@ -630,8 +630,8 @@ describe('StartupReconciler', () => {
     assert.equal(msgA.catId, null, 'catId should be null (connector message)');
     assert.ok(msgA.content.includes('opus'), 'message should mention affected cat');
     assert.ok(
-      msgA.content.includes('restart') || msgA.content.includes('interrupted') || msgA.content.includes('重启'),
-      'message should explain restart',
+      msgA.content.includes('运行服务已恢复') || msgA.content.includes('interrupted'),
+      'message should explain recovery',
     );
 
     // P1 fix: Verify notification uses actual userId from InvocationRecord, not 'system'
@@ -687,7 +687,7 @@ describe('StartupReconciler', () => {
   test('suppresses duplicate restart notice already visible in recent thread history', async () => {
     store.seed(makeRecord({ id: 'dup-restart-1', threadId: 'thread-restart', status: 'running', targetCats: ['opus'] }));
 
-    const content = '服务刚重启，opus 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。';
+    const content = '运行服务已恢复，opus 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。';
     const appendedMessages = [];
     const messageStore = {
       append(msg) {

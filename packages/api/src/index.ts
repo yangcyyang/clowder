@@ -653,7 +653,11 @@ async function main(): Promise<void> {
   const { execFileSync } = await import('node:child_process');
   const getFingerprint = (projectPath: string) => {
     try {
-      return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectPath, encoding: 'utf-8' }).trim();
+      return execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: projectPath,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
     } catch {
       return '';
     }

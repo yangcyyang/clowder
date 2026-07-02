@@ -246,8 +246,8 @@ export class StartupReconciler {
       const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
       const content =
         requeued > 0
-          ? `服务刚重启，已自动恢复 ${catLabel} 的 ${requeued} 个进行中请求，正在继续回复；已发送的消息会保留。`
-          : `服务刚重启，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
+          ? `运行服务已恢复，已自动接续 ${catLabel} 的 ${requeued} 个进行中请求；已发送的消息会保留。`
+          : `运行服务已恢复，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
       if (await this.hasRecentDuplicateNotice(threadId, content)) continue;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
