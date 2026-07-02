@@ -47,6 +47,21 @@ export function GlobalSearchPage() {
     inputRef.current?.focus();
   }, []);
 
+  const handleBack = useCallback(() => {
+    router.back();
+  }, [router]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== 'Escape') return;
+      event.preventDefault();
+      handleBack();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleBack]);
+
   useEffect(() => {
     let cancelled = false;
     setIsLoadingThreads(true);
@@ -140,7 +155,13 @@ export function GlobalSearchPage() {
           <button type="submit" className="console-button-primary h-10 px-4 text-sm">
             搜索
           </button>
-          <button type="button" className="console-button h-10 px-3 text-xs" onClick={() => router.back()} title="返回">
+          <button
+            type="button"
+            className="console-button h-10 px-3 text-xs"
+            onClick={handleBack}
+            title="返回"
+            aria-label="返回上一页"
+          >
             ESC
           </button>
         </form>
