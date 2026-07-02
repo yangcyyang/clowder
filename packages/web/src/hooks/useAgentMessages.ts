@@ -74,6 +74,7 @@ function nextActiveA2AHandoffSeq(): number {
   return activeA2AHandoffSeq;
 }
 const DEBUG_SKIP_FILE_CHANGE_UI = process.env.NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI === '1';
+const REPLY_PLACEHOLDERS_ENABLED = process.env.NEXT_PUBLIC_CAT_CAFE_REPLY_PLACEHOLDERS === '1';
 
 function applyBubbleEventWithRecovery(input: BubbleReducerInput): BubbleReducerOutput {
   const result = applyBubbleEvent(input);
@@ -2776,6 +2777,21 @@ export function useAgentMessages() {
     [addMessage, getOrRecoverActiveAssistantMessageId, recordLateBindBubbleCreate],
   );
 
+  const getNonTextAssistantMessageId = useCallback(
+    (catId: string, metadata?: AgentMsg['metadata'], options?: { invocationId?: string }): string | null => {
+      const existingId = getOrRecoverActiveAssistantMessageId(catId, metadata, {
+        ensureStreaming: true,
+        ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+      });
+      if (existingId) return existingId;
+
+      if (!REPLY_PLACEHOLDERS_ENABLED) return null;
+
+      return ensureActiveAssistantMessage(catId, metadata, options);
+    },
+    [ensureActiveAssistantMessage, getOrRecoverActiveAssistantMessageId],
+  );
+
   const shouldSuppressLateStreamChunk = useCallback(
     (catId: string, invocationId?: string): boolean => {
       const tid = useChatStore.getState().currentThreadId;
@@ -3185,7 +3201,7 @@ export function useAgentMessages() {
           }
         }
 
-        const messageId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+        const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
           ...(msg.invocationId ? { invocationId: msg.invocationId } : {}),
         });
 
@@ -3232,7 +3248,7 @@ export function useAgentMessages() {
             }
           }
         }
-        if (!toolUseReducerHandled) {
+        if (!toolUseReducerHandled && messageId) {
           appendToolEvent(messageId, toolUseEventData);
         }
 
@@ -3247,7 +3263,7 @@ export function useAgentMessages() {
         // Cloud P1#3 (PR#1352): see tool_use note — suppress stale tool_result.
         if (shouldSuppressLateStreamChunk(msg.catId, msg.invocationId)) return;
         setCatStatus(msg.catId, 'streaming');
-        const messageId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+        const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
           ...(msg.invocationId ? { invocationId: msg.invocationId } : {}),
         });
 
@@ -3287,7 +3303,7 @@ export function useAgentMessages() {
             }
           }
         }
-        if (!toolResultReducerHandled) {
+        if (!toolResultReducerHandled && messageId) {
           appendToolEvent(messageId, toolResultEventData);
         }
       } else if (msg.type === 'done') {
@@ -3833,16 +3849,18 @@ export function useAgentMessages() {
             if (!shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
               setCatStatus(msg.catId, 'streaming');
               const count = typeof parsed.count === 'number' ? parsed.count : 1;
-              const messageId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+              const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
               });
 
-              appendToolEvent(messageId, {
-                id: `toolws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                type: 'tool_use',
-                label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
-                timestamp: Date.now(),
-              });
+              if (messageId) {
+                appendToolEvent(messageId, {
+                  id: `toolws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  type: 'tool_use',
+                  label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
+                  timestamp: Date.now(),
+                });
+              }
             }
             consumed = true;
           } else if (parsed?.type === 'thinking') {
@@ -3854,10 +3872,10 @@ export function useAgentMessages() {
             const effectiveInv = msg.invocationId ?? parsedInv;
             // Cloud P1#3 (PR#1352): suppress stale thinking for completed invocation.
             if (thinkingText && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
-              const messageId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+              const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
               });
-              setMessageThinking(messageId, thinkingText);
+              if (messageId) setMessageThinking(messageId, thinkingText);
             }
             consumed = true;
           } else if (parsed?.type === 'liveness_warning') {
@@ -3956,9 +3974,9 @@ export function useAgentMessages() {
 
             if (!targetId && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
               // Final fallback: recover the active stream bubble before creating a placeholder.
-              targetId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+              targetId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
-              });
+              }) ?? undefined;
             }
 
             if (targetId && parsed.block) {
@@ -4235,7 +4253,7 @@ export function useAgentMessages() {
       getOrRecoverActiveAssistantMessageId,
       isActiveCallbackStillStreaming,
       isStaleTerminalEvent,
-      ensureActiveAssistantMessage,
+      getNonTextAssistantMessageId,
       maybeMigrateSequentialInvocationOwnership,
       recordLateBindBubbleCreate,
       shouldSuppressLateStreamChunk,

@@ -113,9 +113,11 @@ describe('useAgentMessages placeholder recovery', () => {
     storeState.activeInvocations = {};
     mockAddMessage.mockClear();
     mockAppendToMessage.mockClear();
+    mockAppendToolEvent.mockClear();
     mockAppendRichBlock.mockClear();
     mockPatchMessage.mockClear();
     mockSetMessageThinking.mockClear();
+    mockReplaceMessages.mockClear();
   });
 
   afterEach(() => {
@@ -186,10 +188,7 @@ describe('useAgentMessages placeholder recovery', () => {
     expect(mockAppendRichBlock).toHaveBeenCalledWith('msg-live-2', expect.objectContaining({ id: 'rb-1' }));
   });
 
-  it('seeds a new stream bubble with invocationId when tool_use carries msg.invocationId explicitly', () => {
-    // F173 hotfix: bubble creation uses ONLY explicit msg.invocationId (no catInvocations /
-    // activeInvocations fallback). Tool events that carry invocationId bind directly.
-
+  it('does not seed an empty reply placeholder when tool_use arrives before text', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -204,20 +203,14 @@ describe('useAgentMessages placeholder recovery', () => {
       });
     });
 
-    expect(mockAddMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'assistant',
-        catId: 'opus',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-active-1' } },
-      }),
-    );
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAppendToolEvent).not.toHaveBeenCalled();
+    expect(mockReplaceMessages).not.toHaveBeenCalled();
+    expect(storeState.messages).toHaveLength(0);
+    expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'streaming');
   });
 
-  it('creates an UNBOUND placeholder when tool_use arrives before invocation_created (no msg.invocationId)', () => {
-    // F173 hotfix: without explicit invocationId, bubble is unbound. invocation_created's
-    // rebind step (exercised in useAgentMessages-invocation-created.test.ts) will bind it.
-
+  it('does not create an unbound placeholder when invocationless tool_use arrives before text', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -231,14 +224,14 @@ describe('useAgentMessages placeholder recovery', () => {
       });
     });
 
-    const created = mockAddMessage.mock.calls.find(
-      ([m]) => m.type === 'assistant' && m.catId === 'opus' && m.origin === 'stream',
-    )?.[0];
-    expect(created).toBeTruthy();
-    expect(created?.extra?.stream?.invocationId).toBeUndefined();
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAppendToolEvent).not.toHaveBeenCalled();
+    expect(mockReplaceMessages).not.toHaveBeenCalled();
+    expect(storeState.messages).toHaveLength(0);
+    expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'streaming');
   });
 
-  it('records bubble timeline with explicit invocationId when tool_use binds the bubble', () => {
+  it('does not record bubble lifecycle when tool_use is only liveness before text', () => {
     configureDebug({ enabled: true });
     ensureWindowDebugApi();
 
@@ -265,18 +258,7 @@ describe('useAgentMessages placeholder recovery', () => {
       events: Array<Record<string, unknown>>;
     };
 
-    expect(dump.events).toEqual([
-      expect.objectContaining({
-        event: 'bubble_lifecycle',
-        threadId: 'thread-1',
-        action: 'create',
-        reason: 'active_late_bind',
-        catId: 'opus',
-        invocationId: 'inv-active-1',
-        origin: 'stream',
-      }),
-    ]);
-    expect(dump.events[0]?.messageId).toEqual(expect.any(String));
+    expect(dump.events).toEqual([]);
   });
 
   it('recovers when replace hydration swaps the local stream id to a persisted server id mid-stream', () => {
