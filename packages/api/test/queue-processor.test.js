@@ -2264,9 +2264,9 @@ describe('QueueProcessor', () => {
       }
     });
 
-    it('codex output gate buffers process chatter and broadcasts sanitized final answer only', async () => {
+    it('codex output gate defaults on and broadcasts sanitized final answer only', async () => {
       const previous = process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
-      process.env.CAT_CAFE_CODEX_OUTPUT_GATE = '1';
+      delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
       try {
         const hookDeps = stubDeps({
           router: {
@@ -2309,6 +2309,54 @@ describe('QueueProcessor', () => {
         assert.ok(!textMessages[0].content.includes('我现在认领当前消息'));
         assert.equal(doneMessages.length, 1, 'done lifecycle event should still be broadcast');
         assert.ok(roomEvents.includes('spawn_started'), 'liveness signal should still be visible while buffered');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+        } else {
+          process.env.CAT_CAFE_CODEX_OUTPUT_GATE = previous;
+        }
+      }
+    });
+
+    it('codex output gate can be disabled explicitly for emergency rollback', async () => {
+      const previous = process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
+      process.env.CAT_CAFE_CODEX_OUTPUT_GATE = '0';
+      try {
+        const hookDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* () {
+              yield {
+                type: 'text',
+                catId: 'gpt52',
+                content: '**🔍 我开始做指南**\n\n我现在认领当前消息。\n\n',
+                timestamp: 1000,
+              };
+              yield {
+                type: 'text',
+                catId: 'gpt52',
+                content: '**✅ 已完成**\n\n交付：输出闸门可回退。',
+                timestamp: 1001,
+              };
+              yield { type: 'done', catId: 'gpt52', timestamp: 1002 };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+          threadMetaLookup: mock.fn(async () => undefined),
+        });
+        const hookProcessor = new QueueProcessor(hookDeps);
+
+        const entry = enqueueEntry(hookDeps.queue, { targetCats: ['gpt52'] });
+        hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-rollback');
+
+        await hookProcessor.processNext('t1', 'u1');
+        await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 3);
+
+        const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+        const textMessages = agentMessages.filter((msg) => msg.type === 'text');
+
+        assert.equal(textMessages.length, 2, 'explicit rollback should restore raw streaming chunks');
+        assert.ok(textMessages[0].content.includes('我开始做指南'));
+        assert.ok(textMessages[1].content.includes('交付：输出闸门可回退。'));
       } finally {
         if (previous === undefined) {
           delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;

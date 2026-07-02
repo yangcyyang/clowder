@@ -203,7 +203,10 @@ function isAgentOutputGateEnabled(): boolean {
 }
 
 function isCodexOutputGateEnabled(): boolean {
-  return parseFeatureFlag(process.env.CAT_CAFE_CODEX_OUTPUT_GATE) === true;
+  const value = parseFeatureFlag(process.env.CAT_CAFE_CODEX_OUTPUT_GATE);
+  // Default on for Codex-style runtimes too. They are the noisiest source of
+  // process chatter, while CAT_CAFE_CODEX_OUTPUT_GATE=0 remains the escape hatch.
+  return value ?? true;
 }
 
 function isCodexRuntimeCat(catId: string): boolean {
