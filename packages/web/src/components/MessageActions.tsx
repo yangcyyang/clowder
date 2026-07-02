@@ -57,7 +57,7 @@ export function MessageActions({
   const canInlineEdit = isUser && !message.contentBlocks?.length && !!onEditMessage;
   const canAct = (isUser || isAssistant) && !message.isStreaming;
   // Keep the toolbar inside the hover frame so message + actions read as one unit.
-  const toolbarPositionClass = 'top-1';
+  const toolbarPositionClass = isUser ? 'top-8' : 'top-1';
 
   useEffect(() => {
     const syncSaved = () => setSaved(isMessageSaved(message.id));
@@ -272,43 +272,40 @@ export function MessageActions({
         <div
           className={`slock-message-toolbar opacity-0 group-hover:opacity-100 focus-within:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
         >
-          <button
-            type="button"
-            onClick={handleReply}
-            className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
-            title="引用回复"
-          >
-            Reply
+          <button type="button" onClick={handleReply} className="slock-message-action-button" title="引用回复">
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M6.5 5.25 3.75 8l2.75 2.75" />
+              <path d="M4 8h5.25A3.75 3.75 0 0 1 13 11.75" />
+            </svg>
+            <span className="sr-only">引用回复</span>
           </button>
-          {canInlineEdit && (
-            <button
-              type="button"
-              onClick={handleInlineEdit}
-              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
-              title="编辑消息"
-            >
-              Edit
-            </button>
-          )}
           {onOpenThread && (
             <button
               type="button"
               onClick={() => onOpenThread(message.id)}
-              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button"
               title="在 Thread 面板中查看"
             >
-              Thread
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3.25 4.25h9.5v6.5h-5l-3 2v-2h-1.5z" />
+              </svg>
+              <span className="sr-only">Thread</span>
             </button>
           )}
           <div className="relative">
             <button
               type="button"
               onClick={() => setReactionPickerOpen((open) => !open)}
-              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+              className="slock-message-action-button"
               title="添加表情反应"
               aria-expanded={reactionPickerOpen}
             >
-              React
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="8" cy="8" r="5.25" />
+                <path d="M5.75 9.5c.65.75 1.35 1.1 2.25 1.1s1.6-.35 2.25-1.1" />
+                <path d="M6.1 6.5h.1M9.8 6.5h.1" />
+              </svg>
+              <span className="sr-only">添加表情反应</span>
             </button>
             {reactionPickerOpen && (
               <div className="absolute right-0 top-full z-20 mt-1 flex gap-1 rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] p-1 shadow-lg">
@@ -326,88 +323,35 @@ export function MessageActions({
               </div>
             )}
           </div>
-          {onPinMessage && (
-            <button
-              type="button"
-              onClick={handlePin}
-              className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
-              title="固定消息"
-            >
-              Pin
-            </button>
-          )}
           <button
             type="button"
             onClick={handleSave}
-            className={`slock-message-action-button rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-cafe-surface-elevated hover:text-cafe ${
-              saved ? 'text-[var(--cafe-accent)]' : 'text-cafe-muted'
-            }`}
+            className="slock-message-action-button"
             title={saved ? '取消收藏消息' : '收藏消息'}
             aria-pressed={saved}
           >
-            {saved ? 'Saved' : 'Save'}
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+              <path d="M4.25 2.75h7.5v10.5L8 10.75l-3.75 2.5z" />
+            </svg>
+            <span className="sr-only">{saved ? '取消收藏消息' : '收藏消息'}</span>
           </button>
           <button
             type="button"
             onClick={handleOpenMoreMenu}
-            className="slock-message-action-button rounded px-1.5 py-0.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe"
+            className="slock-message-action-button"
             title="更多操作"
           >
-            More
-          </button>
-          <button
-            onClick={handleSoftDelete}
-            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
-            title="删除"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M3.5 8h.1M7.95 8h.1M12.4 8h.1" />
             </svg>
+            <span className="sr-only">更多操作</span>
           </button>
-          <button
-            onClick={handleBranchDirect}
-            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-emerald-text transition-colors"
-            title="从这里分支"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
-          </button>
+          <button type="button" onClick={handleSoftDelete} className="hidden" title="删除" aria-hidden="true" tabIndex={-1} />
+          <button type="button" onClick={handleBranchDirect} className="hidden" title="从这里分支" aria-hidden="true" tabIndex={-1} />
           {isUser && (
-            <button
-              onClick={handleEdit}
-              className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-[var(--color-cafe-accent)] transition-colors"
-              title="编辑消息"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-            </button>
+            <button type="button" onClick={canInlineEdit ? handleInlineEdit : handleEdit} className="hidden" title="编辑消息" aria-hidden="true" tabIndex={-1} />
           )}
-          <button
-            onClick={handleHardDelete}
-            className="slock-message-action-button p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
-            title="永久删除"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-          </button>
+          <button type="button" onClick={handleHardDelete} className="hidden" title="永久删除" aria-hidden="true" tabIndex={-1} />
         </div>
       )}
       {ctxMenu && (
@@ -420,6 +364,10 @@ export function MessageActions({
           onSave={handleSave}
           onConvertToTask={handleBranchDirect}
           onShare={handleSharePlaceholder}
+          onPin={onPinMessage ? handlePin : undefined}
+          onEdit={isUser ? (canInlineEdit ? handleInlineEdit : handleEdit) : undefined}
+          onSoftDelete={handleSoftDelete}
+          onHardDelete={handleHardDelete}
         />
       )}
 

@@ -1144,6 +1144,18 @@
   align-items: center;
 }
 
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--slock-ink);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-composer-shell {
   border-top: 0;
 }
@@ -1268,8 +1280,14 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-action-button {
-  min-height: 20px;
-  padding: 2px 6px;
+  display: inline-flex;
+  width: 28px;
+  height: 26px;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--slock-secondary-text);
   font-size: 11px;
   line-height: 1.15;
 }
@@ -1296,6 +1314,10 @@
   border: var(--slock-border-width) solid transparent;
 }
 
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-frame:empty {
+  display: none;
+}
+
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-frame:hover {
   border-color: var(--slock-ink);
   box-shadow: none;
@@ -1304,8 +1326,60 @@
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-toolbar {
   border: 1px solid color-mix(in srgb, var(--slock-ink) 42%, transparent);
   border-radius: 0;
+  background: var(--slock-white);
   box-shadow: none;
-  padding: 2px;
+  padding: 1px;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-thread-panel {
+  border-left: var(--slock-border-width) solid var(--slock-ink);
+  background: var(--slock-white);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-thread-header {
+  height: 40px;
+  border-bottom: var(--slock-border-width) solid var(--slock-ink);
+  background: var(--slock-white);
+  padding-inline: 16px;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-replies-divider {
+  position: relative;
+  padding-block: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: color-mix(in srgb, var(--slock-ink) 38%, #ffffff);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-thread-replies-divider::before {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--slock-ink) 14%, transparent);
+  content: "";
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-thread-replies-divider > div {
+  position: relative;
+  z-index: 1;
+  margin-inline: auto;
+  width: fit-content;
+  background: var(--slock-white);
+  padding-inline: 16px;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-thread-composer {
+  border-top: var(--slock-border-width) solid var(--slock-ink);
+  background: var(--slock-white);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-inline-thread-composer .slock-composer-frame {
+  min-height: 96px;
+  margin: 0;
 }
 
 [data-visual-theme="slock"] .markdown-content code:not([class*="language-"]):not(.markdown-code-block-code) {

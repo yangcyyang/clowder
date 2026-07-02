@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
@@ -47,7 +47,7 @@ import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, shouldRenderChatMessage } from './ChatMessage';
 import { ConnectionStatusBar } from './ConnectionStatusBar';
 import { EditChannelModal } from './EditChannelModal';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
@@ -110,11 +110,40 @@ function formatPinnedMessagePreview(message: ChatMessageData): string {
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 
+function ChatTabIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M3.25 4.25h9.5v6.5h-5l-3 2v-2h-1.5z" />
+    </svg>
+  );
+}
+
+function TasksTabIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M5.5 4.25h7" />
+      <path d="M5.5 8h7" />
+      <path d="M5.5 11.75h7" />
+      <path d="M2.75 4.25h.5" />
+      <path d="M2.75 8h.5" />
+      <path d="M2.75 11.75h.5" />
+    </svg>
+  );
+}
+
+function FilesTabIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M5.5 8.75 8.9 5.35a2.05 2.05 0 0 1 2.9 2.9l-4.25 4.25a3.2 3.2 0 0 1-4.52-4.52l4.1-4.1" />
+    </svg>
+  );
+}
+
 function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabChange: (tab: ChannelTab) => void }) {
-  const tabs: Array<{ id: ChannelTab; icon: string; label: string }> = [
-    { id: 'chat', icon: '💬', label: 'CHAT' },
-    { id: 'tasks', icon: '☰', label: 'TASKS' },
-    { id: 'files', icon: '📎', label: 'FILES' },
+  const tabs: Array<{ id: ChannelTab; icon: ReactNode; label: string }> = [
+    { id: 'chat', icon: <ChatTabIcon />, label: 'Chat' },
+    { id: 'tasks', icon: <TasksTabIcon />, label: 'Tasks' },
+    { id: 'files', icon: <FilesTabIcon />, label: 'Files' },
   ];
 
   return (
@@ -135,7 +164,7 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
               }`}
               aria-pressed={isActive}
             >
-              <span aria-hidden="true" className="text-[12px] leading-none">
+              <span aria-hidden="true" className="slock-tab-icon">
                 {tab.icon}
               </span>
               <span>{tab.label}</span>
@@ -951,6 +980,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const renderSingleMessage = useCallback(
     (msg: ChatMessageData, index: number) => {
+      if (!shouldRenderChatMessage(msg)) return null;
+
       const prevMsg = index > 0 ? messages[index - 1] : undefined;
       const isGrouped = !!(
         prevMsg &&
@@ -1584,6 +1615,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         <InlineThreadPanel
           threadId={inlineThread.threadId}
           sourceMessage={inlineThread.sourceMessage}
+          parentThreadTitle={currentThreadTitle}
           isClosing={inlineThreadClosing}
           onClose={closeInlineThread}
           onReplyCountChange={handleInlineThreadReplyCountChange}

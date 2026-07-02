@@ -20,10 +20,11 @@ import { ChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
 import { MentionPicker } from './MentionPicker';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const THREAD_PANEL_DEFAULT_WIDTH = 320;
-const THREAD_PANEL_MIN_WIDTH = 280;
+const THREAD_PANEL_DEFAULT_WIDTH = 460;
+const THREAD_PANEL_MIN_WIDTH = 360;
 const THREAD_PANEL_FALLBACK_MAX_WIDTH = 720;
 const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.6;
 
@@ -84,6 +85,7 @@ function detectSlashCommand(value: string, cursor: number): string | null {
 interface InlineThreadPanelProps {
   threadId: string;
   sourceMessage: ChatMessageData;
+  parentThreadTitle: string;
   isClosing?: boolean;
   onClose: () => void;
   onReplyCountChange?: (sourceMessageId: string, branchThreadId: string, replyCount: number) => void;
@@ -92,6 +94,7 @@ interface InlineThreadPanelProps {
 export function InlineThreadPanel({
   threadId,
   sourceMessage,
+  parentThreadTitle,
   isClosing = false,
   onClose,
   onReplyCountChange,
@@ -148,6 +151,13 @@ export function InlineThreadPanel({
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
   }, []);
+  const parentThreadLabel = useMemo(() => {
+    const title = parentThreadTitle.trim() || '当前对话';
+    return title.startsWith('#') ? title : `#${title}`;
+  }, [parentThreadTitle]);
+  const handleViewInChannel = useCallback(() => {
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
+  }, [threadId]);
   const handlePanelResize = useCallback(
     (delta: number) => {
       setPanelWidth((prev) => clampThreadPanelWidth(prev - delta));
@@ -485,19 +495,50 @@ export function InlineThreadPanel({
     >
       <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
       <aside
-        className="flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
+        className="slock-inline-thread-panel flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
         style={{ width: panelWidth }}
       >
-        <div className="flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4">
-          <span className="text-sm font-semibold text-[var(--cafe-text)]">Thread</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded px-1.5 py-0.5 text-xs text-[var(--cafe-text-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]"
-            aria-label="关闭 Thread 面板"
-          >
-            x
-          </button>
+        <div className="slock-inline-thread-header flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4">
+          <div className="min-w-0 text-sm font-semibold text-[var(--cafe-text)]">
+            <span>Thread</span>
+            <span className="ml-1.5 text-[var(--cafe-text-muted)]">— {parentThreadLabel}</span>
+          </div>
+          <div className="ml-3 flex flex-shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="slock-header-action slock-header-action--icon"
+              aria-label="搜索 Thread"
+              title="搜索 Thread"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="7" cy="7" r="4" />
+                <path d="m10.2 10.2 3 3" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={handleViewInChannel}
+              className="slock-header-action slock-header-action--label"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M6 4H4.25A1.25 1.25 0 0 0 3 5.25v6.5C3 12.44 3.56 13 4.25 13h6.5c.69 0 1.25-.56 1.25-1.25V10" />
+                <path d="M9 3h4v4" />
+                <path d="m8 8 5-5" />
+              </svg>
+              View in channel
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="slock-header-action slock-header-action--icon"
+              aria-label="关闭 Thread 面板"
+              title="关闭 Thread 面板"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </div>
         </div>
         {runtimeCats.length > 0 && (
           <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
@@ -524,17 +565,18 @@ export function InlineThreadPanel({
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
-          <div className="mb-4 border-b border-[var(--slock-border-color)] pb-3">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
-              原始消息
-            </div>
-            <div className="max-h-48 overflow-y-auto overscroll-contain px-1 py-1 pr-2">
+          <div className="mb-4">
+            <div className="max-h-44 overflow-y-auto overscroll-contain px-1 py-1 pr-2">
               <ChatMessage
                 message={sourceMessage}
                 getCatById={getCatById}
                 showRuntimeMetadata
               />
             </div>
+          </div>
+          <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
+            <div>Beginning of replies</div>
+            <div className="mt-1">{replyMessages.length} {replyMessages.length === 1 ? 'reply' : 'replies'}</div>
           </div>
           {loading ? (
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
@@ -552,9 +594,9 @@ export function InlineThreadPanel({
           )}
         </div>
 
-        <div className="h-[122px] flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
+        <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
-          <div className="relative">
+          <div className="slock-composer-frame relative">
             {showMentionPicker && (
               <MentionPicker
                 options={filteredCatOptions}
@@ -577,21 +619,29 @@ export function InlineThreadPanel({
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
-              placeholder="回复 Thread..."
+              placeholder="Message thread"
               rows={2}
-              className="h-[64px] w-full resize-none rounded-[var(--slock-radius-lg)] border border-[var(--slock-border-color)] bg-[var(--clowder-input-bg)] px-3 py-2 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none transition-colors placeholder:text-[var(--cafe-text-muted)] focus:border-[var(--console-input-stroke)] focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+              className="h-[84px] w-full resize-none border-0 bg-transparent px-3 py-2 pr-12 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none placeholder:text-[var(--cafe-text-muted)]"
             />
-          </div>
-          <div className="mt-2 flex items-center justify-between">
-            <span className="text-[11px] text-[var(--cafe-text-muted)]">⌘/Ctrl + Enter 发送</span>
             <button
               type="button"
               onClick={handleSend}
               disabled={!input.trim() || sending}
-              className="rounded-md bg-[var(--color-cafe-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--cafe-accent-foreground)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+              className="slock-send-button absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center disabled:cursor-not-allowed disabled:opacity-45"
+              aria-label={sending ? '发送中' : '发送 Thread 回复'}
+              title={sending ? '发送中...' : '发送'}
             >
-              {sending ? '发送中...' : '发送'}
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
+              </svg>
             </button>
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[var(--cafe-text-muted)]">
+              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">▧</span>
+              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">⌘</span>
+            </div>
+            <span className="text-[11px] text-[var(--cafe-text-muted)]">⌘/Ctrl + Enter 发送</span>
           </div>
         </div>
       </aside>

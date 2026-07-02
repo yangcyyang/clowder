@@ -9,6 +9,10 @@ interface MessageContextMenuProps {
   onSave?: () => void;
   onConvertToTask?: () => void;
   onShare?: () => void;
+  onPin?: () => void;
+  onEdit?: () => void;
+  onSoftDelete?: () => void;
+  onHardDelete?: () => void;
 }
 
 export function MessageContextMenu({
@@ -20,6 +24,10 @@ export function MessageContextMenu({
   onSave,
   onConvertToTask,
   onShare,
+  onPin,
+  onEdit,
+  onSoftDelete,
+  onHardDelete,
 }: MessageContextMenuProps) {
   const items = [
     {
@@ -50,6 +58,28 @@ export function MessageContextMenu({
         onClose();
       },
     },
+    ...(onPin
+      ? [
+          {
+            label: 'Pin message',
+            onClick: () => {
+              onPin();
+              onClose();
+            },
+          },
+        ]
+      : []),
+    ...(onEdit
+      ? [
+          {
+            label: 'Edit message',
+            onClick: () => {
+              onEdit();
+              onClose();
+            },
+          },
+        ]
+      : []),
     {
       label: 'Share messages...',
       onClick: () => {
@@ -57,6 +87,28 @@ export function MessageContextMenu({
         onClose();
       },
     },
+    ...(onSoftDelete
+      ? [
+          {
+            label: 'Delete message',
+            onClick: () => {
+              onSoftDelete();
+              onClose();
+            },
+          },
+        ]
+      : []),
+    ...(onHardDelete
+      ? [
+          {
+            label: 'Delete permanently',
+            onClick: () => {
+              onHardDelete();
+              onClose();
+            },
+          },
+        ]
+      : []),
   ];
 
   return (

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Space_Grotesk } from 'next/font/google';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
+import { ChunkLoadRefreshGuard } from '@/components/ChunkLoadRefreshGuard';
 import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -72,6 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN" data-visual-theme="slock" suppressHydrationWarning>
       <body className={`${spaceGrotesk.variable} min-h-screen`}>
         <script dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }} />
+        <ChunkLoadRefreshGuard />
         <SessionBootstrap />
         <ThemeProvider>
           <ConfirmProvider>

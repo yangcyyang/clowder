@@ -54,6 +54,30 @@ function sanitizeAgentVisibleContent(content: string): string {
   return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+export function shouldRenderChatMessage(message: ChatMessageType): boolean {
+  if (message.type === 'assistant' && message.origin === 'stream' && message.isStreaming) {
+    return false;
+  }
+
+  if (message.type === 'summary' || message.type === 'system' || message.type === 'connector') {
+    return true;
+  }
+
+  if (message.type === 'user' && !message.catId) {
+    return true;
+  }
+
+  if (message.isStreaming) return true;
+  if (message.contentBlocks?.length) return true;
+  if (sanitizeAgentVisibleContent(message.content).trim().length > 0) return true;
+  if (message.extra?.rich?.blocks?.length) return true;
+  if (message.extra?.crossPost) return true;
+  if (message.thinking) return true;
+  if (message.toolEvents?.length) return true;
+
+  return false;
+}
+
 const TASK_EVIDENCE_KEYS = ['tests', 'build', 'screenshot', 'review', 'lesson'] as const;
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -272,7 +296,7 @@ export function ChatMessage({
   // Slock-like rendering: streaming tokens are buffered in store but hidden from
   // the timeline until the final message arrives. The input area shows typing
   // state, so users do not need to scroll back to follow a growing bubble.
-  if (message.type === 'assistant' && message.origin === 'stream' && message.isStreaming) {
+  if (!shouldRenderChatMessage(message)) {
     return null;
   }
 
@@ -470,22 +494,6 @@ export function ChatMessage({
         </div>
       </div>
     );
-  }
-
-  // Don't render completely empty non-streaming assistant messages.
-  // This can happen when a cat responds with only internal tool/CLI events and no text output.
-  // Slock-like mode keeps execution process out of the main chat surface.
-  // Keep messages that have thinking content — they should still show as collapsible bubbles.
-  if (
-    !message.isStreaming &&
-    !hasTextContent &&
-    !hasBlocks &&
-    !message.extra?.rich?.blocks?.length &&
-    !message.extra?.crossPost &&
-    !message.thinking &&
-    !hasToolEvents
-  ) {
-    return null;
   }
 
   return (
