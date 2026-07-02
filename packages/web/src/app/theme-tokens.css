@@ -283,18 +283,17 @@
   --cat-light-sand: #fff4cf;
   --cat-border-tan: #141111;
   --cat-deep-ink: #141111;
-  --cat-muted-stone: #8f8a82;
+  --cat-muted-stone: #6e6961;
   --cat-paw-pink: #fe7da8;
-  --slock-workspace-bg: #ffffff;
 
   --cafe-surface: #ffffff;
   --cafe-surface-elevated: #fffaef;
   --cafe-surface-sunken: #fff4cf;
   --cafe-text: #141111;
   --cafe-text-secondary: #2b2723;
-  --cafe-text-muted: #8f8a82;
+  --cafe-text-muted: #6e6961;
   --cafe-border: #141111;
-  --cafe-border-subtle: #b6b1aa;
+  --cafe-border-subtle: #8f8a82;
   --cafe-accent: #fe7da8;
   --cafe-accent-hover: #ff8db7;
   --cafe-accent-foreground: #141111;
@@ -311,7 +310,7 @@
   --clowder-sidebar-title: #141111;
   --clowder-sidebar-row-text: #141111;
   --clowder-sidebar-row-active-text: #141111;
-  --clowder-sidebar-row-muted: #8f8a82;
+  --clowder-sidebar-row-muted: #6e6961;
   --clowder-section-tracking: 0.12em;
   --clowder-message-hover-ring: #141111;
   --clowder-markdown-chip-bg: #fff4cf;
@@ -323,8 +322,30 @@
   --clowder-sidebar-active-bg: #fe7da8;
   --clowder-sidebar-active-border: #141111;
   --clowder-sidebar-hover-bg: #fff4cf;
-  --clowder-muted-soft: #8f8a82;
+  --clowder-muted-soft: #6e6961;
   --clowder-avatar-quiet-ring: #141111;
+
+  /* slockv1 = slock-compact: square corners + 2px strokes, keeps the default typescale */
+  --border-radius-base: 0;
+  --slock-radius-sm: 0;
+  --slock-radius-md: 0;
+  --slock-radius-lg: 0;
+  --slock-radius-pill: 0;
+  --slock-border-width: 2px;
+  --slock-rail-border-width: 2px;
+
+  /* palette aliases consumed by the shared slock component rules (light mode only) */
+  --slock-ink: #141111;
+  --slock-rail-yellow: #ffd440;
+  --slock-cream: #fffaef;
+  --slock-workspace-bg: #ffffff;
+  --slock-warm-yellow: #fff4cf;
+  --slock-pink-active: #fe7da8;
+  --slock-pink-hover: #ff8db7;
+  --slock-white: #ffffff;
+  --slock-muted-text: #6e6961;
+  --slock-secondary-text: #2b2723;
+  --slock-success: #00875a;
 }
 
 [data-visual-theme="slock"] {

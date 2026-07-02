@@ -203,9 +203,10 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const [visualTheme, setVisualTheme] = useState<VisualTheme>(DEFAULT_VISUAL_THEME);
 
   useEffect(() => {
-    const hasMigratedDefaultTheme = window.localStorage.getItem(VISUAL_THEME_DEFAULT_MIGRATION_KEY) === '1';
+    // Honor any stored valid theme; default-version bumps must never reset a user's explicit choice.
+    // The migration key is still written for backward compatibility with older builds.
     const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
-    const nextTheme = hasMigratedDefaultTheme ? normalizeVisualTheme(storedTheme) : DEFAULT_VISUAL_THEME;
+    const nextTheme = normalizeVisualTheme(storedTheme);
     setVisualTheme(nextTheme);
     document.documentElement.dataset.visualTheme = nextTheme;
     window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);

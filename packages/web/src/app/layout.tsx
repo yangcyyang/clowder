@@ -26,10 +26,11 @@ const visualThemeBootstrapScript = `
   const validThemes = new Set(['claude', 'slockv1', 'slock', 'kami']);
   const defaultTheme = 'slock';
   try {
-    const migrated = window.localStorage.getItem(migrationKey) === '1';
+    // Honor any stored valid theme; default-version bumps must never reset a user's explicit choice.
+    // The migration key is still written for backward compatibility with older builds.
     const stored = window.localStorage.getItem(storageKey);
     const normalizedStored = stored === 'tesla' ? 'slockv1' : stored;
-    const nextTheme = migrated && validThemes.has(normalizedStored) ? normalizedStored : defaultTheme;
+    const nextTheme = validThemes.has(normalizedStored) ? normalizedStored : defaultTheme;
     document.documentElement.dataset.visualTheme = nextTheme;
     window.localStorage.setItem(storageKey, nextTheme);
     window.localStorage.setItem(migrationKey, '1');
@@ -43,7 +44,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#E29578',
+  // Matches the default slock/slockv1 cream surface so the PWA chrome blends with the UI
+  themeColor: '#fff9ec',
 };
 
 export const metadata: Metadata = {

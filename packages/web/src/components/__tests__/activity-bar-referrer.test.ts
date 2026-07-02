@@ -154,7 +154,7 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     });
   });
 
-  it('migrates old stored Claude visual theme to Slock once for v4 default', () => {
+  it('keeps stored Claude visual theme across default-version bumps', () => {
     window.localStorage.setItem('clowder:visual-theme-default:v3', '1');
     window.localStorage.setItem('clowder:visual-theme', 'claude');
 
@@ -162,8 +162,8 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
       root.render(React.createElement(ActivityBar));
     });
 
-    expect(document.documentElement.dataset.visualTheme).toBe('slock');
-    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('slock');
+    expect(document.documentElement.dataset.visualTheme).toBe('claude');
+    expect(window.localStorage.getItem('clowder:visual-theme')).toBe('claude');
     expect(window.localStorage.getItem('clowder:visual-theme-default:v4')).toBe('1');
   });
 

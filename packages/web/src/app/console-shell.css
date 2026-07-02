@@ -231,15 +231,15 @@
 }
 
 [data-visual-theme="slockv1"] {
-  --console-shell-bg: var(--slock-workspace-bg);
-  --console-panel-bg: var(--slock-workspace-bg);
+  --console-shell-bg: #ffffff;
+  --console-panel-bg: #fffaef;
   --console-card-bg: #ffffff;
   --console-card-soft-bg: #fffaef;
   --console-code-bg: #111827;
   --console-pill-bg: #fff4cf;
   --console-border-soft: #141111;
   --console-border-strong: #141111;
-  --console-shadow: 4px 4px 0 #141111;
+  --console-shadow: 3px 3px 0 #141111;
   --console-shadow-soft: 2px 2px 0 #141111;
   --console-field-bg: #ffffff;
   --console-active-bg: #fe7da8;
@@ -306,6 +306,10 @@
   --chat-code-btn-radius: 0;
   --chat-code-shadow: none;
   --chat-code-btn-shadow: none;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) {
+  --console-panel-bg: var(--slock-workspace-bg);
 }
 
 [data-visual-theme="kami"] {
@@ -779,11 +783,11 @@
   cursor: pointer;
 }
 
-[data-visual-theme="slock"] .console-activity-rail {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-rail {
   border-right: var(--slock-rail-border-width) solid var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .console-activity-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-button {
   position: relative;
   width: 40px;
   height: 40px;
@@ -794,23 +798,27 @@
   box-shadow: var(--slock-shadow-icon);
 }
 
-[data-visual-theme="slock"] .console-activity-button:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-activity-button:hover {
   background: var(--slock-warm-yellow);
   transform: translate(-1px, -1px);
   box-shadow: var(--slock-shadow-soft);
 }
 
-[data-visual-theme="slock"] .console-activity-button:active {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-activity-button:active {
   transform: translate(1px, 1px);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .console-activity-button[data-active="true"] {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-activity-button[data-active="true"] {
   background: var(--slock-ink);
   color: var(--slock-rail-yellow);
 }
 
-[data-visual-theme="slock"] .console-activity-button[data-active="true"]::after {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-activity-button[data-active="true"]::after {
   position: absolute;
   top: -6px;
   right: -6px;
@@ -822,31 +830,32 @@
   content: "";
 }
 
-[data-visual-theme="slock"] .console-activity-button[data-active="true"]:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-activity-button[data-active="true"]:hover {
   background: var(--slock-ink);
   color: var(--slock-rail-yellow);
   transform: translate(-1px, -1px);
 }
 
-[data-visual-theme="slock"] .slock-thread-sidebar {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar {
   border-right: var(--slock-rail-border-width) solid var(--slock-ink);
   background: var(--slock-cream);
   box-shadow: none !important;
 }
 
-[data-visual-theme="slock"] .slock-thread-sidebar-header {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar-header {
   min-height: 70px;
   padding: 14px 16px;
   border-bottom: var(--slock-rail-border-width) solid var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .slock-thread-sidebar-title {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar-title {
   font-size: 24px;
   font-weight: 900;
   letter-spacing: 0;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-new-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-new-button {
   min-height: 38px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
@@ -857,22 +866,24 @@
   font-weight: 900;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-new-button:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-new-button:hover {
   background: var(--slock-pink-hover);
   transform: translate(-1px, -1px);
   box-shadow: var(--slock-shadow-icon);
 }
 
-[data-visual-theme="slock"] .slock-sidebar-new-button:active {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-new-button:active {
   transform: translate(1px, 1px);
   box-shadow: none;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-wrap {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-search-wrap {
   padding: 14px 16px 12px;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-input {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-search-input {
   height: 44px;
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
@@ -883,40 +894,43 @@
   box-shadow: none;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-input:hover,
-[data-visual-theme="slock"] .slock-sidebar-search-input:focus {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-search-input:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-search-input:focus {
   border-color: var(--slock-ink);
   background: var(--slock-white);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-input::placeholder {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-search-input::placeholder {
   color: var(--slock-secondary-text);
 }
 
-[data-visual-theme="slock"] .slock-sidebar-quicknav {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-quicknav {
   padding: 2px 12px 14px;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-section {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section {
   margin-top: 0;
   padding-top: 16px;
   border-top: var(--slock-border-width) solid var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .slock-sidebar-section-title {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section-title {
   color: var(--slock-ink);
   font-size: 15px;
   font-weight: 950;
   letter-spacing: 0.12em;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-section-count {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section-count {
   color: var(--slock-muted-text);
   letter-spacing: 0;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-section-action {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section-action {
   width: 28px;
   height: 28px;
   border: var(--slock-border-width) solid transparent;
@@ -926,14 +940,15 @@
   font-weight: 600;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-section-action:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-section-action:hover {
   border-color: var(--slock-ink);
   background: var(--slock-warm-yellow);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-channel-row,
-[data-visual-theme="slock"] .slock-sidebar-row {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-row {
   min-height: 32px;
   height: 32px;
   border: var(--slock-border-width) solid transparent;
@@ -950,19 +965,19 @@
     color 120ms ease;
 }
 
-[data-visual-theme="slock"] .slock-channel-row {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row {
   margin: 0 12px 4px;
   width: calc(100% - 24px);
   padding-right: 8px;
   padding-left: 8px;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-row {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-row {
   padding-right: 8px;
   padding-left: 8px;
 }
 
-[data-visual-theme="slock"] .slock-channel-row::before {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row::before {
   flex: 0 0 auto;
   color: var(--slock-ink);
   font-size: 23px;
@@ -971,8 +986,8 @@
   content: "#";
 }
 
-[data-visual-theme="slock"] .slock-channel-row:hover,
-[data-visual-theme="slock"] .slock-sidebar-row:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-row:hover {
   border-color: var(--slock-ink);
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
@@ -980,9 +995,12 @@
   transform: translate(-1px, -1px);
 }
 
-[data-visual-theme="slock"] .slock-channel-row[data-active="true"],
-[data-visual-theme="slock"] .slock-sidebar-row[data-active="true"],
-[data-visual-theme="slock"] .slock-sidebar-row[aria-pressed="true"] {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-channel-row[data-active="true"],
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-row[data-active="true"],
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-row[aria-pressed="true"] {
   border-color: var(--slock-ink);
   background: var(--slock-pink-active);
   color: var(--slock-ink);
@@ -991,14 +1009,17 @@
   transform: none;
 }
 
-[data-visual-theme="slock"] .slock-channel-row[data-active="true"]:hover,
-[data-visual-theme="slock"] .slock-sidebar-row[data-active="true"]:hover,
-[data-visual-theme="slock"] .slock-sidebar-row[aria-pressed="true"]:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-channel-row[data-active="true"]:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-row[data-active="true"]:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-row[aria-pressed="true"]:hover {
   background: var(--slock-pink-active);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-tab-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button {
   align-self: flex-end;
   height: 28px;
   border-right: var(--slock-border-width) solid var(--slock-ink);
@@ -1008,11 +1029,6 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
-}
-
-:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-chat-header {
-  height: 40px;
-  background: var(--console-shell-bg);
 }
 
 .slock-header-action {
@@ -1048,25 +1064,39 @@
   color: var(--cafe-text);
 }
 
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-chat-header {
+  height: 40px;
+  background: var(--console-shell-bg);
+}
+
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action {
   height: 28px;
   min-width: 28px;
+  align-items: center;
+  justify-content: center;
   border: 1px solid color-mix(in srgb, var(--slock-ink) 18%, transparent);
   border-radius: 6px;
   background: #ffffff;
   color: var(--slock-secondary-text);
   box-shadow: none;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action--icon {
   width: 28px;
+  padding: 0;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action--label {
+  gap: 4px;
   padding: 0 9px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action:hover {
@@ -1088,21 +1118,22 @@
   color: var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .slock-tab-button:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button:hover {
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .slock-tab-button[data-active="true"] {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-tab-button[data-active="true"] {
   background: var(--slock-rail-yellow);
   color: var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .slock-tab-button > span {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tab-button > span {
   display: none;
 }
 
-[data-visual-theme="slock"] .slock-unread-badge {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-unread-badge {
   min-width: 32px;
   height: 26px;
   border: var(--slock-border-width) solid var(--slock-ink);
@@ -1113,140 +1144,146 @@
   font-weight: 900;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-result {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-search-result {
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
 }
 
-[data-visual-theme="slock"] .slock-sidebar-search-result:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-sidebar-search-result:hover {
   border-color: var(--slock-ink);
   background: var(--slock-warm-yellow);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-sidebar-trash {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-trash {
   padding: 10px 12px 14px;
   border-top: var(--slock-border-width) solid var(--slock-ink);
 }
 
-[data-visual-theme="slock"] .console-panel,
-[data-visual-theme="slock"] .console-shell-panel,
-[data-visual-theme="slock"] .console-shell-panel-soft,
-[data-visual-theme="slock"] .console-card,
-[data-visual-theme="slock"] .console-card-soft,
-[data-visual-theme="slock"] .console-section-shell,
-[data-visual-theme="slock"] .console-code-pane,
-[data-visual-theme="slock"] .console-table-shell,
-[data-visual-theme="slock"] .console-search-field,
-[data-visual-theme="slock"] .console-status-panel {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-panel,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-shell-panel,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-shell-panel-soft,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-card,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-card-soft,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-section-shell,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-code-pane,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-table-shell,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-search-field,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-status-panel {
   border-color: var(--slock-ink);
   border-radius: 0;
 }
 
-[data-visual-theme="slock"] .console-code-pane,
-[data-visual-theme="slock"] .console-table-shell,
-[data-visual-theme="slock"] .console-search-field,
-[data-visual-theme="slock"] .console-status-panel,
-[data-visual-theme="slock"] .slock-composer-frame,
-[data-visual-theme="slock"] .slock-page-frame,
-[data-visual-theme="slock"] .slock-panel-frame {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-code-pane,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-table-shell,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-search-field,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-status-panel,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-composer-frame,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-page-frame,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-panel-frame {
   border-width: var(--slock-border-width);
 }
 
-[data-visual-theme="slock"] .console-card,
-[data-visual-theme="slock"] .console-section-shell,
-[data-visual-theme="slock"] .console-search-field,
-[data-visual-theme="slock"] .console-status-panel {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-card,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-section-shell,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-search-field,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-status-panel {
   box-shadow: var(--slock-shadow-soft);
 }
 
-[data-visual-theme="slock"] .console-button-primary,
-[data-visual-theme="slock"] .console-button-secondary,
-[data-visual-theme="slock"] .console-button-ghost,
-[data-visual-theme="slock"] .console-segmented-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-button-primary,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-button-secondary,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-button-ghost,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-segmented-button {
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .console-button-primary:hover,
-[data-visual-theme="slock"] .console-button-secondary:hover,
-[data-visual-theme="slock"] .console-button-ghost:hover,
-[data-visual-theme="slock"] .console-segmented-button:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-button-primary:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-button-secondary:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-button-ghost:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-segmented-button:hover {
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
   transform: translate(-1px, -1px);
 }
 
-[data-visual-theme="slock"] .console-pill,
-[data-visual-theme="slock"] .console-status-chip,
-[data-visual-theme="slock"] .console-nav-icon {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-pill,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-status-chip,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-nav-icon {
   border-color: var(--slock-ink);
   border-radius: 0;
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .console-nav-item {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-nav-item {
   border-color: var(--slock-ink);
   border-radius: 0;
 }
 
-[data-visual-theme="slock"] .console-search-field:focus-within {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .console-search-field:focus-within {
   border-color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-composer-frame:focus-within {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-composer-frame:focus-within {
   border-color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-page-frame,
-[data-visual-theme="slock"] .slock-panel-frame {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-page-frame,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-panel-frame {
   border-style: solid;
   border-color: var(--slock-ink);
   border-radius: 0;
   box-shadow: var(--slock-shadow-soft);
 }
 
-[data-visual-theme="slock"] .slock-tool-button,
-[data-visual-theme="slock"] .slock-inline-control,
-[data-visual-theme="slock"] .slock-message-action-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tool-button,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-control,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-action-button {
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
 }
 
-[data-visual-theme="slock"] .slock-tool-button:hover,
-[data-visual-theme="slock"] .slock-inline-control:hover,
-[data-visual-theme="slock"] .slock-message-action-button:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tool-button:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-control:hover,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-message-action-button:hover {
   border-color: var(--slock-ink);
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
 }
 
-[data-visual-theme="slock"] .slock-tool-button:active,
-[data-visual-theme="slock"] .slock-inline-control:active,
-[data-visual-theme="slock"] .slock-message-action-button:active {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-tool-button:active,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-inline-control:active,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
+  .slock-message-action-button:active {
   transform: translate(1px, 1px);
   box-shadow: none;
 }
 
-[data-visual-theme="slock"] .slock-message-frame {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-frame {
   border: var(--slock-border-width) solid transparent;
 }
 
-[data-visual-theme="slock"] .slock-message-frame:hover {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-frame:hover {
   border-color: var(--slock-ink);
-  box-shadow: var(--slock-shadow-chip);
+  box-shadow: none;
 }
 
-[data-visual-theme="slock"] .slock-message-toolbar {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-message-toolbar {
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   box-shadow: var(--slock-shadow-chip);
 }
-
 
 [data-visual-theme="slock"] .markdown-content code:not([class*="language-"]) {
   border: var(--slock-border-width) solid var(--slock-ink);
@@ -1257,9 +1294,48 @@
   font-weight: 700;
 }
 
-[data-visual-theme="slock"] .slock-send-button,
-[data-visual-theme="slock"] .slock-stop-button {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-send-button,
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-stop-button {
   border-color: var(--slock-ink);
   color: var(--slock-rail-yellow);
   box-shadow: var(--slock-shadow-icon);
+}
+
+/* slockv1 (light) inherits the slock component polish via the :is() scopes above,
+   but stays compact: tone slock's display typography back down to the v1 typescale. */
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-thread-sidebar-header {
+  min-height: 56px;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-thread-sidebar-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-sidebar-search-input {
+  height: 38px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-sidebar-section-title {
+  font-size: var(--clowder-type-section);
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-sidebar-section-action {
+  font-size: 18px;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-channel-row::before {
+  font-size: 16px;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-unread-badge {
+  min-width: 24px;
+  height: 20px;
+  font-size: 12px;
+}
+
+[data-visual-theme="slockv1"]:not([data-theme="dark"]) .slock-tab-button > span {
+  display: inline;
 }
