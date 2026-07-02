@@ -1042,6 +1042,7 @@
 }
 
 .slock-header-action {
+  display: inline-flex;
   height: 32px;
   min-width: 32px;
   align-items: center;
@@ -1050,6 +1051,7 @@
   border-radius: var(--slock-radius-md);
   background: var(--console-card-soft-bg);
   color: var(--cafe-text-secondary);
+  line-height: 1;
   transition:
     background 120ms ease,
     border-color 120ms ease,
