@@ -679,6 +679,7 @@ kill_managed_ports() {
     if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
         kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
     fi
+    return 0
 }
 
 # 轮询等待端口监听（ML 模型加载需要时间）
