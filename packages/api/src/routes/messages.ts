@@ -104,6 +104,11 @@ import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
+const DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS = 30_000;
+const ORPHAN_DRAFT_CLEANUP_GRACE_MS = Math.max(
+  0,
+  Number(process.env.CAT_CAFE_ORPHAN_DRAFT_CLEANUP_GRACE_MS) || DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS,
+);
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -1756,10 +1761,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // F173 Phase A hotfix3 / stream-catchup repair:
         // Draft persistence can outlive its invocation record when an invocation
         // crashes or is replaced before a formal message is written. Filter those
-        // orphan drafts from the response, but do not delete from the GET path:
-        // a stale/missing InvocationRecord can be corrected by the active
-        // InvocationTracker, while real zombies still expire by DraftStore TTL or
-        // explicit completion/cancel cleanup.
+        // orphan drafts from the response. Once the draft is older than the short
+        // race window, delete it too so canceled/stuck invocations do not keep
+        // reappearing in the first-page merge until the full DraftStore TTL.
         const recoveredDrafts: typeof activeDrafts = [];
         if (activeDrafts.length > 0 && opts.invocationRecordStore) {
           const invocationRecordStore = opts.invocationRecordStore;
@@ -1834,12 +1838,34 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           activeDrafts = checkedActiveDrafts;
 
           if (orphanDrafts.length > 0) {
+            const now = Date.now();
+            const staleOrphanDrafts = orphanDrafts.filter((draft) => {
+              const createdAt = draft.createdAt ?? draft.updatedAt;
+              return now - createdAt >= ORPHAN_DRAFT_CLEANUP_GRACE_MS;
+            });
+            if (staleOrphanDrafts.length > 0) {
+              const cleanupResults = await Promise.allSettled(
+                staleOrphanDrafts.map((draft) => draftStore.delete(userId, resolvedThreadId, draft.invocationId)),
+              );
+              const cleanupFailureCount = cleanupResults.filter((result) => result.status === 'rejected').length;
+              if (cleanupFailureCount > 0) {
+                request.log.warn(
+                  {
+                    threadId: resolvedThreadId,
+                    cleanupFailureCount,
+                    draftIds: staleOrphanDrafts.map((d) => d.invocationId),
+                  },
+                  '#80 draft merge: stale orphan draft cleanup had failures',
+                );
+              }
+            }
             const logPayload = {
               threadId: resolvedThreadId,
               orphanCount: orphanDrafts.length,
               draftIds: orphanDrafts.map((d) => d.invocationId),
               orphanDetails,
-              cleanup: 'ttl_or_completion',
+              cleanup: staleOrphanDrafts.length > 0 ? 'stale_deleted' : 'ttl_or_completion',
+              cleanupDeletedCount: staleOrphanDrafts.length,
             };
             request.log.info(logPayload, '#80 draft merge: filtered orphan drafts');
           }

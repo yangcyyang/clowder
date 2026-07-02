@@ -344,13 +344,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const res = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    // GET /api/cats merges catRegistry (seeded from the global test template) with the
-    // project-local runtime catalog — so the response may include cats beyond the
-    // local template.  Assert that the four locally-bootstrapped cats ARE present.
-    const catIds = body.cats.map((cat) => cat.id);
-    for (const expected of ['codex', 'dare', 'antigravity', 'opencode']) {
-      assert.ok(catIds.includes(expected), `first read should include bootstrapped cat "${expected}"`);
-    }
+    assert.deepEqual(body.cats, [], 'first-run bootstrap creates an empty runtime catalog');
 
     // F171: bootstrapCatCatalog now creates an EMPTY catalog (first-run quest).
     // The catalog file has breeds: [] — cats are served from catRegistry + lazy first-run setup.

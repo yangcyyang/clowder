@@ -474,6 +474,32 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 1, 'GET should not delete orphan drafts');
   });
 
+  it('deletes stale orphan draft when invocation record is missing', async () => {
+    const ts = Date.now() - 31_000;
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-stale-orphan',
+      catId: 'opus',
+      content: 'Old zombie draft from missing invocation',
+      createdAt: ts,
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecords({});
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const orphan = body.messages.find((m) => m.id === 'draft-inv-stale-orphan');
+    assert.equal(orphan, undefined, 'Stale orphan draft should not appear in response');
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 0, 'Stale orphan draft should be deleted');
+  });
+
   it('filters draft without deleting it when invocation record is no longer running (F173 hotfix3)', async () => {
     const ts = Date.now();
     draftStore.upsert({
@@ -561,6 +587,34 @@ describe('GET /api/messages — draft merge (#80)', () => {
       assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 1, 'GET should not delete terminal drafts');
     });
   }
+
+  it('deletes stale draft when invocation record is terminal and no tracker slot is active', async () => {
+    const ts = Date.now() - 31_000;
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-stale-canceled',
+      catId: 'opus',
+      content: 'Old canceled invocation draft',
+      createdAt: ts,
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithInvocationRecords({
+      'inv-stale-canceled': makeInvocationRecord('inv-stale-canceled', 'canceled', ts),
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const terminalDraft = body.messages.find((m) => m.id === 'draft-inv-stale-canceled');
+    assert.equal(terminalDraft, undefined, 'Stale terminal draft should not appear in response');
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 0, 'Stale terminal draft should be deleted');
+  });
 
   it('keeps draft visible when invocation record lookup fails (F173 hotfix3)', async () => {
     const ts = Date.now();
