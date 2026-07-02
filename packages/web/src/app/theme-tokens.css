@@ -350,8 +350,8 @@
 
 [data-visual-theme="slock"] {
   --slock-ink: #000000;
-  --slock-rail-yellow: #ffd83d;
-  --slock-cream: #ffffff;
+  --slock-rail-yellow: #ffd440;
+  --slock-cream: #fffaef;
   --slock-workspace-bg: #ffffff;
   --slock-warm-yellow: #fff0a6;
   --slock-pink-active: #f46fa7;
@@ -388,7 +388,7 @@
   --border-radius-base: 0;
 
   --slock-sidebar-bg: var(--slock-cream);
-  --slock-rail-width: 44px;
+  --slock-rail-width: 64px;
   --slock-sidebar-width: 248px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
@@ -413,7 +413,7 @@
   --clowder-type-section: 12px;
   --clowder-leading-tight: 1.35;
   --clowder-leading-body: 1.55;
-  --clowder-sidebar-bg: #ffffff;
+  --clowder-sidebar-bg: #fffaef;
   --clowder-sidebar-border: #000000;
   --clowder-sidebar-title: #000000;
   --clowder-sidebar-row-text: #000000;
@@ -752,8 +752,8 @@
 
 [data-theme="dark"][data-visual-theme="slock"] {
   --slock-ink: #000000;
-  --slock-rail-yellow: #ffd83d;
-  --slock-cream: #fff9ec;
+  --slock-rail-yellow: #ffd440;
+  --slock-cream: #fffaef;
   --slock-warm-yellow: #fff0a6;
   --slock-pink-active: #f46fa7;
   --slock-pink-hover: #e95b99;
@@ -763,14 +763,14 @@
   --slock-success: #00875a;
 
   --cat-cream-white: #ffffff;
-  --cat-light-sand: #fff9ec;
+  --cat-light-sand: #fffaef;
   --cat-border-tan: #000000;
   --cat-deep-ink: #000000;
   --cat-muted-stone: #8c8c8c;
   --cat-paw-pink: #f46fa7;
 
   --cafe-surface: #ffffff;
-  --cafe-surface-elevated: #fff9ec;
+  --cafe-surface-elevated: #fffaef;
   --cafe-surface-sunken: #fff0a6;
   --cafe-text: #000000;
   --cafe-text-secondary: #5f5f5f;
@@ -788,7 +788,7 @@
   --text-secondary: var(--cafe-text-secondary);
 
   --slock-sidebar-bg: var(--slock-cream);
-  --slock-rail-width: 44px;
+  --slock-rail-width: 64px;
   --slock-sidebar-width: 260px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
@@ -809,8 +809,8 @@
   --border-radius-base: 0;
   --clowder-input-bg: #ffffff;
   --clowder-action-surface: #ffffff;
-  --clowder-running-bar-bg: #fff9ec;
-  --clowder-sidebar-bg: #fff9ec;
+  --clowder-running-bar-bg: #fffaef;
+  --clowder-sidebar-bg: #fffaef;
   --clowder-sidebar-border: #000000;
   --clowder-sidebar-title: #000000;
   --clowder-sidebar-row-text: #000000;

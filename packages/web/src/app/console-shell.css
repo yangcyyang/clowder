@@ -784,25 +784,25 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-rail {
-  background: color-mix(in srgb, var(--slock-rail-yellow) 62%, #ffffff);
+  background: var(--slock-rail-yellow);
   border-right: var(--slock-border-width) solid var(--slock-ink);
-  padding-inline: 4px;
+  padding-inline: 10px;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-button {
   position: relative;
-  width: 32px;
-  height: 32px;
-  border: var(--slock-border-width) solid var(--slock-ink);
+  width: 40px;
+  height: 40px;
+  border: var(--slock-border-width) solid transparent;
   border-radius: 0;
-  background: var(--slock-white);
+  background: transparent;
   color: var(--slock-ink);
   box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button:hover {
-  background: color-mix(in srgb, var(--slock-warm-yellow) 72%, #ffffff);
+  background: color-mix(in srgb, var(--slock-rail-yellow) 76%, #ffffff);
   transform: none;
   box-shadow: none;
 }
@@ -815,27 +815,21 @@
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button[data-active="true"] {
-  background: var(--slock-ink);
-  color: var(--slock-rail-yellow);
+  border-color: var(--slock-ink);
+  background: var(--slock-white);
+  color: var(--slock-ink);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button[data-active="true"]::after {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 10px;
-  height: 10px;
-  border: var(--slock-border-width) solid var(--slock-ink);
-  border-radius: 0;
-  background: var(--slock-pink-active);
-  content: "";
+  display: none;
+  content: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button[data-active="true"]:hover {
-  background: var(--slock-ink);
-  color: var(--slock-rail-yellow);
+  background: var(--slock-white);
+  color: var(--slock-ink);
   transform: none;
 }
 
