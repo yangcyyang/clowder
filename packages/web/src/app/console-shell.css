@@ -789,8 +789,8 @@
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .console-activity-button {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-white);
@@ -801,13 +801,13 @@
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button:hover {
   background: var(--slock-warm-yellow);
-  transform: translate(-1px, -1px);
+  transform: none;
   box-shadow: var(--slock-shadow-soft);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .console-activity-button:active {
-  transform: translate(1px, 1px);
+  transform: none;
   box-shadow: var(--slock-shadow-chip);
 }
 
@@ -834,7 +834,7 @@
   .console-activity-button[data-active="true"]:hover {
   background: var(--slock-ink);
   color: var(--slock-rail-yellow);
-  transform: translate(-1px, -1px);
+  transform: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar {
@@ -844,53 +844,53 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar-header {
-  min-height: 70px;
-  padding: 14px 16px;
+  min-height: 56px;
+  padding: 10px 12px;
   border-bottom: var(--slock-rail-border-width) solid var(--slock-ink);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-thread-sidebar-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 900;
   letter-spacing: 0;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-new-button {
-  min-height: 38px;
+  min-height: 32px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-pink-active);
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-sidebar-new-button:hover {
   background: var(--slock-pink-hover);
-  transform: translate(-1px, -1px);
+  transform: none;
   box-shadow: var(--slock-shadow-icon);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-sidebar-new-button:active {
-  transform: translate(1px, 1px);
+  transform: none;
   box-shadow: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-search-wrap {
-  padding: 14px 16px 12px;
+  padding: 8px 12px 8px;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-search-input {
-  height: 44px;
+  height: 34px;
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
   background: transparent;
   color: var(--slock-ink);
-  font-size: 18px;
-  font-weight: 750;
+  font-size: 14px;
+  font-weight: 650;
   box-shadow: none;
 }
 
@@ -909,18 +909,18 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-quicknav {
-  padding: 2px 12px 14px;
+  padding: 2px 8px 8px;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section {
   margin-top: 0;
-  padding-top: 16px;
+  padding-top: 10px;
   border-top: var(--slock-border-width) solid var(--slock-ink);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section-title {
   color: var(--slock-ink);
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 950;
   letter-spacing: 0.12em;
 }
@@ -931,12 +931,12 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-section-action {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
   color: var(--slock-ink);
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 600;
 }
 
@@ -949,14 +949,15 @@
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row,
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-sidebar-row {
-  min-height: 32px;
-  height: 32px;
+  min-height: 28px;
+  height: 28px;
   border: var(--slock-border-width) solid transparent;
   border-radius: 0;
   background: transparent;
   color: var(--slock-ink);
   box-shadow: 0 0 0 transparent;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 500;
   transition:
     background 120ms ease,
     border-color 120ms ease,
@@ -966,8 +967,8 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row {
-  margin: 0 12px 4px;
-  width: calc(100% - 24px);
+  margin: 0 8px 2px;
+  width: calc(100% - 16px);
   padding-right: 8px;
   padding-left: 8px;
 }
@@ -980,8 +981,8 @@
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-row::before {
   flex: 0 0 auto;
   color: var(--slock-ink);
-  font-size: 23px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1;
   content: "#";
 }
@@ -992,7 +993,7 @@
   background: var(--slock-warm-yellow);
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
-  transform: translate(-1px, -1px);
+  transform: none;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
@@ -1005,7 +1006,7 @@
   background: var(--slock-pink-active);
   color: var(--slock-ink);
   box-shadow: var(--slock-shadow-chip);
-  font-weight: 900;
+  font-weight: 600;
   transform: none;
 }
 
@@ -1074,8 +1075,8 @@
   min-width: 28px;
   align-items: center;
   justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--slock-ink) 18%, transparent);
-  border-radius: 6px;
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 0;
   background: #ffffff;
   color: var(--slock-secondary-text);
   box-shadow: none;
@@ -1100,14 +1101,14 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action:hover {
-  border-color: color-mix(in srgb, var(--slock-ink) 30%, transparent);
+  border-color: var(--slock-ink);
   background: color-mix(in srgb, var(--slock-warm-yellow) 38%, #ffffff);
   color: var(--slock-ink);
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-header-action--active {
-  border-color: color-mix(in srgb, var(--slock-pink-active) 70%, var(--slock-ink));
+  border-color: var(--slock-ink);
   background: color-mix(in srgb, var(--slock-pink-active) 18%, #ffffff);
   color: var(--slock-ink);
 }
@@ -1134,13 +1135,13 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-unread-badge {
-  min-width: 32px;
-  height: 26px;
+  min-width: 24px;
+  height: 20px;
   border: var(--slock-border-width) solid var(--slock-ink);
   border-radius: 0;
   background: var(--slock-pink-active);
   color: var(--slock-white);
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 900;
 }
 

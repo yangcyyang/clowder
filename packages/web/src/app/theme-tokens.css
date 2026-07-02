@@ -389,13 +389,13 @@
 
   --slock-sidebar-bg: var(--slock-cream);
   --slock-rail-width: 52px;
-  --slock-sidebar-width: 260px;
+  --slock-sidebar-width: 248px;
   --slock-channel-width: var(--slock-sidebar-width);
   --slock-context-width: 320px;
   --slock-border-color: var(--slock-ink);
   --slock-border-width: 2px;
   --slock-rail-border-width: 2px;
-  --slock-input-min-height: 86px;
+  --slock-input-min-height: 84px;
   --slock-input-height-min: var(--slock-input-min-height);
   --slock-radius-sm: 0;
   --slock-radius-md: 0;
@@ -406,13 +406,13 @@
   --slock-shadow-icon: none;
   --slock-shadow-chip: none;
 
-  --clowder-type-panel-title: 28px;
-  --clowder-type-body: 17px;
-  --clowder-type-sender: 20px;
-  --clowder-type-meta: 15px;
-  --clowder-type-section: 14px;
+  --clowder-type-panel-title: 20px;
+  --clowder-type-body: 16px;
+  --clowder-type-sender: 14px;
+  --clowder-type-meta: 12px;
+  --clowder-type-section: 12px;
   --clowder-leading-tight: 1.35;
-  --clowder-leading-body: 1.62;
+  --clowder-leading-body: 1.55;
   --clowder-sidebar-bg: #ffffff;
   --clowder-sidebar-border: #000000;
   --clowder-sidebar-title: #000000;
