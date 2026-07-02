@@ -53,9 +53,12 @@ export function MarketplacePanel({
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const previousResultsRef = useRef(results);
 
   // Reset visible count when results change
   useEffect(() => {
+    if (previousResultsRef.current === results) return;
+    previousResultsRef.current = results;
     setVisibleCount(PAGE_SIZE);
   }, [results]);
 
@@ -90,8 +93,12 @@ export function MarketplacePanel({
   );
 
   const handleRetry = useCallback(() => {
-    if (query) search(query);
-  }, [query, search]);
+    if (query) {
+      search(query);
+      return;
+    }
+    browse();
+  }, [browse, query, search]);
 
   useEffect(() => {
     return () => clearSelection();

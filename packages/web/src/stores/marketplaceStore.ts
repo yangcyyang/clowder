@@ -76,7 +76,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   },
 
   browse: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, query: '' });
     try {
       const params = new URLSearchParams();
       const { ecosystemFilter, trustFilter, artifactKindsFilter } = get();

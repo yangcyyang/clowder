@@ -78,7 +78,7 @@ describe('marketplaceStore', () => {
   });
 
   it('search sets loading true then false', async () => {
-    let resolveApi: (v: unknown) => void;
+    let resolveApi: ((v: unknown) => void) | undefined;
     mocks.apiFetch.mockReturnValueOnce(
       new Promise((r) => {
         resolveApi = r;
@@ -89,7 +89,10 @@ describe('marketplaceStore', () => {
     const promise = useMarketplaceStore.getState().search('memory');
     expect(useMarketplaceStore.getState().loading).toBe(true);
 
-    resolveApi!({ json: () => Promise.resolve({ results: [] }) });
+    expect(resolveApi).toBeDefined();
+    const fulfillApi = resolveApi;
+    if (!fulfillApi) throw new Error('api promise resolver was not initialized');
+    fulfillApi({ json: () => Promise.resolve({ results: [] }) });
     await promise;
     expect(useMarketplaceStore.getState().loading).toBe(false);
   });
@@ -137,6 +140,16 @@ describe('marketplaceStore', () => {
 
     expect(mocks.apiFetch).toHaveBeenCalledWith('/api/marketplace/search');
     expect(useMarketplaceStore.getState().results).toHaveLength(1);
+  });
+
+  it('browse clears stale search query', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ results: [] }) });
+    const { useMarketplaceStore } = await import('../marketplaceStore');
+    useMarketplaceStore.setState({ query: 'memory' });
+
+    await useMarketplaceStore.getState().browse();
+
+    expect(useMarketplaceStore.getState().query).toBe('');
   });
 
   it('getInstallPlan fetches plan via POST', async () => {
