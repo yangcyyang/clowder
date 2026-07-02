@@ -330,7 +330,7 @@ const TOOL_QUERY_GUIDE_SECTION = `## 上下文查询指南（按需拉取）
  * L0 Governance Core — Slock-like always-on constitutional floor.
  * Keep this short: every agent sees it, including minimal/default DM responders.
  */
-const GOVERNANCE_CORE_DIGEST = `## 核心家规（shared-rules.md 摘要）
+const GOVERNANCE_CORE_DIGEST = `## 核心协作规则（摘要）
 规则是边界不是全部：先判断角色/事实/直线路径；不适用时用证据+替代方案 Push Back。
 原则：终态/不绕路/方向优先/单一真相源/验证+记忆与项目进度回写。
 协作底线：正确 surface；任务系统+@传球防漏接；行动先认领/复用；交付给证据；危险/不可逆先确认。
@@ -354,7 +354,7 @@ function roughTokenEstimate(text: string): number {
  * F086 post-completion: cats couldn't see shared-rules content, only a link.
  * Design decision: inject detail only for standard/full, not minimal.
  */
-const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
+const GOVERNANCE_OPERATIONAL_DIGEST = `## 协作规则（shared-rules.md）
 原则：P1终态不绕路 P2自主协作 P3方向优先 P4单一真相源 P5可验证 P6回写session P7回写progress。
 操作：不确定先问；bug先写report；可验证子任务及时commit；review必须有明确立场。
 路由：@了谁谁接，做完@下一人；无执行任务不发消息；叙述性提及不用@。
@@ -363,11 +363,11 @@ const GOVERNANCE_OPERATIONAL_DIGEST = `## 家规（shared-rules.md）
 上下文：默认只看最近窗口和摘要；缺 thread 历史用 get_thread_context，缺证据/refs 用 search_evidence，缺 session 接续用 session-chain/digest。
 执行闭环：先认领或复用任务；未认领前不写文件/改代码/启动构建；交付必须附证据；阻塞说明阻塞原因 + 缺什么 + 谁能补。
 输出：中文白话优先；默认一两句话给结论；无任务短路；禁接续检查/记忆命中等协议黑话。
-费曼解释：方案/架构/机制/决策/权衡/排查类回答末尾用生活类比解释。
+解释：方案/架构/机制/决策/权衡/排查类回答可用生活类比，但不要固定套模板标题。
 行为约束：写入 .cat-cafe/memory/{catId}.md 的行为偏好，不靠全局品种管控。
 安全：runtime端口不是沙箱；共享状态只在main改；共享契约热点文件需全量测试。`;
 
-const RULE_PRIORITY_SECTION = `规则优先级：Pack 指令 > 输出协议 > 共享家规 > 角色性格。`;
+const RULE_PRIORITY_SECTION = `规则优先级：Pack 指令 > 输出协议 > 共享协作规则 > 角色性格。`;
 const LESSONS_CONTEXT_BUDGET_RATIO = 0.7;
 const PROJECT_CONTEXT_BUDGET_RATIO = 0.7;
 const MEMORY_SUMMARY_MAX_CHARS = 200;

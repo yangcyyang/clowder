@@ -58,7 +58,7 @@ const INTERNAL_PROGRESS_LINE_PATTERNS = [
 ];
 
 const USER_FACING_LINE_RE =
-  /^(结论|建议|结果|交付|验证|验证证据|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议|费曼版|总结|最终判断|核心判断)(?:\s|[：:]|$)/;
+  /^(结论|建议|结果|交付|验证|验证证据|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议|白话解释|总结|最终判断|核心判断)(?:\s|[：:]|$)/;
 
 function stripInlineArtifacts(text: string): string {
   return text
@@ -67,6 +67,10 @@ function stripInlineArtifacts(text: string): string {
     .replace(COLON_CITATION_RE, '')
     .replace(COMPACT_CITATION_RE, '')
     .replace(TEMP_PATH_RE, '');
+}
+
+function normalizeUserVisibleTerms(text: string): string {
+  return text.replace(/费曼(?:版|解释)?/g, '白话解释');
 }
 
 function isInternalProtocolBlock(block: string): boolean {
@@ -110,7 +114,9 @@ export function sanitizeAgentVisibleOutput(content: string): string {
     if (!block.trim()) continue;
     if (isInternalProtocolBlock(block)) continue;
 
-    const rawLines = block.split('\n').map((line) => stripInlineArtifacts(line).replace(/[ \t]{2,}/g, ' ').trimEnd());
+    const rawLines = block
+      .split('\n')
+      .map((line) => normalizeUserVisibleTerms(stripInlineArtifacts(line)).replace(/[ \t]{2,}/g, ' ').trimEnd());
     const hasInternalProgress = rawLines.some(isInternalProgressLine);
     const hasUserFacingLine = rawLines.some(isUserFacingLine);
 

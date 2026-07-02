@@ -113,7 +113,8 @@ describe('agent output sanitizer', () => {
     assert.ok(output.includes('**✅ 已完成**'));
     assert.ok(output.includes('design-compiler-guide.md'));
     assert.ok(output.includes('**验证证据**'));
-    assert.ok(output.includes('**费曼版**'));
+    assert.ok(output.includes('**白话解释**'));
+    assert.ok(!output.includes('费曼'));
     assert.ok(!output.includes('我开始做指南'));
     assert.ok(!output.includes('证据不够细'));
     assert.ok(!output.includes('我现在认领当前消息'));

@@ -564,18 +564,18 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: false,
     });
 
-    assert.ok(prompt.includes('家规（shared-rules.md）'), 'Should include operational shared-rules digest');
+    assert.ok(prompt.includes('协作规则（shared-rules.md）'), 'Should include operational shared-rules digest');
     assert.ok(prompt.includes('上下文查询指南（按需拉取）'), 'Should include pull-context guide');
     assert.ok(prompt.includes('cat_cafe_get_thread_context'), 'Should point to thread context lookup');
     assert.ok(prompt.includes('cat_cafe_search_evidence'), 'Should point to evidence lookup');
     assert.ok(prompt.includes('中文白话优先'), 'Should require plain-language visible output');
     assert.ok(prompt.includes('无任务短路'), 'Should short-circuit non-task mentions');
     assert.ok(prompt.includes('接续检查'), 'Should ban internal protocol jargon');
-    assert.ok(prompt.includes('费曼解释'), 'Should include Feynman explanation protocol');
-    assert.ok(prompt.includes('方案/架构/机制/决策/权衡/排查'), 'Should scope Feynman explanation to technical reasoning');
+    assert.ok(prompt.includes('生活类比'), 'Should allow plain-language analogies for technical reasoning');
+    assert.ok(!prompt.includes('费曼解释'), 'Should not expose Feynman jargon in prompts');
     assert.ok(prompt.includes('交付必须附证据'), 'Should include delivery verification discipline');
     assert.ok(prompt.includes('规则优先级'), 'Should include rule priority section');
-    assert.ok(prompt.includes('Pack 指令 > 输出协议 > 共享家规 > 角色性格'), 'Should define conflict order');
+    assert.ok(prompt.includes('Pack 指令 > 输出协议 > 共享协作规则 > 角色性格'), 'Should define conflict order');
   });
 
   test('buildStaticIdentity injects durable agent memory with session header', async () => {
@@ -2019,10 +2019,10 @@ describe('SystemPromptBuilder', () => {
 
     const guardPos = prompt.indexOf('PACK_GUARD_MARKER');
     const defaultPos = prompt.indexOf('PACK_DEFAULT_MARKER');
-    // Core governance (L0 家规) must come before pack guardrails
-    const coreGovPos = prompt.indexOf('家规');
+    // Core governance must come before pack guardrails.
+    const coreGovPos = prompt.indexOf('协作规则');
 
-    assert.ok(coreGovPos > -1, 'Core governance (家规) should exist in prompt');
+    assert.ok(coreGovPos > -1, 'Core governance should exist in prompt');
     assert.ok(guardPos > coreGovPos, 'Pack guardrails must come AFTER core governance (KD-9)');
     assert.ok(defaultPos > guardPos, 'Pack defaults must come after pack guardrails');
   });
@@ -2082,7 +2082,7 @@ describe('SystemPromptBuilder', () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const prompt = buildStaticIdentity('opus', { toolPolicy: 'minimal' });
 
-    assert.ok(prompt.includes('核心家规（shared-rules.md 摘要）'), 'minimal should keep the core governance floor');
+    assert.ok(prompt.includes('核心协作规则（摘要）'), 'minimal should keep the core governance floor');
     assert.ok(prompt.includes('完整规则按需查阅'), 'minimal should point to the full source of truth');
     assert.ok(!prompt.includes('46 hotfix止血治理'), 'minimal should not carry operational governance details');
     assert.ok(!prompt.includes('缅因猫fallback层数检测'), 'minimal should not carry breed-specific operational audit text');
@@ -2092,8 +2092,8 @@ describe('SystemPromptBuilder', () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const prompt = buildStaticIdentity('opus', { toolPolicy: 'standard' });
 
-    assert.ok(prompt.includes('家规（shared-rules.md）'), 'standard should keep the operational governance digest');
-    assert.ok(prompt.includes('费曼解释'), 'standard should include Feynman explanation governance');
+    assert.ok(prompt.includes('协作规则（shared-rules.md）'), 'standard should keep the operational governance digest');
+    assert.ok(!prompt.includes('费曼解释'), 'standard should not expose Feynman jargon');
     assert.ok(prompt.includes('中文白话优先'), 'standard should include user-readable output rule');
     assert.ok(prompt.includes('无任务短路'), 'standard should include no-task mention short-circuit');
     assert.ok(prompt.includes('没人认领的任务留在 board 可见'), 'standard should include task-board anti-drop rule');
