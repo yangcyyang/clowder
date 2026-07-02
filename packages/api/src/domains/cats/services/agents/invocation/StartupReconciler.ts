@@ -40,6 +40,14 @@ interface MessageAppender {
   append(msg: AppendMessageInput): unknown;
   /** Read the original user message so a crashed running invocation can be requeued. */
   getById?(id: string): { content: string } | null | Promise<{ content: string } | null>;
+  /** Recent thread messages, used only to suppress duplicate restart notices. */
+  getByThread?(
+    threadId: string,
+    limit?: number,
+    userId?: string,
+  ): Array<{ content?: string; timestamp?: number; source?: ConnectorSource }> | Promise<
+    Array<{ content?: string; timestamp?: number; source?: ConnectorSource }>
+  >;
   /** Mark a queued message as delivered (make visible in timeline). */
   markDelivered?(id: string, deliveredAt: number): unknown;
 }
@@ -76,6 +84,8 @@ const RECONCILER_SOURCE: ConnectorSource = {
   icon: '⚠️',
   meta: { presentation: 'system_notice', noticeTone: 'warning' },
 };
+
+const RESTART_NOTICE_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 export interface StartupReconcilerDeps {
   invocationRecordStore: IInvocationRecordStore;
@@ -238,6 +248,7 @@ export class StartupReconciler {
         requeued > 0
           ? `服务刚重启，已自动恢复 ${catLabel} 的 ${requeued} 个进行中请求，正在继续回复；已发送的消息会保留。`
           : `服务刚重启，${catLabel} 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。`;
+      if (await this.hasRecentDuplicateNotice(threadId, content)) continue;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
       let timestamp = Date.now();
@@ -291,6 +302,24 @@ export class StartupReconciler {
       if (persisted || broadcasted) notified++;
     }
     return notified;
+  }
+
+  private async hasRecentDuplicateNotice(threadId: string, content: string): Promise<boolean> {
+    const getByThread = this.deps.messageStore?.getByThread;
+    if (!getByThread) return false;
+
+    try {
+      const recent = await getByThread.call(this.deps.messageStore, threadId, 20);
+      const cutoff = Date.now() - RESTART_NOTICE_DEDUPE_WINDOW_MS;
+      return recent.some((msg) => {
+        if (msg.source?.connector !== RECONCILER_SOURCE.connector) return false;
+        if (msg.content !== content) return false;
+        return typeof msg.timestamp !== 'number' || msg.timestamp >= cutoff;
+      });
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to inspect recent notifications: ${String(err)}`);
+      return false;
+    }
   }
 
   private async tryRequeueRunningInvocation(record: InvocationRecord): Promise<boolean> {

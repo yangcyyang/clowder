@@ -196,6 +196,25 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     meta: { presentation: 'system_notice', noticeTone: tone },
   });
 
+  const taskStatusLabel = (status: TaskItem['status']): string => {
+    switch (status) {
+      case 'todo':
+        return '待办';
+      case 'doing':
+        return '进行中';
+      case 'in_review':
+        return '待验收';
+      case 'done':
+        return '已完成';
+      case 'blocked':
+        return '阻塞';
+      case 'failed':
+        return '失败';
+      default:
+        return status;
+    }
+  };
+
   async function getTaskInThread(threadId: string, taskId: string): Promise<TaskItem | null> {
     const task = await taskStore.get(taskId);
     if (!task || task.threadId !== threadId) return null;
@@ -259,7 +278,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   async function appendTaskCreateNotice(task: TaskItem): Promise<void> {
     const label = await getTaskLabel(task);
     const verb = task.sourceMessageId ? '已从消息创建' : '已创建';
-    await appendTaskSystemNotice(task, `📋 ${verb} ${label}：${task.title}`);
+    await appendTaskSystemNotice(task, `${verb} ${label}：${task.title}`);
   }
 
   async function appendTaskUpdateNotices(previous: TaskItem | null, current: TaskItem): Promise<void> {
@@ -268,19 +287,26 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     if (previous.ownerCatId !== current.ownerCatId) {
       if (current.ownerCatId) {
-        await appendTaskSystemNotice(current, `👤 ${label} 已由 ${current.ownerCatId} 认领。`);
+        await appendTaskSystemNotice(current, `${label} 已由 ${current.ownerCatId} 认领。`);
       } else if (previous.ownerCatId) {
-        await appendTaskSystemNotice(current, `👤 ${label} 已取消认领。`);
+        await appendTaskSystemNotice(current, `${label} 已取消认领。`);
       }
     }
 
     if (previous.status !== current.status) {
       if (current.status === 'done') {
-        await appendTaskSystemNotice(current, `✅ ${label} 已完成：${current.title}`, 'success');
+        await appendTaskSystemNotice(current, `${label} 已完成：${current.title}`, 'success');
       } else if (current.status === 'blocked' || current.status === 'failed') {
-        await appendTaskSystemNotice(current, `⚠️ ${label} 状态：${previous.status} → ${current.status}。`, 'warning');
+        await appendTaskSystemNotice(
+          current,
+          `${label} 状态：${taskStatusLabel(previous.status)} → ${taskStatusLabel(current.status)}。`,
+          'warning',
+        );
       } else {
-        await appendTaskSystemNotice(current, `🔁 ${label} 状态：${previous.status} → ${current.status}。`);
+        await appendTaskSystemNotice(
+          current,
+          `${label} 状态：${taskStatusLabel(previous.status)} → ${taskStatusLabel(current.status)}。`,
+        );
       }
     }
   }

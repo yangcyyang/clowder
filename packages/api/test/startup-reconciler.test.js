@@ -684,6 +684,44 @@ describe('StartupReconciler', () => {
     );
   });
 
+  test('suppresses duplicate restart notice already visible in recent thread history', async () => {
+    store.seed(makeRecord({ id: 'dup-restart-1', threadId: 'thread-restart', status: 'running', targetCats: ['opus'] }));
+
+    const content = '服务刚重启，opus 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。';
+    const appendedMessages = [];
+    const messageStore = {
+      append(msg) {
+        appendedMessages.push(msg);
+        return { ...msg, id: `msg-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
+      },
+      getByThread(threadId, limit) {
+        assert.equal(threadId, 'thread-restart');
+        assert.equal(limit, 20);
+        return [
+          {
+            id: 'recent-notice',
+            threadId,
+            content,
+            timestamp: Date.now() - 30_000,
+            source: { connector: 'startup-reconciler' },
+          },
+        ];
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.notifiedThreads, 0);
+    assert.equal(appendedMessages.length, 0);
+  });
+
   test('AC-A+4: notification failure does not block startup (best-effort)', async () => {
     store.seed(makeRecord({ id: 'be1', threadId: 'thread-y', status: 'running', targetCats: ['opus'] }));
 

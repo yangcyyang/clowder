@@ -17,6 +17,17 @@ describe('shouldRenderChatMessage', () => {
     expect(shouldRenderChatMessage(message({ isStreaming: false }))).toBe(false);
   });
 
+  it('hides skills budget warning-only assistant messages', () => {
+    expect(
+      shouldRenderChatMessage(
+        message({
+          content:
+            '⚠️ Exceeded skills context budget of 2%. All skill descriptions were removed and 257 additional skills were not included in the model-visible skills list.',
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps user messages and assistant messages with visible content', () => {
     expect(shouldRenderChatMessage(message({ type: 'user', catId: undefined, content: '' }))).toBe(true);
     expect(shouldRenderChatMessage(message({ content: '交付完成' }))).toBe(true);

@@ -305,7 +305,7 @@ describe('Tasks Routes', () => {
     const events = socketManager.getEvents();
     assert.equal(events.length, 4);
     assert.equal(events[2].event, 'task_updated');
-    assert.match(events[3].data.message.content, /状态：todo → doing/);
+    assert.match(events[3].data.message.content, /状态：待办 → 进行中/);
   });
 
   test('PATCH emits user task_attention when work task enters review', async () => {

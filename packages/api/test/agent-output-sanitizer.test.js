@@ -181,4 +181,17 @@ describe('agent output sanitizer', () => {
 
     assert.equal(output, '结论：锚点消息说明当前任务应该先确认来源文件，再继续执行。');
   });
+
+  test('drops model-visible skills budget warning lines', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '结论：任务已经完成。',
+      '',
+      '⚠️ Exceeded skills context budget of 2%. All skill descriptions were removed and 257 additional skills were not included in the model-visible skills list.',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：任务已经完成。');
+  });
 });

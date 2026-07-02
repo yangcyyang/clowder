@@ -44,6 +44,24 @@ describe('SystemNoticeBar', () => {
     expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);
   });
 
+  it('renders notices as compact fit-content bars instead of full-width cards', () => {
+    const html = renderNotice({
+      content: '已从消息创建 task #1：确认',
+      timestamp: new Date('2026-04-16T12:34:00+08:00').getTime(),
+      source: {
+        connector: 'task-system',
+        label: 'Task',
+        icon: '📋',
+        meta: { noticeTone: 'info' },
+      },
+    });
+
+    expect(html).toContain('w-fit');
+    expect(html).toContain('max-w-[85%]');
+    expect(html).not.toContain(' w-full');
+    expect(html).toContain('rounded-[var(--slock-radius-sm)]');
+  });
+
   it('keeps warning emphasis in metadata while leaving the notice body on the shared cafe palette', () => {
     const html = renderNotice({
       content: '服务刚重启，opus 的进行中请求已中断，请重新发送。',

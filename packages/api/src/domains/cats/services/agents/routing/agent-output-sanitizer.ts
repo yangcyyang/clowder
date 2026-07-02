@@ -12,6 +12,8 @@ const INTERNAL_PROTOCOL_PATTERNS = [
   /\bin_review\b/i,
   /\bclowder\s+task\b/i,
   /\bclowder\s+message\b/i,
+  /Exceeded\s+skills\s+context\s+budget/i,
+  /model-visible\s+skills\s+list/i,
 ];
 
 const INTERNAL_PROGRESS_LINE_PATTERNS = [
@@ -51,6 +53,8 @@ const INTERNAL_PROGRESS_LINE_PATTERNS = [
   /找到可用.*API/i,
   /我看完.*上下文/,
   /我再扩一圈/,
+  /Exceeded\s+skills\s+context\s+budget/i,
+  /model-visible\s+skills\s+list/i,
 ];
 
 const USER_FACING_LINE_RE =

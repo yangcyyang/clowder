@@ -213,6 +213,19 @@ body {
   background: color-mix(in srgb, var(--notice-surface) 90%, transparent);
 }
 
+.system-notice-bar .markdown-content > :is(p, ul, ol):first-child {
+  margin-top: 0;
+}
+
+.system-notice-bar .markdown-content > :is(p, ul, ol):last-child {
+  margin-bottom: 0;
+}
+
+.system-notice-bar .markdown-content p {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
 @keyframes system-notice-enter {
   from {
     opacity: 0;

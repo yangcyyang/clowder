@@ -39,6 +39,7 @@ const SCHEDULER_ACCENT_BUBBLE_CLASS = 'border-l-2 border-conn-amber-text/50 pl-3
 const MODEL_SIGNATURE_LINE_RE = /^\s*\[[^\]]*(?:gpt|opus|claude|codex|gemini|kimi|模型)[^\]]*(?:🐾|📋)?\]\s*$/i;
 const MODEL_METADATA_LINE_RE = /\bmodel\s*=\s*[a-z0-9._/-]+/i;
 const IDENTITY_PREAMBLE_RE = /当前会话身份标注|身份标注为/i;
+const SKILLS_BUDGET_WARNING_RE = /Exceeded\s+skills\s+context\s+budget|model-visible\s+skills\s+list/i;
 
 function sanitizeAgentVisibleContent(content: string): string {
   const lines = content.split(/\r?\n/);
@@ -48,6 +49,7 @@ function sanitizeAgentVisibleContent(content: string): string {
     if (MODEL_SIGNATURE_LINE_RE.test(line)) continue;
     if (MODEL_METADATA_LINE_RE.test(line)) continue;
     if (IDENTITY_PREAMBLE_RE.test(line)) continue;
+    if (SKILLS_BUDGET_WARNING_RE.test(line)) continue;
     cleaned.push(line);
   }
 

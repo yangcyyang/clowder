@@ -40,15 +40,15 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
 
   return (
     <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
-      <div className="max-w-[85%] w-full">
+      <div className="w-fit max-w-[85%]">
         <div className="flex items-center gap-2 mb-1 px-1">
           <span className="system-notice-bar__label text-xs font-medium">{source.label}</span>
           <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
         </div>
         <div
-          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-2xl px-4 py-3 text-cafe-secondary`}
+          className={`system-notice-bar ${tone !== 'info' ? 'system-notice-bar--alert' : ''} rounded-[var(--slock-radius-sm)] px-3 py-2 text-cafe-secondary`}
         >
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-2.5">
             <span className="system-notice-bar__icon leading-none mt-0.5">
               <NoticeIcon icon={source.icon} />
             </span>
