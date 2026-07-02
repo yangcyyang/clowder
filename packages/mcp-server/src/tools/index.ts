@@ -125,3 +125,10 @@ export {
   signalSummarizeInputSchema,
   signalsTools,
 } from './signals-tools.js';
+export {
+  handleListSkills,
+  handleReadSkill,
+  listSkillsInputSchema,
+  readSkillInputSchema,
+  skillTools,
+} from './skill-tools.js';

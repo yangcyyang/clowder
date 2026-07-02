@@ -203,9 +203,21 @@ function scoreSkillMatch(message: string, skill: SkillRouterCatalogEntry): numbe
   return score;
 }
 
+function matchExplicitCommand(message: string, skills: SkillRouterCatalogEntry[]): SkillRouterCatalogEntry | null {
+  if (!message.startsWith('/')) return null;
+  const command = message.slice(1).split(/\s+/)[0].toLowerCase();
+  if (!command) return null;
+  return skills.find((s) => s.name.toLowerCase() === command) ?? null;
+}
+
 function matchSkills(userMessageText: string, skills: SkillRouterCatalogEntry[]): SkillRouterCatalogEntry[] {
   const message = userMessageText.trim();
   if (!message) return [];
+
+  // 显式 /command 优先
+  const explicit = matchExplicitCommand(message, skills);
+  if (explicit) return [explicit];
+
   return skills
     .map((skill) => ({ skill, score: scoreSkillMatch(message, skill) }))
     .filter((item) => item.score > 0)
@@ -243,9 +255,8 @@ export function resolveSkillRouterContext(userMessageText: string | undefined): 
 
   const matchedSkills = matchSkills(userMessageText ?? '', skills);
   const lines = [
-    '## Skill Router（可用 Skill 菜单）',
-    '你可以在任务相关时使用下列 cat-cafe skills。先看用户任务是否命中 triggers；命中后优先遵循对应 SKILL.md，但不要为了使用而使用。',
-    ...buildMenuLines(skills),
+    '## Skill Router',
+    '你可以使用 cat-cafe skills 来辅助任务。用 `cat_cafe_list_skills` 查看可用 skill 列表，用 `cat_cafe_read_skill` 查看具体内容。',
   ];
 
   if (matchedSkills.length > 0) {
@@ -253,9 +264,7 @@ export function resolveSkillRouterContext(userMessageText: string | undefined): 
       '',
       '## Skill Router 命中',
       `本轮根据用户消息命中 skill: ${matchedSkills.map((skill) => skill.name).join(', ')}`,
-      '请先按命中的 SKILL.md 执行；如果 skill 与用户明确要求冲突，以用户要求和安全边界为准。',
-      '',
-      ...matchedSkills.map(formatSkillContent),
+      '请用 `cat_cafe_read_skill` 查看对应 SKILL.md 后执行；如果 skill 与用户明确要求冲突，以用户要求和安全边界为准。',
     );
   }
 

@@ -13,6 +13,7 @@ import {
   shellTools,
   signalStudyTools,
   signalsTools,
+  skillTools,
 } from './tools/index.js';
 
 type ToolDef = {
@@ -40,6 +41,9 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  // Skill router pull model (read-only local catalog)
+  'cat_cafe_list_skills',
+  'cat_cafe_read_skill',
   // Signals (read-only)
   'signal_list_inbox',
   'signal_get_article',
@@ -87,6 +91,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...evidenceTools,
   ...reflectTools,
   ...sessionChainTools,
+  ...skillTools,
 ]);
 
 const signalTools: readonly ToolDef[] = applyReadonlyFilter([...signalsTools, ...signalStudyTools]);
