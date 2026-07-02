@@ -34,9 +34,9 @@ function SettingsShellInner() {
   }
 
   return (
-    <div className="console-shell flex h-full min-h-0 overflow-hidden bg-[var(--console-shell-bg)]">
+    <div className="console-shell flex h-full min-h-0 flex-col overflow-hidden bg-[var(--console-shell-bg)] md:flex-row">
       <aside
-        className="flex w-[220px] flex-shrink-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]"
+        className="hidden w-[220px] flex-shrink-0 flex-col overflow-hidden bg-[var(--console-panel-bg)] md:flex"
         data-console-panel="settings-nav"
       >
         <div className="px-4 pt-4 pb-2">
@@ -47,9 +47,19 @@ function SettingsShellInner() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="space-y-5 px-8 py-7">
-          <SettingsContent section={activeSection} />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div
+          className="border-b border-[var(--slock-border-color)] bg-[var(--console-panel-bg)] px-4 py-3 md:hidden"
+          data-console-panel="settings-mobile-nav"
+        >
+          <h1 className="mb-2 text-lg font-bold text-cafe">设置</h1>
+          <SettingsNav activeSection={activeSection} onSelect={handleSelect} variant="strip" />
+        </div>
+
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="space-y-5 px-4 py-5 sm:px-6 md:px-8 md:py-7">
+            <SettingsContent section={activeSection} />
+          </div>
         </div>
       </div>
     </div>

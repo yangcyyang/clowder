@@ -9,6 +9,7 @@ interface SettingsNavProps {
   activeSection: string;
   onSelect: (sectionId: string) => void;
   searchQuery?: string;
+  variant?: 'sidebar' | 'strip';
 }
 
 function NavItem({
@@ -17,21 +18,27 @@ function NavItem({
   pinned,
   onPin,
   onSelect,
+  variant = 'sidebar',
 }: {
   section: SettingsSection;
   active: boolean;
   pinned: boolean;
   onPin: () => void;
   onSelect: () => void;
+  variant?: 'sidebar' | 'strip';
 }) {
+  const isStrip = variant === 'strip';
+
   return (
-    <div className="group relative flex items-center">
+    <div className={`group relative flex items-center ${isStrip ? 'shrink-0' : ''}`}>
       <button
         type="button"
         onClick={onSelect}
         data-guide-id={`settings.${section.id}`}
         data-active={active ? 'true' : 'false'}
-        className={`flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-left transition-colors ${active ? 'bg-[var(--console-active-bg)] font-medium' : 'hover:bg-[var(--console-hover-bg)]'}`}
+        className={`flex h-9 items-center gap-2 rounded-lg px-2.5 text-left transition-colors ${
+          isStrip ? 'w-auto whitespace-nowrap' : 'w-full'
+        } ${active ? 'bg-[var(--console-active-bg)] font-medium' : 'hover:bg-[var(--console-hover-bg)]'}`}
         style={
           active
             ? ({
@@ -51,29 +58,32 @@ function NavItem({
           {section.label}
         </span>
       </button>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onPin();
-        }}
-        className={`absolute right-1 h-6 w-6 flex items-center justify-center rounded transition-opacity ${
-          pinned
-            ? 'opacity-80 text-cafe-secondary'
-            : 'opacity-0 pointer-events-none group-hover:opacity-60 group-hover:pointer-events-auto text-cafe-muted hover:text-cafe-secondary'
-        }`}
-        title={pinned ? '取消固定到侧栏' : '固定到侧栏'}
-      >
-        <svg
-          viewBox="0 0 16 16"
-          fill={pinned ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="1.2"
-          className="h-3 w-3"
+      {!isStrip && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPin();
+          }}
+          className={`absolute right-1 h-6 w-6 flex items-center justify-center rounded transition-opacity ${
+            pinned
+              ? 'opacity-80 text-cafe-secondary'
+              : 'opacity-0 pointer-events-none group-hover:opacity-60 group-hover:pointer-events-auto focus-visible:opacity-60 focus-visible:pointer-events-auto text-cafe-muted hover:text-cafe-secondary'
+          }`}
+          title={pinned ? '取消固定到侧栏' : '固定到侧栏'}
         >
-          <path d="M9.5 1.5l5 5-3 1-2 3-3.5-3.5-4 4M6.5 7L3 10.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            fill={pinned ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            strokeWidth="1.2"
+            className="h-3 w-3"
+          >
+            <path d="M9.5 1.5l5 5-3 1-2 3-3.5-3.5-4 4M6.5 7L3 10.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -92,7 +102,7 @@ const SECTION_KEYWORDS: Record<string, string> = {
   ops: '运维 监控 排行 记忆 健康 命令 救援 usage',
 };
 
-export function SettingsNav({ activeSection, onSelect, searchQuery }: SettingsNavProps) {
+export function SettingsNav({ activeSection, onSelect, searchQuery, variant = 'sidebar' }: SettingsNavProps) {
   const { isPinned, pin, unpin } = usePinnedSections();
   const q = searchQuery?.toLowerCase().trim() ?? '';
   const filtered = q
@@ -105,7 +115,10 @@ export function SettingsNav({ activeSection, onSelect, searchQuery }: SettingsNa
     : SETTINGS_SECTIONS;
 
   return (
-    <nav className="flex flex-col gap-0.5" aria-label="设置导航">
+    <nav
+      className={variant === 'strip' ? 'flex min-w-0 flex-row gap-1.5 overflow-x-auto pb-1' : 'flex flex-col gap-0.5'}
+      aria-label="设置导航"
+    >
       {filtered.length === 0 && q ? (
         <p className="console-card-soft rounded-xl px-4 py-3 text-xs text-cafe-muted">没有匹配的设置分区</p>
       ) : (
@@ -117,6 +130,7 @@ export function SettingsNav({ activeSection, onSelect, searchQuery }: SettingsNa
             pinned={isPinned(section.id)}
             onPin={() => (isPinned(section.id) ? unpin(section.id) : pin(section.id))}
             onSelect={() => onSelect(section.id)}
+            variant={variant}
           />
         ))
       )}

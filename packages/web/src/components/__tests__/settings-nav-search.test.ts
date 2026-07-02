@@ -15,6 +15,7 @@ vi.mock('@/hooks/usePinnedSections', () => ({
 }));
 
 import { SettingsNav } from '../settings/SettingsNav';
+import { SETTINGS_SECTIONS } from '../settings/settings-nav-config';
 
 describe('SettingsNav search filtering', () => {
   let container: HTMLDivElement;
@@ -41,12 +42,12 @@ describe('SettingsNav search filtering', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders all 11 sections when no search query', () => {
+  it('renders all sections when no search query', () => {
     act(() => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(11);
+    expect(buttons).toHaveLength(SETTINGS_SECTIONS.length);
     expect(container.textContent).toContain('规则与 SOP');
   });
 
