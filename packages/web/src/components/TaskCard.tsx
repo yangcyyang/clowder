@@ -8,6 +8,7 @@ import {
   summarizeTaskUsage,
   type InvocationUsageSummary,
 } from '@/utils/invocationCostPanel';
+import { getUsageRisk } from '@/utils/usageRisk';
 import type { PromptSource, PromptSourceBreakdown } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
 import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
@@ -83,6 +84,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
+  const usageRisk = getUsageRisk(usage);
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-cafe-muted">
       {usage.totalTokens != null && (
@@ -100,17 +102,31 @@ function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
           {formatDuration(usage.durationMs)}
         </span>
       )}
+      {usageRisk && (
+        <span
+          className="rounded-full border border-conn-red-text/40 bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
+          title={usageRisk.reason}
+        >
+          {usageRisk.label}
+        </span>
+      )}
     </div>
   );
 }
 
 function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
   const label = [usage.catId, usage.model].filter(Boolean).join(' · ');
+  const usageRisk = getUsageRisk(usage);
   return (
     <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-[10px]">
       <div className="mb-1 flex items-center gap-1 text-cafe-muted">
         <span className="font-semibold text-cafe-secondary">{label || usage.catId}</span>
         {usage.provider && <span>· {usage.provider}</span>}
+        {usageRisk && (
+          <span className="rounded-full bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text" title={usageRisk.reason}>
+            {usageRisk.label}
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-cafe-muted tabular-nums">
         {usage.inputTokens != null && <span>input {formatTokenCount(usage.inputTokens)}</span>}

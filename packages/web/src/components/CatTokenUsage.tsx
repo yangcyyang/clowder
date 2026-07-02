@@ -3,6 +3,7 @@
 import { useCountUp } from '@/hooks/useCountUp';
 import type { ContextHealthData, TokenUsage } from '@/stores/chat-types';
 import { isInvocationCostPanelEnabled } from '@/utils/invocationCostPanel';
+import { getUsageRisk } from '@/utils/usageRisk';
 import { ContextHealthBar } from './ContextHealthBar';
 import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
 import { TokenCacheBar } from './TokenCacheBar';
@@ -69,6 +70,7 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
   const contextResetDay = usage.contextResetsAtMs != null ? formatMonthDay(usage.contextResetsAtMs) : '';
   const contextResetLabel = contextResetDay ? `(resets ${contextResetDay})` : null;
   const showCostPanel = isInvocationCostPanelEnabled();
+  const usageRisk = getUsageRisk(usage);
 
   return (
     <div className="mt-1.5 space-y-1 animate-fade-in" data-testid={`token-usage-${catId}`}>
@@ -127,6 +129,14 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
         )}
         {showCostPanel && usage.durationMs != null && (
           <span className="text-cafe-muted">duration {formatDuration(usage.durationMs)}</span>
+        )}
+        {usageRisk && (
+          <span
+            className="rounded-full border border-conn-red-text/40 bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
+            title={usageRisk.reason}
+          >
+            {usageRisk.label}
+          </span>
         )}
       </div>
 

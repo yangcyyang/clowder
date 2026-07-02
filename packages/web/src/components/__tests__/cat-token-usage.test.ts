@@ -152,4 +152,16 @@ describe('F8: CatTokenUsage (dynamic redesign)', () => {
     expect(html).toContain('Context: 28% left (186,749 used / 258K)');
     expect(html).toContain('(resets 2月18日)');
   });
+
+  it('marks high-cost invocations as high usage', () => {
+    const html = render('opus', {
+      inputTokens: 527969,
+      cacheCreationTokens: 527545,
+      outputTokens: 248,
+      costUsd: 10.57,
+    });
+
+    expect(html).toContain('高消耗');
+    expect(html).toContain('cost &gt;= $5');
+  });
 });
