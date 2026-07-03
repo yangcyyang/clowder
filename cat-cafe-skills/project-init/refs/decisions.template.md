@@ -1,3 +1,10 @@
+---
+doc_kind: project-decisions
+topics: [project-context, {{PROJECT_NAME}}]
+created: "{{ISO_DATE}}"
+creator: "{{CREATOR}}"
+---
+
 # {{PROJECT_NAME}} — 决策记录
 
 > 创建时间：{{ISO_DATE}}

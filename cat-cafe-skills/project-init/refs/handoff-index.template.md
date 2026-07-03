@@ -1,3 +1,10 @@
+---
+doc_kind: project-handoff-index
+topics: [project-context, handoff, {{PROJECT_NAME}}]
+created: "{{ISO_DATE}}"
+creator: "{{CREATOR}}"
+---
+
 # {{PROJECT_NAME}} — 交接索引
 
 > 创建时间：{{ISO_DATE}}

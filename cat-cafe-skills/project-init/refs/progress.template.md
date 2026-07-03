@@ -1,3 +1,10 @@
+---
+doc_kind: project-progress
+topics: [project-context, {{PROJECT_NAME}}]
+created: "{{ISO_DATE}}"
+updated: "{{ISO_DATE}}"
+---
+
 # {{PROJECT_NAME}} — 项目进度
 
 ## 项目状态

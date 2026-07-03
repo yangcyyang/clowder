@@ -1,3 +1,10 @@
+---
+doc_kind: project-brief
+topics: [project-context, {{PROJECT_NAME}}]
+created: "{{ISO_DATE}}"
+creator: "{{CREATOR}}"
+---
+
 # {{PROJECT_NAME}}
 
 > 创建时间：{{ISO_DATE}}
