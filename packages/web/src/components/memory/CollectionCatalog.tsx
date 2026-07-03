@@ -110,6 +110,10 @@ export function CollectionCatalog() {
 
   return (
     <div className="grid gap-3" data-testid="collection-catalog">
+      <div className="rounded-lg border border-cafe bg-[var(--cafe-surface)] px-4 py-3 text-xs leading-6 text-cafe-secondary">
+        <span className="font-semibold text-cafe-primary">只读知识库说明：</span>
+        Obsidian/外部目录的真实边界是本机文件系统权限；Clowder 只读取内容并写索引缓存，不修改原 vault。
+      </div>
       {collections.map((c) => {
         const isExpanded = expandedId === c.manifest.id;
         return (

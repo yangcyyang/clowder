@@ -6,7 +6,10 @@ import { SettingsPageHeader } from './SettingsPageHeader';
 export function MarketplaceContent() {
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="能力市场" subtitle="搜索和安装 MCP、Skill、插件等能力包" />
+      <SettingsPageHeader
+        title="能力市场"
+        subtitle="安装前先看来源和权限风险；Clowder 只提供预览、确认和审计安全网"
+      />
       <MarketplacePanel />
     </div>
   );

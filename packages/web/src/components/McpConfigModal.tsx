@@ -139,12 +139,17 @@ export function McpConfigModal({
             </h2>
             {!readOnly && !isEdit && (
               <p className="text-xs text-cafe-secondary">
-                新增 STDIO MCP 使用同一浅色表单骨架；类型切换只改变字段集合。
+                新增 MCP 会写入配置闸门；真实访问范围仍由 OS、进程和远端账号权限决定。
               </p>
             )}
             {!readOnly && isHttpEdit && (
               <p className="text-xs text-cafe-secondary">
-                HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。
+                HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。Clowder 的开关和审计是安全网，不是远端权限沙箱。
+              </p>
+            )}
+            {readOnly && (
+              <p className="text-xs text-cafe-secondary">
+                此处是只读查看；工具实际能力由 MCP 进程、系统权限和远端授权决定。
               </p>
             )}
           </div>

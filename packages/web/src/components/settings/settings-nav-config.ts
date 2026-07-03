@@ -47,7 +47,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: 'MCP 管理',
     icon: 'box',
     color: 'var(--cafe-accent)',
-    description: 'MCP 服务、工具目录和浏览器自动化依赖。',
+    description: 'MCP 服务、工具目录和安全网开关；真实边界仍由 OS/远端权限决定。',
     group: 'advanced',
   },
   {
@@ -63,7 +63,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: '能力市场',
     icon: 'search',
     color: 'var(--cafe-accent)',
-    description: '搜索和安装 MCP、Skill、插件等能力包。',
+    description: '搜索安装能力包，安装前预览来源、权限风险和确认流程。',
     group: 'advanced',
   },
   {

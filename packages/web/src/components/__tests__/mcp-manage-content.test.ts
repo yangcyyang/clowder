@@ -85,18 +85,19 @@ describe('McpManageContent', () => {
     });
     expect(container.textContent).toContain('pencil');
     expect(container.textContent).toContain('custom-mcp');
-    expect(container.textContent).toContain('marketplace');
+    expect(container.textContent).toContain('权限边界');
   });
 
-  it('clicking trash on external MCP calls soft DELETE (no hard=true)', async () => {
+  it('clicking trash on external MCP calls hard DELETE after confirmation', async () => {
     await act(async () => {
       root.render(React.createElement(McpManageContent));
     });
 
-    const trashButtons = container.querySelectorAll('button[title="禁用此 MCP"]');
+    const trashButtons = container.querySelectorAll('button[title="卸载此 MCP"]');
     expect(trashButtons.length).toBeGreaterThan(0);
 
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     await act(async () => {
       (trashButtons[0] as HTMLButtonElement).click();
@@ -107,7 +108,8 @@ describe('McpManageContent', () => {
     );
     expect(deleteCalls.length).toBe(1);
     expect(deleteCalls[0][0]).toContain('/api/capabilities/mcp/');
-    expect(deleteCalls[0][0]).not.toContain('hard=true');
+    expect(deleteCalls[0][0]).toContain('hard=true');
+    confirmSpy.mockRestore();
   });
 
   it('clicking external MCP card opens config modal', async () => {
@@ -146,7 +148,7 @@ describe('McpManageContent', () => {
       candidate.textContent?.includes('custom-mcp'),
     );
     expect(card).toBeTruthy();
-    expect(card?.querySelector('button[title="禁用此 MCP"]')?.className).toContain('settings-resource-action');
+    expect(card?.querySelector('button[title="卸载此 MCP"]')?.className).toContain('settings-resource-action');
     expect(card?.querySelector('button[title="按猫开关"]')?.className).toContain('settings-resource-action');
     expect(card?.querySelector('button[title="禁用"]')?.className).toContain('settings-resource-toggle');
   });
@@ -164,6 +166,6 @@ describe('McpManageContent', () => {
     const actionTitles = Array.from(card?.querySelectorAll('.settings-resource-actions button') ?? []).map((button) =>
       button.getAttribute('title'),
     );
-    expect(actionTitles).toEqual(['禁用', '按猫开关', '禁用此 MCP']);
+    expect(actionTitles).toEqual(['禁用', '按猫开关', '卸载此 MCP']);
   });
 });

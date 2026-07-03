@@ -57,7 +57,7 @@ export function McpManageContent() {
 
   return (
     <div className="space-y-5">
-      <SettingsPageHeader title="MCP 管理" subtitle="点击卡片预览/编辑">
+      <SettingsPageHeader title="MCP 管理" subtitle="点击卡片预览/编辑；开关是安全网，不是系统沙箱">
         <button
           type="button"
           onClick={handleCreate}
@@ -66,6 +66,11 @@ export function McpManageContent() {
           新增 MCP
         </button>
       </SettingsPageHeader>
+
+      <div className="console-card-soft rounded-xl px-4 py-3 text-xs leading-6 text-cafe-secondary">
+        <span className="font-semibold text-cafe">权限边界：</span>
+        本地进程、文件系统和远端账号授权才是真边界；Clowder 的全局开关、按猫启用、确认和审计只是安全网。
+      </div>
 
       {cap.loading && (
         <div className="space-y-3">

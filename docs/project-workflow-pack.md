@@ -180,6 +180,7 @@ P0 excludes:
 
 Clowder can mount an Obsidian vault as a read-only knowledge collection.
 This is for retrieval and citation only.
+See [Clowder 权限边界两层说明](./security-permission-boundaries.md) for the security boundary contract.
 
 Configure:
 
@@ -193,6 +194,11 @@ Behavior:
 - writes only Clowder index cache under `~/.cat-cafe/library/`
 - skips `.obsidian/`
 - requires explicit rebuild before fresh content appears in search
+
+Boundary:
+- real boundary is the local OS / filesystem permission of the Clowder process
+- Clowder read-only collection behavior is a safety net, not an OS-level read-only mount
+- secret quarantine excludes matched files from the index; it does not delete files or rotate credentials
 
 Rebuild locally:
 
@@ -212,6 +218,8 @@ Search results include `sourcePath`, so an agent can cite the original note path
 
 Figma MCP and opencli-style browser tools are allowed only through the capability system.
 They must not be silently enabled by an agent.
+The real boundary is the OS process permission, browser/Figma account permission, and remote service authorization.
+Clowder provides install preview, disabled-by-default config, per-task enablement, confirmation, and audit as safety nets.
 
 Install preview policy:
 - Figma/opencli MCP entries are created with `enabled=false`
@@ -232,7 +240,7 @@ User requests Figma/opencli task
 ```
 
 This phase creates the first safety gate.
-It does not grant broad tool execution permission by itself.
+It does not grant broad tool execution permission by itself, and it is not a sandbox by itself.
 
 ## Acceptance Criteria
 

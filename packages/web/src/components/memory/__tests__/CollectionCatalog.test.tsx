@@ -70,6 +70,7 @@ describe('CollectionCatalog expand/collapse', () => {
 
     const card = container.querySelector('[data-testid="collection-card-world:pilot"]') as HTMLElement;
     expect(card).not.toBeNull();
+    expect(container.textContent).toContain('只读知识库说明');
 
     const headerBtn = card.querySelector('button[aria-expanded]') as HTMLButtonElement;
     expect(headerBtn).not.toBeNull();

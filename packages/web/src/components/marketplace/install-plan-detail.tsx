@@ -62,7 +62,7 @@ export function InstallPlanDetail({
           setInstallResult({ type: 'error', message: data.error ?? `安装失败 (${res.status})` });
           return;
         }
-        setInstallResult({ type: 'success', message: '已安装，MCP 配置已写入' });
+        setInstallResult({ type: 'success', message: '已安装，MCP 配置已写入；仍需按能力开关和任务范围启用' });
         onInstalled?.();
       } catch {
         setInstallResult({ type: 'error', message: '网络错误' });
@@ -120,6 +120,11 @@ export function InstallPlanDetail({
       </div>
 
       <p className="text-xs leading-relaxed text-cafe-secondary">{result.componentSummary}</p>
+
+      <div className="console-card-soft rounded-xl px-3 py-2.5 text-xs leading-6 text-cafe-secondary">
+        <span className="font-semibold text-cafe">权限边界：</span>
+        OS/文件系统/进程隔离或远端服务授权才是真边界；安装预览、确认弹窗、能力开关和审计记录是 Clowder 的安全网。
+      </div>
 
       <div className="flex items-center gap-2">
         <button
