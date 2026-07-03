@@ -85,6 +85,7 @@ function formatRelativeTime(timestamp: number): string {
 
 function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
   const usageRisk = getUsageRisk(usage);
+  const historyObservation = formatHistoryObservation(usage);
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-cafe-muted">
       {usage.totalTokens != null && (
@@ -102,6 +103,14 @@ function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
           {formatDuration(usage.durationMs)}
         </span>
       )}
+      {historyObservation && (
+        <span
+          className="rounded-full border border-[var(--console-border-soft)] bg-cafe-surface px-1.5 py-0.5 tabular-nums"
+          title={usage.historyGovernanceDegraded ? 'history governance observation degraded' : undefined}
+        >
+          {historyObservation}
+        </span>
+      )}
       {usageRisk && (
         <span
           className="rounded-full border border-conn-red-text/40 bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
@@ -117,6 +126,7 @@ function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
 function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
   const label = [usage.catId, usage.model].filter(Boolean).join(' · ');
   const usageRisk = getUsageRisk(usage);
+  const historyObservation = formatHistoryObservation(usage);
   return (
     <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-[10px]">
       <div className="mb-1 flex items-center gap-1 text-cafe-muted">
@@ -135,10 +145,23 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
         {usage.outputTokens != null && <span>output {formatTokenCount(usage.outputTokens)}</span>}
         {usage.costUsd != null && <span className="text-conn-amber-text">cost {formatCost(usage.costUsd)}</span>}
         {usage.durationMs != null && <span>duration {formatDuration(usage.durationMs)}</span>}
+        {historyObservation && (
+          <span title={usage.historyGovernanceDegraded ? 'history governance observation degraded' : undefined}>
+            {historyObservation}
+          </span>
+        )}
       </div>
       {usage.sourceBreakdown && <UsageSourceBreakdown breakdown={usage.sourceBreakdown} />}
     </div>
   );
+}
+
+function formatHistoryObservation(usage: InvocationUsageSummary): string | null {
+  const parts: string[] = [];
+  if (usage.historyFullTokens != null) parts.push(`history ${formatTokenCount(usage.historyFullTokens)}`);
+  if (usage.historyBudgetRatio != null) parts.push(`${Math.round(usage.historyBudgetRatio * 100)}%`);
+  if (usage.historyGovernanceDegraded) parts.push('degraded');
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function UsageSourceBreakdown({ breakdown }: { breakdown: PromptSourceBreakdown }) {

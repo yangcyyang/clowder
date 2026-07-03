@@ -56,6 +56,17 @@ export interface RuntimeContextBudgetSnapshot {
   usesFullHistory: boolean;
   maxPromptTokens: number;
   maxContextTokens: number;
+  historyMode?: 'observe';
+  historyFullTokens?: number;
+  historyBudgetRatio?: number;
+  historyGovernanceDegraded?: boolean;
+}
+
+export interface HistoryGovernanceObservation {
+  historyMode: 'observe';
+  historyFullTokens: number;
+  historyBudgetRatio: number;
+  historyGovernanceDegraded: boolean;
 }
 
 export interface RuntimeContextSurfaceHint {
@@ -78,6 +89,41 @@ export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'hi
   if (ratio >= 0.85) return 'high';
   if (ratio >= 0.7) return 'caution';
   return 'none';
+}
+
+function isEnabledValue(value: string | undefined): boolean {
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on' || value === 'observe';
+}
+
+export function isHistoryGovernanceObserveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE) || env.CAT_CAFE_HISTORY_GOVERNANCE === 'observe';
+}
+
+export function estimateFullHistoryTokens(messages: readonly StoredMessage[] | undefined): number {
+  if (!messages || messages.length === 0) return 0;
+  const delivered = messages.filter(
+    (m) => isDelivered(m) && m.userId !== 'system' && !(m.catId && m.content?.startsWith('[错误]')),
+  );
+  if (delivered.length === 0) return 0;
+  const lines = delivered.map((m) => `[${m.id}] ${formatMessage(m)}`);
+  return estimateTokens(`[对话历史 - 全量观测 ${lines.length} 条]\n${lines.join('\n')}\n[/对话历史]`);
+}
+
+export function buildHistoryGovernanceObservation(input: {
+  enabled?: boolean;
+  historyFullTokens: number;
+  maxPromptTokens: number;
+  degraded?: boolean | undefined;
+}): HistoryGovernanceObservation | undefined {
+  if (!input.enabled) return undefined;
+  const historyFullTokens = Math.max(0, Math.ceil(input.historyFullTokens));
+  const maxPromptTokens = Math.max(0, Math.floor(input.maxPromptTokens));
+  return {
+    historyMode: 'observe',
+    historyFullTokens,
+    historyBudgetRatio: maxPromptTokens > 0 ? historyFullTokens / maxPromptTokens : 0,
+    historyGovernanceDegraded: Boolean(input.degraded) || maxPromptTokens <= 0,
+  };
 }
 
 export function buildContextUsageWarning(input: {
@@ -196,6 +242,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   governanceEstimatedTokens: number;
   hasGovernanceSourceContext: boolean;
   catBudget: ReturnType<typeof getCatContextBudget>;
+  historyObservation?: HistoryGovernanceObservation;
 }): RuntimeContextBudgetSnapshot {
   const loadedBlocks = ['current-message', 'static-identity'];
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
@@ -248,6 +295,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
     usesFullHistory: historyCount > 0 && includedHistoryCount >= historyCount,
     maxPromptTokens: input.catBudget.maxPromptTokens,
     maxContextTokens: input.catBudget.maxContextTokens,
+    ...(input.historyObservation ?? {}),
   };
 }
 
@@ -273,6 +321,27 @@ export interface RouteStrategyDeps {
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup (optional, fail-open) */
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
+}
+
+export interface HistoryGovernanceHistorySnapshot {
+  messages: readonly StoredMessage[];
+  degraded: boolean;
+}
+
+export async function readHistoryForGovernanceObservation(
+  deps: RouteStrategyDeps,
+  threadId: string,
+  userId: string,
+  history: readonly StoredMessage[] | undefined,
+): Promise<HistoryGovernanceHistorySnapshot> {
+  if (history) return { messages: history, degraded: false };
+  try {
+    const messages = await deps.messageStore.getByThreadAfter(threadId, undefined, undefined, userId);
+    return { messages, degraded: false };
+  } catch (err) {
+    log.warn({ err, threadId, userId }, 'history governance observation failed to read full thread history');
+    return { messages: [], degraded: true };
+  }
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.

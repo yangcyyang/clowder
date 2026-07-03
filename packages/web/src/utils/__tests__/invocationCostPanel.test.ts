@@ -30,6 +30,10 @@ describe('invocationCostPanel', () => {
           data: {
             inputTokens: 1000,
             outputTokens: 500,
+            historyMode: 'observe',
+            historyFullTokens: 12000,
+            historyBudgetRatio: 0.4,
+            historyGovernanceDegraded: false,
             sourceBreakdown: {
               totalEstimatedTokens: 1000,
               sources: [
@@ -46,6 +50,10 @@ describe('invocationCostPanel', () => {
           data: {
             inputTokens: 2000,
             outputTokens: 1000,
+            historyMode: 'observe',
+            historyFullTokens: 18000,
+            historyBudgetRatio: 0.6,
+            historyGovernanceDegraded: true,
             sourceBreakdown: {
               totalEstimatedTokens: 1500,
               sources: [
@@ -59,6 +67,18 @@ describe('invocationCostPanel', () => {
     );
 
     const total = summarizeTaskUsage(summaries);
+    expect(summaries[0]).toMatchObject({
+      historyMode: 'observe',
+      historyFullTokens: 12000,
+      historyBudgetRatio: 0.4,
+      historyGovernanceDegraded: false,
+    });
+    expect(total).toMatchObject({
+      historyMode: 'observe',
+      historyFullTokens: 18000,
+      historyBudgetRatio: 0.6,
+      historyGovernanceDegraded: true,
+    });
     expect(total?.sourceBreakdown).toEqual({
       totalEstimatedTokens: 2500,
       sources: [

@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
-const { assembleIncrementalContext, buildAgentStageGate, buildRuntimeContextBudgetSnapshot } = await import(
-  '../dist/domains/cats/services/agents/routing/route-helpers.js'
-);
+const {
+  assembleIncrementalContext,
+  buildAgentStageGate,
+  buildHistoryGovernanceObservation,
+  buildRuntimeContextBudgetSnapshot,
+  estimateFullHistoryTokens,
+} = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
@@ -182,6 +186,71 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
 
     assert.ok(snapshot.loadedBlocks.includes('project-progress:on-demand'));
     assert.ok(snapshot.skippedBlocks.includes('project-progress'));
+  });
+
+  test('runtime context budget snapshot exposes observe-only history governance fields', async () => {
+    const budget = getCatContextBudget('opus');
+    const messageStore = new MessageStore();
+    const seeded = seedMessages(messageStore, 3);
+    messageStore.append(mockMsg({ userId: 'system', content: 'system notice must not count' }));
+
+    const history = [...seeded, messageStore.getRecent(1, 'system')[0]].filter(Boolean);
+    const historyFullTokens = estimateFullHistoryTokens(history);
+    const historyObservation = buildHistoryGovernanceObservation({
+      enabled: true,
+      historyFullTokens,
+      maxPromptTokens: budget.maxPromptTokens,
+    });
+
+    assert.ok(historyFullTokens > 0);
+    assert.equal(historyObservation?.historyMode, 'observe');
+    assert.equal(historyObservation?.historyFullTokens, historyFullTokens);
+
+    const snapshot = buildRuntimeContextBudgetSnapshot({
+      threadId: 'thread-1',
+      toolPolicy: 'standard',
+      toolPolicySource: 'agent-default',
+      mode: 'serial',
+      prompt: 'hi',
+      staticIdentity: 'identity',
+      historyCount: history.length,
+      includedHistoryCount: 1,
+      loadStandardContext: true,
+      loadFullContext: false,
+      hasPackBlocks: false,
+      hasWorldContext: false,
+      hasSessionBootstrap: false,
+      hasSignalArticles: false,
+      hasAlwaysOnDocs: false,
+      hasSopHint: false,
+      hasGuideContext: false,
+      hasMcpInstructions: false,
+      hasAgentMemory: false,
+      hasLessonsContext: false,
+      hasProjectContext: false,
+      projectContextDeferred: false,
+      governanceTier: 'operational',
+      governanceEstimatedTokens: 120,
+      hasGovernanceSourceContext: false,
+      catBudget: budget,
+      historyObservation,
+    });
+
+    assert.equal(snapshot.historyMode, 'observe');
+    assert.equal(snapshot.historyFullTokens, historyFullTokens);
+    assert.equal(snapshot.historyBudgetRatio, historyFullTokens / budget.maxPromptTokens);
+    assert.equal(snapshot.historyGovernanceDegraded, false);
+    assert.equal(snapshot.historyMessages, 1, 'observe-only must not change included history count');
+  });
+
+  test('history governance observation is absent when observe flag is off', () => {
+    const observation = buildHistoryGovernanceObservation({
+      enabled: false,
+      historyFullTokens: 12000,
+      maxPromptTokens: 30000,
+    });
+
+    assert.equal(observation, undefined);
   });
 
   test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {

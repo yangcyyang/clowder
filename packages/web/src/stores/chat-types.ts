@@ -55,6 +55,14 @@ export interface TokenUsage {
   contextResetsAtMs?: number;
   /** Estimated prompt-source composition. Display-only, not provider billing truth. */
   sourceBreakdown?: PromptSourceBreakdown;
+  /** Phase 3A history governance mode. Observe-only never changes the prompt. */
+  historyMode?: 'observe';
+  /** Estimated tokens of the full delivered thread history before context trimming. */
+  historyFullTokens?: number;
+  /** historyFullTokens / maxPromptTokens for the current invocation. */
+  historyBudgetRatio?: number;
+  /** True when the history governance observation had to fall back/degrade. */
+  historyGovernanceDegraded?: boolean;
 }
 
 export interface ChatMessageMetadata {
@@ -499,6 +507,10 @@ export interface CatInvocationInfo {
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;
+    historyMode?: 'observe';
+    historyFullTokens?: number;
+    historyBudgetRatio?: number;
+    historyGovernanceDegraded?: boolean;
   };
   durationMs?: number;
   startedAt?: number;

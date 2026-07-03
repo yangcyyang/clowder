@@ -173,6 +173,55 @@ describe('useAgentMessages system_info invocation_created', () => {
     expect(rawJsonBubble).toBeUndefined();
   });
 
+  it('preserves history governance fields from invocation_created contextBudget', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({
+          type: 'invocation_created',
+          invocationId: 'inv-history-observe',
+          contextBudget: {
+            threadId: 'thread-1',
+            toolPolicy: 'standard',
+            toolPolicySource: 'agent-default',
+            mode: 'serial',
+            estimatedTokens: 1800,
+            historyMessages: 12,
+            loadedBlocks: ['current-message'],
+            skippedBlocks: [],
+            governanceTier: 'core',
+            governanceEstimatedTokens: 240,
+            governanceSourceInjected: true,
+            usesFullHistory: false,
+            maxPromptTokens: 30000,
+            maxContextTokens: 40000,
+            historyMode: 'observe',
+            historyFullTokens: 12000,
+            historyBudgetRatio: 0.4,
+            historyGovernanceDegraded: false,
+          },
+        }),
+      });
+    });
+
+    expect(mockSetCatInvocation).toHaveBeenCalledWith(
+      'codex',
+      expect.objectContaining({
+        contextBudget: expect.objectContaining({
+          historyMode: 'observe',
+          historyFullTokens: 12000,
+          historyBudgetRatio: 0.4,
+          historyGovernanceDegraded: false,
+        }),
+      }),
+    );
+  });
+
   it('binds stream invocation identity onto an existing placeholder bubble when invocation_created arrives late', () => {
     storeState.messages = [
       {

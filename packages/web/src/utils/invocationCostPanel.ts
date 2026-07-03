@@ -17,6 +17,10 @@ export interface InvocationUsageSummary {
   durationMs?: number;
   durationApiMs?: number;
   sourceBreakdown?: PromptSourceBreakdown;
+  historyMode?: 'observe';
+  historyFullTokens?: number;
+  historyBudgetRatio?: number;
+  historyGovernanceDegraded?: boolean;
 }
 
 export function isInvocationCostPanelEnabled(): boolean {
@@ -98,6 +102,14 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     durationApiMs: asNumber(data.durationApiMs),
     sourceBreakdown: readSourceBreakdown(data.sourceBreakdown),
   };
+  if (data.historyMode === 'observe') summary.historyMode = 'observe';
+  const historyFullTokens = asNumber(data.historyFullTokens);
+  if (historyFullTokens != null) summary.historyFullTokens = historyFullTokens;
+  const historyBudgetRatio = asNumber(data.historyBudgetRatio);
+  if (historyBudgetRatio != null) summary.historyBudgetRatio = historyBudgetRatio;
+  if (typeof data.historyGovernanceDegraded === 'boolean') {
+    summary.historyGovernanceDegraded = data.historyGovernanceDegraded;
+  }
   const hasSignal =
     summary.inputTokens != null ||
     summary.outputTokens != null ||
@@ -107,7 +119,11 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     summary.costUsd != null ||
     summary.durationMs != null ||
     summary.durationApiMs != null ||
-    summary.sourceBreakdown != null;
+    summary.sourceBreakdown != null ||
+    summary.historyMode != null ||
+    summary.historyFullTokens != null ||
+    summary.historyBudgetRatio != null ||
+    summary.historyGovernanceDegraded != null;
   return hasSignal ? summary : null;
 }
 
@@ -128,6 +144,12 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
     total.durationMs = (total.durationMs ?? 0) + (event.durationMs ?? 0);
     total.durationApiMs = (total.durationApiMs ?? 0) + (event.durationApiMs ?? 0);
     total.sourceBreakdown = mergeSourceBreakdown(total.sourceBreakdown, event.sourceBreakdown);
+    if (event.historyMode != null) total.historyMode = event.historyMode;
+    if (event.historyFullTokens != null) total.historyFullTokens = event.historyFullTokens;
+    if (event.historyBudgetRatio != null) total.historyBudgetRatio = event.historyBudgetRatio;
+    if (event.historyGovernanceDegraded != null) {
+      total.historyGovernanceDegraded = event.historyGovernanceDegraded;
+    }
   }
   return total;
 }

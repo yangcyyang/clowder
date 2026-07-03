@@ -581,6 +581,16 @@ export class QueueProcessor {
                 ...(aggregate.usage.durationMs != null ? { durationMs: aggregate.usage.durationMs } : {}),
                 ...(aggregate.usage.durationApiMs != null ? { durationApiMs: aggregate.usage.durationApiMs } : {}),
                 ...(aggregate.usage.sourceBreakdown ? { sourceBreakdown: aggregate.usage.sourceBreakdown } : {}),
+                ...(aggregate.usage.historyMode ? { historyMode: aggregate.usage.historyMode } : {}),
+                ...(aggregate.usage.historyFullTokens != null
+                  ? { historyFullTokens: aggregate.usage.historyFullTokens }
+                  : {}),
+                ...(aggregate.usage.historyBudgetRatio != null
+                  ? { historyBudgetRatio: aggregate.usage.historyBudgetRatio }
+                  : {}),
+                ...(aggregate.usage.historyGovernanceDegraded != null
+                  ? { historyGovernanceDegraded: aggregate.usage.historyGovernanceDegraded }
+                  : {}),
               },
             },
           ],
