@@ -1,9 +1,15 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from '../hub-icons';
-import { SETTINGS_SECTIONS, type SettingsSection } from './settings-nav-config';
+import {
+  isDailySettingsSection,
+  SETTINGS_GROUP_LABELS,
+  SETTINGS_SECTIONS,
+  type SettingsSection,
+  type SettingsSectionGroup,
+} from './settings-nav-config';
 
 interface SettingsNavProps {
   activeSection: string;
@@ -16,6 +22,7 @@ function NavItem({
   section,
   active,
   pinned,
+  pinningEnabled,
   onPin,
   onSelect,
   variant = 'sidebar',
@@ -23,6 +30,7 @@ function NavItem({
   section: SettingsSection;
   active: boolean;
   pinned: boolean;
+  pinningEnabled: boolean;
   onPin: () => void;
   onSelect: () => void;
   variant?: 'sidebar' | 'strip';
@@ -58,7 +66,7 @@ function NavItem({
           {section.label}
         </span>
       </button>
-      {!isStrip && (
+      {!isStrip && pinningEnabled && (
         <button
           type="button"
           onClick={(e) => {
@@ -88,6 +96,8 @@ function NavItem({
   );
 }
 
+const SETTINGS_GROUP_ORDER: SettingsSectionGroup[] = ['basic', 'advanced', 'experimental'];
+
 const SECTION_KEYWORDS: Record<string, string> = {
   members: '猫猫 成员 名册 roster cat',
   accounts: '密钥 API key 账号 credentials',
@@ -104,6 +114,7 @@ const SECTION_KEYWORDS: Record<string, string> = {
 
 export function SettingsNav({ activeSection, onSelect, searchQuery, variant = 'sidebar' }: SettingsNavProps) {
   const { isPinned, pin, unpin } = usePinnedSections();
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<SettingsSectionGroup>>(() => new Set(['basic']));
   const q = searchQuery?.toLowerCase().trim() ?? '';
   const filtered = q
     ? SETTINGS_SECTIONS.filter(
@@ -112,7 +123,34 @@ export function SettingsNav({ activeSection, onSelect, searchQuery, variant = 's
           s.id.toLowerCase().includes(q) ||
           (SECTION_KEYWORDS[s.id] ?? '').toLowerCase().includes(q),
       )
-    : SETTINGS_SECTIONS;
+    : variant === 'strip'
+      ? SETTINGS_SECTIONS.filter(isDailySettingsSection)
+      : SETTINGS_SECTIONS;
+
+  const renderItem = (section: SettingsSection) => (
+    <NavItem
+      key={section.id}
+      section={section}
+      active={section.id === activeSection}
+      pinned={isPinned(section.id)}
+      pinningEnabled={isDailySettingsSection(section)}
+      onPin={() => (isPinned(section.id) ? unpin(section.id) : pin(section.id))}
+      onSelect={() => onSelect(section.id)}
+      variant={variant}
+    />
+  );
+
+  const toggleGroup = (group: SettingsSectionGroup) => {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) {
+        next.delete(group);
+      } else {
+        next.add(group);
+      }
+      return next;
+    });
+  };
 
   return (
     <nav
@@ -121,18 +159,31 @@ export function SettingsNav({ activeSection, onSelect, searchQuery, variant = 's
     >
       {filtered.length === 0 && q ? (
         <p className="console-card-soft rounded-xl px-4 py-3 text-xs text-cafe-muted">没有匹配的设置分区</p>
+      ) : q || variant === 'strip' ? (
+        filtered.map(renderItem)
       ) : (
-        filtered.map((section) => (
-          <NavItem
-            key={section.id}
-            section={section}
-            active={section.id === activeSection}
-            pinned={isPinned(section.id)}
-            onPin={() => (isPinned(section.id) ? unpin(section.id) : pin(section.id))}
-            onSelect={() => onSelect(section.id)}
-            variant={variant}
-          />
-        ))
+        SETTINGS_GROUP_ORDER.map((group) => {
+          const sections = filtered.filter((section) => section.group === group);
+          if (sections.length === 0) return null;
+          const expanded = expandedGroups.has(group);
+          if (group === 'basic') {
+            return <div key={group} className="contents">{sections.map(renderItem)}</div>;
+          }
+          return (
+            <div key={group} className="mt-2">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group)}
+                className="flex w-full items-center justify-between rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted hover:bg-[var(--console-hover-bg)]"
+                aria-expanded={expanded}
+              >
+                <span>{SETTINGS_GROUP_LABELS[group]}</span>
+                <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+              </button>
+              {expanded && <div className="mt-1 flex flex-col gap-0.5">{sections.map(renderItem)}</div>}
+            </div>
+          );
+        })
       )}
     </nav>
   );

@@ -43,6 +43,7 @@ vi.mock('@/components/hub-icons', () => ({
 
 vi.mock('@/components/settings/settings-nav-config', () => ({
   SETTINGS_SECTIONS: [],
+  isDailySettingsSection: () => true,
 }));
 
 import { ActivityBar } from '@/components/ActivityBar';
@@ -80,19 +81,13 @@ describe('ActivityBar referrer forwarding (P2 fix)', () => {
     expect(mockPush).toHaveBeenCalledWith('/mission-hub?from=thread-abc');
   });
 
-  it('appends ?from=threadId when navigating to global search', () => {
+  it('does not render global search as a primary rail entry', () => {
     React.act(() => {
       root.render(React.createElement(ActivityBar));
     });
 
     const searchBtn = container.querySelector('button[title="搜索"]') as HTMLElement;
-    expect(searchBtn).toBeTruthy();
-
-    React.act(() => {
-      searchBtn.click();
-    });
-
-    expect(mockPush).toHaveBeenCalledWith('/search?from=thread-abc');
+    expect(searchBtn).toBeNull();
   });
 
   it('appends ?from=threadId when navigating to memory', () => {

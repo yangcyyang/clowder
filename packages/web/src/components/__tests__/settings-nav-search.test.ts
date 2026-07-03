@@ -15,7 +15,7 @@ vi.mock('@/hooks/usePinnedSections', () => ({
 }));
 
 import { SettingsNav } from '../settings/SettingsNav';
-import { SETTINGS_SECTIONS } from '../settings/settings-nav-config';
+import { isDailySettingsSection, SETTINGS_SECTIONS } from '../settings/settings-nav-config';
 
 describe('SettingsNav search filtering', () => {
   let container: HTMLDivElement;
@@ -42,13 +42,32 @@ describe('SettingsNav search filtering', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders all sections when no search query', () => {
+  it('renders only daily sections when no search query', () => {
     act(() => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(SETTINGS_SECTIONS.length);
+    expect(buttons).toHaveLength(SETTINGS_SECTIONS.filter(isDailySettingsSection).length);
     expect(container.textContent).toContain('规则与 SOP');
+    expect(container.textContent).not.toContain('MCP 管理');
+    expect(container.textContent).toContain('高级');
+  });
+
+  it('reveals advanced sections after expanding the advanced group', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+    const advancedToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('高级'),
+    );
+    expect(advancedToggle).toBeTruthy();
+
+    act(() => {
+      advancedToggle!.click();
+    });
+
+    expect(container.textContent).toContain('MCP 管理');
+    expect(container.textContent).toContain('运维监控');
   });
 
   it('filters sections by label match', () => {
@@ -71,6 +90,15 @@ describe('SettingsNav search filtering', () => {
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('IM 对接');
+  });
+
+  it('search can find advanced sections while they are collapsed by default', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'MCP' }));
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('MCP 管理');
   });
 
   it('filters governance keywords to the rules and SOP section', () => {

@@ -1,9 +1,12 @@
+export type SettingsSectionGroup = 'basic' | 'advanced' | 'experimental';
+
 export interface SettingsSection {
   id: string;
   label: string;
   icon: string;
   color: string;
   description: string;
+  group: SettingsSectionGroup;
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -13,6 +16,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'users',
     color: 'var(--color-opus-primary)',
     description: '成员名册、默认协作对象与编排顺序。',
+    group: 'basic',
   },
   {
     id: 'accounts',
@@ -20,6 +24,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'key',
     color: 'var(--color-opus-primary)',
     description: '模型账户、凭据和执行身份的归属关系。',
+    group: 'basic',
   },
   {
     id: 'im',
@@ -27,6 +32,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'plug',
     color: 'var(--cafe-accent)',
     description: '飞书、钉钉、企微和外部消息入口。',
+    group: 'basic',
   },
   {
     id: 'skills',
@@ -34,6 +40,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'zap',
     color: 'var(--cafe-accent)',
     description: '技能市场、安装计划和本地能力预览。',
+    group: 'basic',
   },
   {
     id: 'mcp',
@@ -41,6 +48,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'box',
     color: 'var(--cafe-accent)',
     description: 'MCP 服务、工具目录和浏览器自动化依赖。',
+    group: 'advanced',
   },
   {
     id: 'plugins',
@@ -48,6 +56,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'puzzle',
     color: 'var(--cafe-accent)',
     description: '插件状态、外部集成以及安装结果。',
+    group: 'advanced',
   },
   {
     id: 'marketplace',
@@ -55,6 +64,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'search',
     color: 'var(--cafe-accent)',
     description: '搜索和安装 MCP、Skill、插件等能力包。',
+    group: 'advanced',
   },
   {
     id: 'voice',
@@ -62,6 +72,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'mic',
     color: 'var(--color-gemini-primary)',
     description: '语音输入输出、术语表和 TTS 服务状态。',
+    group: 'basic',
   },
   {
     id: 'system',
@@ -69,6 +80,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'settings',
     color: 'var(--color-gemini-primary)',
     description: '环境选项、默认行为和运行时总开关。',
+    group: 'basic',
   },
   {
     id: 'rules',
@@ -76,6 +88,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'file-text',
     color: 'var(--color-gemini-primary)',
     description: '家规、协作 SOP 和模型提示词入口。',
+    group: 'basic',
   },
   {
     id: 'notify',
@@ -83,6 +96,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'bell',
     color: 'var(--color-gemini-primary)',
     description: '推送订阅、提醒策略与设备联动。',
+    group: 'basic',
   },
   {
     id: 'ops',
@@ -90,7 +104,18 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: 'activity',
     color: 'var(--color-gemini-primary)',
     description: '服务健康、命令工具和运行态观测。',
+    group: 'advanced',
   },
 ];
+
+export const SETTINGS_GROUP_LABELS: Record<SettingsSectionGroup, string> = {
+  basic: '基础设置',
+  advanced: '高级',
+  experimental: '实验区',
+};
+
+export function isDailySettingsSection(section: SettingsSection): boolean {
+  return section.group === 'basic';
+}
 
 export const DEFAULT_SECTION = 'members';

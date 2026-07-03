@@ -8,7 +8,7 @@
 
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Stub heavy children — we only test the subtab routing.
 vi.mock('../HubCallbackAuthPanel', () => ({
@@ -18,12 +18,20 @@ vi.mock('../HubTraceTree', () => ({
   TraceBrowser: () => <div data-testid="trace-browser">trace-browser</div>,
 }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+const callbackAuthAvailableMock = vi.hoisted(() => vi.fn(() => true));
+vi.mock('@/stores/callbackAuthStore', () => ({
+  useCallbackAuthAvailable: callbackAuthAvailableMock,
+}));
 
 import { HubObservabilityTab } from '../HubObservabilityTab';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
 describe('HubObservabilityTab deep-link sync (F174 D2b-3 cloud P1 #1403)', () => {
+  afterEach(() => {
+    callbackAuthAvailableMock.mockReturnValue(true);
+  });
+
   it('switches active subtab when initialSubTab prop changes after mount', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -106,6 +114,25 @@ describe('HubObservabilityTab deep-link sync (F174 D2b-3 cloud P1 #1403)', () =>
       root.render(<HubObservabilityTab />);
     });
     expect(container.querySelector('[data-testid="callback-auth-panel"]')).toBeNull();
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('hides callback-auth subtab when callback auth is unavailable', async () => {
+    callbackAuthAvailableMock.mockReturnValue(false);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<HubObservabilityTab initialSubTab="callback-auth" />);
+    });
+
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Callback Auth')).toBe(false);
+    expect(container.querySelector('[data-testid="callback-auth-panel"]')).toBeNull();
+
     await act(async () => {
       root.unmount();
     });

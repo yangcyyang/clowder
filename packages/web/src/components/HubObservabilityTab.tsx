@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallbackAuthAvailable } from '@/stores/callbackAuthStore';
 import { apiFetch } from '@/utils/api-client';
 import { HubCallbackAuthPanel } from './HubCallbackAuthPanel';
 import { TraceBrowser } from './HubTraceTree';
@@ -47,17 +48,25 @@ export interface HubObservabilityTabProps {
 
 export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }: HubObservabilityTabProps = {}) {
   const [subTab, setSubTab] = useState<SubTab>(initialSubTab);
+  const callbackAuthAvailable = useCallbackAuthAvailable();
+  const visibleSubTabs = callbackAuthAvailable ? SUB_TABS : SUB_TABS.filter((t) => t !== 'callback-auth');
 
   // Sync prop → state on every initialSubTab change OR per-invocation nonce
   // bump. The nonce dep handles the same-value re-deep-link case (cloud P2).
   useEffect(() => {
-    setSubTab(initialSubTab);
-  }, [initialSubTab, subTabNonce]);
+    setSubTab(initialSubTab === 'callback-auth' && !callbackAuthAvailable ? 'overview' : initialSubTab);
+  }, [callbackAuthAvailable, initialSubTab, subTabNonce]);
+
+  useEffect(() => {
+    if (subTab === 'callback-auth' && !callbackAuthAvailable) {
+      setSubTab('overview');
+    }
+  }, [callbackAuthAvailable, subTab]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 border-b border-cafe-border pb-2" data-guide-id="observability.subtabs">
-        {SUB_TABS.map((t) => (
+        {visibleSubTabs.map((t) => (
           <button
             key={t}
             type="button"
