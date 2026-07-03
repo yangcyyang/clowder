@@ -99,7 +99,27 @@ export interface HistoryGovernanceDecision {
   mode: HistoryGovernanceMode;
   recentMessageLimit?: number;
   thresholds: HistoryGovernanceThresholds;
-  reason: 'disabled' | 'no-observation' | 'observe' | 'shadow' | 'active-threshold' | 'active-debounce';
+  reason:
+    | 'disabled'
+    | 'no-observation'
+    | 'observe'
+    | 'shadow'
+    | 'active-threshold'
+    | 'active-debounce'
+    | 'quality-gate';
+}
+
+export type HistorySummaryQualityIssue =
+  | 'empty_summary'
+  | 'summary_missing_structure'
+  | 'summary_overlaps_recent_window'
+  | 'summary_token_bloat'
+  | 'summary_contains_secret'
+  | 'summary_recall_failed';
+
+export interface HistorySummaryQualityReport {
+  ok: boolean;
+  issues: readonly HistorySummaryQualityIssue[];
 }
 
 export interface RuntimeContextSurfaceHint {
@@ -125,6 +145,14 @@ const HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS: HistoryGovernanceThresholds = {
   criticalRecentMessages: 12,
 };
 const activeSummaryWatermarks = new Map<string, string>();
+const SECRET_LIKE_CONTENT_RE =
+  /\b(?:sk|ghp|gho|xox[abprs])-[A-Za-z0-9_-]{8,}\b|Bearer\s+[A-Za-z0-9._~+/=-]{6,}|\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)\b\s*[:=]\s*[^\s,;}]+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
+const SUMMARY_SMOKE_PATTERNS = [
+  /当前(?:状态|任务)|正在推进|current\s+status/i,
+  /决策|约束|已确认|decision|constraint/i,
+  /下一步|next\s+action/i,
+  /风险|不确定|锚点|回看原文|risk|anchor/i,
+];
 
 export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'high' | 'critical' {
   if (ratio >= 0.95) return 'critical';
@@ -274,8 +302,99 @@ function getActiveRecentMessageLimit(ratio: number, thresholds: HistoryGovernanc
     : thresholds.recentMessages;
 }
 
+function wouldActivateSummaryIfAvailable(input: {
+  threadId: string;
+  catId?: string | undefined;
+  historyObservation?: HistoryGovernanceObservation | undefined;
+  env: NodeJS.ProcessEnv;
+}): boolean {
+  const thresholds = getHistoryGovernanceThresholds(input.env);
+  return (
+    getRequestedHistoryGovernanceMode(input.env) === 'summary-active' &&
+    Boolean(input.historyObservation) &&
+    isHistoryGovernanceCanaryEnabled({ threadId: input.threadId, catId: input.catId, env: input.env }) &&
+    (input.historyObservation?.historyBudgetRatio ?? 0) >= thresholds.activeRatio
+  );
+}
+
 export function __resetHistoryGovernanceDecisionStateForTests(): void {
   activeSummaryWatermarks.clear();
+}
+
+function clearActiveSummaryWatermark(threadId: string, catId: string | undefined): void {
+  activeSummaryWatermarks.delete(`${threadId}:${catId ?? '*'}`);
+}
+
+function containsSecretLikeContent(text: string): boolean {
+  return SECRET_LIKE_CONTENT_RE.test(text);
+}
+
+function modeAfterSummaryQualityFailure(
+  decision: HistoryGovernanceDecision,
+  historyObservation: HistoryGovernanceObservation | undefined,
+): HistoryGovernanceDecision {
+  if (decision.mode === 'legacy' || decision.mode === 'observe') return decision;
+  return {
+    mode: historyObservation ? 'observe' : 'legacy',
+    thresholds: decision.thresholds,
+    reason: 'quality-gate',
+  };
+}
+
+export function validateThreadHistorySummaryQuality(input: {
+  summary: HistorySummaryObservation | undefined;
+  mode: HistoryGovernanceMode;
+  historyObservation?: HistoryGovernanceObservation | undefined;
+  recentMessages?: readonly StoredMessage[] | undefined;
+  recentMessageLimit?: number | undefined;
+}): HistorySummaryQualityReport {
+  if (!input.summary || input.mode === 'legacy' || input.mode === 'observe') {
+    return { ok: true, issues: [] };
+  }
+
+  const issues: HistorySummaryQualityIssue[] = [];
+  const summaryText = 'text' in input.summary ? String(input.summary.text ?? '') : '';
+  if (!summaryText.trim() || input.summary.messageCount <= 0) {
+    issues.push('empty_summary');
+  }
+  if (containsSecretLikeContent(summaryText)) {
+    issues.push('summary_contains_secret');
+  }
+
+  const historyFullTokens = input.historyObservation?.historyFullTokens ?? 0;
+  if (historyFullTokens > 0 && input.summary.tokens >= historyFullTokens) {
+    issues.push('summary_token_bloat');
+  }
+
+  if (input.mode === 'summary-active') {
+    const recentLimit = Math.max(1, Math.floor(input.recentMessageLimit ?? 24));
+    const recentWindow = input.recentMessages?.slice(-recentLimit) ?? [];
+    const firstRecent = recentWindow[0];
+    if (input.summary.watermarkMessageId && firstRecent && input.summary.watermarkMessageId >= firstRecent.id) {
+      issues.push('summary_overlaps_recent_window');
+    }
+    if (!/范围|Scope:/i.test(summaryText)) {
+      issues.push('summary_missing_structure');
+    }
+    if (!SUMMARY_SMOKE_PATTERNS.every((pattern) => pattern.test(summaryText))) {
+      issues.push('summary_recall_failed');
+    }
+  }
+
+  return { ok: issues.length === 0, issues };
+}
+
+export function formatHistoryRecallSmoke(): string {
+  return [
+    '[History Recall Smoke]',
+    'Before relying on the compressed summary, verify these four facts from the current prompt:',
+    '1. 你是谁？当前身份/边界是什么？',
+    '2. 当前任务是什么？验收标准是什么？',
+    '3. 最近一个已确认决策是什么？',
+    '4. 下一步应该做什么？有什么风险？',
+    'If any answer is missing or ambiguous, request the original message range instead of guessing.',
+    '[/History Recall Smoke]',
+  ].join('\n');
 }
 
 export function resolveHistoryGovernanceDecision(input: {
@@ -550,6 +669,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   catBudget: ReturnType<typeof getCatContextBudget>;
   historyObservation?: HistoryGovernanceObservation;
   historySummary?: HistorySummaryObservation;
+  historyGovernanceDegraded?: boolean;
 }): RuntimeContextBudgetSnapshot {
   const loadedBlocks = ['current-message', 'static-identity'];
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
@@ -609,6 +729,13 @@ export function buildRuntimeContextBudgetSnapshot(input: {
           historyMode: input.historySummary.mode,
           historySummaryTokens: Math.max(0, Math.ceil(input.historySummary.tokens)),
           summarySegmentId: input.historySummary.segmentIds[0],
+        }
+      : {}),
+    ...(input.historyGovernanceDegraded !== undefined || input.historyObservation?.historyGovernanceDegraded !== undefined
+      ? {
+          historyGovernanceDegraded: Boolean(
+            input.historyObservation?.historyGovernanceDegraded || input.historyGovernanceDegraded,
+          ),
         }
       : {}),
   };
@@ -819,6 +946,9 @@ export interface IncrementalContextResult {
   navigationHeader?: string;
   /** Phase 3B: summary_segments shadow formatter diagnostics. */
   historySummary?: HistorySummaryObservation;
+  /** Phase 3D/B3: true when summary governance fell back because a guard failed. */
+  historyGovernanceDegraded?: boolean;
+  historyGovernanceQualityIssues?: readonly HistorySummaryQualityIssue[];
   /** Slock-like Agent Inbox snapshot for latest user intent in the current surface. */
   intentSnapshot?: AgentIntentSnapshot;
 }
@@ -1564,23 +1694,52 @@ export async function assembleIncrementalContext(
     env: historyGovernanceEnv,
     forceShadow: options?.historySummaryEnabled === true,
   });
+  const summaryQuality = validateThreadHistorySummaryQuality({
+    summary: threadHistorySummary,
+    mode: historyGovernanceDecision.mode,
+    historyObservation: options?.historyObservation,
+    recentMessages: relevant,
+    recentMessageLimit: historyGovernanceDecision.recentMessageLimit,
+  });
+  const missingActiveSummary = !threadHistorySummary
+    ? wouldActivateSummaryIfAvailable({
+        threadId,
+        catId: catId as string,
+        historyObservation: options?.historyObservation,
+        env: historyGovernanceEnv,
+      })
+    : false;
+  const historyGovernanceQualityIssues = missingActiveSummary
+    ? (['empty_summary'] as const)
+    : summaryQuality.issues;
+  const historyGovernanceDegraded = missingActiveSummary || !summaryQuality.ok;
+  const effectiveHistoryGovernanceDecision = historyGovernanceDegraded
+    ? modeAfterSummaryQualityFailure(historyGovernanceDecision, options?.historyObservation)
+    : historyGovernanceDecision;
+  if (historyGovernanceDegraded) {
+    clearActiveSummaryWatermark(threadId, catId as string);
+    log.warn(
+      { threadId, catId, issues: historyGovernanceQualityIssues, mode: historyGovernanceDecision.mode },
+      'history governance summary quality gate failed; falling back',
+    );
+  }
   const includedThreadHistorySummary =
-    historyGovernanceDecision.mode === 'summary-active' && threadHistorySummary
+    effectiveHistoryGovernanceDecision.mode === 'summary-active' && threadHistorySummary
       ? ({ ...threadHistorySummary, mode: 'summary-active' as const } satisfies FormattedThreadHistorySummary)
-      : historyGovernanceDecision.mode === 'shadow-summary'
+      : effectiveHistoryGovernanceDecision.mode === 'shadow-summary'
         ? threadHistorySummary
         : undefined;
 
   // F148: Smart window — cold mention detection
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
   const hcConfig =
-    historyGovernanceDecision.mode === 'summary-active' && historyGovernanceDecision.recentMessageLimit
+    effectiveHistoryGovernanceDecision.mode === 'summary-active' && effectiveHistoryGovernanceDecision.recentMessageLimit
       ? {
           ...DEFAULT_HIERARCHICAL_CONTEXT,
-          maxBurstMessages: historyGovernanceDecision.recentMessageLimit,
+          maxBurstMessages: effectiveHistoryGovernanceDecision.recentMessageLimit,
           minBurstMessages: Math.min(
             DEFAULT_HIERARCHICAL_CONTEXT.minBurstMessages,
-            historyGovernanceDecision.recentMessageLimit,
+            effectiveHistoryGovernanceDecision.recentMessageLimit,
           ),
         }
       : DEFAULT_HIERARCHICAL_CONTEXT;
@@ -1622,6 +1781,8 @@ export async function assembleIncrementalContext(
       rankedSources,
       storedLedgerArtifacts,
       includedThreadHistorySummary,
+      historyGovernanceDegraded,
+      historyGovernanceQualityIssues,
     );
   }
 
@@ -1631,8 +1792,8 @@ export async function assembleIncrementalContext(
   // and stale cursor scenarios where large unseen batches accumulate.
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const maxRecentMessages =
-    historyGovernanceDecision.mode === 'summary-active' && historyGovernanceDecision.recentMessageLimit
-      ? Math.min(budget.maxMessages, historyGovernanceDecision.recentMessageLimit)
+    effectiveHistoryGovernanceDecision.mode === 'summary-active' && effectiveHistoryGovernanceDecision.recentMessageLimit
+      ? Math.min(budget.maxMessages, effectiveHistoryGovernanceDecision.recentMessageLimit)
       : budget.maxMessages;
   const wasCapped = relevant.length > maxRecentMessages;
   const capped = maxRecentMessages <= 0 ? [] : wasCapped ? relevant.slice(-maxRecentMessages) : relevant;
@@ -1650,6 +1811,8 @@ export async function assembleIncrementalContext(
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
+          historyGovernanceDegraded,
+          historyGovernanceQualityIssues,
           intentSnapshot,
         }
       : {
@@ -1658,6 +1821,8 @@ export async function assembleIncrementalContext(
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
+          historyGovernanceDegraded,
+          historyGovernanceQualityIssues,
           intentSnapshot,
         };
   }
@@ -1695,6 +1860,8 @@ export async function assembleIncrementalContext(
       currentMessageFilteredOut,
       degradation: zeroBudgetDegradation,
       navigationHeader,
+      historyGovernanceDegraded,
+      historyGovernanceQualityIssues,
       intentSnapshot,
     };
   }
@@ -1746,6 +1913,8 @@ export async function assembleIncrementalContext(
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
+          historyGovernanceDegraded,
+          historyGovernanceQualityIssues,
           intentSnapshot,
         }
       : {
@@ -1754,6 +1923,8 @@ export async function assembleIncrementalContext(
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
+          historyGovernanceDegraded,
+          historyGovernanceQualityIssues,
           intentSnapshot,
         };
   }
@@ -1769,7 +1940,11 @@ export async function assembleIncrementalContext(
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
-  const historySummarySection = historySummaryText ? `${historySummaryText}\n[Recent Messages]` : '';
+  const historyRecallSmokeText =
+    includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
+  const historySummarySection = historySummaryText
+    ? [historySummaryText, historyRecallSmokeText, '[Recent Messages]'].filter(Boolean).join('\n')
+    : '';
   return {
     contextText: [
       contextHeader,
@@ -1785,6 +1960,8 @@ export async function assembleIncrementalContext(
     degradation,
     navigationHeader,
     ...(includedHistorySummary ? { historySummary: includedHistorySummary } : {}),
+    historyGovernanceDegraded,
+    historyGovernanceQualityIssues,
     intentSnapshot,
   };
 }
@@ -1812,6 +1989,8 @@ async function assembleSmartWindowContext(
   rankedSources: import('./source-ranking.js').RankedSource[],
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   threadHistorySummary: FormattedThreadHistorySummary | undefined,
+  historyGovernanceDegraded: boolean,
+  historyGovernanceQualityIssues: readonly HistorySummaryQualityIssue[],
 ): Promise<IncrementalContextResult> {
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -1981,6 +2160,8 @@ async function assembleSmartWindowContext(
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: intentionalNoContext ? undefined : `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
+      historyGovernanceDegraded,
+      historyGovernanceQualityIssues,
       intentSnapshot,
     };
   }
@@ -2063,6 +2244,8 @@ async function assembleSmartWindowContext(
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
         degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+        historyGovernanceDegraded,
+        historyGovernanceQualityIssues,
         intentSnapshot,
       };
     }
@@ -2086,8 +2269,10 @@ async function assembleSmartWindowContext(
   );
 
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+  const historyRecallSmokeText =
+    includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
   const historySummarySection = finalThreadHistorySummaryText
-    ? `${finalThreadHistorySummaryText}\n[Recent Messages]`
+    ? [finalThreadHistorySummaryText, historyRecallSmokeText, '[Recent Messages]'].filter(Boolean).join('\n')
     : '';
   const contextText =
     sections.length > 0
@@ -2109,6 +2294,8 @@ async function assembleSmartWindowContext(
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+      historyGovernanceDegraded,
+      historyGovernanceQualityIssues,
       intentSnapshot,
     };
   }
@@ -2121,6 +2308,8 @@ async function assembleSmartWindowContext(
     currentMessageFilteredOut,
     degradation: tokenDegradation,
     ...(includedHistorySummary ? { historySummary: includedHistorySummary } : {}),
+    historyGovernanceDegraded,
+    historyGovernanceQualityIssues,
     coverageMap,
     briefingContext: {
       ...(threadMemorySummary ? { threadMemorySummary } : {}),
