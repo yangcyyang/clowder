@@ -146,15 +146,15 @@ describe('ChatMessage thread reply badge', () => {
       );
     });
 
-    expect(container.textContent).toContain('▶ #1 @专家-Claude');
-    expect(container.textContent).toContain('证据 1/5');
+    expect(container.textContent).toContain('任务 #1 @专家-Claude');
+    expect(container.textContent).toContain('交付证据 1/5');
 
     const taskButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('▶ #1'),
+      button.textContent?.includes('任务 #1'),
     ) as HTMLButtonElement | undefined;
 
     expect(taskButton).toBeTruthy();
-    expect(taskButton?.getAttribute('aria-label')).toContain('打开任务 #1');
+    expect(taskButton?.getAttribute('aria-label')).toContain('打开任务 Thread #1');
 
     act(() => {
       taskButton?.click();

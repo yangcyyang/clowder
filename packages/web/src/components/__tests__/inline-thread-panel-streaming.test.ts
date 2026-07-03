@@ -1,7 +1,11 @@
+import type { TaskItem } from '@cat-cafe/shared';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   getInlineThreadSearchHits,
   getNextInlineThreadSearchIndex,
+  InlineThreadTaskStatusCard,
   isUnsafeInlineThreadTarget,
   normalizeInlineThreadMessage,
   shouldShowInlineThreadRuntimeStatus,
@@ -63,6 +67,45 @@ describe('InlineThreadPanel thread target guard', () => {
 
   it('allows real branch threads to receive replies', () => {
     expect(isUnsafeInlineThreadTarget('thread-branch', { threadId: 'thread-main' })).toBe(false);
+  });
+});
+
+describe('InlineThreadPanel task status card', () => {
+  const baseTask = {
+    id: 'task-status-card',
+    kind: 'work',
+    threadId: 'thread-main',
+    subjectKey: null,
+    title: '验证任务 Thread 状态卡',
+    ownerCatId: 'codex',
+    status: 'in_review',
+    why: '用户需要一眼看到状态和交付证据',
+    createdBy: 'opus',
+    createdAt: 1_780_000_000_000,
+    updatedAt: 1_780_000_001_000,
+    evidence: {
+      tests: 'node --test packages/api/test/tasks-route.test.js passed',
+      review: '@专家-Claude review passed',
+    },
+  } as TaskItem;
+
+  it('renders task target, owner, status, evidence count and next step', () => {
+    const html = renderToStaticMarkup(React.createElement(InlineThreadTaskStatusCard, { task: baseTask }));
+
+    expect(html).toContain('任务目标');
+    expect(html).toContain('验证任务 Thread 状态卡');
+    expect(html).toContain('负责人');
+    expect(html).toContain('codex');
+    expect(html).toContain('待验收');
+    expect(html).toContain('交付证据 2/5');
+    expect(html).toContain('下一步');
+    expect(html).toContain('等待验收');
+  });
+
+  it('renders nothing when no task context is available', () => {
+    const html = renderToStaticMarkup(React.createElement(InlineThreadTaskStatusCard, {}));
+
+    expect(html).toBe('');
   });
 });
 

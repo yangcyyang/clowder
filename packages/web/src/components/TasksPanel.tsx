@@ -10,12 +10,12 @@ type TaskViewMode = 'board' | 'list';
 type TaskBoardStyle = CSSProperties & Record<string, string>;
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: 'TODO',
-  doing: 'IN PROGRESS',
-  in_review: 'IN REVIEW',
-  blocked: 'BLOCKED',
-  done: 'DONE',
-  failed: 'FAILED',
+  todo: '待办',
+  doing: '进行中',
+  in_review: '待验收',
+  blocked: '阻塞',
+  done: '已完成',
+  failed: '失败',
 };
 
 const TASK_STATUS_META: Record<
@@ -110,12 +110,12 @@ const taskBoardStyle: TaskBoardStyle = {
 };
 
 const BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; title: string }> = [
-  { status: 'todo', title: 'TODO' },
-  { status: 'doing', title: 'IN PROGRESS' },
-  { status: 'in_review', title: 'IN REVIEW' },
-  { status: 'blocked', title: 'BLOCKED' },
-  { status: 'failed', title: 'FAILED' },
-  { status: 'done', title: 'DONE' },
+  { status: 'todo', title: '待办' },
+  { status: 'doing', title: '进行中' },
+  { status: 'in_review', title: '待验收' },
+  { status: 'blocked', title: '阻塞' },
+  { status: 'failed', title: '失败' },
+  { status: 'done', title: '已完成' },
 ];
 
 const EVIDENCE_FIELDS = [
@@ -199,7 +199,7 @@ function TaskCardView({
       className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5"
       role={onOpenThread ? 'button' : undefined}
       tabIndex={onOpenThread ? 0 : undefined}
-      title={onOpenThread ? '打开任务 Thread' : undefined}
+      title={onOpenThread ? `任务 Thread：${task.title}` : undefined}
       onClick={() => onOpenThread?.(task)}
       onKeyDown={(event) => {
         if (!onOpenThread) return;
@@ -232,6 +232,7 @@ function TaskCardView({
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t-2 border-dashed border-[var(--task-ink)]/20 pt-2 text-[11px] font-semibold text-[var(--task-muted)]">
         <span>Owner: {getOwnerLabel(task)}</span>
+        {onOpenThread && <span>接手入口：任务 Thread</span>}
         <span>{formatTaskTime(task.updatedAt || task.createdAt)}</span>
         <span>By: {task.createdBy === 'user' ? 'user' : task.createdBy}</span>
       </div>
@@ -262,7 +263,7 @@ function TaskCardView({
             onToggleEvidence(task);
           }}
         >
-          证物 {evidenceCount}/5
+          交付证据 {evidenceCount}/5
         </button>
       </div>
 
@@ -273,7 +274,7 @@ function TaskCardView({
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-black text-[var(--task-ink)]">交付证物</div>
+              <div className="text-xs font-black text-[var(--task-ink)]">交付证据</div>
               <div className="mt-0.5 text-[11px] font-medium text-[var(--task-muted)]">记录测试、构建、截图、review 和 lesson。</div>
             </div>
             {evidence?.updatedAt && <span className="shrink-0 text-[10px] text-[var(--task-muted)]">更新 {formatTaskTime(evidence.updatedAt)}</span>}
@@ -305,7 +306,7 @@ function TaskCardView({
                 onSaveEvidence(task.id);
               }}
             >
-              {saving ? '保存中...' : '保存证物'}
+              {saving ? '保存中...' : '保存证据'}
             </button>
           </div>
         </div>
@@ -419,7 +420,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
       setTasks((current) => current.map((task) => (task.id === updated.id ? updated : task)));
       setEvidenceDrafts((current) => ({ ...current, [updated.id]: updated.evidence ?? {} }));
     } catch {
-      setSaveError('证物保存失败，请稍后重试');
+      setSaveError('交付证据保存失败，请稍后重试');
     } finally {
       setSavingTaskId(null);
     }
@@ -457,7 +458,9 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
           <div className="flex flex-wrap items-center gap-3">
             <div className="mr-auto">
               <h2 className="text-base font-black uppercase tracking-[0.08em] text-[var(--task-ink)]">Tasks</h2>
-              <p className="mt-1 text-xs font-semibold text-[var(--task-muted)]">当前频道任务板 · {tasks.length} total</p>
+              <p className="mt-1 text-xs font-semibold text-[var(--task-muted)]">
+                主会话任务卡 · 任务 Thread 接手区 · {tasks.length} 个
+              </p>
             </div>
 
             <button
@@ -479,7 +482,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
               className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-4 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5"
               onClick={() => setComposerOpen((current) => !current)}
             >
-              + New Task
+              + 新任务
             </button>
 
             <div className="flex rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-ink)] p-0.5">
@@ -527,7 +530,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
 
         {!isLoading && !error && sortedTasks.length === 0 && !composerOpen && (
           <div className="rounded-[18px] border-2 border-dashed border-[var(--task-subtle)] bg-[var(--task-card)]/70 p-10 text-center text-sm font-black text-[var(--task-muted)]">
-            当前频道暂无任务。点击 + New Task 创建第一张任务卡。
+            当前频道暂无任务。新任务会成为主会话里的任务卡。
           </div>
         )}
 

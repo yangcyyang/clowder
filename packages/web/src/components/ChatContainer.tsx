@@ -89,6 +89,7 @@ const INLINE_THREAD_EXIT_MS = 180;
 
 type InlineThreadReplyState = Record<string, { branchThreadId: string; replyCount: number }>;
 type ThreadReplyInfo = InlineThreadReplyState[string] & { newCount?: number };
+type InlineThreadState = { threadId: string; sourceMessage: ChatMessageData; task?: TaskItem };
 type ChannelTab = 'chat' | 'tasks' | 'files';
 const EMPTY_MEMBER_IDS: string[] = [];
 
@@ -233,14 +234,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isExport = searchParams?.get('export') === 'true';
   const isResearchMode = searchParams?.get('research') === 'multi';
-  const { clearTasks } = useTaskStore();
+  const { clearTasks, updateTask } = useTaskStore();
   const { cats, getCatById, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useWorkspaceNavigate(workspaceWorktreeId, threadId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusPanelOpen, setStatusPanelOpen] = useState(false);
-  const [inlineThread, setInlineThread] = useState<{ threadId: string; sourceMessage: ChatMessageData } | null>(null);
+  const [inlineThread, setInlineThread] = useState<InlineThreadState | null>(null);
   const [inlineThreadClosing, setInlineThreadClosing] = useState(false);
   const inlineThreadCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inlineThreadReplies, setInlineThreadReplies] = useState<InlineThreadReplyState>({});
@@ -354,7 +355,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, []);
   const openInlineThread = useCallback(
-    (next: { threadId: string; sourceMessage: ChatMessageData }) => {
+    (next: InlineThreadState) => {
       clearInlineThreadCloseTimer();
       clearUnread(next.threadId);
       setInlineThreadClosing(false);
@@ -458,6 +459,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             editedAt?: number;
             origin?: unknown;
           };
+          task?: TaskItem;
         };
         if (!data.threadId || !data.sourceMessage) throw new Error('Missing task thread payload');
         const sourceMessage: ChatMessageData = {
@@ -469,7 +471,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           timestamp: data.sourceMessage.timestamp,
           ...(data.sourceMessage.editedAt ? { editedAt: data.sourceMessage.editedAt } : {}),
         };
-        openInlineThread({ threadId: data.threadId, sourceMessage });
+        if (data.task) updateTask(data.task);
+        openInlineThread({ threadId: data.threadId, sourceMessage, task: data.task ?? task });
       } catch {
         addToast({
           type: 'error',
@@ -479,7 +482,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [addToast, openInlineThread],
+    [addToast, openInlineThread, updateTask],
   );
   useEffect(() => {
     clearInlineThreadCloseTimer();
@@ -1636,6 +1639,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         <InlineThreadPanel
           threadId={inlineThread.threadId}
           sourceMessage={inlineThread.sourceMessage}
+          task={inlineThread.task}
           parentThreadTitle={currentThreadTitle}
           isClosing={inlineThreadClosing}
           onClose={closeInlineThread}

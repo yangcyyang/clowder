@@ -111,7 +111,7 @@ function getTaskMetaLabels(task: TaskItem): string[] {
   if (task.retryOf) labels.push('重试');
   if (task.parentTaskId) labels.push('子任务');
   if (task.branchOf) labels.push('分支');
-  if (evidenceCount > 0) labels.push(`证据 ${evidenceCount}/5`);
+  if (evidenceCount > 0) labels.push(`交付证据 ${evidenceCount}/5`);
 
   return labels.slice(0, 2);
 }
@@ -128,7 +128,7 @@ function MessageTaskBadge({
   onOpen?: (task: TaskItem) => void;
 }) {
   const metaLabels = getTaskMetaLabels(task);
-  const chipLabel = assigneeLabel ? `▶ #${seq} @${assigneeLabel}` : `▶ #${seq}`;
+  const chipLabel = assigneeLabel ? `任务 #${seq} @${assigneeLabel}` : `任务 #${seq}`;
   const content = (
     <>
       <span className="shrink-0">{chipLabel}</span>
@@ -155,7 +155,7 @@ function MessageTaskBadge({
           }}
           className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-cyan-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-cyan-ring"
           title={`打开任务 Thread：${task.title}`}
-          aria-label={`打开任务 #${seq}${assigneeLabel ? `，负责人 ${assigneeLabel}` : ''}`}
+          aria-label={`打开任务 Thread #${seq}${assigneeLabel ? `，负责人 ${assigneeLabel}` : ''}`}
         >
           {content}
         </button>

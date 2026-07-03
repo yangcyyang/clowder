@@ -1,5 +1,6 @@
 'use client';
 
+import type { TaskEvidence, TaskItem, TaskStatus } from '@cat-cafe/shared';
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -27,6 +28,32 @@ const THREAD_PANEL_DEFAULT_WIDTH = 460;
 const THREAD_PANEL_MIN_WIDTH = 360;
 const THREAD_PANEL_FALLBACK_MAX_WIDTH = 720;
 const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.6;
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: '待办',
+  doing: '进行中',
+  in_review: '待验收',
+  blocked: '阻塞',
+  done: '已完成',
+  failed: '失败',
+};
+
+const TASK_STATUS_TONE: Record<TaskStatus, string> = {
+  todo: 'border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] text-[var(--cafe-text-muted)]',
+  doing: 'border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text',
+  in_review: 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text',
+  blocked: 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text',
+  done: 'border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text',
+  failed: 'border-conn-red-ring bg-conn-red-bg text-conn-red-text',
+};
+
+const TASK_EVIDENCE_KEYS: ReadonlyArray<keyof Omit<TaskEvidence, 'updatedAt'>> = [
+  'tests',
+  'build',
+  'screenshot',
+  'review',
+  'lesson',
+];
 
 const THREAD_STATUS_LABELS: Record<CatStatusType, string> = {
   spawning: '启动中',
@@ -103,6 +130,79 @@ export function isUnsafeInlineThreadTarget(
   return !!sourceMessage.threadId && sourceMessage.threadId === threadId;
 }
 
+function countTaskEvidence(evidence?: TaskEvidence): number {
+  if (!evidence) return 0;
+  return TASK_EVIDENCE_KEYS.filter((key) => Boolean(evidence[key]?.trim())).length;
+}
+
+function getTaskNextStep(status: TaskStatus): string {
+  switch (status) {
+    case 'todo':
+      return '认领任务并开始执行';
+    case 'doing':
+      return '继续执行并补齐交付证据';
+    case 'in_review':
+      return '等待验收并补齐交付摘要';
+    case 'blocked':
+      return '说明阻塞原因并请求协助';
+    case 'done':
+      return '沉淀 lesson 或关闭任务';
+    case 'failed':
+      return '记录失败原因并决定重试';
+    default:
+      return '确认下一步动作';
+  }
+}
+
+function getTaskOwnerLabel(task: TaskItem): string {
+  return task.ownerCatId ?? '未分配';
+}
+
+export function InlineThreadTaskStatusCard({ task }: { task?: TaskItem }) {
+  if (!task) return null;
+
+  const evidenceCount = countTaskEvidence(task.evidence);
+  const statusTone = TASK_STATUS_TONE[task.status] ?? TASK_STATUS_TONE.todo;
+
+  return (
+    <section
+      className="flex flex-shrink-0 flex-col gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
+      aria-label="任务 Thread 状态"
+    >
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-[var(--cafe-text-muted)]">任务目标</div>
+          <div className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--cafe-text)]" title={task.title}>
+            {task.title}
+          </div>
+        </div>
+        <span className={`flex-shrink-0 border px-2 py-0.5 text-[11px] font-semibold ${statusTone}`}>
+          {TASK_STATUS_LABELS[task.status] ?? task.status}
+        </span>
+      </div>
+      {task.why.trim() && (
+        <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{task.why}</p>
+      )}
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">负责人</div>
+          <div className="mt-0.5 truncate font-medium text-[var(--cafe-text)]">{getTaskOwnerLabel(task)}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">交付证据</div>
+          <div className="mt-0.5 font-medium text-[var(--cafe-text)]">交付证据 {evidenceCount}/5</div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">下一步</div>
+          <div className="mt-0.5 truncate font-medium text-[var(--cafe-text)]" title={getTaskNextStep(task.status)}>
+            {getTaskNextStep(task.status)}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function detectSlashCommand(value: string, cursor: number): string | null {
   if (!value.startsWith('/') || cursor <= 0) return null;
   const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
@@ -113,6 +213,7 @@ function detectSlashCommand(value: string, cursor: number): string | null {
 interface InlineThreadPanelProps {
   threadId: string;
   sourceMessage: ChatMessageData;
+  task?: TaskItem;
   parentThreadTitle: string;
   isClosing?: boolean;
   onClose: () => void;
@@ -122,6 +223,7 @@ interface InlineThreadPanelProps {
 export function InlineThreadPanel({
   threadId,
   sourceMessage,
+  task,
   parentThreadTitle,
   isClosing = false,
   onClose,
@@ -686,6 +788,7 @@ export function InlineThreadPanel({
             </button>
           </div>
         )}
+        <InlineThreadTaskStatusCard task={task} />
         {runtimeCats.length > 0 && (
           <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">

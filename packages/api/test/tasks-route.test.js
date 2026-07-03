@@ -25,12 +25,15 @@ function createMockSocketManager() {
 
 describe('Tasks Routes', () => {
   let taskStore;
+  let threadStore;
   let socketManager;
   let messageStore;
 
   beforeEach(async () => {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     taskStore = new TaskStore();
+    threadStore = new ThreadStore();
     socketManager = createMockSocketManager();
     messageStore = {
       messages: [],
@@ -51,7 +54,7 @@ describe('Tasks Routes', () => {
   async function createApp() {
     const { tasksRoutes } = await import('../dist/routes/tasks.js');
     const app = Fastify();
-    await app.register(tasksRoutes, { taskStore, messageStore, socketManager });
+    await app.register(tasksRoutes, { taskStore, threadStore, messageStore, socketManager });
     return app;
   }
 
@@ -279,6 +282,53 @@ describe('Tasks Routes', () => {
     });
 
     assert.equal(response.statusCode, 404);
+  });
+
+  // ---- POST /api/tasks/:id/thread ----
+
+  test('POST task thread returns task context for the thread status card', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: '验证任务 Thread 状态卡',
+        why: '用户需要一眼看到状态和交付证据',
+        createdBy: 'opus',
+        ownerCatId: 'codex',
+      },
+    });
+    const taskId = createRes.json().id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: {
+        status: 'in_review',
+        evidence: {
+          tests: 'node --test packages/api/test/tasks-route.test.js passed',
+          review: '@专家-Claude review passed',
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${taskId}/thread`,
+      payload: { userId: 'user-1' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.equal(body.threadId, body.task.taskThreadId);
+    assert.equal(body.sourceMessage.id, body.task.sourceMessageId);
+    assert.equal(body.task.id, taskId);
+    assert.equal(body.task.title, '验证任务 Thread 状态卡');
+    assert.equal(body.task.status, 'in_review');
+    assert.equal(body.task.ownerCatId, 'codex');
+    assert.equal(body.task.evidence.tests, 'node --test packages/api/test/tasks-route.test.js passed');
+    assert.equal(body.task.evidence.review, '@专家-Claude review passed');
   });
 
   // ---- PATCH /api/tasks/:id ----

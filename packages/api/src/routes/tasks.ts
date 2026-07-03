@@ -457,7 +457,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
         const messages = await messageStore.getByThread(task.taskThreadId, 100);
         const sourceMessage = messages[0];
         if (sourceMessage) {
-          return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage) };
+          return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task };
         }
       }
     }
@@ -492,7 +492,15 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', updated);
     }
 
-    return { threadId: taskThread.id, sourceMessage: toTaskThreadMessage(sourceMessage) };
+    return {
+      threadId: taskThread.id,
+      sourceMessage: toTaskThreadMessage(sourceMessage),
+      task: updated ?? {
+        ...task,
+        taskThreadId: taskThread.id,
+        ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
+      },
+    };
   });
 
   // PATCH /api/tasks/:id
