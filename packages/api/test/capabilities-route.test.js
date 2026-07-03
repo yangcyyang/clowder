@@ -1018,6 +1018,158 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('PATCH scope=thread records a thread-scoped MCP grant without enabling it globally', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-thread-grant-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'opencli-browser',
+          type: 'mcp',
+          enabled: false,
+          source: 'external',
+          mcpServer: { command: 'opencli', args: ['mcp'] },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/capabilities',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        capabilityId: 'opencli-browser',
+        capabilityType: 'mcp',
+        scope: 'thread',
+        threadId: 'thread-a',
+        enabled: true,
+        projectPath: projectDir,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.capability.enabled, false, 'thread grant must not flip global enabled');
+    assert.equal(body.capability.threadOverrides?.[0]?.threadId, 'thread-a');
+    assert.equal(body.capability.threadOverrides?.[0]?.enabled, true);
+    assert.equal(body.capability.threadOverrides?.[0]?.grantedBy, 'test-user');
+    assert.equal(typeof body.capability.threadOverrides?.[0]?.updatedAt, 'number');
+
+    const updated = await readCapabilitiesConfig(projectDir);
+    assert.equal(updated?.capabilities[0]?.enabled, false);
+    assert.equal(updated?.capabilities[0]?.threadOverrides?.[0]?.threadId, 'thread-a');
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
+  it('GET /api/capabilities exposes current thread MCP scope when threadId is provided', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-thread-scope-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'opencli-browser',
+          type: 'mcp',
+          enabled: false,
+          source: 'external',
+          threadOverrides: [{ threadId: 'thread-a', enabled: true, grantedBy: 'test-user', updatedAt: 123 }],
+          mcpServer: { command: 'opencli', args: ['mcp'] },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}&threadId=thread-a`,
+      headers: AUTH_HEADERS,
+    });
+    assert.equal(res.statusCode, 200);
+
+    const body = res.json();
+    const item = body.items.find((i) => i.type === 'mcp' && i.id === 'opencli-browser');
+    assert.ok(item, 'opencli-browser MCP item should exist');
+    assert.deepEqual(item.threadScope, { threadId: 'thread-a', enabled: true });
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
+  it('probeId limits probe=true to a single MCP capability', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-probe-id-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    const probeCode = inlineProbeServerCode(process.cwd());
+
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'probe-target',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            args: ['--input-type=module', '--eval', probeCode],
+            workingDir: process.cwd(),
+          },
+        },
+        {
+          id: 'probe-other',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            args: ['--eval', 'process.exit(1)'],
+            workingDir: process.cwd(),
+          },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}&probe=true&probeId=probe-target`,
+      headers: AUTH_HEADERS,
+    });
+    assert.equal(res.statusCode, 200);
+
+    const body = res.json();
+    const target = body.items.find((i) => i.type === 'mcp' && i.id === 'probe-target');
+    const other = body.items.find((i) => i.type === 'mcp' && i.id === 'probe-other');
+    assert.equal(target?.connectionStatus, 'connected');
+    assert.ok(target?.tools?.some((tool) => tool.name === 'probe_echo'));
+    assert.equal(other?.connectionStatus, undefined, 'non-target MCP should not be probed');
+    assert.equal(other?.tools, undefined, 'non-target MCP should not receive tool metadata');
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
   it('probe=true keeps runtime PATH when capability provides custom env', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');

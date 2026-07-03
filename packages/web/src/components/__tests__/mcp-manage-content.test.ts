@@ -34,7 +34,8 @@ const ITEMS_RESPONSE = {
 };
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (sel: (s: Record<string, unknown>) => unknown) => sel({ threads: [] }),
+  useChatStore: (sel: (s: Record<string, unknown>) => unknown) =>
+    sel({ threads: [], currentThreadId: 'thread-current' }),
 }));
 
 vi.mock('@/utils/api-client', () => ({
@@ -86,6 +87,70 @@ describe('McpManageContent', () => {
     expect(container.textContent).toContain('pencil');
     expect(container.textContent).toContain('custom-mcp');
     expect(container.textContent).toContain('权限边界');
+  });
+
+  it('loads MCP cards without automatic batch probe', async () => {
+    await act(async () => {
+      root.render(React.createElement(McpManageContent));
+    });
+
+    expect(mockFetch.mock.calls[0][0]).toContain('/api/capabilities?');
+    expect(mockFetch.mock.calls[0][0]).not.toContain('probe=true');
+  });
+
+  it('clicking thread grant sends a thread-scoped capability patch', async () => {
+    await act(async () => {
+      root.render(React.createElement(McpManageContent));
+    });
+
+    const card = Array.from(container.querySelectorAll('.settings-resource-card')).find((candidate) =>
+      candidate.textContent?.includes('custom-mcp'),
+    );
+    expect(card).toBeTruthy();
+    const threadButton = card?.querySelector('button[title="仅本对话启用"]') as HTMLButtonElement | null;
+    expect(threadButton).toBeTruthy();
+
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await act(async () => {
+      threadButton?.click();
+    });
+
+    const patchCall = mockFetch.mock.calls.find(
+      (args: unknown[]) => (args[1] as { method?: string } | undefined)?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const body = JSON.parse((patchCall?.[1] as { body: string }).body);
+    expect(body).toMatchObject({
+      capabilityId: 'custom-mcp',
+      capabilityType: 'mcp',
+      scope: 'thread',
+      threadId: 'thread-current',
+      enabled: true,
+    });
+  });
+
+  it('clicking controlled probe fetches tools for only that MCP', async () => {
+    await act(async () => {
+      root.render(React.createElement(McpManageContent));
+    });
+
+    const card = Array.from(container.querySelectorAll('.settings-resource-card')).find((candidate) =>
+      candidate.textContent?.includes('custom-mcp'),
+    );
+    expect(card).toBeTruthy();
+    const probeButton = card?.querySelector('button[title="受控探测工具"]') as HTMLButtonElement | null;
+    expect(probeButton).toBeTruthy();
+
+    mockFetch.mockResolvedValue(ITEMS_RESPONSE);
+    await act(async () => {
+      probeButton?.click();
+    });
+
+    const probeCall = mockFetch.mock.calls.find((args: unknown[]) =>
+      String(args[0]).includes('probeId=custom-mcp'),
+    );
+    expect(probeCall?.[0]).toContain('probe=true');
+    expect(probeCall?.[0]).toContain('threadId=thread-current');
   });
 
   it('clicking trash on external MCP calls hard DELETE after confirmation', async () => {
@@ -166,6 +231,6 @@ describe('McpManageContent', () => {
     const actionTitles = Array.from(card?.querySelectorAll('.settings-resource-actions button') ?? []).map((button) =>
       button.getAttribute('title'),
     );
-    expect(actionTitles).toEqual(['禁用', '按猫开关', '卸载此 MCP']);
+    expect(actionTitles).toEqual(['禁用', '仅本对话启用', '受控探测工具', '按猫开关', '卸载此 MCP']);
   });
 });

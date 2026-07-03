@@ -677,6 +677,46 @@ describe('Tasks Routes', () => {
     assert.equal(response.json().events[0].data.durationMs, 2345);
   });
 
+  test('POST task events accepts tool_usage event payload and filters it', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'OpenCLI title check', why: '', createdBy: 'codex' },
+    });
+    const taskId = createRes.json().id;
+
+    const postRes = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-1/tasks/${taskId}/events`,
+      payload: {
+        catId: 'codex',
+        type: 'tool_usage',
+        data: {
+          toolName: 'opencli.browser.open',
+          category: 'mcp',
+          url: 'https://example.com',
+          title: 'Example Domain',
+          status: 'completed',
+          invocationId: 'inv-opencli-title',
+        },
+      },
+    });
+    assert.equal(postRes.statusCode, 201);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/threads/thread-1/tasks/${taskId}/events?type=tool_usage`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().events.length, 1);
+    assert.equal(response.json().events[0].type, 'tool_usage');
+    assert.equal(response.json().events[0].data.toolName, 'opencli.browser.open');
+    assert.equal(response.json().events[0].data.title, 'Example Domain');
+    assert.equal(response.json().events[0].data.invocationId, 'inv-opencli-title');
+  });
+
   test('POST task events accepts fast lane completion payload and filters it', async () => {
     const app = await createApp();
     const createRes = await app.inject({

@@ -522,8 +522,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Multi-project: accept ?projectPath=... to manage capabilities for any project
-    const query = request.query as { projectPath?: string; probe?: string | boolean };
+    const query = request.query as { projectPath?: string; probe?: string | boolean; probeId?: string; threadId?: string };
     const probeEnabled = query.probe === true || query.probe === 'true' || query.probe === '1';
+    const requestedProbeId = typeof query.probeId === 'string' && query.probeId.trim() ? query.probeId.trim() : null;
+    const currentThreadId = typeof query.threadId === 'string' && query.threadId.trim() ? query.threadId.trim() : null;
     let projectRoot = getProjectRoot();
     if (query.projectPath) {
       const validated = await validateProjectPath(query.projectPath);
@@ -776,6 +778,13 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         ...(cap.ecosystem && { ecosystem: cap.ecosystem }),
         ...(cap.lockVersion && { lockVersion: cap.lockVersion }),
       };
+      if (currentThreadId) {
+        const threadOverride = cap.threadOverrides?.find((o) => o.threadId === currentThreadId);
+        mcpItem.threadScope = {
+          threadId: currentThreadId,
+          enabled: threadOverride ? threadOverride.enabled : false,
+        };
+      }
       const mcpDesc = describeMcpCapability(cap);
       if (mcpDesc) mcpItem.description = mcpDesc;
       if (cap.mcpServer) {
@@ -829,7 +838,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     // Optional MCP probe: fill connectionStatus + tools via tools/list.
     if (probeEnabled) {
-      const mcpCaps = config.capabilities.filter((cap) => cap.type === 'mcp');
+      const mcpCaps = config.capabilities.filter(
+        (cap) => cap.type === 'mcp' && (!requestedProbeId || cap.id === requestedProbeId),
+      );
       const mcpItemById = new Map(
         items
           .filter((item): item is CapabilityBoardItem & { type: 'mcp' } => item.type === 'mcp')
@@ -838,8 +849,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const probeEntries: Array<readonly [string, McpProbeResult]> = [];
       const probeOne = async (cap: (typeof mcpCaps)[number]): Promise<readonly [string, McpProbeResult]> => {
         const boardItem = mcpItemById.get(cap.id);
+        const threadEnabled = currentThreadId
+          ? cap.threadOverrides?.some((o) => o.threadId === currentThreadId && o.enabled)
+          : false;
         const anyCatEnabled = boardItem ? Object.values(boardItem.cats).some(Boolean) : cap.enabled;
-        if (!anyCatEnabled) {
+        if (!anyCatEnabled && !threadEnabled) {
           return [cap.id, { connectionStatus: 'unknown' }] as const;
         }
         const probe = await probeMcpCapability(cap, { projectRoot });
@@ -937,12 +951,19 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const body = request.body as CapabilityPatchRequest | undefined;
     if (!body || !body.capabilityId || !body.capabilityType || !body.scope || typeof body.enabled !== 'boolean') {
       reply.status(400);
-      return { error: 'Required: capabilityId, capabilityType (mcp|skill), scope (global|cat), enabled (boolean)' };
+      return {
+        error: 'Required: capabilityId, capabilityType (mcp|skill), scope (global|cat|thread), enabled (boolean)',
+      };
     }
 
     if (body.scope === 'cat' && !body.catId) {
       reply.status(400);
       return { error: 'catId required when scope is "cat"' };
+    }
+
+    if (body.scope === 'thread' && !body.threadId) {
+      reply.status(400);
+      return { error: 'threadId required when scope is "thread"' };
     }
 
     // Multi-project: accept projectPath in body
@@ -976,7 +997,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
       if (body.scope === 'global') {
         cap.enabled = body.enabled;
-      } else {
+      } else if (body.scope === 'cat') {
         if (!cap.overrides) cap.overrides = [];
         const existing = cap.overrides.find((o) => o.catId === body.catId!);
         if (existing) {
@@ -987,6 +1008,22 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         if (body.enabled === cap.enabled) {
           cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
           if (cap.overrides.length === 0) delete cap.overrides;
+        }
+      } else {
+        if (!cap.threadOverrides) cap.threadOverrides = [];
+        const existing = cap.threadOverrides.find((o) => o.threadId === body.threadId!);
+        const updatedAt = Date.now();
+        if (existing) {
+          existing.enabled = body.enabled;
+          existing.grantedBy = userId;
+          existing.updatedAt = updatedAt;
+        } else {
+          cap.threadOverrides.push({
+            threadId: body.threadId!,
+            enabled: body.enabled,
+            grantedBy: userId,
+            updatedAt,
+          });
         }
       }
 

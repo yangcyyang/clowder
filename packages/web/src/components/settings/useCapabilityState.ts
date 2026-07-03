@@ -19,17 +19,23 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [resolvedProjectPath, setResolvedProjectPath] = useState('');
   const [toggling, setToggling] = useState<string | null>(null);
+  const [probing, setProbing] = useState<string | null>(null);
   const [disabling, setDisabling] = useState<string | null>(null);
 
   const threads = useChatStore((s) => s.threads);
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
   const knownProjects = useMemo(() => getProjectPaths(threads), [threads]);
 
   const fetchItems = useCallback(
-    async (forProject?: string) => {
+    async (forProject?: string, options: { probeId?: string } = {}) => {
       try {
         const query = new URLSearchParams();
         if (forProject) query.set('projectPath', forProject);
-        if (filterType === 'mcp') query.set('probe', 'true');
+        if (currentThreadId) query.set('threadId', currentThreadId);
+        if (filterType === 'mcp' && options.probeId) {
+          query.set('probe', 'true');
+          query.set('probeId', options.probeId);
+        }
         const res = await apiFetch(`/api/capabilities?${query.toString()}`);
         if (!res.ok) return;
         const data = (await res.json()) as CapabilityBoardResponse;
@@ -43,7 +49,7 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
         setLoading(false);
       }
     },
-    [filterType],
+    [currentThreadId, filterType],
   );
 
   useEffect(() => {
@@ -82,6 +88,47 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
         /* ignore */
       } finally {
         setToggling(null);
+      }
+    },
+    [fetchItems, filterType, projectPath],
+  );
+
+  const handleThreadToggle = useCallback(
+    async (item: CapabilityBoardItem, enabled: boolean) => {
+      if (!currentThreadId) return;
+      const key = `${item.id}:thread:${currentThreadId}`;
+      setToggling(key);
+      try {
+        const res = await apiFetch('/api/capabilities', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            capabilityId: item.id,
+            capabilityType: filterType,
+            scope: 'thread',
+            threadId: currentThreadId,
+            enabled,
+            projectPath: projectPath ?? undefined,
+          }),
+        });
+        if (res.ok) await fetchItems(projectPath ?? undefined);
+      } catch {
+        /* ignore */
+      } finally {
+        setToggling(null);
+      }
+    },
+    [currentThreadId, fetchItems, filterType, projectPath],
+  );
+
+  const handleProbe = useCallback(
+    async (item: CapabilityBoardItem) => {
+      if (filterType !== 'mcp') return;
+      setProbing(item.id);
+      try {
+        await fetchItems(projectPath ?? undefined, { probeId: item.id });
+      } finally {
+        setProbing(null);
       }
     },
     [fetchItems, filterType, projectPath],
@@ -133,10 +180,14 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     projectPath,
     resolvedProjectPath,
     knownProjects,
+    currentThreadId,
     toggling,
+    probing,
     disabling,
     switchProject,
     handleToggle,
+    handleThreadToggle,
+    handleProbe,
     handleRemoveMcp,
     handleDisableSkill,
     refetch: () => fetchItems(projectPath ?? undefined),

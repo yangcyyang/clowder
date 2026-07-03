@@ -308,6 +308,53 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
   });
 
+  test('mcpServers inject external local MCP servers alongside cat-cafe', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      mcpServerPath: '/absolute/path/to/packages/mcp-server/dist/index.js',
+      mcpServers: [
+        {
+          name: 'opencli-browser',
+          command: 'opencli',
+          args: ['mcp'],
+        },
+      ],
+    });
+
+    assert.ok(config.mcp, 'config must have mcp section');
+    assert.deepStrictEqual(config.mcp['cat-cafe'], {
+      type: 'local',
+      command: ['node', '/absolute/path/to/packages/mcp-server/dist/index.js'],
+    });
+    assert.deepStrictEqual(config.mcp['opencli-browser'], {
+      type: 'local',
+      command: ['opencli', 'mcp'],
+    });
+  });
+
+  test('mcpServers omit disabled or commandless entries before writing config', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      mcpServers: [
+        { name: 'enabled-tool', command: 'tool', args: ['serve'] },
+        { name: 'missing-command', command: '', args: ['serve'] },
+      ],
+    });
+
+    assert.deepStrictEqual(config.mcp, {
+      'enabled-tool': {
+        type: 'local',
+        command: ['tool', 'serve'],
+      },
+    });
+  });
+
   test('mcp section is absent when mcpServerPath is not provided', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'maas',

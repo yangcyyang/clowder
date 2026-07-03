@@ -1342,6 +1342,28 @@ describe('resolveServersForCat', () => {
     assert.equal(opusServers[0].enabled, true);
   });
 
+  it('lets a thread override grant a default-disabled MCP for only that thread', () => {
+    const config = makeConfig([
+      {
+        id: 'opencli-browser',
+        type: 'mcp',
+        enabled: false,
+        source: 'external',
+        mcpServer: { command: 'opencli', args: ['mcp'] },
+        threadOverrides: [{ threadId: 'thread-a', enabled: true, grantedBy: 'test-user', updatedAt: 123 }],
+      },
+    ]);
+
+    const grantedServers = resolveServersForCat(config, 'codex', { threadId: 'thread-a' });
+    assert.equal(grantedServers[0].enabled, true);
+
+    const otherThreadServers = resolveServersForCat(config, 'codex', { threadId: 'thread-b' });
+    assert.equal(otherThreadServers[0].enabled, false);
+
+    const noThreadServers = resolveServersForCat(config, 'codex');
+    assert.equal(noThreadServers[0].enabled, false);
+  });
+
   it('treats resolver-backed stdio MCPs as transport-usable before local resolution', () => {
     const config = makeConfig([
       {

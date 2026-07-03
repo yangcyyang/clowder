@@ -138,6 +138,7 @@ const taskEventSchema = z.object({
     'handoff',
     'artifact',
     'usage',
+    'tool_usage',
     'fast_lane_decision',
     'fast_lane_started',
     'fast_lane_completed',

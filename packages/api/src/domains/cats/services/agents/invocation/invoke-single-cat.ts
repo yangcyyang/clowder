@@ -16,6 +16,10 @@ import { dirname, join, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
+  readCapabilitiesConfig,
+  resolveServersForCat,
+} from '../../../../../config/capabilities/capability-orchestrator.js';
+import {
   resolveBuiltinClientForProvider,
   resolveForClient,
   validateRuntimeProviderBinding,
@@ -70,6 +74,7 @@ import {
   parseOpenCodeModel,
   safeProviderName,
   summarizeOpenCodeRuntimeConfigForDebug,
+  type OpenCodeRuntimeMcpServer,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
 
@@ -101,6 +106,28 @@ export function getOpenCodeKnownModels(): Set<string> {
     _openCodeKnownModels = new Set();
   }
   return _openCodeKnownModels;
+}
+
+async function resolveOpenCodeCapabilityMcpServers(
+  projectRoot: string,
+  catId: CatId,
+  threadId: string,
+): Promise<OpenCodeRuntimeMcpServer[]> {
+  try {
+    const config = await readCapabilitiesConfig(projectRoot);
+    if (!config) return [];
+    return resolveServersForCat(config, catId as string, { threadId })
+      .filter((server) => server.source === 'external' && server.enabled && server.transport !== 'streamableHttp')
+      .filter((server) => server.command.trim().length > 0)
+      .map((server) => ({
+        name: server.name,
+        command: server.command,
+        args: server.args,
+      }));
+  } catch (err) {
+    log.warn({ catId, threadId, err }, 'Failed to resolve OpenCode capability MCP servers');
+    return [];
+  }
 }
 
 function resolveClowderCliEnv(hostProjectRoot: string): Record<string, string> {
@@ -1135,6 +1162,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = safeModel;
       const apiType = deriveOpenCodeApiType(effectiveProviderName);
       const rawModels = resolvedAccount.models?.length ? resolvedAccount.models : [effectiveModel];
+      const capabilityMcpServers = await resolveOpenCodeCapabilityMcpServers(projectRoot, catId, threadId);
       const runtimeConfigOptions = {
         providerName: effectiveProviderName,
         models: rawModels,
@@ -1142,6 +1170,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         mcpServerPath,
+        mcpServers: capabilityMcpServers,
       } as const;
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
         projectRoot,

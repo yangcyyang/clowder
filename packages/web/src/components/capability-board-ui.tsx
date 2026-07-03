@@ -20,6 +20,10 @@ export interface CapabilityBoardItem {
   source: 'cat-cafe' | 'external';
   enabled: boolean;
   cats: Record<string, boolean>;
+  threadScope?: {
+    threadId: string;
+    enabled: boolean;
+  };
   description?: string;
   triggers?: string[];
   category?: string;

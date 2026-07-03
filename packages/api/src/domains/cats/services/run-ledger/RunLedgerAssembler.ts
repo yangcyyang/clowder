@@ -23,6 +23,7 @@ export type RunLedgerEventType =
   | 'tool_started'
   | 'tool_completed'
   | 'tool_failed'
+  | 'tool_usage'
   | 'artifact_delta'
   | 'usage_recorded'
   | 'message_persisted'
@@ -210,6 +211,18 @@ function sanitizeTaskEventData(event: TaskEvent): Record<string, unknown> {
       totalRemoved: finiteNumber(data.totalRemoved),
     });
   }
+  if (event.type === 'tool_usage') {
+    return compactRecord({
+      provider: typeof data.provider === 'string' ? redactString(data.provider) : undefined,
+      serverId: typeof data.serverId === 'string' ? redactString(data.serverId) : undefined,
+      toolName: typeof data.toolName === 'string' ? redactString(data.toolName) : undefined,
+      toolId: typeof data.toolId === 'string' ? redactString(data.toolId) : undefined,
+      status: typeof data.status === 'string' ? redactString(data.status) : undefined,
+      title: typeof data.title === 'string' ? redactString(data.title) : undefined,
+      target: typeof data.target === 'string' ? redactString(data.target) : undefined,
+      durationMs: finiteNumber(data.durationMs),
+    });
+  }
   if (event.type === 'failed') {
     return compactRecord({
       failureClass: typeof data.failureClass === 'string' ? redactString(data.failureClass) : undefined,
@@ -246,6 +259,7 @@ function sanitizeTaskEventData(event: TaskEvent): Record<string, unknown> {
 function mapTaskEventType(type: TaskEvent['type']): RunLedgerEventType {
   if (type === 'usage') return 'usage_recorded';
   if (type === 'artifact') return 'artifact_delta';
+  if (type === 'tool_usage') return 'tool_usage';
   if (type === 'handoff') return 'recovered';
   if (type === 'failed' || type === 'fast_lane_failed') return 'failed';
   return 'task_event';
@@ -329,14 +343,15 @@ const EVENT_TYPE_ORDER: Partial<Record<RunLedgerEventType, number>> = {
   tool_started: 8,
   tool_completed: 9,
   tool_failed: 10,
-  usage_recorded: 11,
-  artifact_delta: 12,
-  message_persisted: 13,
-  task_event: 14,
-  recovered: 15,
-  succeeded: 16,
-  failed: 16,
-  canceled: 16,
+  tool_usage: 11,
+  usage_recorded: 12,
+  artifact_delta: 13,
+  message_persisted: 14,
+  task_event: 15,
+  recovered: 16,
+  succeeded: 17,
+  failed: 17,
+  canceled: 17,
 };
 
 export class RunLedgerAssembler {

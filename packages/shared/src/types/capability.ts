@@ -44,6 +44,18 @@ export interface CatCapabilityOverride {
   enabled: boolean;
 }
 
+/** Per-thread override for a capability. Used for task-scoped external MCP access. */
+export interface ThreadCapabilityOverride {
+  /** Thread ID */
+  threadId: string;
+  /** Whether enabled for this thread (overrides global/per-cat state for that thread) */
+  enabled: boolean;
+  /** User who granted/revoked this thread scope */
+  grantedBy?: string;
+  /** Unix timestamp in ms */
+  updatedAt?: number;
+}
+
 /** Single capability entry in capabilities.json */
 export interface CapabilityEntry {
   /** Unique capability ID (usually MCP server name) */
@@ -54,6 +66,8 @@ export interface CapabilityEntry {
   enabled: boolean;
   /** Per-cat overrides (only stores differences from global) */
   overrides?: CatCapabilityOverride[];
+  /** Per-thread overrides for task-scoped grants */
+  threadOverrides?: ThreadCapabilityOverride[];
   /** MCP server descriptor (only for type: 'mcp') */
   mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
   /** Source origin */
@@ -86,6 +100,11 @@ export interface CapabilityBoardItem {
   enabled: boolean;
   /** Per-cat effective state (global + overrides resolved) */
   cats: Record<string, boolean>;
+  /** Effective state for the current thread when GET /api/capabilities receives threadId */
+  threadScope?: {
+    threadId: string;
+    enabled: boolean;
+  };
   /** Description if available */
   description?: string;
   /** Skill trigger keywords (from SKILL.md frontmatter) */
@@ -308,10 +327,12 @@ export interface CapabilityPatchRequest {
   capabilityId: string;
   /** Capability type — required to disambiguate same-name MCP/skill entries */
   capabilityType: 'mcp' | 'skill' | 'limb';
-  /** Scope: global toggle or per-cat override */
-  scope: 'global' | 'cat';
+  /** Scope: global toggle, per-cat override, or per-thread task grant */
+  scope: 'global' | 'cat' | 'thread';
   /** Required when scope is 'cat' */
   catId?: string;
+  /** Required when scope is 'thread' */
+  threadId?: string;
   /** New enabled state */
   enabled: boolean;
   /** Target project path (multi-project support). If omitted, uses server default. */

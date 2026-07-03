@@ -879,8 +879,14 @@ const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic', 'kimi']);
 /**
  * Resolve effective MCP servers for a specific cat.
  * Applies global enabled + per-cat overrides + provider transport compatibility.
+ * If threadId is supplied, a matching thread override wins over global/per-cat
+ * state so controlled external tools can be granted for one task thread.
  */
-export function resolveServersForCat(config: CapabilitiesConfig, catId: string): McpServerDescriptor[] {
+export function resolveServersForCat(
+  config: CapabilitiesConfig,
+  catId: string,
+  options: { threadId?: string } = {},
+): McpServerDescriptor[] {
   const entry = catRegistry.tryGet(catId);
   const provider = entry?.config.clientId;
 
@@ -893,7 +899,10 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
       }
       // Resolve effective enabled: global + per-cat override
       const override = cap.overrides?.find((o) => o.catId === catId);
-      const enabledFromConfig = override ? override.enabled : cap.enabled;
+      const threadOverride = options.threadId
+        ? cap.threadOverrides?.find((o) => o.threadId === options.threadId)
+        : undefined;
+      const enabledFromConfig = threadOverride ? threadOverride.enabled : override ? override.enabled : cap.enabled;
       // Guardrail: entries without usable transport stay disabled for writer cleanup.
       // Also gate streamableHttp by provider — only Anthropic supports URL transport.
       const transportSupported =

@@ -111,6 +111,20 @@ describe('run ledger route', () => {
           type: 'artifact',
           data: { files: [{ path: 'packages/api/src/routes/run-ledger.ts', added: 10, removed: 0 }] },
         },
+        {
+          ts: new Date().toISOString(),
+          catId: 'codex',
+          invocationId,
+          type: 'tool_usage',
+          data: {
+            provider: 'opencli',
+            toolName: 'browser.eval',
+            target: 'https://example.com',
+            title: 'Example Domain',
+            status: 'completed',
+            durationMs: 120,
+          },
+        },
       ],
     });
 
@@ -129,16 +143,21 @@ describe('run ledger route', () => {
     assert.equal(body.summary.toolCallCount, 1);
     assert.equal(body.summary.artifactCount, 1);
     assert.equal(body.summary.traceId, 'trace-1');
-    assert.deepEqual(body.sources, { invocationRecord: true, messages: 2, taskEvents: 2, trace: true });
+    assert.deepEqual(body.sources, { invocationRecord: true, messages: 2, taskEvents: 3, trace: true });
 
     const eventTypes = body.events.map((event) => event.type);
     assert.equal(eventTypes.filter((type) => type === 'message_persisted').length, 1);
     assert.ok(eventTypes.indexOf('created') < eventTypes.indexOf('running'));
     assert.ok(eventTypes.indexOf('running') < eventTypes.indexOf('message_persisted'));
     assert.ok(eventTypes.includes('tool_completed'));
+    assert.ok(eventTypes.includes('tool_usage'));
     assert.ok(eventTypes.indexOf('message_persisted') < eventTypes.indexOf('succeeded'));
     assert.ok(eventTypes.includes('usage_recorded'));
     assert.ok(eventTypes.includes('artifact_delta'));
+    const toolUsageEvent = body.events.find((event) => event.type === 'tool_usage');
+    assert.equal(toolUsageEvent.data.provider, 'opencli');
+    assert.equal(toolUsageEvent.data.toolName, 'browser.eval');
+    assert.equal(toolUsageEvent.data.title, 'Example Domain');
 
     assert.equal(res.body.includes('Please run this private prompt'), false);
     assert.equal(res.body.includes('raw prompt must not leak'), false);

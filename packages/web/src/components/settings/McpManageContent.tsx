@@ -97,11 +97,20 @@ export function McpManageContent() {
           const busy = cap.toggling === item.id;
           const removing = cap.disabling === item.id;
           const expanded = expandedId === item.id;
+          const threadEnabled = item.threadScope?.enabled ?? false;
+          const threadBusy = Boolean(cap.currentThreadId && cap.toggling === `${item.id}:thread:${cap.currentThreadId}`);
+          const probeBusy = cap.probing === item.id;
           const subInfo =
             item.mcpServer?.transport === 'streamableHttp'
               ? `http · ${item.mcpServer.url}`
               : item.mcpServer?.command
                 ? `stdio · ${item.mcpServer.command}${item.mcpServer.args?.length ? ` ${item.mcpServer.args.join(' ')}` : ''}`
+                : undefined;
+          const toolInfo =
+            item.connectionStatus === 'connected' && item.tools?.length
+              ? `tools · ${item.tools.map((tool) => tool.name).join(', ')}`
+              : item.connectionStatus
+                ? `probe · ${item.connectionStatus}`
                 : undefined;
           return (
             <div key={item.id} className={settingsResourceCardClass}>
@@ -129,6 +138,7 @@ export function McpManageContent() {
                     <p className="text-sm font-bold text-cafe">{item.id}</p>
                     <p className="mt-0.5 truncate text-xs text-cafe-secondary">{item.description || '—'}</p>
                     {subInfo && <p className="mt-0.5 truncate text-label font-mono text-cafe-muted">{subInfo}</p>}
+                    {toolInfo && <p className="mt-0.5 truncate text-label font-mono text-cafe-muted">{toolInfo}</p>}
                   </div>
                 </button>
                 <div className={settingsResourceActionGroupClass}>
@@ -140,6 +150,30 @@ export function McpManageContent() {
                       cap.handleToggle(item, !item.enabled);
                     }}
                   />
+                  <SettingsResourceIconButton
+                    disabled={!cap.currentThreadId || threadBusy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cap.handleThreadToggle(item, !threadEnabled);
+                    }}
+                    title={threadEnabled ? '撤销本对话授权' : '仅本对话启用'}
+                    aria-label={threadEnabled ? '撤销本对话授权' : '仅本对话启用'}
+                    aria-pressed={threadEnabled}
+                    className={threadEnabled ? 'text-[var(--cafe-accent,#C65F3D)]' : undefined}
+                  >
+                    <HubIcon name="shield" className="h-4 w-4" />
+                  </SettingsResourceIconButton>
+                  <SettingsResourceIconButton
+                    disabled={probeBusy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cap.handleProbe(item);
+                    }}
+                    title="受控探测工具"
+                    aria-label="受控探测工具"
+                  >
+                    <HubIcon name={probeBusy ? 'timer' : 'search'} className="h-4 w-4" />
+                  </SettingsResourceIconButton>
                   {cap.catFamilies.length > 0 && (
                     <SettingsResourceIconButton
                       onClick={() => setExpandedId(expanded ? null : item.id)}

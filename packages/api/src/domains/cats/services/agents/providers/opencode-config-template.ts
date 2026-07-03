@@ -40,6 +40,12 @@ interface OpenCodeConfig {
   mcp?: Record<string, unknown>;
 }
 
+export interface OpenCodeRuntimeMcpServer {
+  name: string;
+  command: string;
+  args?: readonly string[];
+}
+
 export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCodeConfig {
   const { baseUrl, model, enableOmoc = true } = options;
 
@@ -104,6 +110,8 @@ export interface OpenCodeRuntimeConfigOptions {
   hasBaseUrl?: boolean;
   /** Absolute path to Clowder AI MCP server entry (packages/mcp-server/dist/index.js). */
   mcpServerPath?: string;
+  /** Invocation-scoped external MCP servers resolved from the capability center. */
+  mcpServers?: readonly OpenCodeRuntimeMcpServer[];
 }
 
 export interface OpenCodeRuntimeConfigDebugSummary {
@@ -152,7 +160,15 @@ export function safeProviderName(name: string): string {
 }
 
 export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOptions): OpenCodeConfig {
-  const { providerName, models, defaultModel, apiType = 'openai', hasBaseUrl = false, mcpServerPath } = options;
+  const {
+    providerName,
+    models,
+    defaultModel,
+    apiType = 'openai',
+    hasBaseUrl = false,
+    mcpServerPath,
+    mcpServers = [],
+  } = options;
 
   const configName = safeProviderName(providerName);
 
@@ -183,13 +199,24 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     },
   };
 
+  const mcp: Record<string, unknown> = {};
   if (mcpServerPath) {
-    config.mcp = {
-      'cat-cafe': {
-        type: 'local',
-        command: ['node', mcpServerPath],
-      },
+    mcp['cat-cafe'] = {
+      type: 'local',
+      command: ['node', mcpServerPath],
     };
+  }
+  for (const server of mcpServers) {
+    const name = server.name.trim();
+    const command = server.command.trim();
+    if (!name || !command) continue;
+    mcp[name] = {
+      type: 'local',
+      command: [command, ...(server.args ?? [])],
+    };
+  }
+  if (Object.keys(mcp).length > 0) {
+    config.mcp = mcp;
   }
 
   return config;
