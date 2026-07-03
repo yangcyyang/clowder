@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
   let CollectionIndexBuilder, FlatScanner, SqliteEvidenceStore;
   let store, dbPath;
+  let previousQuarantineFlag;
 
   beforeEach(async () => {
+    previousQuarantineFlag = process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE;
+    delete process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE;
     ({ CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js'));
     ({ FlatScanner } = await import('../../dist/domains/memory/FlatScanner.js'));
     ({ SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js'));
@@ -21,6 +24,11 @@ describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
     try {
       unlinkSync(dbPath);
     } catch {}
+    if (previousQuarantineFlag === undefined) {
+      delete process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE;
+    } else {
+      process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE = previousQuarantineFlag;
+    }
   });
 
   const makeManifest = (root) => ({
@@ -134,5 +142,53 @@ describe('CollectionIndexBuilder — secret gate (AC-C1)', () => {
     assert.equal(second.blocked, true);
     const purged = await store.getByAnchor('test:sec:doc/doc');
     assert.equal(purged, null, 'pre-existing entries must be purged when rebuild blocked');
+  });
+
+  it('quarantines toxic files and indexes safe files when quarantine flag is enabled', async () => {
+    process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'col-quarantine-'));
+    writeFileSync(join(dir, 'safe.md'), '# Safe\n\nSafe content should remain searchable.');
+    writeFileSync(join(dir, 'dirty.md'), '# Dirty\n\naws_key: AKIAIOSFODNN7EXAMPLE\n');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:sec');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    const result = await builder.rebuild();
+    assert.equal(result.blocked, false, 'quarantine mode should not block the whole collection');
+    assert.equal(result.indexed, 1, 'safe file should still be indexed');
+    assert.ok(result.secretFindings.length >= 1);
+    assert.equal(result.quarantinedFiles.length, 1);
+    assert.equal(result.quarantinedFiles[0].path, 'dirty.md');
+    assert.equal(result.quarantinedFiles[0].anchor, 'test:sec:doc/dirty');
+    assert.ok(await store.getByAnchor('test:sec:doc/safe'), 'safe file should be searchable');
+    assert.equal(await store.getByAnchor('test:sec:doc/dirty'), null, 'toxic file must not be indexed');
+  });
+
+  it('removes previously indexed toxic files while keeping safe files in quarantine mode', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-quarantine-cleanup-'));
+    writeFileSync(join(dir, 'safe.md'), '# Safe\n\nStable safe content.');
+    writeFileSync(join(dir, 'later-dirty.md'), '# Initially Safe\n\nNo credentials yet.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:sec');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    const first = await builder.rebuild();
+    assert.equal(first.indexed, 2);
+    assert.ok(await store.getByAnchor('test:sec:doc/later-dirty'));
+
+    process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE = '1';
+    writeFileSync(join(dir, 'later-dirty.md'), '# Dirty\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+    const second = await builder.rebuild();
+
+    assert.equal(second.blocked, false);
+    assert.equal(second.quarantinedFiles.length, 1);
+    assert.ok(await store.getByAnchor('test:sec:doc/safe'), 'safe existing file should remain indexed');
+    assert.equal(
+      await store.getByAnchor('test:sec:doc/later-dirty'),
+      null,
+      'previously indexed toxic file must be removed from search',
+    );
   });
 });

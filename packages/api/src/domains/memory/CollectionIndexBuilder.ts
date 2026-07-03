@@ -10,6 +10,13 @@ export interface CollectionRebuildResult {
   skipped: number;
   blocked: boolean;
   secretFindings: SecretFinding[];
+  quarantinedFiles: QuarantinedCollectionFile[];
+}
+
+export interface QuarantinedCollectionFile {
+  anchor: string;
+  path: string;
+  findings: SecretFinding[];
 }
 
 export class CollectionIndexBuilder {
@@ -23,17 +30,55 @@ export class CollectionIndexBuilder {
     const force = options?.force ?? false;
     const results = this.scanner.discover(this.manifest.root);
 
-    const { findings } = SecretScanner.scanBatch(
-      results.map((r) => ({ path: r.item.sourcePath ?? r.item.anchor, content: r.rawContent })),
-    );
+    const secretReport = this.scanSecrets(results);
 
-    if (findings.length > 0) {
+    if (secretReport.findings.length > 0 && !isSecretQuarantineEnabled()) {
       await this.purgeCollection();
-      return { indexed: 0, skipped: 0, blocked: true, secretFindings: findings };
+      return {
+        indexed: 0,
+        skipped: 0,
+        blocked: true,
+        secretFindings: secretReport.findings,
+        quarantinedFiles: [],
+      };
     }
 
-    const { indexed, skipped } = await this.indexResults(results, force);
-    return { indexed, skipped, blocked: false, secretFindings: [] };
+    if (secretReport.quarantinedFiles.length > 0) {
+      await this.deleteQuarantinedFiles(secretReport.quarantinedFiles);
+    }
+
+    const quarantinedAnchors = new Set(secretReport.quarantinedFiles.map((file) => file.anchor));
+    const safeResults = results.filter((result) => !quarantinedAnchors.has(result.item.anchor));
+    const { indexed, skipped } = await this.indexResults(safeResults, force);
+    return {
+      indexed,
+      skipped,
+      blocked: false,
+      secretFindings: secretReport.findings,
+      quarantinedFiles: secretReport.quarantinedFiles,
+    };
+  }
+
+  private scanSecrets(results: ScannedEvidence[]): {
+    findings: SecretFinding[];
+    quarantinedFiles: QuarantinedCollectionFile[];
+  } {
+    const findings: SecretFinding[] = [];
+    const quarantinedFiles: QuarantinedCollectionFile[] = [];
+
+    for (const result of results) {
+      const path = result.item.sourcePath ?? result.item.anchor;
+      const fileFindings = SecretScanner.scan(result.rawContent, path);
+      if (fileFindings.length === 0) continue;
+      findings.push(...fileFindings);
+      quarantinedFiles.push({
+        anchor: result.item.anchor,
+        path,
+        findings: fileFindings,
+      });
+    }
+
+    return { findings, quarantinedFiles };
   }
 
   private async indexResults(results: ScannedEvidence[], force: boolean) {
@@ -80,6 +125,12 @@ export class CollectionIndexBuilder {
     }
   }
 
+  private async deleteQuarantinedFiles(files: QuarantinedCollectionFile[]): Promise<void> {
+    for (const file of files) {
+      await this.store.deleteByAnchor(file.anchor);
+    }
+  }
+
   private async cleanStale(currentAnchors: Set<string>): Promise<void> {
     const prefix = `${this.manifest.id}:`;
     const db = this.store.getDb();
@@ -92,4 +143,8 @@ export class CollectionIndexBuilder {
       }
     }
   }
+}
+
+function isSecretQuarantineEnabled(): boolean {
+  return process.env.CAT_CAFE_COLLECTION_SECRET_QUARANTINE === '1';
 }
