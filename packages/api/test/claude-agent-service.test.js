@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -231,11 +231,18 @@ test('steer v2 flag enables Claude stream-json stdin and runtime injection', asy
     assert.ok(args.includes('--input-format'));
     assert.ok(args.includes('stream-json'));
     assert.equal(args.includes('first prompt'), false, 'stream-json mode should send prompt via stdin, not argv');
+    assert.equal(stdinChunks.join(''), '', 'initial prompt should wait until Claude emits system/init');
+
+    const beforeInit = injectClaudeRuntimeSteer('thread-1', 'opus', 'user-a', 'too early');
+    assert.equal(beforeInit.ok, false);
+
+    proc.stdout.write(`${JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-steer' })}\n`);
+    await new Promise((resolve) => setImmediate(resolve));
 
     const injected = injectClaudeRuntimeSteer('thread-1', 'opus', 'user-a', 'second prompt');
     assert.equal(injected.ok, true);
 
-    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success', session_id: 'sess-steer' }]);
     await promise;
 
     const stdinText = stdinChunks.join('');
@@ -243,6 +250,134 @@ test('steer v2 flag enables Claude stream-json stdin and runtime injection', asy
     assert.ok(stdinText.includes('"content":"second prompt"'), 'runtime steer should append to stdin');
   } finally {
     clearClaudeRuntimeSteerChannelsForTests();
+    if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
+    else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
+  }
+});
+
+test('steer v2 real spawn writes first prompt only after Claude system init', async () => {
+  const previousFlag = process.env.CAT_CAFE_STEER_V2_CLAUDE;
+  process.env.CAT_CAFE_STEER_V2_CLAUDE = '1';
+  clearClaudeRuntimeSteerChannelsForTests();
+
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-real-claude-'));
+  const fakeClaude = join(dir, 'claude');
+  writeFileSync(
+    fakeClaude,
+    `#!/usr/bin/env node
+let initEmitted = false;
+let input = '';
+let gotInputBeforeInit = false;
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  if (!initEmitted) gotInputBeforeInit = true;
+  input += chunk;
+  if (!input.includes('\\n')) return;
+  if (gotInputBeforeInit) {
+    console.error('STDIN_BEFORE_INIT');
+    process.exit(7);
+  }
+  const firstLine = input.trim().split('\\n')[0];
+  const parsed = JSON.parse(firstLine);
+  const content = parsed && parsed.message && parsed.message.content;
+  if (content !== 'first prompt') {
+    console.error('BAD_CONTENT:' + content);
+    process.exit(8);
+  }
+  process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'real-spawn-ok' }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'real-spawn-session' }) + '\\n');
+  process.exit(0);
+});
+setTimeout(() => {
+  initEmitted = true;
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'real-spawn-session' }) + '\\n');
+}, 100);
+setTimeout(() => {
+  console.error('NO_STDIN_AFTER_INIT');
+  process.exit(9);
+}, 2000);
+`,
+  );
+  chmodSync(fakeClaude, 0o755);
+
+  const service = new ClaudeAgentService({ catId: 'opus', cliCommand: fakeClaude, model: 'claude-test-model' });
+
+  try {
+    const messages = await collect(
+      service.invoke('first prompt', {
+        auditContext: {
+          invocationId: 'inv-real',
+          threadId: 'thread-real',
+          userId: 'user-a',
+          catId: 'opus',
+        },
+      }),
+    );
+
+    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'real-spawn-ok'), true);
+    assert.equal(messages.some((m) => m.type === 'error'), false);
+  } finally {
+    clearClaudeRuntimeSteerChannelsForTests();
+    rmSync(dir, { recursive: true, force: true });
+    if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
+    else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
+  }
+});
+
+test('steer v2 real spawn falls back when Claude init waits for first stdin', async () => {
+  const previousFlag = process.env.CAT_CAFE_STEER_V2_CLAUDE;
+  process.env.CAT_CAFE_STEER_V2_CLAUDE = '1';
+  clearClaudeRuntimeSteerChannelsForTests();
+
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-real-claude-stdin-first-'));
+  const fakeClaude = join(dir, 'claude');
+  writeFileSync(
+    fakeClaude,
+    `#!/usr/bin/env node
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (!input.includes('\\n')) return;
+  const firstLine = input.trim().split('\\n')[0];
+  const parsed = JSON.parse(firstLine);
+  const content = parsed && parsed.message && parsed.message.content;
+  if (content !== 'first prompt') {
+    console.error('BAD_CONTENT:' + content);
+    process.exit(8);
+  }
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'stdin-first-session' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'stdin-first-ok' }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'stdin-first-session' }) + '\\n');
+  process.exit(0);
+});
+setTimeout(() => {
+  console.error('NO_STDIN_FALLBACK');
+  process.exit(9);
+}, 2000);
+`,
+  );
+  chmodSync(fakeClaude, 0o755);
+
+  const service = new ClaudeAgentService({ catId: 'opus', cliCommand: fakeClaude, model: 'claude-test-model' });
+
+  try {
+    const messages = await collect(
+      service.invoke('first prompt', {
+        auditContext: {
+          invocationId: 'inv-stdin-first',
+          threadId: 'thread-stdin-first',
+          userId: 'user-a',
+          catId: 'opus',
+        },
+      }),
+    );
+
+    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'stdin-first-ok'), true);
+    assert.equal(messages.some((m) => m.type === 'error'), false);
+  } finally {
+    clearClaudeRuntimeSteerChannelsForTests();
+    rmSync(dir, { recursive: true, force: true });
     if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
     else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
   }

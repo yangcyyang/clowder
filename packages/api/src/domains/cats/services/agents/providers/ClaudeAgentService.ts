@@ -65,6 +65,12 @@ function formatThinkingSignatureRescueError(sessionId: string | undefined): stri
   ].join(' ');
 }
 
+function isClaudeSessionInitEvent(event: unknown): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const candidate = event as { type?: unknown; subtype?: unknown };
+  return candidate.type === 'system' && candidate.subtype === 'init';
+}
+
 const IS_WINDOWS = process.platform === 'win32';
 
 export { pickGitBashPathFromWhere } from './claude-agent-win.js';
@@ -343,6 +349,34 @@ export class ClaudeAgentService implements AgentService {
         'Invoking Claude CLI',
       );
 
+      let runtimeSteerSink: CliStdinSink | undefined;
+      let runtimeSteerCleanup: (() => void) | undefined;
+      let runtimeSteerInitialPromptTimer: ReturnType<typeof setTimeout> | undefined;
+      let runtimeSteerInitialPromptSent = false;
+      const sendRuntimeSteerInitialPrompt = () => {
+        if (!useRuntimeSteer || !options.auditContext || !runtimeSteerSink || runtimeSteerInitialPromptSent) return;
+        runtimeSteerInitialPromptSent = true;
+        if (runtimeSteerInitialPromptTimer) {
+          clearTimeout(runtimeSteerInitialPromptTimer);
+          runtimeSteerInitialPromptTimer = undefined;
+        }
+        runtimeSteerSink.writeJsonLine(buildClaudeStreamJsonUserMessage(effectivePrompt));
+        runtimeSteerCleanup = registerClaudeRuntimeSteerChannel({
+          threadId: options.auditContext.threadId,
+          catId: options.auditContext.catId,
+          userId: options.auditContext.userId,
+          invocationId: options.auditContext.invocationId,
+          sink: runtimeSteerSink,
+        });
+      };
+      const scheduleRuntimeSteerInitialPrompt = () => {
+        if (!useRuntimeSteer || !options.auditContext || runtimeSteerInitialPromptTimer) return;
+        runtimeSteerInitialPromptTimer = setTimeout(() => {
+          runtimeSteerInitialPromptTimer = undefined;
+          sendRuntimeSteerInitialPrompt();
+        }, 250);
+      };
+
       const cliOpts = {
         command: claudeCommand,
         args,
@@ -356,14 +390,15 @@ export class ClaudeAgentService implements AgentService {
         ...(useRuntimeSteer && options.auditContext
           ? {
               stdinLineSink: (sink: CliStdinSink) => {
-                sink.writeJsonLine(buildClaudeStreamJsonUserMessage(effectivePrompt));
-                return registerClaudeRuntimeSteerChannel({
-                  threadId: options.auditContext!.threadId,
-                  catId: options.auditContext!.catId,
-                  userId: options.auditContext!.userId,
-                  invocationId: options.auditContext!.invocationId,
-                  sink,
-                });
+                runtimeSteerSink = sink;
+                scheduleRuntimeSteerInitialPrompt();
+                return () => {
+                  if (runtimeSteerInitialPromptTimer) {
+                    clearTimeout(runtimeSteerInitialPromptTimer);
+                    runtimeSteerInitialPromptTimer = undefined;
+                  }
+                  runtimeSteerCleanup?.();
+                };
               },
             }
           : {}),
@@ -381,6 +416,12 @@ export class ClaudeAgentService implements AgentService {
             ? String((event as Record<string, unknown>).type)
             : '__unknown';
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
+        if (isClaudeSessionInitEvent(event)) {
+          // Prefer system/init as the readiness signal. Some real Claude CLI
+          // versions only emit init after first stdin, so a short timer above is
+          // the fallback that prevents a no-input silent completion.
+          sendRuntimeSteerInitialPrompt();
+        }
         if (isCliTimeout(event)) {
           // F118 AC-C3: Forward timeout diagnostics before error
           yield {
