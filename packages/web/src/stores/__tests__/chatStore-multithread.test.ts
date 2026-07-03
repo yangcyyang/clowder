@@ -746,6 +746,19 @@ describe('chatStore multi-thread state', () => {
       expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(0);
     });
 
+    it('initThreadUnread stores read cursor and clearUnread keeps it for divider placement', () => {
+      useChatStore.setState({ currentThreadId: 'thread-a', _unreadSuppressedUntil: {}, _pendingAckCount: {} });
+      useChatStore.getState().initThreadUnread('thread-b', 2, false, 'msg-read-1');
+
+      expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(2);
+      expect(useChatStore.getState().threadStates['thread-b']?.lastReadMessageId).toBe('msg-read-1');
+
+      useChatStore.getState().clearUnread('thread-b');
+
+      expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(0);
+      expect(useChatStore.getState().threadStates['thread-b']?.lastReadMessageId).toBe('msg-read-1');
+    });
+
     it('suppression persists until confirmUnreadAck (#586)', () => {
       useChatStore.getState().addMessageToThread('thread-b', makeMsg('s2'));
       useChatStore.getState().clearUnread('thread-b');

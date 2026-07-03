@@ -219,6 +219,42 @@ describe('Thread API', () => {
     assert.ok(!titles.includes('Thread C'));
   });
 
+  it('GET /api/threads includes read cursor for unread divider placement', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+    const localThreadStore = new ThreadStore();
+    const thread = localThreadStore.create('alice', 'Unread Channel');
+    const localApp = Fastify();
+    await localApp.register(threadsRoutes, {
+      threadStore: localThreadStore,
+      messageStore: {},
+      readStateStore: {
+        getUnreadSummaries: async (_userId, threadIds) =>
+          threadIds.map((threadId) => ({
+            threadId,
+            unreadCount: threadId === thread.id ? 2 : 0,
+            hasUserMention: threadId === thread.id,
+            lastReadMessageId: threadId === thread.id ? 'msg-read-1' : null,
+          })),
+      },
+    });
+    await localApp.ready();
+
+    const res = await localApp.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const hydrated = body.threads.find((item) => item.id === thread.id);
+    assert.equal(hydrated.unreadCount, 2);
+    assert.equal(hydrated.hasUserMention, true);
+    assert.equal(hydrated.lastReadMessageId, 'msg-read-1');
+
+    await localApp.close();
+  });
+
   it('GET /api/threads trusts localhost origin fallback and lists default-user threads', async () => {
     threadStore.create('default-user', 'Browser Thread');
     threadStore.create('bob', 'Bob Thread');

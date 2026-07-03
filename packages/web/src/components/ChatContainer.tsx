@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
@@ -39,6 +39,7 @@ import {
 } from '@/utils/saved-messages';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { scrollToMessage } from '@/utils/scrollToMessage';
+import { getUnreadDividerInsertIndex, resolveUnreadDividerCursor } from '@/utils/unreadDivider';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AgentStatusIndicator } from './AgentStatusIndicator';
@@ -177,6 +178,18 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
   );
 }
 
+function UnreadDivider() {
+  return (
+    <div role="separator" aria-label="上次读到这里" className="my-3 flex items-center gap-3 px-4 text-[11px] text-cafe-muted">
+      <span className="h-px flex-1 bg-[var(--console-border-soft)]" />
+      <span className="rounded-full border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-0.5 font-semibold">
+        上次读到这里
+      </span>
+      <span className="h-px flex-1 bg-[var(--console-border-soft)]" />
+    </div>
+  );
+}
+
 export function ChatContainer({ threadId }: ChatContainerProps) {
   const router = useRouter();
   const bottomChromeRef = useRef<HTMLDivElement | null>(null);
@@ -256,6 +269,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [isDeletingChannel, setIsDeletingChannel] = useState(false);
   const [channelSettingsError, setChannelSettingsError] = useState<string | null>(null);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
+  const [unreadDividerAfterMessageId, setUnreadDividerAfterMessageId] = useState<string | null>(null);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
@@ -581,6 +595,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentThread = storeThreads.find((thread) => thread.id === threadId);
   const currentThreadTitle = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
+  const currentThreadUnreadCount = currentThread?.unreadCount ?? 0;
+  const currentThreadLastReadMessageId = currentThread?.lastReadMessageId ?? null;
   const currentThreadMemberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? EMPTY_MEMBER_IDS;
   const currentBootcampPhase = currentBootcampState?.phase;
   const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
@@ -1064,6 +1080,20 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       handleCancelEditMessage,
     ],
   );
+  const unreadDividerInsertIndex = useMemo(
+    () => getUnreadDividerInsertIndex(messages, unreadDividerAfterMessageId, shouldRenderChatMessage),
+    [messages, unreadDividerAfterMessageId],
+  );
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((msg, index) => (
+        <Fragment key={msg.id}>
+          {index === unreadDividerInsertIndex && <UnreadDivider />}
+          {renderSingleMessage(msg, index)}
+        </Fragment>
+      )),
+    [messages, renderSingleMessage, unreadDividerInsertIndex],
+  );
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
   const connectionStatus = useConnectionStatus(socketConnected);
@@ -1097,6 +1127,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       syncRooms([...allIds]);
     }
   }, [viewMode, splitPaneThreadIds, threadId, syncRooms]);
+
+  useEffect(() => {
+    const state = useChatStore.getState();
+    const storedState = state.threadStates[threadId];
+    setUnreadDividerAfterMessageId(
+      resolveUnreadDividerCursor({
+        serverUnreadCount: currentThreadUnreadCount,
+        serverLastReadMessageId: currentThreadLastReadMessageId,
+        storedUnreadCount: storedState?.unreadCount,
+        storedLastReadMessageId: storedState?.lastReadMessageId,
+      }),
+    );
+  }, [threadId, currentThreadUnreadCount, currentThreadLastReadMessageId]);
 
   useEffect(() => {
     clearUnread(threadId);
@@ -1441,7 +1484,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   })()}
                 </div>
               ) : (
-                messages.map(renderSingleMessage)
+                renderedMessages
               )}
               <div ref={messagesEndRef} />
             </main>

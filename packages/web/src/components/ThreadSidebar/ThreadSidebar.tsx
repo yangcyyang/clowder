@@ -178,7 +178,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       const { initThreadUnread } = useChatStore.getState();
       for (const thread of threads) {
         if (thread.unreadCount > 0 || thread.hasUserMention) {
-          initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);
+          initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention, thread.lastReadMessageId ?? null);
         }
       }
     } catch {

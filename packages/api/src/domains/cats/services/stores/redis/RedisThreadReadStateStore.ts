@@ -57,7 +57,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       // Pre-F069 threads have no cursor; counting all messages as unread
       // causes every badge to reappear on every page refresh.
       if (!state) {
-        summaries.push({ threadId, unreadCount: 0, hasUserMention: false });
+        summaries.push({ threadId, unreadCount: 0, hasUserMention: false, lastReadMessageId: null });
         continue;
       }
       const afterId = state.lastReadMessageId;
@@ -70,7 +70,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       const unreadCount = relevant.length;
       const hasUserMention = relevant.some((m) => !!m.mentionsUser);
 
-      summaries.push({ threadId, unreadCount, hasUserMention });
+      summaries.push({ threadId, unreadCount, hasUserMention, lastReadMessageId: afterId });
     }
 
     return summaries;

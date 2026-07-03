@@ -401,6 +401,12 @@ export interface Thread {
   bootcampState?: BootcampStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
   connectorHubState?: ConnectorHubStateV1;
+  /** Read cursor hydrated from /api/threads for unread divider placement. */
+  lastReadMessageId?: string | null;
+  /** Hydrated unread count for sidebar badge and unread divider capture. */
+  unreadCount?: number;
+  /** Hydrated mention flag for sidebar badge and Activity inbox. */
+  hasUserMention?: boolean;
 }
 
 /** F087: Bootcamp state for CVO onboarding threads */
@@ -641,6 +647,8 @@ export interface ThreadState {
   unreadCount: number;
   /** F057-C2: Thread has an unread @user mention from a cat */
   hasUserMention: boolean;
+  /** Last server-acknowledged read cursor; retained after local unread clear for divider placement. */
+  lastReadMessageId: string | null;
   lastActivity: number;
   /** F39: Message queue entries for this thread */
   queue: QueueEntry[];
@@ -689,6 +697,7 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   currentGame: null,
   unreadCount: 0,
   hasUserMention: false,
+  lastReadMessageId: null,
   lastActivity: 0,
   queue: [],
   activeInvocations: {},

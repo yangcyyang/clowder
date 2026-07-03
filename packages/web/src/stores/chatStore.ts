@@ -112,6 +112,7 @@ function snapshotActive(s: ChatState): ThreadState {
     currentGame: s.currentGame,
     unreadCount: 0, // active thread always 0
     hasUserMention: false,
+    lastReadMessageId: s.threadStates[s.currentThreadId]?.lastReadMessageId ?? null,
     // If the thread is actively streaming, Date.now() is correct — there IS real activity.
     // Otherwise, preserve the real timestamp so a mere thread switch doesn't reorder the sidebar.
     lastActivity: s.hasActiveInvocation
@@ -950,7 +951,12 @@ export interface ChatState {
   /** #586: Ack about to fire — increment pending count + set Infinity suppression */
   armUnreadSuppression: (threadId: string) => void;
   /** F069: Initialize unread state from API (page load recovery) */
-  initThreadUnread: (threadId: string, unreadCount: number, hasUserMention: boolean) => void;
+  initThreadUnread: (
+    threadId: string,
+    unreadCount: number,
+    hasUserMention: boolean,
+    lastReadMessageId?: string | null,
+  ) => void;
   updateThreadCatStatus: (threadId: string, catId: string, status: CatStatusType) => void;
   /** F173 PR-C Task 10: clear targetCats / catStatuses + mark stale catInvocations completed
    *  for a specific thread. Mirrors flat when active. Replaces the flat-only clearCatStatuses
@@ -2717,18 +2723,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
     })),
 
-  initThreadUnread: (threadId, unreadCount, hasUserMention) =>
+  initThreadUnread: (threadId, unreadCount, hasUserMention, lastReadMessageId) =>
     set((state) => {
       if (threadId === state.currentThreadId) return state;
       // Skip re-hydration if this thread was recently cleared (ack race suppression)
       const suppressUntil = state._unreadSuppressedUntil[threadId];
       if (suppressUntil && Date.now() < suppressUntil) return state;
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      if (existing.unreadCount === unreadCount && existing.hasUserMention === hasUserMention) return state;
+      const nextLastReadMessageId = lastReadMessageId ?? existing.lastReadMessageId ?? null;
+      if (
+        existing.unreadCount === unreadCount &&
+        existing.hasUserMention === hasUserMention &&
+        existing.lastReadMessageId === nextLastReadMessageId
+      ) {
+        return state;
+      }
       return {
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...existing, unreadCount, hasUserMention },
+          [threadId]: { ...existing, unreadCount, hasUserMention, lastReadMessageId: nextLastReadMessageId },
         },
       };
     }),
