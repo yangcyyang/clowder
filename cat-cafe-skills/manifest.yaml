@@ -104,10 +104,10 @@ skills:
   project-init:
     description: >
       初始化 Clowder 长期项目脚手架，创建 .cat-cafe/projects/{name}/ 下的
-      brief.md、progress.md、handoff-log.md，并可选创建 security.md。
-      Use when: 新项目、初始化项目、project init、给项目建 brief/progress/handoff 档案。
+      brief.md、progress.md、decisions.md、handoff-index.md、handoff-log.md，并可选创建 security.md。
+      Use when: 新项目、初始化项目、project init、给项目建 brief/progress/decisions/handoff 档案。
       Not for: 已有项目的日常进度更新、代码实现、交接日志自动追加。
-      Output: 项目目录 + 3 个核心项目文件 + 可选 security.md + git commit。
+      Output: 项目目录 + 5 个核心项目文件 + 可选 security.md + git commit。
     triggers:
       - "新项目"
       - "初始化项目"
@@ -119,7 +119,32 @@ skills:
       - "写代码"
       - "自动交接日志"
     output: ".cat-cafe/projects/{name}/ project scaffold"
-    next: ["feat-lifecycle", "writing-plans"]
+    next: ["project-workflow", "feat-lifecycle", "writing-plans"]
+    sop_step: null
+
+  project-workflow:
+    description: >
+      Clowder 长期项目接手、推进、交接、代码影响面判断和 review 验收工作流。
+      Use when: 继续推进、接手项目、项目工作流、看当前进度、写交接、判断影响范围、review/验收任务。
+      Not for: 一次性小问答、无项目状态变化的纯解释、明确局部 trivial 修复。
+      Output: 接手摘要 + 下一步计划 + 必要的项目事实源更新 + review 风险结论。
+    triggers:
+      - "继续推进"
+      - "接手项目"
+      - "项目工作流"
+      - "看下当前进度"
+      - "写交接"
+      - "判断影响范围"
+      - "review 任务"
+      - "验收任务"
+      - "项目接手"
+      - "上下文接手"
+    not_for:
+      - "一次性小问答"
+      - "纯解释"
+      - "trivial 修复"
+    output: "Takeover summary / project progress update / handoff / review risk report"
+    next: ["writing-plans", "tdd", "quality-gate", "request-review"]
     sop_step: null
 
   # ── 专家辩论团 ──

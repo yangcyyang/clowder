@@ -30,7 +30,7 @@ source_author: "Muji（Seede AI）"
 | 文章痛点 | Clowder 对应能力 |
 |---|---|
 | 谁来 review AI 写的屎山？守门员缺失 | cross-cat review、quality-gate、merge-gate、no-self-review 硬规则 |
-| spec 必要但不充分，要把"需求/实现/影响范围/验收标准"串起来 | project-init 脚手架（brief.md / progress.md / handoff-log.md） |
+| spec 必要但不充分，要把"需求/实现/影响范围/验收标准"串起来 | project-init 脚手架（brief.md / progress.md / decisions.md / handoff-index.md / handoff-log.md） |
 | 多 builder 协作很快变混乱 | governance bootstrap + shared-rules 家规注入 |
 | 黑盒等待无聊，要"活人感"、过程可见 | agent 状态指示、thread、rich block 实时输出 |
 | 文档跟不上代码变化 | handoff-log 自动追加、context-index |

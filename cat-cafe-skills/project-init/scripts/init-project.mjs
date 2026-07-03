@@ -84,6 +84,8 @@ async function main() {
   await mkdir(projectDir, { recursive: true });
   await writeNewFile(resolve(projectDir, 'brief.md'), await renderTemplate('brief.template.md', variables));
   await writeNewFile(resolve(projectDir, 'progress.md'), await renderTemplate('progress.template.md', variables));
+  await writeNewFile(resolve(projectDir, 'decisions.md'), await renderTemplate('decisions.template.md', variables));
+  await writeNewFile(resolve(projectDir, 'handoff-index.md'), await renderTemplate('handoff-index.template.md', variables));
   await writeNewFile(resolve(projectDir, 'handoff-log.md'), await renderTemplate('handoff-log.template.md', variables));
   if (args.security) {
     await writeNewFile(resolve(projectDir, 'security.md'), await renderTemplate('security.template.md', variables));

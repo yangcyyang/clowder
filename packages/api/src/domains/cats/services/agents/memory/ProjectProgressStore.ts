@@ -5,6 +5,8 @@ import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 
 export const PROJECT_PROGRESS_MAX_CHARS = 12_000;
 export const PROJECT_BRIEF_MAX_CHARS = 8_000;
+export const PROJECT_DECISIONS_MAX_CHARS = 8_000;
+export const PROJECT_HANDOFF_INDEX_MAX_CHARS = 6_000;
 
 export interface ProjectProgressRecord {
   id: string;
@@ -39,23 +41,42 @@ export function getProjectHandoffLogPath(projectId: string, projectRoot = findMo
   return join(getProjectProgressDir(projectRoot), projectId, 'handoff-log.md');
 }
 
+export function getProjectDecisionsPath(projectId: string, projectRoot = findMonorepoRoot()): string {
+  assertSafeProjectId(projectId);
+  return join(getProjectProgressDir(projectRoot), projectId, 'decisions.md');
+}
+
+export function getProjectHandoffIndexPath(projectId: string, projectRoot = findMonorepoRoot()): string {
+  assertSafeProjectId(projectId);
+  return join(getProjectProgressDir(projectRoot), projectId, 'handoff-index.md');
+}
+
+async function readProjectFile(
+  projectId: string,
+  path: string,
+  maxChars: number,
+  overflowLabel: string,
+): Promise<ProjectProgressRecord> {
+  if (!existsSync(path)) {
+    return { id: projectId, path, content: '', exists: false, truncated: false };
+  }
+  const raw = await readFile(path, 'utf-8');
+  const truncated = raw.length > maxChars;
+  return {
+    id: projectId,
+    path,
+    content: truncated ? `${raw.slice(0, maxChars)}\n\n[${overflowLabel}内容过长，已截断]` : raw,
+    exists: true,
+    truncated,
+  };
+}
+
 export async function readProjectBrief(
   projectId: string,
   projectRoot = findMonorepoRoot(),
 ): Promise<ProjectProgressRecord> {
   const path = getProjectBriefPath(projectId, projectRoot);
-  if (!existsSync(path)) {
-    return { id: projectId, path, content: '', exists: false, truncated: false };
-  }
-  const raw = await readFile(path, 'utf-8');
-  const truncated = raw.length > PROJECT_BRIEF_MAX_CHARS;
-  return {
-    id: projectId,
-    path,
-    content: truncated ? `${raw.slice(0, PROJECT_BRIEF_MAX_CHARS)}\n\n[项目简介内容过长，已截断]` : raw,
-    exists: true,
-    truncated,
-  };
+  return readProjectFile(projectId, path, PROJECT_BRIEF_MAX_CHARS, '项目简介');
 }
 
 export async function readProjectProgress(
@@ -63,18 +84,23 @@ export async function readProjectProgress(
   projectRoot = findMonorepoRoot(),
 ): Promise<ProjectProgressRecord> {
   const path = getProjectProgressPath(projectId, projectRoot);
-  if (!existsSync(path)) {
-    return { id: projectId, path, content: '', exists: false, truncated: false };
-  }
-  const raw = await readFile(path, 'utf-8');
-  const truncated = raw.length > PROJECT_PROGRESS_MAX_CHARS;
-  return {
-    id: projectId,
-    path,
-    content: truncated ? `${raw.slice(0, PROJECT_PROGRESS_MAX_CHARS)}\n\n[项目进度内容过长，已截断]` : raw,
-    exists: true,
-    truncated,
-  };
+  return readProjectFile(projectId, path, PROJECT_PROGRESS_MAX_CHARS, '项目进度');
+}
+
+export async function readProjectDecisions(
+  projectId: string,
+  projectRoot = findMonorepoRoot(),
+): Promise<ProjectProgressRecord> {
+  const path = getProjectDecisionsPath(projectId, projectRoot);
+  return readProjectFile(projectId, path, PROJECT_DECISIONS_MAX_CHARS, '项目决策');
+}
+
+export async function readProjectHandoffIndex(
+  projectId: string,
+  projectRoot = findMonorepoRoot(),
+): Promise<ProjectProgressRecord> {
+  const path = getProjectHandoffIndexPath(projectId, projectRoot);
+  return readProjectFile(projectId, path, PROJECT_HANDOFF_INDEX_MAX_CHARS, '交接索引');
 }
 
 export async function listProjectProgressIds(projectRoot = findMonorepoRoot()): Promise<string[]> {
@@ -106,14 +132,22 @@ export async function readProjectProgressForPrompt(
         id,
         brief: await readProjectBrief(id, projectRoot),
         progress: await readProjectProgress(id, projectRoot),
+        decisions: await readProjectDecisions(id, projectRoot),
+        handoffIndex: await readProjectHandoffIndex(id, projectRoot),
       })),
     );
     const blocks = records
       .filter(
-        ({ brief, progress }) => (brief.exists && brief.content.trim()) || (progress.exists && progress.content.trim()),
+        ({ brief, progress, decisions, handoffIndex }) =>
+          (brief.exists && brief.content.trim()) ||
+          (progress.exists && progress.content.trim()) ||
+          (decisions.exists && decisions.content.trim()) ||
+          (handoffIndex.exists && handoffIndex.content.trim()),
       )
-      .map(({ id, brief, progress }) => {
-        const parts = [`<!-- project:${id} brief_path:${brief.path} progress_path:${progress.path} -->`];
+      .map(({ id, brief, progress, decisions, handoffIndex }) => {
+        const parts = [
+          `<!-- project:${id} brief_path:${brief.path} progress_path:${progress.path} decisions_path:${decisions.path} handoff_index_path:${handoffIndex.path} -->`,
+        ];
         if (brief.exists && brief.content.trim()) {
           parts.push('## 项目简介（brief.md）', brief.content.trim());
         }
@@ -122,6 +156,16 @@ export async function readProjectProgressForPrompt(
             parts.push('⚠️ 项目状态：needs_brief（未找到 brief.md）');
           }
           parts.push('## 项目进度（progress.md）', progress.content.trim());
+        }
+        if (decisions.exists && decisions.content.trim()) {
+          parts.push('## 项目决策（decisions.md）', decisions.content.trim());
+        }
+        if (handoffIndex.exists && handoffIndex.content.trim()) {
+          parts.push(
+            '## 交接索引（handoff-index.md）',
+            '先读索引，只在当前任务命中模块、日期、关键词或风险点时再打开具体 handoff。',
+            handoffIndex.content.trim(),
+          );
         }
         return parts.join('\n');
       });

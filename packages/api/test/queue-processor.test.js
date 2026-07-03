@@ -387,9 +387,11 @@ describe('QueueProcessor', () => {
           files: [
             { path: '.cat-cafe/projects/wechat-cli/brief.md', added: 10, removed: 0 },
             { path: '.cat-cafe/projects/wechat-cli/progress.md', added: 10, removed: 0 },
+            { path: '.cat-cafe/projects/wechat-cli/decisions.md', added: 10, removed: 0 },
+            { path: '.cat-cafe/projects/wechat-cli/handoff-index.md', added: 10, removed: 0 },
             { path: '.cat-cafe/projects/wechat-cli/handoff-log.md', added: 10, removed: 0 },
           ],
-          totalAdded: 30,
+          totalAdded: 50,
           totalRemoved: 0,
         },
       ];
@@ -441,7 +443,7 @@ describe('QueueProcessor', () => {
       assert.equal(completed.data.workflowId, 'project-init');
       assert.equal(completed.data.routeExecutionBypassed, true);
       assert.equal(completed.data.tokenUsage.totalTokens, 0);
-      assert.equal(completed.data.artifactCount, 3);
+      assert.equal(completed.data.artifactCount, 5);
       const textMessage = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
         (call) => call.arguments[0].type === 'text',
       );

@@ -27,7 +27,7 @@ Clowder 的引擎是 LLM，受四条不可违背的定律约束。其中最硬�
 
 **所以真正还重的是这几块（治理重点）**：
 1. **会话历史**：`claude --resume` 每轮回放历史，长 thread 越滚越大（cache read 大头来自这里）。
-2. **项目上下文**：brief/progress/handoff-log 全量注入，不分任务相关性。
+2. **项目上下文**：brief/progress/decisions/handoff-index/handoff-log 仍偏重，尤其需要避免全文交接日志默认注入。
 3. **缺分层**：现有选择性注入是零散的（digest + skill router），没有统一的"L1 默认 / L2-L3 按需升级"框架。
 4. **看不见**：没有每轮 token/成本面板，无法判断"哪一轮为什么重"。
 
@@ -38,7 +38,7 @@ Clowder 的引擎是 LLM，受四条不可违背的定律约束。其中最硬�
 - `context/SystemPromptBuilder.ts`（1217行）：上下文总装配，含 governance digest 逻辑。
 - `context/SkillRouter.ts`（276行）：已有 skill 选择性注入（matchSkills/scoreSkillMatch）。
 - `context/ContextAssembler.ts`：上下文拼装。
-- `agents/memory/ProjectProgressStore.ts`：brief/progress/handoff-log 读取注入。
+- `agents/memory/ProjectProgressStore.ts`：brief/progress/decisions/handoff-index 读取注入，handoff-log 通过索引按需打开。
 - `agents/invocation/QueueProcessor.ts`：`appendUsageTaskEvents()` 已记录 provider/model/token/cost → 可观测的现成数据源。
 - cat 上下文窗口配置：`model_context_window` / `model_auto_compact_token_limit`（已有 compaction 钩子）。
 
@@ -54,7 +54,7 @@ Clowder 的引擎是 LLM，受四条不可违背的定律约束。其中最硬�
 把现有零散的选择性注入，收拢成一个清晰的分层规则。**默认只给 L1，按需升级。**
 ```text
 L1（默认，每轮都给）：身份/角色 + governance digest + 当前任务 + 最小必要历史
-L2（按需）：项目上下文（brief/progress/handoff-log）+ 代码情报产物 —— 仅当任务涉及该项目/系统理解时
+L2（按需）：项目上下文（brief/progress/decisions/handoff-index）+ 代码情报产物 —— 仅当任务涉及该项目/系统理解时
 L3（按需）：完整 shared-rules 原文 + review/评审机制 —— 仅当 magic word / 评审任务触发
 ```
 - 落点：在 `SkillRouter` / `SystemPromptBuilder` 之上加一层"注入分级决策"，判断这轮该给哪几层。

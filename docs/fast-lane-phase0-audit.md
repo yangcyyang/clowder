@@ -66,7 +66,7 @@ Clowder 现在已经有"快车道"的雏形，但还不是一个可运行的快�
 
 - 校验项目名：`^[a-zA-Z0-9_-]+$`
 - 创建 `.cat-cafe/projects/<name>/`
-- 从模板写入 `brief.md`、`progress.md`、`handoff-log.md`
+- 从模板写入 `brief.md`、`progress.md`、`decisions.md`、`handoff-index.md`、`handoff-log.md`
 - 可选写入 `security.md`
 - 目录已存在时拒绝覆盖
 - 支持 `--creator`、`--root`、`--security`、`--no-commit`

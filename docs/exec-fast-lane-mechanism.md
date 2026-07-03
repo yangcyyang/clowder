@@ -95,7 +95,7 @@ type FastLaneWorkflow = {
 ```text
 输入：初始化一个项目 wechat-cli
 fast lane：直接运行 project-init workflow
-输出：brief.md / progress.md / handoff-log.md / README.md
+输出：brief.md / progress.md / decisions.md / handoff-index.md / handoff-log.md
 证据：文件存在、git diff 可读、必要字段完整
 回退：参数缺失或目录不安全时走 slow lane 或 ask-user
 ```

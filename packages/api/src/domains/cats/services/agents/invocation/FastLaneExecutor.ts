@@ -53,6 +53,8 @@ function projectFiles(projectName: string): string[] {
   return [
     `.cat-cafe/projects/${projectName}/brief.md`,
     `.cat-cafe/projects/${projectName}/progress.md`,
+    `.cat-cafe/projects/${projectName}/decisions.md`,
+    `.cat-cafe/projects/${projectName}/handoff-index.md`,
     `.cat-cafe/projects/${projectName}/handoff-log.md`,
   ];
 }

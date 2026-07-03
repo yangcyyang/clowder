@@ -782,7 +782,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('readProjectProgressForPrompt loads brief before progress when present', async () => {
+  test('readProjectProgressForPrompt loads brief, progress, decisions, and handoff index in order', async () => {
     const { readProjectProgressForPrompt } = await import(
       '../dist/domains/cats/services/agents/memory/ProjectProgressStore.js'
     );
@@ -799,14 +799,40 @@ describe('SystemPromptBuilder', () => {
         '# Demo 进度\n\n## 当前阶段\nB',
         'utf-8',
       );
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'decisions.md'),
+        '# Demo 决策\n\n- KD-001: C',
+        'utf-8',
+      );
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'),
+        '# Demo 交接索引\n\n- 2026-07-03: D',
+        'utf-8',
+      );
 
       const content = await readProjectProgressForPrompt(['demo'], root);
       assert.ok(content?.includes('brief_path:'), 'Should include brief marker');
+      assert.ok(content?.includes('decisions_path:'), 'Should include decisions marker');
+      assert.ok(content?.includes('handoff_index_path:'), 'Should include handoff index marker');
       assert.ok(content?.includes('项目简介（brief.md）'), 'Should include brief section');
       assert.ok(content?.includes('项目进度（progress.md）'), 'Should include progress section');
+      assert.ok(content?.includes('项目决策（decisions.md）'), 'Should include decisions section');
+      assert.ok(content?.includes('交接索引（handoff-index.md）'), 'Should include handoff index section');
       assert.ok(
         content && content.indexOf('Demo Brief') < content.indexOf('Demo 进度'),
         'Should place brief before progress',
+      );
+      assert.ok(
+        content && content.indexOf('Demo 进度') < content.indexOf('Demo 决策'),
+        'Should place progress before decisions',
+      );
+      assert.ok(
+        content && content.indexOf('Demo 决策') < content.indexOf('Demo 交接索引'),
+        'Should place decisions before handoff index',
+      );
+      assert.ok(
+        content?.includes('先读索引，只在当前任务命中模块、日期、关键词或风险点时再打开具体 handoff'),
+        'Should instruct agents to use handoff index before full handoffs',
       );
       assert.ok(!content?.includes('needs_brief'), 'Should not flag needs_brief when brief exists');
     } finally {

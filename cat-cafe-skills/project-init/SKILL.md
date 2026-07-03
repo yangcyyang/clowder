@@ -1,7 +1,7 @@
 ---
 name: project-init
 display_name: 项目脚手架初始化员
-description: "Use when creating or initializing a Clowder project scaffold under .cat-cafe/projects/{name}, including brief.md, progress.md, handoff-log.md, and optional security.md."
+description: "Use when creating or initializing a Clowder project scaffold under .cat-cafe/projects/{name}, including brief.md, progress.md, decisions.md, handoff-index.md, handoff-log.md, and optional security.md."
 triggers:
   - "新项目"
   - "初始化项目"
@@ -12,7 +12,7 @@ triggers:
 
 ## 目标
 
-为 Clowder 长期项目创建统一项目档案，让后续 Agent 能快速理解目标、验收标准、当前进度和交接历史。
+为 Clowder 长期项目创建统一项目档案，让后续 Agent 能快速理解目标、验收标准、当前进度、已拍板决策和交接入口。
 
 ## 输入
 
@@ -37,6 +37,8 @@ node cat-cafe-skills/project-init/scripts/init-project.mjs <项目名> --creator
 
 - `.cat-cafe/projects/{name}/brief.md`
 - `.cat-cafe/projects/{name}/progress.md`
+- `.cat-cafe/projects/{name}/decisions.md`
+- `.cat-cafe/projects/{name}/handoff-index.md`
 - `.cat-cafe/projects/{name}/handoff-log.md`
 - 可选 `.cat-cafe/projects/{name}/security.md`
 - git commit（除非显式 `--no-commit`）
@@ -46,4 +48,6 @@ node cat-cafe-skills/project-init/scripts/init-project.mjs <项目名> --creator
 - 不覆盖已有项目文件。
 - `brief.md` 必须包含目标、验收标准、约束、涉及角色。
 - `progress.md` 必须包含 `last_updated` 和进度分区。
+- `decisions.md` 必须记录已拍板的长期决策，避免反复讨论。
+- `handoff-index.md` 只放交接索引，接手时先读索引，再按需打开具体 handoff。
 - `handoff-log.md` 只作为自动追加入口，不手写流水账。

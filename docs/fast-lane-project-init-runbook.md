@@ -92,6 +92,8 @@ CAT_CAFE_FAST_LANE=1
 .cat-cafe/projects/<project-name>/
 ├── brief.md
 ├── progress.md
+├── decisions.md
+├── handoff-index.md
 ├── handoff-log.md
 └── security.md   # 仅传 --security 时生成
 ```
