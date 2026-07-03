@@ -82,4 +82,31 @@ describe('buildInstallPreview', () => {
     });
     assert.deepEqual(preview.entry.mcpServer?.env, { API_KEY: 'secret' });
   });
+
+  test('Figma MCP is installed disabled with controlled-access warnings', () => {
+    const preview = buildInstallPreview({
+      id: 'codex-figma',
+      command: 'npx',
+      args: ['-y', '@anthropic-ai/mcp-server-figma'],
+    });
+
+    assert.equal(preview.entry.enabled, false);
+    assert.equal(preview.willProbe, false);
+    assert.ok(preview.risks.some((risk) => risk.includes('default disabled')));
+    assert.ok(preview.risks.some((risk) => risk.includes('task-scoped authorization')));
+    assert.ok(preview.risks.some((risk) => risk.includes('capability audit')));
+  });
+
+  test('opencli-style browser MCP is installed disabled with controlled-access warnings', () => {
+    const preview = buildInstallPreview({
+      id: 'opencli-browser',
+      command: 'opencli',
+      args: ['mcp'],
+    });
+
+    assert.equal(preview.entry.enabled, false);
+    assert.equal(preview.willProbe, false);
+    assert.ok(preview.risks.some((risk) => risk.includes('default disabled')));
+    assert.ok(preview.risks.some((risk) => risk.includes('high-risk actions require confirmation')));
+  });
 });

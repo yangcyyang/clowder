@@ -26,10 +26,11 @@ export function buildInstallPreview(req: McpInstallRequest, existingCaps?: Capab
     throw new Error('resolver must be a string');
   }
   const hasResolver = !!req.resolver;
+  const controlledAccess = detectControlledAccessTool(req);
   const entry: CapabilityEntry = {
     id: req.id,
     type: 'mcp',
-    enabled: true,
+    enabled: !controlledAccess,
     source: 'external',
     mcpServer: {
       transport: req.transport ?? 'stdio',
@@ -43,7 +44,8 @@ export function buildInstallPreview(req: McpInstallRequest, existingCaps?: Capab
     ...(req.ecosystem && MARKETPLACE_ECOSYSTEMS.includes(req.ecosystem) && { ecosystem: req.ecosystem }),
   };
 
-  const willProbe = entry.mcpServer?.transport !== 'streamableHttp' && !hasResolver && !!(req.command || req.url);
+  const willProbe =
+    entry.enabled && entry.mcpServer?.transport !== 'streamableHttp' && !hasResolver && !!(req.command || req.url);
 
   const risks: string[] = [];
   if (existingCaps?.some((c) => c.id === req.id && c.type === 'mcp')) {
@@ -52,6 +54,24 @@ export function buildInstallPreview(req: McpInstallRequest, existingCaps?: Capab
   if (!req.command && !req.resolver && !req.url) {
     risks.push('No command, resolver, or URL — MCP will be unresolvable');
   }
+  if (controlledAccess) {
+    risks.push(
+      `${controlledAccess.label} is default disabled; enable only after task-scoped authorization.`,
+      `${controlledAccess.label} requires visible capability audit / tool usage evidence for every install, toggle, or update.`,
+      `${controlledAccess.label} high-risk actions require confirmation before external writes, batch operations, or credentialed access.`,
+    );
+  }
 
   return { entry, cliConfigsAffected: CLI_CONFIGS, willProbe, risks };
+}
+
+function detectControlledAccessTool(req: McpInstallRequest): { label: string } | null {
+  const haystack = [req.id, req.command, req.resolver, req.url, ...(req.args ?? [])]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  if (/\bfigma\b/.test(haystack)) return { label: 'Figma MCP' };
+  if (/\bopen[-_ ]?cli\b/.test(haystack)) return { label: 'opencli MCP' };
+  return null;
 }
