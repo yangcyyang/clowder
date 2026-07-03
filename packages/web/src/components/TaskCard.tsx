@@ -1,13 +1,14 @@
 'use client';
 
-import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
-import { useState } from 'react';
+import type { TaskEvent, TaskItem, TaskStatus } from '@cat-cafe/shared';
+import { useEffect, useMemo, useState } from 'react';
 import {
   isInvocationCostPanelEnabled,
   readTaskUsageSummaries,
   summarizeTaskUsage,
   type InvocationUsageSummary,
 } from '@/utils/invocationCostPanel';
+import { apiFetch } from '@/utils/api-client';
 import { getUsageRisk } from '@/utils/usageRisk';
 import type { PromptSource, PromptSourceBreakdown } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
@@ -71,6 +72,13 @@ const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: 
     pillBg: 'bg-conn-red-bg text-conn-red-text',
   },
 };
+
+interface CapabilityOption {
+  id: string;
+  type: 'mcp' | 'skill' | 'limb';
+  description?: string;
+  enabled: boolean;
+}
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -172,6 +180,173 @@ function UsageSourceBreakdown({ breakdown }: { breakdown: PromptSourceBreakdown 
   );
 }
 
+function isControlledExternalTool(item: {
+  id: string;
+  description?: string;
+  mcpServer?: { command?: string; args?: string[]; url?: string };
+}): boolean {
+  const haystack = [
+    item.id,
+    item.description,
+    item.mcpServer?.command,
+    item.mcpServer?.url,
+    ...(item.mcpServer?.args ?? []),
+  ]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+  return /opencli|figma/.test(haystack);
+}
+
+function readCapabilityEvents(events: readonly TaskEvent[] | undefined, type: 'capability_authorized' | 'capability_usage') {
+  return (events ?? []).filter((event) => event.type === type);
+}
+
+function CapabilityTaskPanel({ task }: { task: TaskItem }) {
+  const [capabilities, setCapabilities] = useState<CapabilityOption[]>([]);
+  const [events, setEvents] = useState<readonly TaskEvent[]>(task.events ?? []);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEvents(task.events ?? []);
+  }, [task.events]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch('/api/capabilities')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as {
+          items?: Array<CapabilityOption & { mcpServer?: { command?: string; args?: string[]; url?: string } }>;
+        };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setCapabilities(
+          (data.items ?? [])
+            .filter((item) => item.type === 'mcp' && isControlledExternalTool(item))
+            .map((item) => ({
+              id: item.id,
+              type: item.type,
+              description: item.description,
+              enabled: item.enabled,
+            })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setError('外部工具能力加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const authorizationEvents = useMemo(() => readCapabilityEvents(events, 'capability_authorized'), [events]);
+  const usageEvents = useMemo(() => readCapabilityEvents(events, 'capability_usage'), [events]);
+  const authorized = useMemo(
+    () =>
+      new Set(
+        authorizationEvents
+          .map((event) => event.data?.capabilityId)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0),
+      ),
+    [authorizationEvents],
+  );
+
+  async function authorize(capability: CapabilityOption) {
+    setBusyId(capability.id);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/tasks/${task.id}/capability-authorizations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          capabilityId: capability.id,
+          capabilityType: capability.type,
+          reason: `Task-scoped authorization for ${task.title}`,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? `授权失败 (${res.status})`);
+        return;
+      }
+      const data = (await res.json()) as { task?: TaskItem };
+      setEvents(data.task?.events ?? events);
+    } catch {
+      setError('授权请求失败');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-2 text-[10px]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold text-cafe-secondary">外部工具授权</p>
+        <span className="rounded-full border border-conn-amber-text/40 bg-conn-amber-bg/40 px-1.5 py-0.5 text-conn-amber-text">
+          本任务范围
+        </span>
+      </div>
+      <p className="mt-1 leading-5 text-cafe-muted">
+        这里只记录任务级授权和使用回流；真实边界仍是本地进程、浏览器/Figma 账号和远端服务权限。
+      </p>
+      {error && <p className="mt-1 text-conn-red-text">{error}</p>}
+      {loading && <p className="mt-1 text-cafe-muted">加载 opencli/Figma 接入位...</p>}
+      {!loading && capabilities.length === 0 && (
+        <p className="mt-1 text-cafe-muted">未检测到 opencli/Figma MCP。先到 MCP 管理新增，安装后默认关闭。</p>
+      )}
+      {capabilities.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {capabilities.map((capability) => {
+            const isAuthorized = authorized.has(capability.id);
+            return (
+              <div
+                key={`${capability.type}:${capability.id}`}
+                className="flex items-center gap-2 rounded-md border border-[var(--console-border-soft)] bg-cafe-surface-elevated px-2 py-1.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-cafe-secondary">{capability.id}</p>
+                  <p className="truncate text-cafe-muted">
+                    {capability.enabled ? '能力已启用' : '全局关闭'} · {capability.description ?? '外部工具'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isAuthorized || busyId === capability.id}
+                  onClick={() => authorize(capability)}
+                  className="rounded-full border border-cafe-accent px-2 py-0.5 font-semibold text-cafe-accent disabled:cursor-not-allowed disabled:border-[var(--console-border-soft)] disabled:text-cafe-muted"
+                >
+                  {isAuthorized ? '已授权' : busyId === capability.id ? '授权中' : '授权本任务'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {usageEvents.length > 0 && (
+        <div className="mt-2 border-t border-[var(--console-border-soft)] pt-1.5">
+          <p className="mb-1 font-semibold text-cafe-muted">工具使用回流</p>
+          <div className="space-y-1">
+            {usageEvents.slice(-5).map((event, index) => (
+              <p key={`${event.ts}-${index}`} className="truncate text-cafe-muted">
+                {String(event.data?.capabilityId ?? 'capability')} · {String(event.data?.status ?? 'used')}
+                {typeof event.data?.durationMs === 'number' ? ` · ${formatDuration(event.data.durationMs)}` : ''}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TaskCard({
   task,
   onStatusChange,
@@ -230,6 +405,7 @@ export function TaskCard({
               ))}
             </div>
           )}
+          <CapabilityTaskPanel task={task} />
         </div>
       )}
     </div>

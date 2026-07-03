@@ -82,6 +82,97 @@ describe('Tasks Routes', () => {
     assert.equal(body.createdBy, 'opus');
   });
 
+  test('POST task capability authorization appends task-scoped audit event', async () => {
+    const app = await createApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Use opencli for visual check',
+        why: '',
+        createdBy: 'user',
+      },
+    });
+    const taskId = created.json().id;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${taskId}/capability-authorizations`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: {
+        capabilityId: 'opencli',
+        capabilityType: 'mcp',
+        reason: 'Need browser visual audit',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    const event = body.task.events.find((item) => item.type === 'capability_authorized');
+    assert.ok(event);
+    assert.equal(event.data.capabilityId, 'opencli');
+    assert.equal(event.data.authorizedBy, 'alice');
+    assert.equal(socketManager.getEvents().some((event) => event.event === 'task_updated'), true);
+  });
+
+  test('POST task capability authorization requires identity', async () => {
+    const app = await createApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Use opencli',
+        why: '',
+        createdBy: 'user',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${created.json().id}/capability-authorizations`,
+      payload: { capabilityId: 'opencli' },
+    });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  test('POST task capability usage appends usage callback event', async () => {
+    const app = await createApp();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Use opencli',
+        why: '',
+        createdBy: 'user',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${created.json().id}/capability-usage`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: {
+        capabilityId: 'opencli',
+        capabilityType: 'mcp',
+        toolName: 'screenshot',
+        status: 'succeeded',
+        durationMs: 1200,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    const event = body.task.events.find((item) => item.type === 'capability_usage');
+    assert.ok(event);
+    assert.equal(event.data.capabilityId, 'opencli');
+    assert.equal(event.data.toolName, 'screenshot');
+    assert.equal(event.data.durationMs, 1200);
+  });
+
   test('POST accepts task lineage fields', async () => {
     const app = await createApp();
     const parentRes = await app.inject({

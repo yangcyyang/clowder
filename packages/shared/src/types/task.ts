@@ -27,6 +27,8 @@ export type TaskEventType =
   | 'handoff'
   | 'artifact'
   | 'usage'
+  | 'capability_authorized'
+  | 'capability_usage'
   | 'fast_lane_decision'
   | 'fast_lane_started'
   | 'fast_lane_completed'

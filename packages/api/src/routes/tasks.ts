@@ -16,6 +16,7 @@ import type { IMessageStore, StoredMessage } from '../domains/cats/services/stor
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { resolveUserId } from '../utils/request-identity.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
@@ -138,12 +139,33 @@ const taskEventSchema = z.object({
     'handoff',
     'artifact',
     'usage',
+    'capability_authorized',
+    'capability_usage',
     'fast_lane_decision',
     'fast_lane_started',
     'fast_lane_completed',
     'fast_lane_failed',
   ]),
   data: z.record(z.unknown()).optional(),
+});
+
+const capabilityTypeSchema = z.enum(['mcp', 'skill', 'limb']);
+
+const capabilityAuthorizationSchema = z.object({
+  capabilityId: z.string().min(1).max(120),
+  capabilityType: capabilityTypeSchema.default('mcp'),
+  reason: z.string().max(500).optional(),
+  expiresAt: z.number().int().positive().optional(),
+});
+
+const capabilityUsageSchema = z.object({
+  capabilityId: z.string().min(1).max(120),
+  capabilityType: capabilityTypeSchema.default('mcp'),
+  toolName: z.string().min(1).max(120).optional(),
+  status: z.enum(['started', 'succeeded', 'failed']).default('succeeded'),
+  durationMs: z.number().nonnegative().optional(),
+  costUsd: z.number().nonnegative().optional(),
+  summary: z.string().max(500).optional(),
 });
 
 const taskThreadSchema = z.object({
@@ -311,6 +333,24 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
   }
 
+  async function getTaskOr404(taskId: string, reply: import('fastify').FastifyReply): Promise<TaskItem | null> {
+    const task = await taskStore.get(taskId);
+    if (!task) {
+      reply.status(404);
+      return null;
+    }
+    return task;
+  }
+
+  function requireUserId(request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply): string | null {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return null;
+    }
+    return userId;
+  }
+
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
     const result = createSchema.safeParse(request.body);
@@ -419,6 +459,87 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     reply.status(201);
     return { events: updated.events ?? [] };
+  });
+
+  // POST /api/tasks/:id/capability-authorizations — task-scoped external tool authorization.
+  app.post('/api/tasks/:id/capability-authorizations', async (request, reply) => {
+    const userId = requireUserId(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { id } = request.params as { id: string };
+    const task = await getTaskOr404(id, reply);
+    if (!task) return { error: 'Task not found' };
+
+    const parsed = capabilityAuthorizationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const event: TaskEvent = {
+      ts: new Date().toISOString(),
+      catId: 'user',
+      type: 'capability_authorized',
+      data: {
+        capabilityId: parsed.data.capabilityId,
+        capabilityType: parsed.data.capabilityType,
+        authorizedBy: userId,
+        authorizedAt: Date.now(),
+        ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+        ...(parsed.data.expiresAt ? { expiresAt: parsed.data.expiresAt } : {}),
+      },
+    };
+    const updated = await taskStore.update(task.id, { events: [event] });
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to authorize capability' };
+    }
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    const label = await getTaskLabel(updated);
+    await appendTaskSystemNotice(
+      updated,
+      `${label} 已授权外部工具 ${parsed.data.capabilityId} 仅用于本任务。`,
+    );
+    return { task: updated, authorization: event };
+  });
+
+  // POST /api/tasks/:id/capability-usage — usage/audit callback for task-scoped tools.
+  app.post('/api/tasks/:id/capability-usage', async (request, reply) => {
+    const userId = requireUserId(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
+    const { id } = request.params as { id: string };
+    const task = await getTaskOr404(id, reply);
+    if (!task) return { error: 'Task not found' };
+
+    const parsed = capabilityUsageSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const event: TaskEvent = {
+      ts: new Date().toISOString(),
+      catId: 'system',
+      type: 'capability_usage',
+      data: {
+        capabilityId: parsed.data.capabilityId,
+        capabilityType: parsed.data.capabilityType,
+        recordedBy: userId,
+        status: parsed.data.status,
+        ...(parsed.data.toolName ? { toolName: parsed.data.toolName } : {}),
+        ...(parsed.data.durationMs != null ? { durationMs: parsed.data.durationMs } : {}),
+        ...(parsed.data.costUsd != null ? { costUsd: parsed.data.costUsd } : {}),
+        ...(parsed.data.summary ? { summary: parsed.data.summary } : {}),
+      },
+    };
+    const updated = await taskStore.update(task.id, { events: [event] });
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to record capability usage' };
+    }
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    return { task: updated, usage: event };
   });
 
   // GET /api/threads/:threadId/tasks/:taskId/lineage — 返回父链/重试/分支关联

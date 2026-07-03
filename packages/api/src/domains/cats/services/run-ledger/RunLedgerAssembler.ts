@@ -362,7 +362,12 @@ function collectTaskEvents(tasks: TaskItem[], invocationId: string): TaskEvent[]
   return tasks.flatMap((task) =>
     (task.events ?? []).filter((event) => {
       if (event.data?.invocationId === invocationId) return true;
-      return event.type === 'usage' || event.type === 'artifact' || event.type.startsWith('fast_lane_');
+      return (
+        event.type === 'usage' ||
+        event.type === 'artifact' ||
+        event.type === 'capability_usage' ||
+        event.type.startsWith('fast_lane_')
+      );
     }),
   );
 }
@@ -404,6 +409,23 @@ function toTaskLedgerEvent(event: TaskEvent): DraftEvent | null {
       actor,
       severity: 'info',
       data: pickUsageEventData(event.data ?? {}),
+    };
+  }
+  if (event.type === 'capability_usage') {
+    return {
+      ts,
+      type: 'usage_recorded',
+      actor,
+      severity: event.data?.status === 'failed' ? 'warning' : 'info',
+      data: {
+        usageKind: 'capability',
+        capabilityId: sanitizeUnknown(event.data?.capabilityId),
+        capabilityType: sanitizeUnknown(event.data?.capabilityType),
+        toolName: sanitizeUnknown(event.data?.toolName),
+        status: sanitizeUnknown(event.data?.status),
+        durationMs: sanitizeUnknown(event.data?.durationMs),
+        costUsd: sanitizeUnknown(event.data?.costUsd),
+      },
     };
   }
   if (event.type === 'artifact') {
