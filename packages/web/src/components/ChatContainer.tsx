@@ -1034,6 +1034,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             isGrouped={isGrouped}
             threadReplyInfo={threadReplyInfo}
             onOpenThread={handleOpenInlineThread}
+            onOpenTaskThread={handleOpenTaskThread}
             isEditing={editingMessageId === msg.id}
             editDraft={editingMessageId === msg.id ? editingDraft : ''}
             isSavingEdit={isSavingEdit && editingMessageId === msg.id}
@@ -1049,6 +1050,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       getCatById,
       messages,
       handleOpenInlineThread,
+      handleOpenTaskThread,
       inlineThreadReplies,
       threadStates,
       handleStartEditMessage,

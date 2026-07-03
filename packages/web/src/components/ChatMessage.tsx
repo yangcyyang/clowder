@@ -1,6 +1,6 @@
 'use client';
 
-import type { TaskItem, TaskStatus } from '@cat-cafe/shared';
+import type { TaskItem } from '@cat-cafe/shared';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
@@ -96,25 +96,6 @@ export function shouldRenderChatMessage(message: ChatMessageType): boolean {
 
 const TASK_EVIDENCE_KEYS = ['tests', 'build', 'screenshot', 'review', 'lesson'] as const;
 
-const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: '待办',
-  doing: '进行中',
-  in_review: '待验收',
-  blocked: '阻塞',
-  done: '完成',
-  failed: '失败',
-};
-
-const TASK_BADGE_CLASS: Record<TaskStatus, string> = {
-  todo: 'border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-[var(--cafe-text)]',
-  doing: 'border-[var(--slock-border-color)] bg-cafe-crosspost/15 text-cafe-crosspost',
-  in_review:
-    'border-[var(--slock-border-color)] bg-[var(--console-active-bg)] text-[var(--cafe-accent)] shadow-[var(--slock-shadow-chip)]',
-  blocked: 'border-conn-amber-text bg-conn-amber-bg text-conn-amber-text',
-  done: 'border-conn-emerald-text bg-conn-emerald-bg text-conn-emerald-text',
-  failed: 'border-conn-red-text bg-conn-red-bg text-conn-red-text',
-};
-
 function countTaskEvidence(task: TaskItem): number {
   const evidence = task.evidence;
   if (!evidence) return 0;
@@ -135,29 +116,60 @@ function getTaskMetaLabels(task: TaskItem): string[] {
   return labels.slice(0, 2);
 }
 
-function MessageTaskBadge({ task, seq }: { task: TaskItem; seq: number }) {
-  const status = task.status;
-  const statusLabel = TASK_STATUS_LABELS[status] ?? status;
+function MessageTaskBadge({
+  task,
+  seq,
+  assigneeLabel,
+  onOpen,
+}: {
+  task: TaskItem;
+  seq: number;
+  assigneeLabel?: string;
+  onOpen?: (task: TaskItem) => void;
+}) {
   const metaLabels = getTaskMetaLabels(task);
+  const chipLabel = assigneeLabel ? `▶ #${seq} @${assigneeLabel}` : `▶ #${seq}`;
+  const content = (
+    <>
+      <span className="shrink-0">{chipLabel}</span>
+      {metaLabels.map((label) => (
+        <span
+          key={label}
+          className="shrink-0 border-l border-[var(--slock-border-color)]/40 pl-1.5 text-[10px] font-bold opacity-80"
+        >
+          {label}
+        </span>
+      ))}
+    </>
+  );
+
+  if (onOpen) {
+    return (
+      <div className="mt-1.5">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpen(task);
+          }}
+          className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-cyan-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-cyan-ring"
+          title={`打开任务 Thread：${task.title}`}
+          aria-label={`打开任务 #${seq}${assigneeLabel ? `，负责人 ${assigneeLabel}` : ''}`}
+        >
+          {content}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-1.5">
       <span
-        className={`inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 px-2 py-1 text-[11px] font-bold leading-none ${TASK_BADGE_CLASS[status] ?? TASK_BADGE_CLASS.todo}`}
-        title={`${TASK_STATUS_LABELS[status] ?? status}: ${task.title}`}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)]"
+        title={task.title}
       >
-        <span className="shrink-0">task #{seq}</span>
-        <span aria-hidden="true" className="opacity-60">
-          ·
-        </span>
-        <span className="shrink-0">{statusLabel}</span>
-        {metaLabels.map((label) => (
-          <span
-            key={label}
-            className="shrink-0 rounded-[var(--slock-radius-sm)] border border-current/35 px-1 py-0.5 text-[10px] font-semibold opacity-85"
-          >
-            {label}
-          </span>
-        ))}
+        {content}
       </span>
     </div>
   );
@@ -221,6 +233,7 @@ interface ChatMessageProps {
   isGrouped?: boolean;
   threadReplyInfo?: { branchThreadId: string; replyCount: number; newCount?: number };
   onOpenThread?: (messageId: string) => void;
+  onOpenTaskThread?: (task: TaskItem) => void;
   isEditing?: boolean;
   editDraft?: string;
   isSavingEdit?: boolean;
@@ -238,6 +251,7 @@ export function ChatMessage({
   isGrouped = false,
   threadReplyInfo,
   onOpenThread,
+  onOpenTaskThread,
   isEditing = false,
   editDraft = '',
   isSavingEdit = false,
@@ -285,6 +299,8 @@ export function ChatMessage({
     .filter((task) => task.kind !== 'pr_tracking')
     .map((task, index) => ({ task, seq: index + 1 }))
     .find(({ task }) => task.sourceMessageId === message.id);
+  const taskAssignee = taskEntry?.task.ownerCatId ? getCatById(taskEntry.task.ownerCatId) : undefined;
+  const taskAssigneeLabel = taskAssignee ? formatCatName(taskAssignee) : taskEntry?.task.ownerCatId ?? undefined;
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
   const isSchedulerReply = isSchedulerReplyPreview(message.replyPreview);
@@ -503,7 +519,14 @@ export function ChatMessage({
               <CollapsibleMarkdown content={message.content} searchHighlight={searchHighlight} />
             )}
           </div>
-          {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
+          {taskEntry && (
+            <MessageTaskBadge
+              task={taskEntry.task}
+              seq={taskEntry.seq}
+              assigneeLabel={taskAssigneeLabel}
+              onOpen={onOpenTaskThread}
+            />
+          )}
           <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
           {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
             <ThreadReplyBadge
@@ -656,7 +679,14 @@ export function ChatMessage({
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />
           )}
         </div>
-        {taskEntry && <MessageTaskBadge task={taskEntry.task} seq={taskEntry.seq} />}
+        {taskEntry && (
+          <MessageTaskBadge
+            task={taskEntry.task}
+            seq={taskEntry.seq}
+            assigneeLabel={taskAssigneeLabel}
+            onOpen={onOpenTaskThread}
+          />
+        )}
         <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
         {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
           <ThreadReplyBadge

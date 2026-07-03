@@ -54,7 +54,7 @@ function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
     threadId: 'thread-1',
     subjectKey: null,
     title: '验收快车道',
-    ownerCatId: null,
+    ownerCatId: 'opus' as NonNullable<TaskItem['ownerCatId']>,
     status: 'in_review',
     why: '',
     createdBy: 'user',
@@ -122,15 +122,44 @@ describe('ChatMessage thread reply badge', () => {
     expect(onOpenThread).toHaveBeenCalledWith('m-thread-parent');
   });
 
-  it('renders an inline task badge with readable status and context', () => {
+  it('renders a slock-like task dispatch chip with assignee and opens the task thread', () => {
     useTaskStore.setState({ tasks: [makeTask()] });
+    const onOpenTaskThread = vi.fn();
 
     act(() => {
-      root.render(<ChatMessage message={makeUserMessage()} getCatById={() => undefined} />);
+      root.render(
+        <ChatMessage
+          message={makeUserMessage()}
+          getCatById={() => ({
+            id: 'opus',
+            displayName: '专家-Claude',
+            color: { primary: '#111', secondary: '#fff' },
+            mentionPatterns: [],
+            clientId: 'claude',
+            defaultModel: 'sonnet',
+            avatar: '',
+            roleDescription: 'Claude reviewer',
+            personality: 'concise',
+          })}
+          onOpenTaskThread={onOpenTaskThread}
+        />,
+      );
     });
 
-    expect(container.textContent).toContain('task #1');
-    expect(container.textContent).toContain('待验收');
+    expect(container.textContent).toContain('▶ #1 @专家-Claude');
     expect(container.textContent).toContain('证据 1/5');
+
+    const taskButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('▶ #1'),
+    ) as HTMLButtonElement | undefined;
+
+    expect(taskButton).toBeTruthy();
+    expect(taskButton?.getAttribute('aria-label')).toContain('打开任务 #1');
+
+    act(() => {
+      taskButton?.click();
+    });
+
+    expect(onOpenTaskThread).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }));
   });
 });
