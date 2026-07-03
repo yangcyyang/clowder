@@ -320,6 +320,8 @@ export async function* routeParallel(
       let prompt: string;
       let includedHistoryCount = 0;
       let historySummary: HistorySummaryObservation | undefined;
+      let runtimeHistoryObservation = historyObservation;
+      let runtimeHistoryGovernanceDegraded: boolean | undefined;
       if (incrementalMode) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -357,6 +359,12 @@ export async function* routeParallel(
               ? (history?.length ?? 0)
               : 0;
         historySummary = inc.historySummary;
+        runtimeHistoryGovernanceDegraded = Boolean(
+          historyObservation?.historyGovernanceDegraded || inc.historyGovernanceDegraded,
+        );
+        if (inc.historyGovernanceDegraded && historyObservation) {
+          runtimeHistoryObservation = { ...historyObservation, historyGovernanceDegraded: true };
+        }
         if (inc.degradation) {
           degradationMsgs.push({
             type: 'system_info' as AgentMessageType,
@@ -521,8 +529,11 @@ export async function* routeParallel(
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
-        ...(historyObservation ? { historyObservation } : {}),
+        ...(runtimeHistoryObservation ? { historyObservation: runtimeHistoryObservation } : {}),
         ...(historySummary ? { historySummary } : {}),
+        ...(runtimeHistoryGovernanceDegraded !== undefined
+          ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
+          : {}),
       });
 
       return invokeSingleCat(deps.invocationDeps, {

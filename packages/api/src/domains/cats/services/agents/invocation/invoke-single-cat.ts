@@ -1491,15 +1491,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (promptSourceBreakdown && !msg.metadata.usage.sourceBreakdown) {
             msg.metadata.usage = { ...msg.metadata.usage, sourceBreakdown: promptSourceBreakdown };
           }
-          if (params.contextBudget?.historyMode) {
+          if (
+            params.contextBudget &&
+            (params.contextBudget.historyMode || params.contextBudget.historyGovernanceDegraded !== undefined)
+          ) {
             msg.metadata.usage = {
               ...msg.metadata.usage,
-              historyMode: params.contextBudget.historyMode,
-              historyFullTokens: params.contextBudget.historyFullTokens,
-              historySummaryTokens: params.contextBudget.historySummaryTokens,
-              historyBudgetRatio: params.contextBudget.historyBudgetRatio,
-              summarySegmentId: params.contextBudget.summarySegmentId,
-              historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded,
+              ...(params.contextBudget.historyMode ? { historyMode: params.contextBudget.historyMode } : {}),
+              ...(params.contextBudget.historyFullTokens != null
+                ? { historyFullTokens: params.contextBudget.historyFullTokens }
+                : {}),
+              ...(params.contextBudget.historySummaryTokens != null
+                ? { historySummaryTokens: params.contextBudget.historySummaryTokens }
+                : {}),
+              ...(params.contextBudget.historyBudgetRatio != null
+                ? { historyBudgetRatio: params.contextBudget.historyBudgetRatio }
+                : {}),
+              ...(params.contextBudget.summarySegmentId ? { summarySegmentId: params.contextBudget.summarySegmentId } : {}),
+              ...(params.contextBudget.historyGovernanceDegraded !== undefined
+                ? { historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded }
+                : {}),
             };
           }
           // F152: Record OTel token usage + LLM call duration

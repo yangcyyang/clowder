@@ -15,6 +15,19 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 
+function structuredSummary(extra = '') {
+  return [
+    '范围：thread-1 历史消息已经压缩。',
+    '当前状态：正在推进 Phase 3 历史治理。',
+    '已确认决策/约束：summary-active 只允许 canary 线程启用。',
+    '下一步：保留最近原文窗口并继续执行质量闸门。',
+    '风险锚点：如果需要精确文件路径或用户原话，必须回看原文范围。',
+    extra,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   test('injects Agent Inbox Snapshot with latest correction intent', async () => {
     const messageStore = new MessageStore();
@@ -393,7 +406,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
           fromMessageId: msgs[0].id,
           toMessageId: msgs[15].id,
           messageCount: 16,
-          summary: '旧历史摘要：前 16 条消息已经归纳为稳定事实。',
+          summary: structuredSummary('稳定事实：前 16 条消息已经归纳为可追溯摘要。'),
           generatedAt: '2026-07-03T12:00:00.000Z',
           modelId: 'cheap-summary-model',
           promptVersion: 'history-v1',
@@ -427,10 +440,292 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.equal(result.historySummary?.segmentIds[0], 'seg-active');
     assert.equal(result.historySummary?.watermarkMessageId, msgs[15].id);
     assert.ok(result.contextText.includes('[Thread History Summary]'));
+    assert.ok(result.contextText.includes('[History Recall Smoke]'));
     assert.ok(result.contextText.includes('[Recent Messages]'));
     assert.ok(result.contextText.includes(latest.id), 'current/latest user message must remain verbatim');
     assert.ok(!result.contextText.includes(`[${msgs[0].id}]`), 'oldest raw message must be replaced by summary');
     assert.ok(deliveredCount <= 12, `summary-active should cap recent raw messages, got ${deliveredCount}`);
+    assert.equal(result.historyGovernanceDegraded, false);
+  });
+
+  test('summary-active rejects secret-like summaries and degrades without injecting them', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-secret',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[15].id,
+          messageCount: 16,
+          summary: structuredSummary('风险锚点：ANTHROPIC_API_KEY=sk-ant-secret-value'),
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.8',
+        CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES: '12',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, true);
+    assert.ok(!result.contextText.includes('[Thread History Summary]'));
+    assert.ok(!result.contextText.includes('sk-ant-secret-value'));
+  });
+
+  test('summary-active rejects summaries that fail recall-smoke structure', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-thin',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[15].id,
+          messageCount: 16,
+          summary: '稳定事实：只有一句泛泛而谈的摘要。',
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, true);
+    assert.ok(!result.contextText.includes('[History Recall Smoke]'));
+  });
+
+  test('summary-active rejects summaries that overlap the recent window', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-overlap',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[35].id,
+          messageCount: 36,
+          summary: structuredSummary(),
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES: '12',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, true);
+  });
+
+  test('summary-active rejects summaries that are not smaller than full history', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-bloat',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[15].id,
+          messageCount: 16,
+          summary: structuredSummary('稳定事实：这条摘要故意设置为比 full history 预算更贵。'),
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 10,
+        historyBudgetRatio: 0.001,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.0001',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, true);
+    assert.ok(result.historyGovernanceQualityIssues?.includes('summary_token_bloat'));
+    assert.ok(!result.contextText.includes('[Thread History Summary]'));
+  });
+
+  test('history governance kill switch disables summary injection without marking degraded', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-disabled',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[15].id,
+          messageCount: 16,
+          summary: structuredSummary(),
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historySummaryEnabled: true,
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: '0',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, false);
+    assert.ok(!result.contextText.includes('[Thread History Summary]'));
+  });
+
+  test('summary-active degrades when a canary thread has no usable summary', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 10);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.8',
+        CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES: '6',
+      },
+    });
+
+    assert.equal(result.historySummary, undefined);
+    assert.equal(result.historyGovernanceDegraded, true);
+    assert.deepEqual(result.historyGovernanceQualityIssues, ['empty_summary']);
+    assert.equal(result.includedHistoryCount, 10);
+    assert.ok(result.contextText.includes(`[${msgs[0].id}]`), 'missing summary must fall back to raw history');
   });
 
   test('summary-active threshold is configurable and can stay in shadow below active ratio', () => {

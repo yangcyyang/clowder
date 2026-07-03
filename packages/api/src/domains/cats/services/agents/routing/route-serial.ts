@@ -575,6 +575,8 @@ export async function* routeSerial(
       let deliveryBoundaryId: string | undefined;
       let includedHistoryCount = 0;
       let historySummary: HistorySummaryObservation | undefined;
+      let runtimeHistoryObservation = historyObservation;
+      let runtimeHistoryGovernanceDegraded: boolean | undefined;
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
@@ -616,6 +618,12 @@ export async function* routeSerial(
               ? (history?.length ?? 0)
               : 0;
         historySummary = inc.historySummary;
+        runtimeHistoryGovernanceDegraded = Boolean(
+          historyObservation?.historyGovernanceDegraded || inc.historyGovernanceDegraded,
+        );
+        if (inc.historyGovernanceDegraded && historyObservation) {
+          runtimeHistoryObservation = { ...historyObservation, historyGovernanceDegraded: true };
+        }
         if (inc.degradation) {
           yield {
             type: 'system_info' as AgentMessageType,
@@ -778,8 +786,11 @@ export async function* routeSerial(
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
-        ...(historyObservation ? { historyObservation } : {}),
+        ...(runtimeHistoryObservation ? { historyObservation: runtimeHistoryObservation } : {}),
         ...(historySummary ? { historySummary } : {}),
+        ...(runtimeHistoryGovernanceDegraded !== undefined
+          ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
+          : {}),
       });
 
       let textContent = '';
