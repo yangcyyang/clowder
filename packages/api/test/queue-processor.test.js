@@ -1979,9 +1979,11 @@ describe('QueueProcessor', () => {
                   outputTokens: 500,
                   cacheReadTokens: 300,
                   durationMs: 1234,
-                  historyMode: 'observe',
+                  historyMode: 'shadow-summary',
                   historyFullTokens: 12000,
+                  historySummaryTokens: 480,
                   historyBudgetRatio: 0.6,
+                  summarySegmentId: 'seg-001',
                   historyGovernanceDegraded: false,
                   sourceBreakdown: {
                     totalEstimatedTokens: 1000,
@@ -2018,9 +2020,11 @@ describe('QueueProcessor', () => {
       assert.equal(event.data.totalTokens, 1500);
       assert.equal(event.data.cacheReadTokens, 300);
       assert.equal(event.data.durationMs, 1234);
-      assert.equal(event.data.historyMode, 'observe');
+      assert.equal(event.data.historyMode, 'shadow-summary');
       assert.equal(event.data.historyFullTokens, 12000);
+      assert.equal(event.data.historySummaryTokens, 480);
       assert.equal(event.data.historyBudgetRatio, 0.6);
+      assert.equal(event.data.summarySegmentId, 'seg-001');
       assert.equal(event.data.historyGovernanceDegraded, false);
       assert.deepEqual(event.data.sourceBreakdown, {
         totalEstimatedTokens: 1000,

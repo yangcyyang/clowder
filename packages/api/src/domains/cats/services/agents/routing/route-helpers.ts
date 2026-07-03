@@ -11,6 +11,7 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 const log = createModuleLogger('context-transport');
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import type { IThreadHistorySummaryStore, ThreadHistorySummarySegment } from '../../../../memory/index.js';
 import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
@@ -56,9 +57,11 @@ export interface RuntimeContextBudgetSnapshot {
   usesFullHistory: boolean;
   maxPromptTokens: number;
   maxContextTokens: number;
-  historyMode?: 'observe';
+  historyMode?: 'observe' | 'shadow-summary' | 'summary-active';
   historyFullTokens?: number;
+  historySummaryTokens?: number;
   historyBudgetRatio?: number;
+  summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
 }
 
@@ -67,6 +70,17 @@ export interface HistoryGovernanceObservation {
   historyFullTokens: number;
   historyBudgetRatio: number;
   historyGovernanceDegraded: boolean;
+}
+
+export interface HistorySummaryObservation {
+  mode: 'shadow-summary' | 'summary-active';
+  tokens: number;
+  segmentIds: readonly string[];
+  messageCount: number;
+}
+
+export interface FormattedThreadHistorySummary extends HistorySummaryObservation {
+  text: string;
 }
 
 export interface RuntimeContextSurfaceHint {
@@ -99,6 +113,14 @@ export function isHistoryGovernanceObserveEnabled(env: NodeJS.ProcessEnv = proce
   return isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE) || env.CAT_CAFE_HISTORY_GOVERNANCE === 'observe';
 }
 
+export function isHistorySummaryShadowEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (
+    isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_SUMMARY) ||
+    env.CAT_CAFE_HISTORY_GOVERNANCE === 'shadow-summary' ||
+    env.CAT_CAFE_HISTORY_GOVERNANCE === 'summary-active'
+  );
+}
+
 export function estimateFullHistoryTokens(messages: readonly StoredMessage[] | undefined): number {
   if (!messages || messages.length === 0) return 0;
   const delivered = messages.filter(
@@ -124,6 +146,59 @@ export function buildHistoryGovernanceObservation(input: {
     historyBudgetRatio: maxPromptTokens > 0 ? historyFullTokens / maxPromptTokens : 0,
     historyGovernanceDegraded: Boolean(input.degraded) || maxPromptTokens <= 0,
   };
+}
+
+const MAX_THREAD_HISTORY_SUMMARY_SEGMENTS = 4;
+
+function formatSummaryScope(segments: readonly ThreadHistorySummarySegment[]): string {
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  if (!first || !last) return '';
+  return `Scope: ${first.threadId}, messages ${first.fromMessageId}..${last.toMessageId}, generated_at=${last.generatedAt}`;
+}
+
+export function formatThreadHistorySummary(
+  segments: readonly ThreadHistorySummarySegment[],
+): FormattedThreadHistorySummary | undefined {
+  const usable = segments.filter((segment) => segment.summary.trim().length > 0);
+  if (usable.length === 0) return undefined;
+
+  const segmentLines = usable.map((segment, index) => {
+    const summary = sanitizeInjectedContent(segment.summary).trim();
+    const range = `${segment.fromMessageId}..${segment.toMessageId}`;
+    return [`Segment ${index + 1}: ${segment.id} (${range}, ${segment.messageCount} messages)`, summary].join('\n');
+  });
+  const text = [
+    '[Thread History Summary]',
+    formatSummaryScope(usable),
+    'This is a compressed, provenance-backed summary of older delivered messages.',
+    '需要精确引用、文件路径、命令输出或敏感凭据细节时，请申请回看原文范围，不要凭摘要猜测。',
+    '',
+    segmentLines.join('\n\n'),
+    '[/Thread History Summary]',
+  ].join('\n');
+
+  return {
+    mode: 'shadow-summary',
+    text,
+    tokens: estimateTokens(text),
+    segmentIds: usable.map((segment) => segment.id),
+    messageCount: usable.reduce((sum, segment) => sum + Math.max(0, segment.messageCount), 0),
+  };
+}
+
+export async function readThreadHistorySummaryForContext(
+  store: IThreadHistorySummaryStore | undefined,
+  threadId: string,
+): Promise<FormattedThreadHistorySummary | undefined> {
+  if (!store) return undefined;
+  try {
+    const segments = await store.listLatestByThread(threadId, MAX_THREAD_HISTORY_SUMMARY_SEGMENTS);
+    return formatThreadHistorySummary(segments);
+  } catch (err) {
+    log.warn({ err, threadId }, 'history summary formatter failed to read summary_segments');
+    return undefined;
+  }
 }
 
 export function buildContextUsageWarning(input: {
@@ -243,6 +318,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasGovernanceSourceContext: boolean;
   catBudget: ReturnType<typeof getCatContextBudget>;
   historyObservation?: HistoryGovernanceObservation;
+  historySummary?: HistorySummaryObservation;
 }): RuntimeContextBudgetSnapshot {
   const loadedBlocks = ['current-message', 'static-identity'];
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
@@ -259,6 +335,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
   if (input.hasSopHint) loadedBlocks.push('sop-hint');
   if (input.hasGuideContext) loadedBlocks.push('guide-context');
+  if (input.historySummary) loadedBlocks.push('history-summary');
   if (input.skillRouterMatchedSkills) {
     loadedBlocks.push('skill-router');
     for (const skillName of input.skillRouterMatchedSkills) {
@@ -296,6 +373,13 @@ export function buildRuntimeContextBudgetSnapshot(input: {
     maxPromptTokens: input.catBudget.maxPromptTokens,
     maxContextTokens: input.catBudget.maxContextTokens,
     ...(input.historyObservation ?? {}),
+    ...(input.historySummary
+      ? {
+          historyMode: input.historySummary.mode,
+          historySummaryTokens: Math.max(0, Math.ceil(input.historySummary.tokens)),
+          summarySegmentId: input.historySummary.segmentIds[0],
+        }
+      : {}),
   };
 }
 
@@ -313,6 +397,8 @@ export interface RouteStrategyDeps {
   packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for context recall (optional, fail-open) */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  /** Phase 3B: read-only summary_segments source for shadow summary formatting. */
+  threadHistorySummaryStore?: IThreadHistorySummaryStore;
   /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
@@ -499,6 +585,8 @@ export interface IncrementalContextResult {
   };
   /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
   navigationHeader?: string;
+  /** Phase 3B: summary_segments shadow formatter diagnostics. */
+  historySummary?: HistorySummaryObservation;
   /** Slock-like Agent Inbox snapshot for latest user intent in the current surface. */
   intentSnapshot?: AgentIntentSnapshot;
 }
@@ -1110,6 +1198,8 @@ export interface IncrementalContextOptions {
   recentFilesTouched?: Array<{ path: string; ops: string[] }>;
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Test/route override for Phase 3B shadow summary. Defaults to env flag. */
+  historySummaryEnabled?: boolean;
 }
 
 export async function assembleIncrementalContext(
@@ -1225,6 +1315,11 @@ export async function assembleIncrementalContext(
     batonCandidateCount: batonCandidates.length,
   });
 
+  const threadHistorySummary =
+    (options?.historySummaryEnabled ?? isHistorySummaryShadowEnabled())
+      ? await readThreadHistorySummaryForContext(deps.threadHistorySummaryStore, threadId)
+      : undefined;
+
   // F148: Smart window — cold mention detection
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
   const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
@@ -1265,6 +1360,7 @@ export async function assembleIncrementalContext(
       recentArtifacts,
       rankedSources,
       storedLedgerArtifacts,
+      threadHistorySummary,
     );
   }
 
@@ -1357,8 +1453,15 @@ export async function assembleIncrementalContext(
     }
   }
 
-  const finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
+  let includedHistorySummary = threadHistorySummary;
+  let historySummaryText = includedHistorySummary?.text ?? '';
+  let finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
   const finalCapped = tokenTrimmed ? capped.slice(tokenTrimStart) : capped;
+
+  if (historySummaryText && estimateTokens([historySummaryText, ...finalLines].join('\n')) > effectiveTokenBudget) {
+    historySummaryText = '';
+    includedHistorySummary = undefined;
+  }
 
   // Recompute metadata on FINAL post-token-trim set
   const finalIncludesCurrentUserMessage = tokenTrimmed
@@ -1396,13 +1499,21 @@ export async function assembleIncrementalContext(
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+  const historySummarySection = historySummaryText ? `${historySummaryText}\n[Recent Messages]` : '';
   return {
-    contextText: `${contextHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    contextText: [
+      contextHeader,
+      historySummarySection,
+      `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
     boundaryId,
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
     navigationHeader,
+    ...(includedHistorySummary ? { historySummary: includedHistorySummary } : {}),
     intentSnapshot,
   };
 }
@@ -1429,6 +1540,7 @@ async function assembleSmartWindowContext(
   recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   rankedSources: import('./source-ranking.js').RankedSource[],
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
+  threadHistorySummary: FormattedThreadHistorySummary | undefined,
 ): Promise<IncrementalContextResult> {
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -1611,11 +1723,14 @@ async function assembleSmartWindowContext(
   let finalTombstoneText = tombstoneText;
   let finalCoverageMapText = coverageMapText;
   let finalThreadMemoryText = threadMemoryText;
+  let includedHistorySummary = threadHistorySummary;
+  let finalThreadHistorySummaryText = includedHistorySummary?.text ?? '';
   let tokenDegradation: string | undefined;
 
   const totalTokens = () =>
     estimateTokens(
       [
+        finalThreadHistorySummaryText,
         finalCoverageMapText,
         finalThreadMemoryText,
         finalTombstoneText,
@@ -1628,6 +1743,11 @@ async function assembleSmartWindowContext(
     );
 
   if (totalTokens() > effectiveTokenBudget) {
+    if (finalThreadHistorySummaryText) {
+      finalThreadHistorySummaryText = '';
+      includedHistorySummary = undefined;
+    }
+
     // Stage 1: Drop evidence lines from oldest
     while (finalEvidenceLines.length > 0 && totalTokens() > effectiveTokenBudget) {
       finalEvidenceLines.shift();
@@ -1693,9 +1813,18 @@ async function assembleSmartWindowContext(
   );
 
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+  const historySummarySection = finalThreadHistorySummaryText
+    ? `${finalThreadHistorySummaryText}\n[Recent Messages]`
+    : '';
   const contextText =
     sections.length > 0
-      ? `${contextHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      ? [
+          contextHeader,
+          historySummarySection,
+          `[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`,
+        ]
+          .filter(Boolean)
+          .join('\n')
       : contextHeader;
 
   // Final hard cap: envelope overhead may push total over budget
@@ -1716,6 +1845,7 @@ async function assembleSmartWindowContext(
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,
+    ...(includedHistorySummary ? { historySummary: includedHistorySummary } : {}),
     coverageMap,
     briefingContext: {
       ...(threadMemorySummary ? { threadMemorySummary } : {}),

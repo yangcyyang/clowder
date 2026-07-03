@@ -88,7 +88,7 @@ import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
-import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
+import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
   buildHistoryGovernanceObservation,
@@ -574,6 +574,7 @@ export async function* routeSerial(
 
       let deliveryBoundaryId: string | undefined;
       let includedHistoryCount = 0;
+      let historySummary: HistorySummaryObservation | undefined;
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
@@ -608,6 +609,7 @@ export async function* routeSerial(
         );
         deliveryBoundaryId = inc.boundaryId;
         includedHistoryCount = inc.contextText ? (history?.length ?? 0) : 0;
+        historySummary = inc.historySummary;
         if (inc.degradation) {
           yield {
             type: 'system_info' as AgentMessageType,
@@ -771,6 +773,7 @@ export async function* routeSerial(
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
         ...(historyObservation ? { historyObservation } : {}),
+        ...(historySummary ? { historySummary } : {}),
       });
 
       let textContent = '';

@@ -25,6 +25,7 @@ import { MaterializationService } from './MaterializationService.js';
 import { loadObsidianReadonlyCollections } from './obsidian-readonly-collections.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
+import { SqliteThreadHistorySummaryStore, type IThreadHistorySummaryStore } from './ThreadHistorySummaryStore.js';
 import { ensureVectorTable } from './schema.js';
 import { VectorStore } from './VectorStore.js';
 
@@ -32,6 +33,8 @@ export interface MemoryServices {
   evidenceStore: IEvidenceStore;
   /** Phase G: direct store access for summary compaction task (getDb()) */
   store: SqliteEvidenceStore;
+  /** Phase 3B: read-only summary_segments source for route context formatter. */
+  threadHistorySummaryStore: IThreadHistorySummaryStore;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   knowledgeResolver: IKnowledgeResolver;
@@ -89,6 +92,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const store = new SqliteEvidenceStore(sqlitePath);
   await store.initialize();
+  const threadHistorySummaryStore = new SqliteThreadHistorySummaryStore(store.getDb());
 
   let embeddingService: IEmbeddingService | undefined;
   let vectorStore: VectorStore | undefined;
@@ -219,6 +223,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   return {
     evidenceStore: store,
     store,
+    threadHistorySummaryStore,
     markerQueue,
     reflectionService,
     knowledgeResolver,

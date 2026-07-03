@@ -196,9 +196,14 @@ function sanitizeTaskEventData(event: TaskEvent): Record<string, unknown> {
       costUsd: finiteNumber(data.costUsd),
       durationMs: finiteNumber(data.durationMs),
       durationApiMs: finiteNumber(data.durationApiMs),
-      historyMode: data.historyMode === 'observe' ? 'observe' : undefined,
+      historyMode:
+        data.historyMode === 'observe' || data.historyMode === 'shadow-summary' || data.historyMode === 'summary-active'
+          ? data.historyMode
+          : undefined,
       historyFullTokens: finiteNumber(data.historyFullTokens),
+      historySummaryTokens: finiteNumber(data.historySummaryTokens),
       historyBudgetRatio: finiteNumber(data.historyBudgetRatio),
+      summarySegmentId: typeof data.summarySegmentId === 'string' ? redactString(data.summarySegmentId) : undefined,
       historyGovernanceDegraded:
         typeof data.historyGovernanceDegraded === 'boolean' ? data.historyGovernanceDegraded : undefined,
     });

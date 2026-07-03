@@ -647,9 +647,13 @@ export class QueueProcessor {
                 ...(aggregate.usage.historyFullTokens != null
                   ? { historyFullTokens: aggregate.usage.historyFullTokens }
                   : {}),
+                ...(aggregate.usage.historySummaryTokens != null
+                  ? { historySummaryTokens: aggregate.usage.historySummaryTokens }
+                  : {}),
                 ...(aggregate.usage.historyBudgetRatio != null
                   ? { historyBudgetRatio: aggregate.usage.historyBudgetRatio }
                   : {}),
+                ...(aggregate.usage.summarySegmentId ? { summarySegmentId: aggregate.usage.summarySegmentId } : {}),
                 ...(aggregate.usage.historyGovernanceDegraded != null
                   ? { historyGovernanceDegraded: aggregate.usage.historyGovernanceDegraded }
                   : {}),

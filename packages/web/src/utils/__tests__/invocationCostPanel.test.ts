@@ -30,9 +30,11 @@ describe('invocationCostPanel', () => {
           data: {
             inputTokens: 1000,
             outputTokens: 500,
-            historyMode: 'observe',
+            historyMode: 'shadow-summary',
             historyFullTokens: 12000,
+            historySummaryTokens: 420,
             historyBudgetRatio: 0.4,
+            summarySegmentId: 'seg-001',
             historyGovernanceDegraded: false,
             sourceBreakdown: {
               totalEstimatedTokens: 1000,
@@ -68,9 +70,11 @@ describe('invocationCostPanel', () => {
 
     const total = summarizeTaskUsage(summaries);
     expect(summaries[0]).toMatchObject({
-      historyMode: 'observe',
+      historyMode: 'shadow-summary',
       historyFullTokens: 12000,
+      historySummaryTokens: 420,
       historyBudgetRatio: 0.4,
+      summarySegmentId: 'seg-001',
       historyGovernanceDegraded: false,
     });
     expect(total).toMatchObject({

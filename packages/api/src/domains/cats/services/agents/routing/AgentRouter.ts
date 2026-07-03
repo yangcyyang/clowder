@@ -175,6 +175,8 @@ export interface AgentRouterOptions {
   packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for hierarchical context recall */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  /** Phase 3B: read-only summary_segments source for history summary injection */
+  threadHistorySummaryStore?: import('../../../../memory/index.js').IThreadHistorySummaryStore;
   /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F155 B-4: Independent guide session store */
@@ -225,6 +227,7 @@ export class AgentRouter {
     | undefined;
   private packStore?: import('../../../../packs/PackStore.js').PackStore;
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  private threadHistorySummaryStore?: import('../../../../memory/index.js').IThreadHistorySummaryStore;
   /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F155 B-4 */
@@ -271,6 +274,7 @@ export class AgentRouter {
     this.signalArticleLookup = options.signalArticleLookup;
     this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
+    this.threadHistorySummaryStore = options.threadHistorySummaryStore;
     this.toolUsageCounter = options.toolUsageCounter;
     this.guideSessionStore = options.guideSessionStore;
     this.dismissTracker = options.dismissTracker;
@@ -696,6 +700,7 @@ export class AgentRouter {
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
       ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
+      ...(this.threadHistorySummaryStore ? { threadHistorySummaryStore: this.threadHistorySummaryStore } : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),

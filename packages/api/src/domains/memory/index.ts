@@ -63,6 +63,8 @@ export { MarkerQueue } from './MarkerQueue.js';
 export { MaterializationService } from './MaterializationService.js';
 export { ReflectionService } from './ReflectionService.js';
 export { SemanticReranker } from './SemanticReranker.js';
+export type { IThreadHistorySummaryStore, ThreadHistorySummarySegment } from './ThreadHistorySummaryStore.js';
+export { SqliteThreadHistorySummaryStore } from './ThreadHistorySummaryStore.js';
 // Implementations
 export type { PassageResult } from './SqliteEvidenceStore.js';
 export { SqliteEvidenceStore } from './SqliteEvidenceStore.js';

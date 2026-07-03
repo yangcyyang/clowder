@@ -175,6 +175,17 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     typeof parsed.historyBudgetRatio === 'number' && Number.isFinite(parsed.historyBudgetRatio)
       ? parsed.historyBudgetRatio
       : undefined;
+  const historySummaryTokens =
+    typeof parsed.historySummaryTokens === 'number' && Number.isFinite(parsed.historySummaryTokens)
+      ? parsed.historySummaryTokens
+      : undefined;
+  const historyMode =
+    parsed.historyMode === 'observe' ||
+    parsed.historyMode === 'shadow-summary' ||
+    parsed.historyMode === 'summary-active'
+      ? parsed.historyMode
+      : undefined;
+  const summarySegmentId = typeof parsed.summarySegmentId === 'string' ? parsed.summarySegmentId : undefined;
   const historyGovernanceDegraded =
     typeof parsed.historyGovernanceDegraded === 'boolean' ? parsed.historyGovernanceDegraded : undefined;
   return {
@@ -193,9 +204,11 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     usesFullHistory: Boolean(parsed.usesFullHistory),
     maxPromptTokens: Number(parsed.maxPromptTokens) || 0,
     maxContextTokens: Number(parsed.maxContextTokens) || 0,
-    ...(parsed.historyMode === 'observe' ? { historyMode: 'observe' as const } : {}),
+    ...(historyMode ? { historyMode } : {}),
     ...(historyFullTokens != null ? { historyFullTokens } : {}),
+    ...(historySummaryTokens != null ? { historySummaryTokens } : {}),
     ...(historyBudgetRatio != null ? { historyBudgetRatio } : {}),
+    ...(summarySegmentId ? { summarySegmentId } : {}),
     ...(historyGovernanceDegraded != null ? { historyGovernanceDegraded } : {}),
   };
 }
