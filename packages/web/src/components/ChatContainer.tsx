@@ -265,6 +265,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_bootcampRefreshKey, setBootcampRefreshKey] = useState(0);
   const patchMessage = useChatStore((s) => s.patchMessage);
+  const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const addToast = useToastStore((s) => s.addToast);
   const handleBootcampModalClose = useCallback(() => {
     setShowBootcampList(false);
@@ -334,6 +335,22 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { handleAgentMessage, handleStop: stopHandler, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
+  const handleRetryFailedSend = useCallback(
+    (message: ChatMessageData) => {
+      if (message.contentBlocks?.some((block) => block.type === 'image' || block.type === 'file')) {
+        addToast({
+          type: 'error',
+          title: '请重新选择附件',
+          message: '浏览器不能安全复用上次选择的文件。',
+          duration: 3000,
+        });
+        return;
+      }
+      removeThreadMessage(message.threadId ?? threadId, message.id);
+      void handleSend(message.content, undefined, message.threadId ?? threadId);
+    },
+    [addToast, handleSend, removeThreadMessage, threadId],
+  );
   const setThreads = useChatStore((s) => s.setThreads);
   const threadStates = useChatStore((s) => s.threadStates);
   const handleInlineThreadReplyCountChange = useCallback(
@@ -1044,6 +1061,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             onChangeEditDraft={setEditingDraft}
             onSaveEdit={handleSaveEditMessage}
             onCancelEdit={handleCancelEditMessage}
+            onRetrySend={handleRetryFailedSend}
           />
         </MessageActions>
       );
@@ -1062,6 +1080,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       isSavingEdit,
       handleSaveEditMessage,
       handleCancelEditMessage,
+      handleRetryFailedSend,
     ],
   );
 

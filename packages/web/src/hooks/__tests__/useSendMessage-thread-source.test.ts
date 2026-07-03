@@ -7,6 +7,7 @@ const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
 const mockRemoveMessage = vi.fn();
 const mockRemoveThreadMessage = vi.fn();
+const mockPatchThreadMessage = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
@@ -36,6 +37,7 @@ vi.mock('@/stores/chatStore', () => ({
       addMessageToThread: mockAddMessageToThread,
       removeMessage: mockRemoveMessage,
       removeThreadMessage: mockRemoveThreadMessage,
+      patchThreadMessage: mockPatchThreadMessage,
       setLoading: mockSetLoading,
       setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
@@ -93,6 +95,7 @@ describe('useSendMessage thread source', () => {
     mockAddMessageToThread.mockReset();
     mockRemoveMessage.mockReset();
     mockRemoveThreadMessage.mockReset();
+    mockPatchThreadMessage.mockReset();
     mockSetLoading.mockReset();
     mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
@@ -166,7 +169,7 @@ describe('useSendMessage thread source', () => {
     expect(mockSetLoading).not.toHaveBeenCalled();
   });
 
-  it('routes send error message to override target thread in split-pane mode', async () => {
+  it('marks the optimistic split-pane user message as failed on send errors', async () => {
     mockApiFetch.mockResolvedValue({
       ok: false,
       status: 500,
@@ -183,16 +186,22 @@ describe('useSendMessage thread source', () => {
       );
     });
 
-    const systemCall = mockAddMessageToThread.mock.calls.find(
+    const optimisticUserCall = mockAddMessageToThread.mock.calls.find(
       ([, msg]) =>
-        typeof msg === 'object' && msg !== null && 'type' in msg && (msg as { type?: string }).type === 'system',
+        typeof msg === 'object' && msg !== null && 'type' in msg && (msg as { type?: string }).type === 'user',
     );
-    expect(systemCall?.[0]).toBe('thread-target');
-    expect(systemCall?.[1]).toMatchObject({
-      type: 'system',
-      variant: 'error',
-      content: expect.stringContaining('target thread send failed'),
+    const optimisticMessage = optimisticUserCall?.[1] as { id: string };
+    expect(optimisticUserCall?.[0]).toBe('thread-target');
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith('thread-target', optimisticMessage.id, {
+      sendStatus: 'failed',
+      sendError: 'target thread send failed',
     });
+    expect(
+      mockAddMessageToThread.mock.calls.some(
+        ([, msg]) =>
+          typeof msg === 'object' && msg !== null && 'type' in msg && (msg as { type?: string }).type === 'system',
+      ),
+    ).toBe(false);
   });
 
   it('clears invocation state for source thread when send fails after thread switch', async () => {
@@ -247,8 +256,12 @@ describe('useSendMessage thread source', () => {
 
     const optimisticUserCall = mockAddMessage.mock.calls[0];
     const optimisticMessage = optimisticUserCall?.[0];
-    expect(optimisticMessage).toMatchObject({ type: 'user' });
+    expect(optimisticMessage).toMatchObject({ type: 'user', sendStatus: 'sending' });
     expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-1');
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith('thread-route', 'msg-server-1', {
+      sendStatus: undefined,
+      sendError: undefined,
+    });
   });
 
   it('keeps an optimistic active-thread user bubble when server smart-defaults to queued', async () => {

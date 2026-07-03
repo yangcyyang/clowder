@@ -5,6 +5,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const mockApiFetch = vi.fn();
 const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
+const mockRemoveThreadMessage = vi.fn();
+const mockPatchThreadMessage = vi.fn();
+const mockReplaceThreadMessageId = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
@@ -29,6 +32,9 @@ vi.mock('@/stores/chatStore', () => ({
     () => ({
       addMessage: mockAddMessage,
       addMessageToThread: mockAddMessageToThread,
+      removeThreadMessage: mockRemoveThreadMessage,
+      patchThreadMessage: mockPatchThreadMessage,
+      replaceThreadMessageId: mockReplaceThreadMessageId,
       setLoading: mockSetLoading,
       setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
@@ -102,6 +108,9 @@ describe('useSendMessage upload status', () => {
     mockApiFetch.mockReset();
     mockAddMessage.mockReset();
     mockAddMessageToThread.mockReset();
+    mockRemoveThreadMessage.mockReset();
+    mockPatchThreadMessage.mockReset();
+    mockReplaceThreadMessageId.mockReset();
     mockSetLoading.mockReset();
     mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
@@ -159,12 +168,12 @@ describe('useSendMessage upload status', () => {
     const last = snapshots[snapshots.length - 1];
     expect(last.status).toBe('failed');
     expect(last.error).toContain('上传超时');
-    expect(mockAddMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'system',
-        variant: 'error',
-        content: expect.stringContaining('Failed to send message: 上传超时'),
-      }),
-    );
+    const optimisticUserMessage = mockAddMessage.mock.calls[0]?.[0] as { id: string };
+    expect(optimisticUserMessage).toMatchObject({ type: 'user', sendStatus: 'sending' });
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith('thread-route', optimisticUserMessage.id, {
+      sendStatus: 'failed',
+      sendError: '上传超时',
+    });
+    expect(mockAddMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'system' }));
   });
 });

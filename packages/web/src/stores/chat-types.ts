@@ -286,6 +286,10 @@ export interface ChatMessage {
   editedAt?: number;
   /** F098-D: When a queued message was actually dequeued and delivered to a cat */
   deliveredAt?: number;
+  /** Client-only send state for optimistic user messages. */
+  sendStatus?: 'sending' | 'failed';
+  /** Client-only reason shown when an optimistic send failed before the server persisted it. */
+  sendError?: string;
   isStreaming?: boolean;
   summary?: {
     id: string;

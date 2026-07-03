@@ -1154,7 +1154,7 @@ ensure_native_modules_compatible() {
     fi
 
     echo -e "${YELLOW}  ⚠ better-sqlite3 native module 不兼容，自动重新编译...${NC}"
-    run_logged_step "better-sqlite3 重编译" 8 pnpm rebuild better-sqlite3
+    run_logged_step "better-sqlite3 重编译" 8 env PATH="/Users/cy/.uclaw/node/bin:$PATH" NODE="/Users/cy/.uclaw/node/bin/node" pnpm rebuild better-sqlite3
 
     if run_in_dir "$PROJECT_DIR/packages/api" node -e "$sqlite_probe" >/dev/null 2>&1; then
         echo -e "${GREEN}  ✓ better-sqlite3 重编译完成${NC}"

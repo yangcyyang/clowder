@@ -240,6 +240,7 @@ interface ChatMessageProps {
   onChangeEditDraft?: (value: string) => void;
   onSaveEdit?: () => void;
   onCancelEdit?: () => void;
+  onRetrySend?: (message: ChatMessageType) => void;
   disableContentCollapse?: boolean;
   showRuntimeMetadata?: boolean;
   searchHighlight?: string;
@@ -258,6 +259,7 @@ export function ChatMessage({
   onChangeEditDraft,
   onSaveEdit,
   onCancelEdit,
+  onRetrySend,
   disableContentCollapse = false,
   showRuntimeMetadata = false,
   searchHighlight,
@@ -526,6 +528,20 @@ export function ChatMessage({
               assigneeLabel={taskAssigneeLabel}
               onOpen={onOpenTaskThread}
             />
+          )}
+          {message.sendStatus === 'failed' && (
+            <div className="mt-2 flex w-fit items-center gap-2 border-2 border-conn-red-text bg-conn-red-bg px-2.5 py-1.5 text-xs font-semibold text-conn-red-text shadow-[var(--slock-shadow-chip)]">
+              <span>发送失败：{message.sendError || '服务未收到'}</span>
+              {onRetrySend && (
+                <button
+                  type="button"
+                  onClick={() => onRetrySend(message)}
+                  className="border border-current bg-[var(--cafe-surface)] px-2 py-0.5 font-black hover:bg-conn-red-ring"
+                >
+                  重试
+                </button>
+              )}
+            </div>
           )}
           <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
           {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (

@@ -29,6 +29,7 @@ export function useSendMessage(activeThreadId?: string) {
     addMessage,
     addMessageToThread,
     removeThreadMessage,
+    patchThreadMessage,
     replaceThreadMessageId,
     setLoading,
     setHasActiveInvocation,
@@ -89,6 +90,7 @@ export function useSendMessage(activeThreadId?: string) {
         type: 'user',
         content,
         timestamp: Date.now(),
+        sendStatus: 'sending',
         ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
       };
       if (hasImages || hasAttachments) {
@@ -197,6 +199,9 @@ export function useSendMessage(activeThreadId?: string) {
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
+          if (body?.userMessageId) {
+            patchThreadMessage(threadId, body.userMessageId, { sendStatus: undefined, sendError: undefined });
+          }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
           setUploadStatus('idle');
           setUploadError(null);
@@ -222,6 +227,9 @@ export function useSendMessage(activeThreadId?: string) {
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
+          if (body?.userMessageId) {
+            patchThreadMessage(threadId, body.userMessageId, { sendStatus: undefined, sendError: undefined });
+          }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
           setUploadStatus('idle');
           setUploadError(null);
@@ -245,18 +253,10 @@ export function useSendMessage(activeThreadId?: string) {
         } else {
           setUploadStatus('idle');
         }
-        const errorMessagePayload: ChatMessageData = {
-          id: `err-${Date.now()}`,
-          type: 'system',
-          variant: 'error',
-          content: `Failed to send message: ${errorMessage}`,
-          timestamp: Date.now(),
-        };
-        if (threadId !== activeThread) {
-          addMessageToThread(threadId, errorMessagePayload);
-        } else {
-          addMessage(errorMessagePayload);
-        }
+        patchThreadMessage(threadId, optimisticMessageId, {
+          sendStatus: 'failed',
+          sendError: errorMessage,
+        });
         return undefined;
       }
     },
@@ -266,6 +266,7 @@ export function useSendMessage(activeThreadId?: string) {
       addMessage,
       addMessageToThread,
       removeThreadMessage,
+      patchThreadMessage,
       replaceThreadMessageId,
       setLoading,
       setHasActiveInvocation,
