@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
-const { assembleIncrementalContext, buildAgentStageGate, buildRuntimeContextBudgetSnapshot } = await import(
-  '../dist/domains/cats/services/agents/routing/route-helpers.js'
-);
-const { buildHistoryGovernanceObservation, estimateFullHistoryTokens } = await import(
-  '../dist/domains/cats/services/agents/routing/route-helpers.js'
-);
+const {
+  assembleIncrementalContext,
+  __resetHistoryGovernanceDecisionStateForTests,
+  buildAgentStageGate,
+  buildHistoryGovernanceObservation,
+  resolveHistoryGovernanceDecision,
+  buildRuntimeContextBudgetSnapshot,
+  estimateFullHistoryTokens,
+} = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
@@ -373,6 +376,175 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.equal(snapshot.summarySegmentId, 'seg-001');
     assert.ok(snapshot.loadedBlocks.includes('history-summary'));
     assert.equal(snapshot.usesFullHistory, true, 'B1 shadow summary must keep full/recent history behavior unchanged');
+  });
+
+  test('summary-active canary keeps only a bounded recent window with summary provenance', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const msgs = seedMessages(messageStore, 40);
+    const latest = msgs[msgs.length - 1];
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-active',
+          threadId: 'thread-1',
+          fromMessageId: msgs[0].id,
+          toMessageId: msgs[15].id,
+          messageCount: 16,
+          summary: '旧历史摘要：前 16 条消息已经归纳为稳定事实。',
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 10000,
+        maxContextTokens: 8000,
+        maxMessages: 40,
+        maxContentLengthPerMsg: 1000,
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      historyGovernanceEnv: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.8',
+        CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES: '12',
+      },
+    });
+
+    const deliveredCount = (result.contextText.match(/\[(\d{16}-\d{6}-[a-f0-9]{8})\]/g) || []).length;
+    assert.equal(result.historySummary?.mode, 'summary-active');
+    assert.equal(result.historySummary?.segmentIds[0], 'seg-active');
+    assert.equal(result.historySummary?.watermarkMessageId, msgs[15].id);
+    assert.ok(result.contextText.includes('[Thread History Summary]'));
+    assert.ok(result.contextText.includes('[Recent Messages]'));
+    assert.ok(result.contextText.includes(latest.id), 'current/latest user message must remain verbatim');
+    assert.ok(!result.contextText.includes(`[${msgs[0].id}]`), 'oldest raw message must be replaced by summary');
+    assert.ok(deliveredCount <= 12, `summary-active should cap recent raw messages, got ${deliveredCount}`);
+  });
+
+  test('summary-active threshold is configurable and can stay in shadow below active ratio', () => {
+    __resetHistoryGovernanceDecisionStateForTests();
+    const decision = resolveHistoryGovernanceDecision({
+      threadId: 'thread-1',
+      catId: 'opus',
+      summary: {
+        mode: 'shadow-summary',
+        text: '[Thread History Summary]\nsummary\n[/Thread History Summary]',
+        tokens: 20,
+        segmentIds: ['seg-001'],
+        messageCount: 12,
+        watermarkMessageId: 'm12',
+      },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      env: {
+        CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+        CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-1',
+        CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.9',
+      },
+    });
+
+    assert.equal(decision.mode, 'shadow-summary');
+    assert.equal(decision.recentMessageLimit, undefined);
+  });
+
+  test('summary flag keeps B1 shadow formatter available without observe mode', () => {
+    __resetHistoryGovernanceDecisionStateForTests();
+    const decision = resolveHistoryGovernanceDecision({
+      threadId: 'thread-shadow',
+      catId: 'opus',
+      summary: {
+        mode: 'shadow-summary',
+        text: '[Thread History Summary]\nsummary\n[/Thread History Summary]',
+        tokens: 20,
+        segmentIds: ['seg-shadow'],
+        messageCount: 12,
+        watermarkMessageId: 'm12',
+      },
+      env: {
+        CAT_CAFE_HISTORY_GOVERNANCE_SUMMARY: '1',
+      },
+    });
+
+    assert.equal(decision.mode, 'shadow-summary');
+    assert.equal(decision.reason, 'shadow');
+  });
+
+  test('summary-active debounces until the summary watermark changes', () => {
+    __resetHistoryGovernanceDecisionStateForTests();
+    const env = {
+      CAT_CAFE_HISTORY_GOVERNANCE: 'summary-active',
+      CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS: 'thread-debounce',
+      CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO: '0.8',
+      CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES: '24',
+    };
+    const summary = {
+      mode: 'shadow-summary',
+      text: '[Thread History Summary]\nsummary\n[/Thread History Summary]',
+      tokens: 20,
+      segmentIds: ['seg-001'],
+      messageCount: 20,
+      watermarkMessageId: 'm20',
+    };
+
+    const first = resolveHistoryGovernanceDecision({
+      threadId: 'thread-debounce',
+      catId: 'opus',
+      summary,
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 8500,
+        historyBudgetRatio: 0.85,
+        historyGovernanceDegraded: false,
+      },
+      env,
+    });
+    const second = resolveHistoryGovernanceDecision({
+      threadId: 'thread-debounce',
+      catId: 'opus',
+      summary,
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 3000,
+        historyBudgetRatio: 0.3,
+        historyGovernanceDegraded: false,
+      },
+      env,
+    });
+    const changedWatermark = resolveHistoryGovernanceDecision({
+      threadId: 'thread-debounce',
+      catId: 'opus',
+      summary: { ...summary, segmentIds: ['seg-002'], watermarkMessageId: 'm21' },
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 3000,
+        historyBudgetRatio: 0.3,
+        historyGovernanceDegraded: false,
+      },
+      env,
+    });
+
+    assert.equal(first.mode, 'summary-active');
+    assert.equal(first.reason, 'active-threshold');
+    assert.equal(second.mode, 'summary-active');
+    assert.equal(second.reason, 'active-debounce');
+    assert.equal(second.recentMessageLimit, 24);
+    assert.equal(changedWatermark.mode, 'shadow-summary');
   });
 
   test('history governance observation is absent when observe flag is off', () => {

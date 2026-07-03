@@ -72,15 +72,34 @@ export interface HistoryGovernanceObservation {
   historyGovernanceDegraded: boolean;
 }
 
+export type HistoryGovernanceMode = 'legacy' | 'observe' | 'shadow-summary' | 'summary-active';
+
 export interface HistorySummaryObservation {
   mode: 'shadow-summary' | 'summary-active';
   tokens: number;
   segmentIds: readonly string[];
   messageCount: number;
+  watermarkMessageId?: string;
 }
 
 export interface FormattedThreadHistorySummary extends HistorySummaryObservation {
   text: string;
+}
+
+export interface HistoryGovernanceThresholds {
+  observeRatio: number;
+  shadowRatio: number;
+  activeRatio: number;
+  criticalRatio: number;
+  recentMessages: number;
+  criticalRecentMessages: number;
+}
+
+export interface HistoryGovernanceDecision {
+  mode: HistoryGovernanceMode;
+  recentMessageLimit?: number;
+  thresholds: HistoryGovernanceThresholds;
+  reason: 'disabled' | 'no-observation' | 'observe' | 'shadow' | 'active-threshold' | 'active-debounce';
 }
 
 export interface RuntimeContextSurfaceHint {
@@ -97,6 +116,15 @@ export interface ContextUsageWarning {
 }
 
 const CONTEXT_RATIONAL_LINE_RATIO = 0.7;
+const HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS: HistoryGovernanceThresholds = {
+  observeRatio: 0.6,
+  shadowRatio: 0.7,
+  activeRatio: 0.8,
+  criticalRatio: 0.9,
+  recentMessages: 24,
+  criticalRecentMessages: 12,
+};
+const activeSummaryWatermarks = new Map<string, string>();
 
 export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'high' | 'critical' {
   if (ratio >= 0.95) return 'critical';
@@ -105,20 +133,222 @@ export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'hi
   return 'none';
 }
 
+function normalizeEnvValue(value: string | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
 function isEnabledValue(value: string | undefined): boolean {
-  return value === '1' || value === 'true' || value === 'yes' || value === 'on' || value === 'observe';
+  const normalized = normalizeEnvValue(value);
+  return (
+    normalized === '1' ||
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === 'on' ||
+    normalized === 'observe' ||
+    normalized === 'shadow-summary' ||
+    normalized === 'summary-active'
+  );
+}
+
+function isDisabledValue(value: string | undefined): boolean {
+  const normalized = normalizeEnvValue(value);
+  return (
+    normalized === '0' ||
+    normalized === 'false' ||
+    normalized === 'no' ||
+    normalized === 'off' ||
+    normalized === 'disabled' ||
+    normalized === 'legacy'
+  );
+}
+
+function getRequestedHistoryGovernanceMode(env: NodeJS.ProcessEnv): HistoryGovernanceMode {
+  const normalized = normalizeEnvValue(env.CAT_CAFE_HISTORY_GOVERNANCE);
+  if (normalized === 'observe' || normalized === 'shadow-summary' || normalized === 'summary-active') {
+    return normalized;
+  }
+  if (isDisabledValue(normalized)) return 'legacy';
+  if (isEnabledValue(normalized)) return 'observe';
+  return 'legacy';
 }
 
 export function isHistoryGovernanceObserveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE) || env.CAT_CAFE_HISTORY_GOVERNANCE === 'observe';
+  const requestedMode = getRequestedHistoryGovernanceMode(env);
+  return isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE) || requestedMode !== 'legacy';
 }
 
 export function isHistorySummaryShadowEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (isDisabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE)) return false;
+  const requestedMode = getRequestedHistoryGovernanceMode(env);
   return (
     isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_SUMMARY) ||
-    env.CAT_CAFE_HISTORY_GOVERNANCE === 'shadow-summary' ||
-    env.CAT_CAFE_HISTORY_GOVERNANCE === 'summary-active'
+    requestedMode === 'shadow-summary' ||
+    requestedMode === 'summary-active'
   );
+}
+
+function readRatioEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readPositiveIntEnv(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (!raw) return fallback;
+  const parsed = Math.floor(Number(raw));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getHistoryGovernanceThresholds(env: NodeJS.ProcessEnv = process.env): HistoryGovernanceThresholds {
+  return {
+    observeRatio: readRatioEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE_RATIO',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.observeRatio,
+    ),
+    shadowRatio: readRatioEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_SHADOW_RATIO',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.shadowRatio,
+    ),
+    activeRatio: readRatioEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_ACTIVE_RATIO',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.activeRatio,
+    ),
+    criticalRatio: readRatioEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_CRITICAL_RATIO',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.criticalRatio,
+    ),
+    recentMessages: readPositiveIntEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_RECENT_MESSAGES',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.recentMessages,
+    ),
+    criticalRecentMessages: readPositiveIntEnv(
+      env,
+      'CAT_CAFE_HISTORY_GOVERNANCE_CRITICAL_RECENT_MESSAGES',
+      HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.criticalRecentMessages,
+    ),
+  };
+}
+
+function listMatches(value: string | undefined, candidate: string | undefined): boolean {
+  if (!value || !candidate) return false;
+  return value
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .some((item) => item === '*' || item === candidate);
+}
+
+function hasConfiguredList(value: string | undefined): boolean {
+  return Boolean(value?.split(/[\s,]+/).some((item) => item.trim().length > 0));
+}
+
+function isHistoryGovernanceCanaryEnabled(input: {
+  threadId: string;
+  catId?: string | undefined;
+  env: NodeJS.ProcessEnv;
+}): boolean {
+  const threadList = input.env.CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS;
+  const catList = input.env.CAT_CAFE_HISTORY_GOVERNANCE_CANARY_CATS;
+  const hasThreadList = hasConfiguredList(threadList);
+  const hasCatList = hasConfiguredList(catList);
+  if (!hasThreadList && !hasCatList) return false;
+  const threadAllowed = hasThreadList ? listMatches(threadList, input.threadId) : true;
+  const catAllowed = hasCatList ? listMatches(catList, input.catId) : true;
+  return threadAllowed && catAllowed;
+}
+
+function getSummaryWatermark(summary: HistorySummaryObservation | undefined): string | undefined {
+  return summary?.watermarkMessageId ?? summary?.segmentIds.join(',');
+}
+
+function getActiveRecentMessageLimit(ratio: number, thresholds: HistoryGovernanceThresholds): number {
+  return ratio >= thresholds.criticalRatio
+    ? Math.min(thresholds.recentMessages, thresholds.criticalRecentMessages)
+    : thresholds.recentMessages;
+}
+
+export function __resetHistoryGovernanceDecisionStateForTests(): void {
+  activeSummaryWatermarks.clear();
+}
+
+export function resolveHistoryGovernanceDecision(input: {
+  threadId: string;
+  catId?: string | undefined;
+  summary?: HistorySummaryObservation | undefined;
+  historyObservation?: HistoryGovernanceObservation | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  forceShadow?: boolean | undefined;
+}): HistoryGovernanceDecision {
+  const env = input.env ?? process.env;
+  const thresholds = getHistoryGovernanceThresholds(env);
+  const requestedMode = getRequestedHistoryGovernanceMode(env);
+  const ratio = input.historyObservation?.historyBudgetRatio ?? 0;
+  const baseMode: HistoryGovernanceMode = input.historyObservation ? 'observe' : 'legacy';
+  const summaryWatermark = getSummaryWatermark(input.summary);
+  const shadowRequested =
+    input.forceShadow ||
+    isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_SUMMARY) ||
+    requestedMode === 'shadow-summary' ||
+    requestedMode === 'summary-active';
+
+  if (isDisabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE)) {
+    activeSummaryWatermarks.delete(`${input.threadId}:${input.catId ?? '*'}`);
+    return { mode: 'legacy', thresholds, reason: 'disabled' };
+  }
+
+  if (!input.historyObservation && requestedMode === 'legacy' && !shadowRequested) {
+    return { mode: 'legacy', thresholds, reason: 'no-observation' };
+  }
+
+  if (requestedMode === 'summary-active' && input.summary && summaryWatermark) {
+    const canaryAllowed = isHistoryGovernanceCanaryEnabled({
+      threadId: input.threadId,
+      catId: input.catId,
+      env,
+    });
+    const debounceKey = `${input.threadId}:${input.catId ?? '*'}`;
+    const previousWatermark = activeSummaryWatermarks.get(debounceKey);
+    if (previousWatermark && previousWatermark !== summaryWatermark) {
+      activeSummaryWatermarks.delete(debounceKey);
+    }
+    if (canaryAllowed && previousWatermark === summaryWatermark) {
+      return {
+        mode: 'summary-active',
+        recentMessageLimit: getActiveRecentMessageLimit(ratio, thresholds),
+        thresholds,
+        reason: 'active-debounce',
+      };
+    }
+    if (canaryAllowed && ratio >= thresholds.activeRatio) {
+      activeSummaryWatermarks.set(debounceKey, summaryWatermark);
+      return {
+        mode: 'summary-active',
+        recentMessageLimit: getActiveRecentMessageLimit(ratio, thresholds),
+        thresholds,
+        reason: 'active-threshold',
+      };
+    }
+  }
+
+  if (
+    input.summary &&
+    (shadowRequested || ratio >= thresholds.shadowRatio)
+  ) {
+    return { mode: 'shadow-summary', thresholds, reason: 'shadow' };
+  }
+
+  if (input.historyObservation && (requestedMode === 'observe' || ratio >= thresholds.observeRatio)) {
+    return { mode: 'observe', thresholds, reason: 'observe' };
+  }
+
+  return { mode: baseMode, thresholds, reason: baseMode === 'legacy' ? 'no-observation' : 'observe' };
 }
 
 export function estimateFullHistoryTokens(messages: readonly StoredMessage[] | undefined): number {
@@ -184,6 +414,7 @@ export function formatThreadHistorySummary(
     tokens: estimateTokens(text),
     segmentIds: usable.map((segment) => segment.id),
     messageCount: usable.reduce((sum, segment) => sum + Math.max(0, segment.messageCount), 0),
+    watermarkMessageId: usable[usable.length - 1]?.toMessageId,
   };
 }
 
@@ -564,6 +795,7 @@ export async function persistSilentCompletionNotice(
 export interface IncrementalContextResult {
   contextText: string;
   boundaryId?: string;
+  includedHistoryCount?: number;
   includesCurrentUserMessage: boolean;
   /** True when the current user message exists in unseen but was filtered out
    *  (e.g. whisper not intended for this cat). Callers must NOT inject the raw
@@ -1199,6 +1431,10 @@ export interface IncrementalContextOptions {
   threadTitle?: string;
   /** Test/route override for Phase 3B shadow summary. Defaults to env flag. */
   historySummaryEnabled?: boolean;
+  /** Phase 3A observation used by Phase 3C to switch canary threads to summary-active. */
+  historyObservation?: HistoryGovernanceObservation;
+  /** Test/route override for governance env flags. Defaults to process.env. */
+  historyGovernanceEnv?: NodeJS.ProcessEnv;
 }
 
 export async function assembleIncrementalContext(
@@ -1314,14 +1550,39 @@ export async function assembleIncrementalContext(
     batonCandidateCount: batonCandidates.length,
   });
 
+  const historyGovernanceEnv = options?.historyGovernanceEnv ?? process.env;
   const threadHistorySummary =
-    (options?.historySummaryEnabled ?? isHistorySummaryShadowEnabled())
+    (options?.historySummaryEnabled ?? isHistorySummaryShadowEnabled(historyGovernanceEnv))
       ? await readThreadHistorySummaryForContext(deps.threadHistorySummaryStore, threadId)
       : undefined;
+  const historyGovernanceDecision = resolveHistoryGovernanceDecision({
+    threadId,
+    catId: catId as string,
+    summary: threadHistorySummary,
+    historyObservation: options?.historyObservation,
+    env: historyGovernanceEnv,
+    forceShadow: options?.historySummaryEnabled === true,
+  });
+  const includedThreadHistorySummary =
+    historyGovernanceDecision.mode === 'summary-active' && threadHistorySummary
+      ? ({ ...threadHistorySummary, mode: 'summary-active' as const } satisfies FormattedThreadHistorySummary)
+      : historyGovernanceDecision.mode === 'shadow-summary'
+        ? threadHistorySummary
+        : undefined;
 
   // F148: Smart window — cold mention detection
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
-  const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
+  const hcConfig =
+    historyGovernanceDecision.mode === 'summary-active' && historyGovernanceDecision.recentMessageLimit
+      ? {
+          ...DEFAULT_HIERARCHICAL_CONTEXT,
+          maxBurstMessages: historyGovernanceDecision.recentMessageLimit,
+          minBurstMessages: Math.min(
+            DEFAULT_HIERARCHICAL_CONTEXT.minBurstMessages,
+            historyGovernanceDecision.recentMessageLimit,
+          ),
+        }
+      : DEFAULT_HIERARCHICAL_CONTEXT;
   const countTrigger = relevant.length > hcConfig.coldMentionThreshold;
   // Gap-1: only estimate tokens when count doesn't trigger (the "few but fat" path)
   const tokenTrigger =
@@ -1359,7 +1620,7 @@ export async function assembleIncrementalContext(
       recentArtifacts,
       rankedSources,
       storedLedgerArtifacts,
-      threadHistorySummary,
+      includedThreadHistorySummary,
     );
   }
 
@@ -1368,8 +1629,12 @@ export async function assembleIncrementalContext(
   // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
   // and stale cursor scenarios where large unseen batches accumulate.
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
-  const wasCapped = relevant.length > budget.maxMessages;
-  const capped = budget.maxMessages <= 0 ? [] : wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
+  const maxRecentMessages =
+    historyGovernanceDecision.mode === 'summary-active' && historyGovernanceDecision.recentMessageLimit
+      ? Math.min(budget.maxMessages, historyGovernanceDecision.recentMessageLimit)
+      : budget.maxMessages;
+  const wasCapped = relevant.length > maxRecentMessages;
+  const capped = maxRecentMessages <= 0 ? [] : wasCapped ? relevant.slice(-maxRecentMessages) : relevant;
 
   // Metadata must be based on the FINAL capped set, not pre-cap `relevant`
   const includesCurrentUserMessage = Boolean(currentUserMessageId && capped.some((m) => m.id === currentUserMessageId));
@@ -1380,6 +1645,7 @@ export async function assembleIncrementalContext(
       ? {
           contextText,
           boundaryId: cursor,
+          includedHistoryCount: 0,
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
@@ -1387,6 +1653,7 @@ export async function assembleIncrementalContext(
         }
       : {
           contextText,
+          includedHistoryCount: 0,
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
@@ -1422,6 +1689,7 @@ export async function assembleIncrementalContext(
     return {
       contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId: zeroBoundaryId,
+      includedHistoryCount: 0,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: zeroBudgetDegradation,
@@ -1452,7 +1720,7 @@ export async function assembleIncrementalContext(
     }
   }
 
-  let includedHistorySummary = threadHistorySummary;
+  let includedHistorySummary = includedThreadHistorySummary;
   let historySummaryText = includedHistorySummary?.text ?? '';
   let finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
   const finalCapped = tokenTrimmed ? capped.slice(tokenTrimStart) : capped;
@@ -1473,6 +1741,7 @@ export async function assembleIncrementalContext(
       ? {
           contextText,
           boundaryId: cursor,
+          includedHistoryCount: 0,
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
@@ -1480,6 +1749,7 @@ export async function assembleIncrementalContext(
         }
       : {
           contextText,
+          includedHistoryCount: 0,
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
@@ -1489,9 +1759,9 @@ export async function assembleIncrementalContext(
 
   let degradation: string | undefined;
   if (wasCapped && tokenTrimmed) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${effectiveTokenBudget}) 双重截断，已保留最近 ${finalCapped.length} 条`;
+    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${maxRecentMessages}) 和 token 预算(${effectiveTokenBudget}) 双重截断，已保留最近 ${finalCapped.length} 条`;
   } else if (wasCapped) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${budget.maxMessages}，已保留最近 ${finalCapped.length} 条`;
+    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${maxRecentMessages}，已保留最近 ${finalCapped.length} 条`;
   } else if (tokenTrimmed) {
     degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${effectiveTokenBudget})，已保留最近 ${finalCapped.length} 条`;
   }
@@ -1508,6 +1778,7 @@ export async function assembleIncrementalContext(
       .filter(Boolean)
       .join('\n'),
     boundaryId,
+    includedHistoryCount: finalCapped.length,
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
@@ -1705,6 +1976,7 @@ async function assembleSmartWindowContext(
     return {
       contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId,
+      includedHistoryCount: 0,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: intentionalNoContext ? undefined : `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
@@ -1786,6 +2058,7 @@ async function assembleSmartWindowContext(
       return {
         contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
         boundaryId,
+        includedHistoryCount: 0,
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
         degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
@@ -1831,6 +2104,7 @@ async function assembleSmartWindowContext(
     return {
       contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
       boundaryId,
+      includedHistoryCount: 0,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
@@ -1841,6 +2115,7 @@ async function assembleSmartWindowContext(
   return {
     contextText,
     boundaryId,
+    includedHistoryCount: finalBurstMsgs.length,
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,

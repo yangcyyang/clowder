@@ -346,10 +346,16 @@ export async function* routeParallel(
             contextBudget: effectiveContextBudget,
             canonicalFeatureId: loadFullContext ? sopStageHint?.featureId : undefined,
             threadTitle: routeThread?.title ?? undefined,
+            ...(historyObservation ? { historyObservation } : {}),
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
-        includedHistoryCount = inc.contextText ? (history?.length ?? 0) : 0;
+        includedHistoryCount =
+          inc.historySummary?.mode === 'summary-active'
+            ? (inc.includedHistoryCount ?? 0)
+            : inc.contextText
+              ? (history?.length ?? 0)
+              : 0;
         historySummary = inc.historySummary;
         if (inc.degradation) {
           degradationMsgs.push({
