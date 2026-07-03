@@ -383,6 +383,62 @@ setTimeout(() => {
   }
 });
 
+test('steer v2 closes Claude stdin after result so lingering runtime releases slot', async () => {
+  const previousFlag = process.env.CAT_CAFE_STEER_V2_CLAUDE;
+  process.env.CAT_CAFE_STEER_V2_CLAUDE = '1';
+  clearClaudeRuntimeSteerChannelsForTests();
+
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-real-claude-result-end-'));
+  const fakeClaude = join(dir, 'claude');
+  writeFileSync(
+    fakeClaude,
+    `#!/usr/bin/env node
+let input = '';
+let emittedResult = false;
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (emittedResult || !input.includes('\\n')) return;
+  emittedResult = true;
+  process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'result-end-session' }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'result-end-ok' }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'result-end-session' }) + '\\n');
+});
+process.stdin.on('end', () => {
+  process.exit(0);
+});
+setTimeout(() => {
+  console.error('NO_STDIN_END_AFTER_RESULT');
+  process.exit(9);
+}, 1000);
+`,
+  );
+  chmodSync(fakeClaude, 0o755);
+
+  const service = new ClaudeAgentService({ catId: 'opus', cliCommand: fakeClaude, model: 'claude-test-model' });
+
+  try {
+    const messages = await collect(
+      service.invoke('first prompt', {
+        auditContext: {
+          invocationId: 'inv-result-end',
+          threadId: 'thread-result-end',
+          userId: 'user-a',
+          catId: 'opus',
+        },
+      }),
+    );
+
+    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'result-end-ok'), true);
+    assert.equal(messages.some((m) => m.type === 'error'), false);
+  } finally {
+    clearClaudeRuntimeSteerChannelsForTests();
+    rmSync(dir, { recursive: true, force: true });
+    if (previousFlag === undefined) delete process.env.CAT_CAFE_STEER_V2_CLAUDE;
+    else process.env.CAT_CAFE_STEER_V2_CLAUDE = previousFlag;
+  }
+});
+
 test('passes cwd from workingDirectory option', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

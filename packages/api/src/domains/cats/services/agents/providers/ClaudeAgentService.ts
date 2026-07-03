@@ -351,8 +351,10 @@ export class ClaudeAgentService implements AgentService {
 
       let runtimeSteerSink: CliStdinSink | undefined;
       let runtimeSteerCleanup: (() => void) | undefined;
+      const runtimeSteerSemanticCompletionController = useRuntimeSteer ? new AbortController() : undefined;
       let runtimeSteerInitialPromptTimer: ReturnType<typeof setTimeout> | undefined;
       let runtimeSteerInitialPromptSent = false;
+      let runtimeSteerCompleted = false;
       const sendRuntimeSteerInitialPrompt = () => {
         if (!useRuntimeSteer || !options.auditContext || !runtimeSteerSink || runtimeSteerInitialPromptSent) return;
         runtimeSteerInitialPromptSent = true;
@@ -368,6 +370,17 @@ export class ClaudeAgentService implements AgentService {
           invocationId: options.auditContext.invocationId,
           sink: runtimeSteerSink,
         });
+      };
+      const completeRuntimeSteerTurn = () => {
+        if (!useRuntimeSteer || runtimeSteerCompleted) return;
+        runtimeSteerCompleted = true;
+        if (runtimeSteerInitialPromptTimer) {
+          clearTimeout(runtimeSteerInitialPromptTimer);
+          runtimeSteerInitialPromptTimer = undefined;
+        }
+        runtimeSteerCleanup?.();
+        runtimeSteerSink?.end();
+        runtimeSteerSemanticCompletionController?.abort();
       };
       const scheduleRuntimeSteerInitialPrompt = () => {
         if (!useRuntimeSteer || !options.auditContext || runtimeSteerInitialPromptTimer) return;
@@ -387,6 +400,9 @@ export class ClaudeAgentService implements AgentService {
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
+        ...(runtimeSteerSemanticCompletionController
+          ? { semanticCompletionSignal: runtimeSteerSemanticCompletionController.signal }
+          : {}),
         ...(useRuntimeSteer && options.auditContext
           ? {
               stdinLineSink: (sink: CliStdinSink) => {
@@ -494,6 +510,7 @@ export class ClaudeAgentService implements AgentService {
             metadata.usage.lastTurnInputTokens = streamState.lastTurnInputTokens;
           }
         }
+        if (rawEvt.type === 'result') completeRuntimeSteerTurn();
 
         const fromResultError = isResultErrorEvent(event);
         let result = transformClaudeEvent(event, this.catId, streamState);
