@@ -353,6 +353,10 @@ export interface ChatMessage {
   replyTo?: string;
   /** F121: Server-hydrated reply preview (sender + truncated content) */
   replyPreview?: ReplyPreview;
+  /** Local-only optimistic send state for user messages. */
+  sendStatus?: 'sending' | 'sent' | 'failed';
+  /** Local-only send error shown on the optimistic user bubble. */
+  sendError?: string;
   /**
    * F183 Phase D — set when this message was hydrated from the IndexedDB
    * snapshot (offline-store). Used by `mergeReplaceHydrationMessages` to

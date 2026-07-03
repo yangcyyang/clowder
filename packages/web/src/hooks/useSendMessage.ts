@@ -20,6 +20,30 @@ export interface WhisperOptions {
   whisperTo: string[];
 }
 
+export interface SendRetryPayload {
+  content: string;
+  threadId: string;
+  clientMessageId: string;
+  images?: File[];
+  attachments?: File[];
+  whisper?: WhisperOptions;
+  deliveryMode?: DeliveryMode;
+}
+
+export interface SendMessageOptions {
+  clientMessageId?: string;
+}
+
+const sendRetryPayloads = new Map<string, SendRetryPayload>();
+
+export function getSendRetryPayload(messageId: string): SendRetryPayload | undefined {
+  return sendRetryPayloads.get(messageId);
+}
+
+export function clearSendRetryPayload(messageId: string): void {
+  sendRetryPayloads.delete(messageId);
+}
+
 /**
  * Hook for sending messages (text + optional images + optional whisper).
  * Handles both JSON and multipart form data modes.
@@ -30,6 +54,7 @@ export function useSendMessage(activeThreadId?: string) {
     addMessageToThread,
     removeThreadMessage,
     replaceThreadMessageId,
+    patchThreadMessage,
     setLoading,
     setHasActiveInvocation,
     setThreadLoading,
@@ -65,6 +90,7 @@ export function useSendMessage(activeThreadId?: string) {
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
       attachments?: File[],
+      options?: SendMessageOptions,
     ): Promise<SendMessageResult | undefined> => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
@@ -80,7 +106,7 @@ export function useSendMessage(activeThreadId?: string) {
       const wasCommand = await processCommand(content, threadId);
       if (wasCommand) return undefined;
 
-      const clientMessageId = createClientId();
+      const clientMessageId = options?.clientMessageId ?? createClientId();
       const optimisticMessageId = `user-${clientMessageId}`;
 
       // Create user message
@@ -110,6 +136,15 @@ export function useSendMessage(activeThreadId?: string) {
       // F117: Queue sends skip optimistic insert — bubble appears only on messages_delivered
       // (prevents queued message from showing in chat timeline before delivery)
       if (!isQueueSend) {
+        sendRetryPayloads.set(optimisticMessageId, {
+          content,
+          threadId,
+          clientMessageId,
+          ...(images ? { images } : {}),
+          ...(attachments ? { attachments } : {}),
+          ...(whisper ? { whisper } : {}),
+          ...(deliveryMode ? { deliveryMode } : {}),
+        });
         if (threadId !== activeThread) {
           addMessageToThread(threadId, userMsg);
         } else {
@@ -133,6 +168,7 @@ export function useSendMessage(activeThreadId?: string) {
         body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
       ) => {
         if (body?.status === 'duplicate') {
+          clearSendRetryPayload(optimisticMessageId);
           // A retry with the same requestId should converge onto the original
           // user bubble instead of leaving a second optimistic message behind.
           if (body.userMessageId) {
@@ -149,6 +185,7 @@ export function useSendMessage(activeThreadId?: string) {
         // so the source thread may no longer be active. Thread-scoped APIs check
         // currentThreadId at call-time, correctly targeting flat or background state.
         if (body?.status === 'game_started' && body.gameThreadId) {
+          clearSendRetryPayload(optimisticMessageId);
           removeThreadMessage(threadId, optimisticMessageId);
           setThreadLoading(threadId, false);
           setThreadHasActiveInvocation(threadId, false);
@@ -194,6 +231,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
+          clearSendRetryPayload(optimisticMessageId);
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
@@ -219,6 +257,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
+          clearSendRetryPayload(optimisticMessageId);
           if (!reconcileQueuedResponse(body) && body?.userMessageId) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
@@ -245,6 +284,12 @@ export function useSendMessage(activeThreadId?: string) {
         } else {
           setUploadStatus('idle');
         }
+        if (!isQueueSend) {
+          patchThreadMessage(threadId, optimisticMessageId, {
+            sendStatus: 'failed',
+            sendError: errorMessage,
+          });
+        }
         const errorMessagePayload: ChatMessageData = {
           id: `err-${Date.now()}`,
           type: 'system',
@@ -267,6 +312,7 @@ export function useSendMessage(activeThreadId?: string) {
       addMessageToThread,
       removeThreadMessage,
       replaceThreadMessageId,
+      patchThreadMessage,
       setLoading,
       setHasActiveInvocation,
       setThreadLoading,

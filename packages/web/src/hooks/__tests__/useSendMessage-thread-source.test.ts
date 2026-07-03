@@ -13,6 +13,7 @@ const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
 const mockReplaceMessageId = vi.fn();
 const mockReplaceThreadMessageId = vi.fn();
+const mockPatchThreadMessage = vi.fn();
 const mockResetRefs = vi.fn();
 const mockProcessCommand = vi.fn(async () => false);
 let storeCurrentThreadId = 'thread-stale';
@@ -42,6 +43,7 @@ vi.mock('@/stores/chatStore', () => ({
       setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
       replaceMessageId: mockReplaceMessageId,
       replaceThreadMessageId: mockReplaceThreadMessageId,
+      patchThreadMessage: mockPatchThreadMessage,
       currentThreadId: storeCurrentThreadId,
     }),
     {
@@ -50,15 +52,17 @@ vi.mock('@/stores/chatStore', () => ({
   ),
 }));
 
-import { useSendMessage } from '@/hooks/useSendMessage';
+import { clearSendRetryPayload, getSendRetryPayload, useSendMessage } from '@/hooks/useSendMessage';
 
 function SendRunner({
   activeThreadId,
   overrideThreadId,
+  retryClientMessageId,
   onDone,
 }: {
   activeThreadId?: string;
   overrideThreadId?: string;
+  retryClientMessageId?: string;
   onDone: () => void;
 }) {
   const { handleSend } = useSendMessage(activeThreadId);
@@ -67,8 +71,16 @@ function SendRunner({
   useEffect(() => {
     if (called.current) return;
     called.current = true;
-    handleSend('@布偶 @缅因 看图', undefined, overrideThreadId).then(onDone);
-  }, [handleSend, onDone, overrideThreadId]);
+    handleSend(
+      '@布偶 @缅因 看图',
+      undefined,
+      overrideThreadId,
+      undefined,
+      undefined,
+      undefined,
+      retryClientMessageId ? { clientMessageId: retryClientMessageId } : undefined,
+    ).then(onDone);
+  }, [handleSend, onDone, overrideThreadId, retryClientMessageId]);
 
   return null;
 }
@@ -99,6 +111,7 @@ describe('useSendMessage thread source', () => {
     mockSetThreadHasActiveInvocation.mockReset();
     mockReplaceMessageId.mockReset();
     mockReplaceThreadMessageId.mockReset();
+    mockPatchThreadMessage.mockReset();
     mockResetRefs.mockReset();
     mockProcessCommand.mockReset();
     mockProcessCommand.mockResolvedValue(false);
@@ -195,6 +208,93 @@ describe('useSendMessage thread source', () => {
     });
   });
 
+  it('marks the optimistic user bubble failed when the send request fails', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ detail: 'API unavailable' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const optimisticMessage = mockAddMessage.mock.calls[0]?.[0] as { id: string };
+    const firstPayload = JSON.parse(String(mockApiFetch.mock.calls[0]?.[1]?.body));
+    expect(optimisticMessage).toMatchObject({ type: 'user' });
+    expect(getSendRetryPayload(optimisticMessage.id)).toMatchObject({
+      content: '@布偶 @缅因 看图',
+      threadId: 'thread-route',
+      clientMessageId: firstPayload.idempotencyKey,
+    });
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith(
+      'thread-route',
+      optimisticMessage.id,
+      expect.objectContaining({
+        sendStatus: 'failed',
+        sendError: 'API unavailable',
+      }),
+    );
+    clearSendRetryPayload(optimisticMessage.id);
+  });
+
+  it('reuses the original idempotencyKey when retrying a failed send', async () => {
+    mockApiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 504,
+      json: async () => ({ detail: 'timeout' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const optimisticMessage = mockAddMessage.mock.calls[0]?.[0] as { id: string };
+    const retryPayload = getSendRetryPayload(optimisticMessage.id);
+    const firstPayload = JSON.parse(String(mockApiFetch.mock.calls[0]?.[1]?.body));
+    expect(retryPayload?.clientMessageId).toBe(firstPayload.idempotencyKey);
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    mockApiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'duplicate', userMessageId: 'msg-server-original' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          retryClientMessageId: retryPayload?.clientMessageId,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const secondPayload = JSON.parse(String(mockApiFetch.mock.calls[1]?.[1]?.body));
+    expect(secondPayload.idempotencyKey).toBe(firstPayload.idempotencyKey);
+    clearSendRetryPayload(optimisticMessage.id);
+  });
+
   it('clears invocation state for source thread when send fails after thread switch', async () => {
     let rejectFetch: ((err: Error) => void) | null = null;
     mockApiFetch.mockImplementation(
@@ -249,6 +349,7 @@ describe('useSendMessage thread source', () => {
     const optimisticMessage = optimisticUserCall?.[0];
     expect(optimisticMessage).toMatchObject({ type: 'user' });
     expect(mockReplaceThreadMessageId).toHaveBeenCalledWith('thread-route', optimisticMessage.id, 'msg-server-1');
+    expect(getSendRetryPayload(optimisticMessage.id)).toBeUndefined();
   });
 
   it('keeps an optimistic active-thread user bubble when server smart-defaults to queued', async () => {

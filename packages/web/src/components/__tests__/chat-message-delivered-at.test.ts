@@ -40,7 +40,11 @@ vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 describe('ChatMessage dual timestamp (deliveredAt)', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
+  let ChatMessage: React.FC<{
+    message: ChatMessageType;
+    getCatById: (id: string) => CatData | undefined;
+    onRetrySend?: (message: ChatMessageType) => void;
+  }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -142,5 +146,40 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
     expect(text).toContain('19:05');
     expect(text).not.toContain('发送');
     expect(text).not.toContain('收到');
+  });
+
+  it('shows failed send state on the user bubble and calls retry handler', () => {
+    const onRetrySend = vi.fn();
+    const failedMessage: ChatMessageType = {
+      id: 'msg-failed',
+      type: 'user',
+      content: 'Please do the thing',
+      timestamp: Date.now(),
+      sendStatus: 'failed',
+      sendError: 'API unavailable',
+    };
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: failedMessage,
+          onRetrySend,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('发送失败');
+    expect(container.textContent).toContain('API unavailable');
+    const retryButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('重试'),
+    );
+    expect(retryButton).toBeTruthy();
+
+    act(() => {
+      (retryButton as HTMLButtonElement).click();
+    });
+
+    expect(onRetrySend).toHaveBeenCalledWith(failedMessage);
   });
 });

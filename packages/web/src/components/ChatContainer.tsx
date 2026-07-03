@@ -17,7 +17,7 @@ import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
-import { useSendMessage } from '@/hooks/useSendMessage';
+import { clearSendRetryPayload, getSendRetryPayload, useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
@@ -285,6 +285,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setBootcampRefreshKey((k) => k + 1);
   }, []);
   const [bootcampCount, setBootcampCount] = useState(0);
+  const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/bootcamp/threads')
@@ -350,6 +351,30 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const setThreads = useChatStore((s) => s.setThreads);
   const threadStates = useChatStore((s) => s.threadStates);
+  const handleRetrySendMessage = useCallback(
+    (message: ChatMessageData) => {
+      const retryPayload = getSendRetryPayload(message.id);
+      const retryThreadId = retryPayload?.threadId ?? message.threadId ?? threadId;
+      const textBlock = message.contentBlocks?.find((block) => block.type === 'text');
+      const retryContent = retryPayload?.content ?? message.content ?? (textBlock?.type === 'text' ? textBlock.text : '');
+      if (!retryContent.trim()) return;
+      clearSendRetryPayload(message.id);
+      removeThreadMessage(retryThreadId, message.id);
+      void handleSend(
+        retryContent,
+        retryPayload?.images,
+        retryThreadId,
+        retryPayload?.whisper ??
+          (message.visibility === 'whisper' && message.whisperTo?.length
+            ? { visibility: 'whisper', whisperTo: message.whisperTo }
+            : undefined),
+        retryPayload?.deliveryMode,
+        retryPayload?.attachments,
+        retryPayload?.clientMessageId ? { clientMessageId: retryPayload.clientMessageId } : undefined,
+      );
+    },
+    [handleSend, removeThreadMessage, threadId],
+  );
   const handleInlineThreadReplyCountChange = useCallback(
     (sourceMessageId: string, branchThreadId: string, replyCount: number) => {
       setInlineThreadReplies((prev) => ({
@@ -1060,6 +1085,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             onChangeEditDraft={setEditingDraft}
             onSaveEdit={handleSaveEditMessage}
             onCancelEdit={handleCancelEditMessage}
+            onRetrySend={handleRetrySendMessage}
           />
         </MessageActions>
       );
@@ -1078,6 +1104,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       isSavingEdit,
       handleSaveEditMessage,
       handleCancelEditMessage,
+      handleRetrySendMessage,
     ],
   );
   const unreadDividerInsertIndex = useMemo(

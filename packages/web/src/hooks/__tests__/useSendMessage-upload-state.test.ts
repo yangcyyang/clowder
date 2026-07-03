@@ -9,6 +9,7 @@ const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
+const mockPatchThreadMessage = vi.fn();
 const mockResetRefs = vi.fn();
 const mockProcessCommand = vi.fn(async () => false);
 
@@ -33,6 +34,7 @@ vi.mock('@/stores/chatStore', () => ({
       setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
       setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+      patchThreadMessage: mockPatchThreadMessage,
       currentThreadId: 'thread-stale',
     }),
     {
@@ -41,7 +43,7 @@ vi.mock('@/stores/chatStore', () => ({
   ),
 }));
 
-import { useSendMessage } from '@/hooks/useSendMessage';
+import { clearSendRetryPayload, getSendRetryPayload, useSendMessage } from '@/hooks/useSendMessage';
 
 interface UploadSnapshot {
   status: string;
@@ -106,6 +108,7 @@ describe('useSendMessage upload status', () => {
     mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
     mockSetThreadHasActiveInvocation.mockReset();
+    mockPatchThreadMessage.mockReset();
     mockResetRefs.mockReset();
     mockProcessCommand.mockReset();
     mockProcessCommand.mockResolvedValue(false);
@@ -159,6 +162,18 @@ describe('useSendMessage upload status', () => {
     const last = snapshots[snapshots.length - 1];
     expect(last.status).toBe('failed');
     expect(last.error).toContain('上传超时');
+    const optimisticMessage = mockAddMessage.mock.calls[0]?.[0] as { id: string };
+    const retryPayload = getSendRetryPayload(optimisticMessage.id);
+    expect(retryPayload?.content).toBe('@布偶 看图');
+    expect(retryPayload?.images).toHaveLength(1);
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith(
+      'thread-route',
+      optimisticMessage.id,
+      expect.objectContaining({
+        sendStatus: 'failed',
+        sendError: '上传超时',
+      }),
+    );
     expect(mockAddMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'system',
@@ -166,5 +181,6 @@ describe('useSendMessage upload status', () => {
         content: expect.stringContaining('Failed to send message: 上传超时'),
       }),
     );
+    clearSendRetryPayload(optimisticMessage.id);
   });
 });
