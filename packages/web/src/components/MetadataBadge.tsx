@@ -18,6 +18,7 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
 
   // Read usage from message metadata (message-scoped, not per-cat aggregate)
   const usage = metadata.usage;
+  const runtimeWarnings = metadata.runtimeWarnings ?? [];
 
   const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null || usage.totalTokens != null);
   const cachePct = usage ? cachePercent(usage.inputTokens, usage.cacheReadTokens) : null;
@@ -67,8 +68,21 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
         </span>
       )}
 
+      {runtimeWarnings.length > 0 && (
+        <span className="ml-1 text-conn-amber-text">
+          <span className="text-cafe-muted"> · </span>⚠ {runtimeWarnings.length}
+        </span>
+      )}
+
       {expanded && metadata.sessionId && (
         <span className="ml-1 text-cafe-muted">· {metadata.sessionId.slice(0, 12)}...</span>
+      )}
+
+      {expanded && runtimeWarnings.length > 0 && (
+        <span className="ml-1 basis-full text-left text-conn-amber-text">
+          运行警告：
+          {runtimeWarnings.map((warning) => warning.title).join(' / ')}
+        </span>
       )}
     </button>
   );

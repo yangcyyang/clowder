@@ -12,6 +12,7 @@ export const OPS_SUBSECTIONS: OpsSubsection[] = [
   { id: 'rescue', label: '紧急救援', group: 'basic' },
   { id: 'usage', label: '用量/配额', group: 'advanced' },
   { id: 'observability', label: '监控面板', group: 'advanced' },
+  { id: 'system-events', label: '系统事件', group: 'advanced' },
   { id: 'audit', label: '审计日志', group: 'advanced' },
   { id: 'leaderboard', label: '排行榜', group: 'experimental' },
 ];

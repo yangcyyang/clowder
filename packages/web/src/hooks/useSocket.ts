@@ -11,8 +11,10 @@ import {
 import { useBrakeStore } from '@/stores/brakeStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
+import { useRuntimeEventsStore } from '@/stores/runtimeEventsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { classifyRuntimeSystemEvent } from '@/utils/runtime-notices';
 import { getTaskAttentionToast } from '@/utils/taskAttention';
 import { getUserId } from '@/utils/userId';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
@@ -946,6 +948,24 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('connector_message', (data: ConnectorMessageEvent) => {
       if (!data?.threadId || !data?.message?.id) return;
+      const runtimeEvent = classifyRuntimeSystemEvent({
+        id: data.message.id,
+        content: data.message.content,
+        source: data.message.source,
+        threadId: data.threadId,
+        timestamp: data.message.timestamp,
+      });
+      if (runtimeEvent) {
+        useRuntimeEventsStore.getState().addEvent(runtimeEvent);
+        useToastStore.getState().addToast({
+          type: 'info',
+          title: runtimeEvent.title,
+          message: runtimeEvent.message,
+          threadId: data.threadId,
+          duration: 4000,
+        });
+        return;
+      }
       const toast = data.message.extra?.scheduler?.toast;
       if (data.message.source?.connector === 'scheduler' && toast) {
         useToastStore.getState().addToast({

@@ -7,6 +7,7 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { classifyRuntimeSystemEvent } from '@/utils/runtime-notices';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
@@ -57,6 +58,19 @@ function sanitizeAgentVisibleContent(content: string): string {
 }
 
 export function shouldRenderChatMessage(message: ChatMessageType): boolean {
+  if (
+    message.type === 'connector' &&
+    classifyRuntimeSystemEvent({
+      id: message.id,
+      content: message.content,
+      source: message.source,
+      threadId: message.threadId,
+      timestamp: message.timestamp,
+    })
+  ) {
+    return false;
+  }
+
   if (message.type === 'assistant' && message.origin === 'stream' && message.isStreaming) {
     return false;
   }

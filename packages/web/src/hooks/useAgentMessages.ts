@@ -14,6 +14,7 @@ import type {
   ChatMessage,
   ChatMessageMetadata,
   ChatMessagePatch,
+  RuntimeWarning,
   RichBlock,
   TaskProgressItem,
   ThreadState,
@@ -22,6 +23,7 @@ import type {
 } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
+import { classifyRuntimeWarning } from '@/utils/runtime-notices';
 import { compactToolResultDetail } from '@/utils/toolPreview';
 import {
   clearReplacedInvocationsForThread,
@@ -252,7 +254,7 @@ export interface BackgroundStreamRef {
 }
 
 export interface BackgroundToastInput {
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'info';
   title: string;
   message: string;
   threadId: string;
@@ -269,6 +271,7 @@ export interface BackgroundStoreLike {
   setThreadCatInvocation: (threadId: string, catId: string, info: Partial<CatInvocationInfo>) => void;
   setThreadMessageMetadata: (threadId: string, messageId: string, metadata: ChatMessageMetadata) => void;
   setThreadMessageUsage: (threadId: string, messageId: string, usage: TokenUsage) => void;
+  appendThreadMessageRuntimeWarning: (threadId: string, messageId: string, warning: RuntimeWarning) => void;
   /** F045: Set or append extended thinking on an assistant message in a background thread */
   setThreadMessageThinking: (threadId: string, messageId: string, thinking: string) => void;
   /** F081: Persist stream invocation identity on background assistant bubbles */
@@ -344,6 +347,17 @@ interface SystemInfoConsumeResult {
   variant: 'info' | 'a2a_followup';
 }
 
+function makeRuntimeWarning(
+  warning: Omit<RuntimeWarning, 'id' | 'timestamp'>,
+  msg: Pick<AgentMsg, 'catId' | 'invocationId' | 'type'>,
+): RuntimeWarning {
+  return {
+    ...warning,
+    id: `runtime-warning-${msg.invocationId ?? msg.catId}-${msg.type}-${Date.now()}`,
+    timestamp: Date.now(),
+  };
+}
+
 function recoverBackgroundStreamingMessage(
   msg: BackgroundAgentMessage,
   options: HandleBackgroundMessageOptions,
@@ -374,6 +388,14 @@ export function consumeBackgroundSystemInfo(
 
   try {
     const parsed = JSON.parse(sysContent);
+    const runtimeWarning = classifyRuntimeWarning(parsed);
+    if (runtimeWarning) {
+      const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+      if (targetId) {
+        options.store.appendThreadMessageRuntimeWarning(msg.threadId, targetId, makeRuntimeWarning(runtimeWarning, msg));
+      }
+      consumed = true;
+    } else {
     const visible = formatVisibleSystemInfo(parsed);
     if (visible) {
       sysContent = visible.content;
@@ -689,8 +711,16 @@ export function consumeBackgroundSystemInfo(
       }
       consumed = true;
     }
+    }
   } catch {
-    // Not JSON; keep original content as user-facing system info.
+    const runtimeWarning = classifyRuntimeWarning(sysContent);
+    if (runtimeWarning) {
+      const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+      if (targetId) {
+        options.store.appendThreadMessageRuntimeWarning(msg.threadId, targetId, makeRuntimeWarning(runtimeWarning, msg));
+      }
+      consumed = true;
+    }
   }
 
   return { consumed, content: sysContent, variant: sysVariant };
@@ -1805,6 +1835,7 @@ export function useAgentMessages() {
     setMessageMetadata,
     setMessageThinking,
     setMessageStreamInvocation,
+    appendMessageRuntimeWarning,
     requestStreamCatchUp,
     replaceThreadTargetCats,
   } = useChatStore();
@@ -3615,6 +3646,14 @@ export function useAgentMessages() {
         let consumed = false;
         try {
           const parsed = JSON.parse(sysContent);
+          const runtimeWarning = classifyRuntimeWarning(parsed);
+          if (runtimeWarning) {
+            const ref = getActive(msg.catId);
+            if (ref?.id) {
+              appendMessageRuntimeWarning(ref.id, makeRuntimeWarning(runtimeWarning, msg));
+            }
+            consumed = true;
+          } else {
           const visible = formatVisibleSystemInfo(parsed);
           if (visible) {
             sysContent = visible.content;
@@ -3992,8 +4031,16 @@ export function useAgentMessages() {
             const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
             sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
           }
+          }
         } catch {
-          /* not JSON, use raw content */
+          const runtimeWarning = classifyRuntimeWarning(sysContent);
+          if (runtimeWarning) {
+            const ref = getActive(msg.catId);
+            if (ref?.id) {
+              appendMessageRuntimeWarning(ref.id, makeRuntimeWarning(runtimeWarning, msg));
+            }
+            consumed = true;
+          }
         }
         if (!consumed) {
           addMessage({
@@ -4259,6 +4306,7 @@ export function useAgentMessages() {
       shouldSuppressLateStreamChunk,
       setHasActiveInvocation,
       setMessageUsage,
+      appendMessageRuntimeWarning,
       requestStreamCatchUp,
       removeMessage,
     ],

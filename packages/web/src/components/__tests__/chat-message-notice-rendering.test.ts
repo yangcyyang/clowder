@@ -95,7 +95,7 @@ describe('ChatMessage notice rendering', () => {
     expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
   });
 
-  it('renders restart interruption notice as in-thread notice bar instead of connector bubble', () => {
+  it('does not render startup recovery notices in the main chat flow', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
@@ -116,7 +116,7 @@ describe('ChatMessage notice rendering', () => {
       );
     });
 
-    expect(container.querySelector('[data-testid="notice-bar"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
   });
 

@@ -28,6 +28,23 @@ describe('shouldRenderChatMessage', () => {
     ).toBe(false);
   });
 
+  it('hides startup recovery connector notices from the main chat flow', () => {
+    expect(
+      shouldRenderChatMessage(
+        message({
+          type: 'connector',
+          content: '运行服务已恢复，已自动接续 opus 的 1 个进行中请求；已发送的消息会保留。',
+          source: {
+            connector: 'startup-reconciler',
+            label: '重启通知',
+            icon: '⚠️',
+            meta: { presentation: 'system_notice' },
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps user messages and assistant messages with visible content', () => {
     expect(shouldRenderChatMessage(message({ type: 'user', catId: undefined, content: '' }))).toBe(true);
     expect(shouldRenderChatMessage(message({ content: '交付完成' }))).toBe(true);

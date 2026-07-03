@@ -6,6 +6,7 @@ import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } f
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { useRuntimeEventsStore } from '@/stores/runtimeEventsStore';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
@@ -13,6 +14,7 @@ import {
   loadThreadMessages as loadCachedMessages,
   saveThreadMessages as saveMessagesSnapshot,
 } from '@/utils/offline-store';
+import { classifyRuntimeSystemEvent } from '@/utils/runtime-notices';
 
 type SavedScrollState = {
   top: number;
@@ -493,7 +495,8 @@ export function useChatHistory(threadId: string) {
         // Stale check: discard if thread changed during fetch
         if (threadIdRef.current !== fetchForThread) return;
         const data = await res.json();
-        const historyMsgs = (data.messages ?? []).map(
+        const historyMsgs = (data.messages ?? [])
+          .map(
           (m: {
             id: string;
             threadId?: string;
@@ -502,7 +505,7 @@ export function useChatHistory(threadId: string) {
             content: string;
             contentBlocks?: unknown[];
             toolEvents?: unknown[];
-            metadata?: { provider: string; model: string; sessionId?: string };
+            metadata?: ChatMessageData['metadata'];
             origin?: 'stream' | 'callback' | 'briefing';
             thinking?: string;
             extra?: {
@@ -520,13 +523,26 @@ export function useChatHistory(threadId: string) {
             whisperTo?: string[];
             revealedAt?: number;
             isDraft?: boolean;
-            source?: { connector: string; label: string; icon: string; url?: string };
+            source?: ChatMessageData['source'];
             mentionsUser?: boolean;
             deliveredAt?: number;
             replyTo?: string;
             replyPreview?: ReplyPreview;
-          }) =>
-            ({
+          }) => {
+            if (m.source) {
+              const runtimeEvent = classifyRuntimeSystemEvent({
+                id: m.id,
+                content: m.content,
+                source: m.source,
+                threadId: m.threadId ?? fetchForThread,
+                timestamp: m.timestamp,
+              });
+              if (runtimeEvent) {
+                useRuntimeEventsStore.getState().addEvent(runtimeEvent);
+                return null;
+              }
+            }
+            return {
               id: m.id,
               ...(m.threadId ? { threadId: m.threadId } : {}),
               type: (m.type === 'system'
@@ -575,8 +591,10 @@ export function useChatHistory(threadId: string) {
               // #80: Restore streaming indicator for draft messages recovered from Redis
               ...(m.isDraft ? { isStreaming: true } : {}),
               timestamp: m.timestamp,
-            }) as ChatMessageData,
-        );
+            } as ChatMessageData;
+          },
+        )
+          .filter((m: ChatMessageData | null): m is ChatMessageData => Boolean(m));
         if (options?.replace) {
           // Replace mode now does a non-destructive merge first, then resets the thread
           // snapshot to the merged result in one step. The clear is no longer "drop

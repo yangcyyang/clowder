@@ -62,6 +62,16 @@ export interface ChatMessageMetadata {
   model: string;
   sessionId?: string;
   usage?: TokenUsage;
+  /** Runtime-only warnings surfaced behind the message's metadata chip. */
+  runtimeWarnings?: RuntimeWarning[];
+}
+
+export interface RuntimeWarning {
+  id: string;
+  title: string;
+  message: string;
+  severity: 'info' | 'warning';
+  timestamp: number;
 }
 
 export interface MessageReaction {

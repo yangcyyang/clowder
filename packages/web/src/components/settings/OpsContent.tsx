@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRuntimeEventsStore } from '@/stores/runtimeEventsStore';
 import { BrakeSettingsPanel } from '../BrakeSettingsPanel';
 import { HubClaudeRescueSection } from '../HubClaudeRescueSection';
 import { HubCommandsTab } from '../HubCommandsTab';
@@ -92,6 +93,8 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
       return <HubLeaderboardTab />;
     case 'observability':
       return <HubObservabilityTab />;
+    case 'system-events':
+      return <SystemEventsPanel />;
     case 'audit':
       return <DangerousActionAuditPanel />;
     case 'health':
@@ -108,4 +111,34 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
     default:
       return null;
   }
+}
+
+function SystemEventsPanel() {
+  const events = useRuntimeEventsStore((state) => state.events);
+
+  if (events.length === 0) {
+    return (
+      <div className="rounded-[var(--border-radius-base)] border-2 border-[var(--slock-border-color)] bg-[var(--console-card-bg)] p-4 text-sm text-cafe-muted">
+        暂无系统事件。重启接续、运行恢复等通知会在这里留档，不再占用主会话。
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((event) => (
+        <div
+          key={event.id}
+          className="rounded-[var(--border-radius-base)] border-2 border-[var(--slock-border-color)] bg-[var(--console-card-bg)] p-3 shadow-[var(--slock-shadow-chip)]"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-cafe">{event.title}</div>
+            <div className="font-mono text-[11px] text-cafe-muted">{new Date(event.timestamp).toLocaleString()}</div>
+          </div>
+          <p className="mt-1 text-sm text-cafe-secondary">{event.message}</p>
+          {event.threadId && <p className="mt-1 font-mono text-[11px] text-cafe-muted">{event.threadId}</p>}
+        </div>
+      ))}
+    </div>
+  );
 }

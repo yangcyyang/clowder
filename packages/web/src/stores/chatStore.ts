@@ -759,6 +759,10 @@ export interface ChatState {
   clearCatStatuses: () => void;
   setCatInvocation: (catId: string, info: Partial<CatInvocationInfo>) => void;
   setMessageUsage: (messageId: string, usage: TokenUsage) => void;
+  appendMessageRuntimeWarning: (
+    messageId: string,
+    warning: NonNullable<ChatMessageMetadata['runtimeWarnings']>[number],
+  ) => void;
   /** Merge metadata onto an active-thread message (parallel to setThreadMessageMetadata) */
   setMessageMetadata: (messageId: string, metadata: ChatMessageMetadata) => void;
   /** F045: Set or append extended thinking content on an assistant message */
@@ -910,6 +914,11 @@ export interface ChatState {
   setThreadCatInvocation: (threadId: string, catId: string, info: Partial<CatInvocationInfo>) => void;
   setThreadMessageMetadata: (threadId: string, messageId: string, metadata: ChatMessageMetadata) => void;
   setThreadMessageUsage: (threadId: string, messageId: string, usage: TokenUsage) => void;
+  appendThreadMessageRuntimeWarning: (
+    threadId: string,
+    messageId: string,
+    warning: NonNullable<ChatMessageMetadata['runtimeWarnings']>[number],
+  ) => void;
   setThreadMessageThinking: (threadId: string, messageId: string, thinking: string) => void;
   setThreadMessageStreamInvocation: (threadId: string, messageId: string, invocationId: string) => void;
   setThreadMessageStreaming: (threadId: string, messageId: string, streaming: boolean) => void;
@@ -1843,6 +1852,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     })),
 
+  appendMessageRuntimeWarning: (messageId, warning) =>
+    set((state) => ({
+      messages: state.messages.map((m) => {
+        if (m.id !== messageId || !m.metadata) return m;
+        const current = m.metadata.runtimeWarnings ?? [];
+        if (current.some((item) => item.id === warning.id)) return m;
+        return { ...m, metadata: { ...m.metadata, runtimeWarnings: [...current, warning] } };
+      }),
+    })),
+
   setMessageMetadata: (messageId, metadata) => {
     // Skip if message already has metadata (avoid per-chunk re-render during streaming)
     const msg = get().messages.find((m) => m.id === messageId);
@@ -2321,6 +2340,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updateThreadMessage(state, threadId, messageId, (m) =>
         m.metadata ? { ...m, metadata: { ...m.metadata, usage } } : m,
       ),
+    ),
+
+  appendThreadMessageRuntimeWarning: (threadId, messageId, warning) =>
+    set((state) =>
+      updateThreadMessage(state, threadId, messageId, (m) => {
+        if (!m.metadata) return m;
+        const current = m.metadata.runtimeWarnings ?? [];
+        if (current.some((item) => item.id === warning.id)) return m;
+        return { ...m, metadata: { ...m.metadata, runtimeWarnings: [...current, warning] } };
+      }),
     ),
 
   /** F045: Set/append extended thinking on an assistant message in a background thread. */
