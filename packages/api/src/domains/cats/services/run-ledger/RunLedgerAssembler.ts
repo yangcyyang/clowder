@@ -220,6 +220,7 @@ function sanitizeTaskEventData(event: TaskEvent): Record<string, unknown> {
       status: typeof data.status === 'string' ? redactString(data.status) : undefined,
       title: typeof data.title === 'string' ? redactString(data.title) : undefined,
       target: typeof data.target === 'string' ? redactString(data.target) : undefined,
+      toolInput: typeof data.toolInput === 'string' ? redactString(data.toolInput) : undefined,
       durationMs: finiteNumber(data.durationMs),
     });
   }

@@ -1023,7 +1023,11 @@ describe('GET /api/capabilities (Fastify)', () => {
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
     const app = Fastify();
-    await app.register(capabilitiesRoutes);
+    await app.register(capabilitiesRoutes, {
+      threadStore: {
+        get: async () => ({ id: 'thread-a', createdBy: 'test-user' }),
+      },
+    });
     await app.ready();
 
     const projectDir = join('/tmp', `cap-route-test-thread-grant-${Date.now()}`);
@@ -1071,12 +1075,136 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('PATCH scope=thread rejects a thread owned by another user', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    const threadStore = {
+      get: async () => ({
+        id: 'thread-owned-by-someone-else',
+        createdBy: 'other-user',
+      }),
+    };
+    await app.register(capabilitiesRoutes, { threadStore });
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-thread-forbidden-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'opencli-browser',
+          type: 'mcp',
+          enabled: false,
+          source: 'external',
+          mcpServer: { command: 'opencli', args: ['mcp'] },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/capabilities',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        capabilityId: 'opencli-browser',
+        capabilityType: 'mcp',
+        scope: 'thread',
+        threadId: 'thread-owned-by-someone-else',
+        enabled: true,
+        projectPath: projectDir,
+      },
+    });
+
+    assert.equal(res.statusCode, 403);
+    const updated = await readCapabilitiesConfig(projectDir);
+    assert.equal(updated?.capabilities[0]?.threadOverrides, undefined);
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
+  it('PATCH scope=thread only allows external MCP capabilities', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    const threadStore = {
+      get: async () => ({
+        id: 'thread-a',
+        createdBy: 'test-user',
+      }),
+    };
+    await app.register(capabilitiesRoutes, { threadStore });
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-thread-mcp-only-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'cat-cafe',
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['server.js'] },
+        },
+        {
+          id: 'project-init',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+        },
+      ],
+    });
+
+    const builtinRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/capabilities',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        capabilityId: 'cat-cafe',
+        capabilityType: 'mcp',
+        scope: 'thread',
+        threadId: 'thread-a',
+        enabled: false,
+        projectPath: projectDir,
+      },
+    });
+    assert.equal(builtinRes.statusCode, 400);
+
+    const skillRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/capabilities',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: {
+        capabilityId: 'project-init',
+        capabilityType: 'skill',
+        scope: 'thread',
+        threadId: 'thread-a',
+        enabled: false,
+        projectPath: projectDir,
+      },
+    });
+    assert.equal(skillRes.statusCode, 400);
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
   it('GET /api/capabilities exposes current thread MCP scope when threadId is provided', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
     const app = Fastify();
-    await app.register(capabilitiesRoutes);
+    await app.register(capabilitiesRoutes, {
+      threadStore: {
+        get: async () => ({ id: 'thread-a', createdBy: 'test-user' }),
+      },
+    });
     await app.ready();
 
     const projectDir = join('/tmp', `cap-route-test-thread-scope-${Date.now()}`);
@@ -1106,6 +1234,49 @@ describe('GET /api/capabilities (Fastify)', () => {
     const item = body.items.find((i) => i.type === 'mcp' && i.id === 'opencli-browser');
     assert.ok(item, 'opencli-browser MCP item should exist');
     assert.deepEqual(item.threadScope, { threadId: 'thread-a', enabled: true });
+
+    await rm(projectDir, { recursive: true, force: true });
+    await app.close();
+  });
+
+  it('GET /api/capabilities rejects thread scope for another user', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const app = Fastify();
+    const threadStore = {
+      get: async () => ({
+        id: 'thread-owned-by-someone-else',
+        createdBy: 'other-user',
+      }),
+    };
+    await app.register(capabilitiesRoutes, { threadStore });
+    await app.ready();
+
+    const projectDir = join('/tmp', `cap-route-test-thread-get-forbidden-${Date.now()}`);
+    await mkdir(projectDir, { recursive: true });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'opencli-browser',
+          type: 'mcp',
+          enabled: false,
+          source: 'external',
+          threadOverrides: [
+            { threadId: 'thread-owned-by-someone-else', enabled: true, grantedBy: 'other-user', updatedAt: 123 },
+          ],
+          mcpServer: { command: 'opencli', args: ['mcp'] },
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}&threadId=thread-owned-by-someone-else&probe=true&probeId=opencli-browser`,
+      headers: AUTH_HEADERS,
+    });
+    assert.equal(res.statusCode, 403);
 
     await rm(projectDir, { recursive: true, force: true });
     await app.close();

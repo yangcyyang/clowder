@@ -52,6 +52,7 @@ import {
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   buildProviderSkillDirCandidates,
   isSkillMountedForProvider,
@@ -512,7 +513,52 @@ function buildCatFamilies(): CatFamily[] {
 
 // ────────── Route Plugin ──────────
 
-export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
+export interface CapabilitiesRoutesOptions {
+  threadStore?: Pick<IThreadStore, 'get'>;
+}
+
+type ThreadScopeGuardResult =
+  | { ok: true }
+  | {
+      ok: false;
+      status: number;
+      body: { error: string; code: string };
+    };
+
+async function guardThreadScopeAccess(
+  threadStore: CapabilitiesRoutesOptions['threadStore'],
+  threadId: string,
+  userId: string,
+): Promise<ThreadScopeGuardResult> {
+  if (!threadStore) {
+    return {
+      ok: false,
+      status: 503,
+      body: {
+        error: 'Thread store not configured for thread-scoped capability access',
+        code: 'THREAD_STORE_UNAVAILABLE',
+      },
+    };
+  }
+  const thread = await threadStore.get(threadId);
+  if (!thread) {
+    return {
+      ok: false,
+      status: 404,
+      body: { error: 'Thread not found', code: 'THREAD_NOT_FOUND' },
+    };
+  }
+  if (thread.createdBy !== 'system' && thread.createdBy !== userId) {
+    return {
+      ok: false,
+      status: 403,
+      body: { error: 'Forbidden for this thread', code: 'FORBIDDEN' },
+    };
+  }
+  return { ok: true };
+}
+
+export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> = async (app, opts) => {
   // ── GET /api/capabilities ──
   app.get('/api/capabilities', async (request, reply) => {
     const userId = resolveUserId(request);
@@ -526,6 +572,13 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const probeEnabled = query.probe === true || query.probe === 'true' || query.probe === '1';
     const requestedProbeId = typeof query.probeId === 'string' && query.probeId.trim() ? query.probeId.trim() : null;
     const currentThreadId = typeof query.threadId === 'string' && query.threadId.trim() ? query.threadId.trim() : null;
+    if (currentThreadId) {
+      const guard = await guardThreadScopeAccess(opts.threadStore, currentThreadId, userId);
+      if (!guard.ok) {
+        reply.status(guard.status);
+        return guard.body;
+      }
+    }
     let projectRoot = getProjectRoot();
     if (query.projectPath) {
       const validated = await validateProjectPath(query.projectPath);
@@ -966,6 +1019,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'threadId required when scope is "thread"' };
     }
 
+    if (body.scope === 'thread' && body.capabilityType !== 'mcp') {
+      reply.status(400);
+      return { error: 'thread scope is only supported for MCP capabilities' };
+    }
+
     // Multi-project: accept projectPath in body
     let projectRoot = getProjectRoot();
     if (body.projectPath) {
@@ -975,6 +1033,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
       }
       projectRoot = validated;
+    }
+
+    if (body.scope === 'thread') {
+      const guard = await guardThreadScopeAccess(opts.threadStore, body.threadId!, userId);
+      if (!guard.ok) {
+        reply.status(guard.status);
+        return guard.body;
+      }
     }
 
     return withCapabilityLock(projectRoot, async () => {
@@ -993,6 +1059,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const cap = config.capabilities[capIndex]!;
+      if (body.scope === 'thread' && (cap.type !== 'mcp' || cap.source !== 'external')) {
+        reply.status(400);
+        return { error: 'thread scope is only supported for external MCP capabilities' };
+      }
       const beforeSnapshot = structuredClone(cap);
 
       if (body.scope === 'global') {

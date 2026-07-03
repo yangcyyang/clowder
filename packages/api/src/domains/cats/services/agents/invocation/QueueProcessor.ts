@@ -120,6 +120,13 @@ interface TokenUsageAggregate {
   usage: TokenUsage;
 }
 
+interface ToolUsageTaskDraft {
+  ts: string;
+  catId: string;
+  invocationId?: string;
+  data: Record<string, unknown>;
+}
+
 interface TokenPricing {
   inputPerMillion: number;
   outputPerMillion: number;
@@ -277,6 +284,59 @@ function parseNumstat(stdout: string): GitArtifactSnapshot {
     files,
     totalAdded: files.reduce((sum, file) => sum + file.added, 0),
     totalRemoved: files.reduce((sum, file) => sum + file.removed, 0),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function redactToolPayload(value: string): string {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{6,}/gi, 'Bearer [redacted-secret]')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, '[redacted-secret]')
+    .replace(/\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)\b\s*[:=]\s*[^\s,;}]+/gi, '[redacted-secret]');
+}
+
+function previewToolPayload(value: unknown, maxLength = 1000): string | undefined {
+  if (value == null) return undefined;
+  let raw: string;
+  try {
+    raw = typeof value === 'string' ? value : JSON.stringify(value);
+  } catch {
+    raw = '[unserializable]';
+  }
+  const redacted = redactToolPayload(raw);
+  return redacted.length > maxLength ? `${redacted.slice(0, maxLength)}…` : redacted;
+}
+
+function extractToolTarget(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const candidate = value.target ?? value.url ?? value.href ?? value.query;
+  return typeof candidate === 'string' ? candidate : undefined;
+}
+
+function createToolUsageTaskDraft(
+  msg: { type: string; catId?: string; [key: string]: unknown },
+  invocationId?: string,
+): ToolUsageTaskDraft | null {
+  if (msg.type !== 'tool_use' || !msg.catId) return null;
+  const toolName = typeof msg.toolName === 'string' && msg.toolName.trim() ? msg.toolName.trim() : 'unknown';
+  const metadata = isRecord(msg.metadata) ? msg.metadata : undefined;
+  const toolInput = msg.toolInput;
+  const target = extractToolTarget(toolInput);
+  const toolInputPreview = previewToolPayload(toolInput);
+  return {
+    ts: new Date(typeof msg.timestamp === 'number' ? msg.timestamp : Date.now()).toISOString(),
+    catId: msg.catId,
+    ...(invocationId ? { invocationId } : {}),
+    data: {
+      provider: typeof metadata?.provider === 'string' ? metadata.provider : 'agent',
+      toolName,
+      status: 'started',
+      ...(target ? { target } : {}),
+      ...(toolInputPreview ? { toolInput: toolInputPreview } : {}),
+    },
   };
 }
 
@@ -603,6 +663,40 @@ export class QueueProcessor {
       }
     } catch (err) {
       this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append usage task event failed');
+    }
+  }
+
+  private async appendToolUsageTaskEvents(params: {
+    threadId: string;
+    sourceMessageIds: readonly string[];
+    events: readonly ToolUsageTaskDraft[];
+  }): Promise<void> {
+    const { taskStore } = this.deps;
+    if (!taskStore || params.events.length === 0) return;
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      if (!sourceTask) return;
+      for (const event of params.events) {
+        const updated = await taskStore.update(sourceTask.id, {
+          events: [
+            {
+              ts: event.ts,
+              catId: event.catId,
+              ...(event.invocationId ? { invocationId: event.invocationId } : {}),
+              type: 'tool_usage',
+              data: event.data,
+            },
+          ],
+        });
+        if (updated) {
+          this.deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append tool usage task event failed');
     }
   }
 
@@ -1489,6 +1583,7 @@ export class QueueProcessor {
         isCompleteMessageDeliveryEnabled() || isOutputGateEnabledForTargets(targetCats);
       const completedSocketTurnIndices = new Set<number>();
       const tokenUsageAggregates = new Map<string, TokenUsageAggregate>();
+      const toolUsageTaskEvents: ToolUsageTaskDraft[] = [];
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -1801,6 +1896,8 @@ export class QueueProcessor {
           break;
         }
         this.collectTokenUsage(tokenUsageAggregates, msg);
+        const toolUsageTaskEvent = createToolUsageTaskDraft(msg, invocationId);
+        if (toolUsageTaskEvent) toolUsageTaskEvents.push(toolUsageTaskEvent);
         if (msg.catId) {
           if (msg.type === 'tool_use') {
             await this.deps.catSupervisor?.pauseForTool?.(msg.catId);
@@ -1987,6 +2084,12 @@ export class QueueProcessor {
         deliveredTurnIndices,
         threadMeta,
       );
+
+      await this.appendToolUsageTaskEvents({
+        threadId,
+        sourceMessageIds: allMessageIds,
+        events: toolUsageTaskEvents,
+      });
 
       await this.appendUsageTaskEvents({
         threadId,

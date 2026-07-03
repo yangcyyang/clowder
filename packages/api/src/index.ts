@@ -1775,7 +1775,7 @@ async function main(): Promise<void> {
   await app.register(accountsRoutes);
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });
-  await app.register(capabilitiesRoutes);
+  await app.register(capabilitiesRoutes, { threadStore });
 
   {
     const { createAdapterRegistry } = await import('./marketplace/index.js');

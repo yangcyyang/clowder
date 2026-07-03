@@ -2032,6 +2032,65 @@ describe('QueueProcessor', () => {
       assert.ok(Math.abs(event.data.costUsd - 0.00045) < 1e-10);
       assert.equal(usageDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
     });
+
+    it('appends tool_usage task event from actual routed tool calls after successful execution', async () => {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        taskThreadId: 't1',
+        events: [],
+      };
+      const updatedTasks = [];
+      const toolDeps = stubDeps({
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previous = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previous.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'tool_use',
+              catId: 'opus',
+              toolName: 'opencli.browser.eval',
+              toolInput: { target: 'https://example.com', script: 'document.title' },
+              timestamp: Date.now(),
+            };
+            yield { type: 'text', catId: 'opus', content: 'Example Domain', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const toolProcessor = new QueueProcessor(toolDeps);
+      enqueueEntry(toolDeps.queue, {
+        userId: 'u1',
+        targetCats: ['opus'],
+      });
+
+      await toolProcessor.processNext('t1', 'u1');
+      await new Promise((r) => setTimeout(r, 80));
+
+      assert.equal(updatedTasks.length, 1);
+      const event = updatedTasks[0].events.at(-1);
+      assert.equal(event.type, 'tool_usage');
+      assert.equal(event.catId, 'opus');
+      assert.equal(event.invocationId, 'inv-stub');
+      assert.equal(event.data.provider, 'agent');
+      assert.equal(event.data.toolName, 'opencli.browser.eval');
+      assert.equal(event.data.status, 'started');
+      assert.equal(event.data.target, 'https://example.com');
+      assert.equal(event.data.toolInput, '{"target":"https://example.com","script":"document.title"}');
+      assert.equal(toolDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
+    });
   });
 
   // ── Tracker guard: prevent duplicate execution for CLI-active cats ──
