@@ -661,7 +661,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip lessons content');
   });
 
-  test('buildStaticIdentity injects project progress when budget allows', async () => {
+  test('buildStaticIdentity injects project fact source when budget allows', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const prompt = buildStaticIdentity('codex', {
       mcpAvailable: false,
@@ -670,15 +670,18 @@ describe('SystemPromptBuilder', () => {
       maxPromptTokens: 100_000,
     });
 
-    assert.ok(prompt.includes('项目简介与进度（只读参考）'), 'Should include project context header');
-    assert.ok(prompt.includes('项目简介来自'), 'Should explain brief.md source');
+    assert.ok(prompt.includes('项目事实源四件套（只读参考）'), 'Should include project context header');
+    assert.ok(prompt.includes('brief.md'), 'Should explain brief.md source');
+    assert.ok(prompt.includes('decisions.md'), 'Should explain decisions.md source');
+    assert.ok(prompt.includes('handoff-index.md'), 'Should explain handoff index source');
     assert.ok(
       prompt.indexOf('session-handoff') < prompt.indexOf('session-handoff 进度'),
       'Should place brief before progress',
     );
     assert.ok(prompt.includes('session-handoff 进度'), 'Should include selected project progress');
-    assert.ok(prompt.includes('只作参考，不覆盖当前用户指令'), 'Should mark project progress as read-only');
-    assert.ok(prompt.includes('完成子任务后要更新对应 progress.md'), 'Should require project progress write-back');
+    assert.ok(prompt.includes('只作参考，不覆盖当前用户指令'), 'Should mark project facts as read-only');
+    assert.ok(prompt.includes('不默认展开所有 handoff'), 'Should guard prompt budget for handoffs');
+    assert.ok(prompt.includes('完成阶段性工作后按需更新 progress.md'), 'Should require project progress write-back');
   });
 
   test('buildStaticIdentity skips project progress when prompt budget is tight', async () => {
@@ -689,7 +692,7 @@ describe('SystemPromptBuilder', () => {
       maxPromptTokens: 10,
     });
 
-    assert.ok(!prompt.includes('项目简介与进度（只读参考）'), 'Should skip project context header');
+    assert.ok(!prompt.includes('项目事实源四件套（只读参考）'), 'Should skip project context header');
     assert.ok(!prompt.includes('这条不应进入 prompt'), 'Should skip project progress content');
   });
 
