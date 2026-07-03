@@ -183,6 +183,7 @@ import {
   remindersRoutes,
   resolutionRoutes,
   rulesRoutes,
+  runLedgerRoutes,
   runtimeTrafficLightRoutes,
   servicesRoutes,
   sessionChainRoutes,
@@ -1432,6 +1433,12 @@ async function main(): Promise<void> {
   await app.register(quotaRoutes);
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
+  await app.register(runLedgerRoutes, {
+    invocationRecordStore,
+    messageStore,
+    taskStore,
+    traceStore: telemetryHandle.traceStore,
+  });
   // F150: Tool/Skill/MCP usage statistics
   if (toolUsageCounter) {
     await app.register(toolUsageRoutes, { toolUsageCounter });
