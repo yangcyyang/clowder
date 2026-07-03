@@ -1,15 +1,12 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
 const DEFAULT_SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理';
 const DEFAULT_SKILL_MANIFEST_PATH = `${DEFAULT_SKILL_MANAGEMENT_DIR}/skills-manifest.json`;
-const MAX_MENU_SKILLS = 35;
-const MAX_MENU_DESCRIPTION_CHARS = 120;
 const MAX_TRIGGERS_PER_SKILL = 5;
 const MAX_MATCHED_SKILLS = 2;
-const MAX_SKILL_CONTENT_CHARS = 10_000;
 
 interface SkillManifest {
   skills?: SkillManifestEntry[];
@@ -32,6 +29,15 @@ interface SkillFrontmatter {
   triggers?: unknown;
 }
 
+interface RepoSkillManifest {
+  skills?: Record<string, RepoSkillManifestEntry>;
+}
+
+interface RepoSkillManifestEntry {
+  description?: unknown;
+  triggers?: unknown;
+}
+
 interface SkillRouterCatalogEntry {
   id: string;
   name: string;
@@ -49,13 +55,12 @@ export interface SkillRouterContext {
   menuSkillCount: number;
 }
 
-let catalogCache:
-  | {
-      manifestPath: string;
-      manifestMtimeMs: number;
-      entries: SkillRouterCatalogEntry[];
-    }
-  | null = null;
+let catalogCache: {
+  manifestPath: string;
+  manifestMtimeMs: number;
+  repoManifestMtimeMs: number;
+  entries: SkillRouterCatalogEntry[];
+} | null = null;
 
 function resolveSkillManifestPath(): string {
   return process.env.CAT_CAFE_SKILL_MANIFEST_PATH || DEFAULT_SKILL_MANIFEST_PATH;
@@ -63,12 +68,6 @@ function resolveSkillManifestPath(): string {
 
 function flattenText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
-}
-
-function truncateText(value: string, maxChars: number): string {
-  const normalized = flattenText(value);
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
 function toStringList(value: unknown): string[] {
@@ -105,6 +104,15 @@ function safeReadJson(path: string): SkillManifest | null {
   }
 }
 
+function safeReadRepoManifest(path: string): RepoSkillManifest | null {
+  try {
+    const parsed = parseYaml(readFileSync(path, 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as RepoSkillManifest) : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveRepoSkillRoot(): string {
   return resolve(findMonorepoRoot(), 'cat-cafe-skills');
 }
@@ -121,66 +129,137 @@ function toRelativeRepoPath(path: string): string {
   return resolvedPath.startsWith(`${root}/`) ? resolvedPath.slice(root.length + 1) : resolvedPath;
 }
 
+function readSkillContent(sourcePath: string): string | null {
+  if (!isSafeCatCafeSkillPath(sourcePath) || !existsSync(sourcePath)) return null;
+  try {
+    return readFileSync(sourcePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function frontmatterName(frontmatter: SkillFrontmatter, fallback: string): string {
+  return typeof frontmatter.name === 'string' && frontmatter.name.trim() ? frontmatter.name.trim() : fallback.trim();
+}
+
+function frontmatterDescription(frontmatter: SkillFrontmatter): string {
+  return typeof frontmatter.description === 'string' ? flattenText(frontmatter.description) : '';
+}
+
+function skillTriggers(frontmatter: SkillFrontmatter, manifestTriggers: unknown, name: string): string[] {
+  return Array.from(
+    new Set(
+      [...toStringList(frontmatter.triggers), ...toStringList(manifestTriggers), name].map((value) => value.trim()),
+    ),
+  )
+    .filter(Boolean);
+}
+
+function makeCatalogEntry(params: {
+  id: string;
+  name: string;
+  description: string;
+  triggers: string[];
+  riskLevel: string;
+  sourcePath: string;
+  content: string;
+}): SkillRouterCatalogEntry {
+  return {
+    ...params,
+    relativePath: toRelativeRepoPath(params.sourcePath),
+  };
+}
+
 function normalizeCatalogEntry(entry: SkillManifestEntry): SkillRouterCatalogEntry | null {
-  if (entry.source !== 'cat-cafe') return null;
-  if (entry.clowder_available === false) return null;
+  if (entry.source !== 'cat-cafe' || entry.clowder_available === false) return null;
   if (typeof entry.name !== 'string' || !entry.name.trim()) return null;
   if (typeof entry.source_path !== 'string' || !entry.source_path.trim()) return null;
 
   const sourcePath = resolve(entry.source_path);
-  if (!isSafeCatCafeSkillPath(sourcePath) || !existsSync(sourcePath)) return null;
-
-  let content: string;
-  try {
-    content = readFileSync(sourcePath, 'utf8');
-  } catch {
-    return null;
-  }
+  const content = readSkillContent(sourcePath);
+  if (!content) return null;
 
   const frontmatter = parseSkillFrontmatter(content);
-  const name =
-    typeof frontmatter.name === 'string' && frontmatter.name.trim()
-      ? frontmatter.name.trim()
-      : entry.name.trim();
+  const name = frontmatterName(frontmatter, entry.name);
   const frontmatterDescription =
     typeof frontmatter.description === 'string' ? flattenText(frontmatter.description) : '';
   const manifestDescription =
     typeof entry.description === 'string' && entry.description.trim() !== '>' ? flattenText(entry.description) : '';
-  const description = frontmatterDescription || manifestDescription || name;
-  const triggers = Array.from(
-    new Set([...toStringList(frontmatter.triggers), ...toStringList(entry.triggers), name].map((value) => value.trim())),
-  )
-    .filter(Boolean)
-    .slice(0, MAX_TRIGGERS_PER_SKILL);
 
-  return {
+  return makeCatalogEntry({
     id: typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : `cat-cafe:${name}`,
     name,
-    description,
-    triggers,
+    description: frontmatterDescription || manifestDescription || name,
+    triggers: skillTriggers(frontmatter, entry.triggers, name),
     riskLevel: typeof entry.risk_level === 'string' && entry.risk_level.trim() ? entry.risk_level.trim() : 'unknown',
     sourcePath,
-    relativePath: toRelativeRepoPath(sourcePath),
     content,
-  };
+  });
+}
+
+function normalizeRepoManifestEntry(name: string, entry: RepoSkillManifestEntry): SkillRouterCatalogEntry | null {
+  if (!name.trim()) return null;
+
+  const sourcePath = resolve(resolveRepoSkillRoot(), name, 'SKILL.md');
+  const content = readSkillContent(sourcePath);
+  if (!content) return null;
+
+  const frontmatter = parseSkillFrontmatter(content);
+  const skillName = frontmatterName(frontmatter, name);
+  const manifestDescription = typeof entry.description === 'string' ? flattenText(entry.description) : '';
+
+  return makeCatalogEntry({
+    id: `cat-cafe:${skillName}`,
+    name: skillName,
+    description: frontmatterDescription(frontmatter) || manifestDescription || skillName,
+    triggers: skillTriggers(frontmatter, entry.triggers, skillName),
+    riskLevel: 'repo',
+    sourcePath,
+    content,
+  });
+}
+
+function loadExternalManifestEntries(manifestPath: string): SkillRouterCatalogEntry[] {
+  const manifest = safeReadJson(manifestPath);
+  return (manifest?.skills ?? [])
+    .map(normalizeCatalogEntry)
+    .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
+}
+
+function loadRepoManifestEntries(): SkillRouterCatalogEntry[] {
+  const manifestPath = resolve(resolveRepoSkillRoot(), 'manifest.yaml');
+  const manifest = safeReadRepoManifest(manifestPath);
+  return Object.entries(manifest?.skills ?? {})
+    .map(([name, entry]) => normalizeRepoManifestEntry(name, entry))
+    .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
+}
+
+function mergeSkillEntries(entries: SkillRouterCatalogEntry[]): SkillRouterCatalogEntry[] {
+  const byName = new Map<string, SkillRouterCatalogEntry>();
+  for (const entry of entries) {
+    byName.set(entry.name, entry);
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
 }
 
 export function loadSkillRouterCatalog(): SkillRouterCatalogEntry[] {
   const manifestPath = resolveSkillManifestPath();
+  const repoManifestPath = resolve(resolveRepoSkillRoot(), 'manifest.yaml');
+  const manifestMtimeMs = existsSync(manifestPath) ? statSync(manifestPath).mtimeMs : 0;
+  const repoManifestMtimeMs = existsSync(repoManifestPath) ? statSync(repoManifestPath).mtimeMs : 0;
+
+  if (
+    catalogCache?.manifestPath === manifestPath &&
+    catalogCache.manifestMtimeMs === manifestMtimeMs &&
+    catalogCache.repoManifestMtimeMs === repoManifestMtimeMs
+  ) {
+    return catalogCache.entries;
+  }
+
   try {
-    const manifestMtimeMs = statSync(manifestPath).mtimeMs;
-    if (catalogCache?.manifestPath === manifestPath && catalogCache.manifestMtimeMs === manifestMtimeMs) {
-      return catalogCache.entries;
-    }
+    const entries = mergeSkillEntries([...loadExternalManifestEntries(manifestPath), ...loadRepoManifestEntries()]);
 
-    const manifest = safeReadJson(manifestPath);
-    const entries = (manifest?.skills ?? [])
-      .map(normalizeCatalogEntry)
-      .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry))
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
-      .slice(0, MAX_MENU_SKILLS);
-
-    catalogCache = { manifestPath, manifestMtimeMs, entries };
+    catalogCache = { manifestPath, manifestMtimeMs, repoManifestMtimeMs, entries };
     return entries;
   } catch {
     catalogCache = null;
@@ -226,29 +305,6 @@ function matchSkills(userMessageText: string, skills: SkillRouterCatalogEntry[])
     .map((item) => item.skill);
 }
 
-function buildMenuLines(skills: SkillRouterCatalogEntry[]): string[] {
-  return skills.map((skill) => {
-    const triggers = skill.triggers.slice(0, MAX_TRIGGERS_PER_SKILL).join(' / ');
-    const description = truncateText(skill.description, MAX_MENU_DESCRIPTION_CHARS);
-    return `- ${skill.name}: ${description}；triggers: ${triggers}`;
-  });
-}
-
-function formatSkillContent(skill: SkillRouterCatalogEntry): string {
-  const content =
-    skill.content.length <= MAX_SKILL_CONTENT_CHARS
-      ? skill.content.trim()
-      : `${skill.content.slice(0, MAX_SKILL_CONTENT_CHARS).trimEnd()}\n\n<!-- SKILL.md 已按上下文预算截断 -->`;
-  return [
-    `### SKILL: ${skill.name}`,
-    `Source: ${skill.relativePath}`,
-    '',
-    '```markdown',
-    content,
-    '```',
-  ].join('\n');
-}
-
 export function resolveSkillRouterContext(userMessageText: string | undefined): SkillRouterContext | null {
   const skills = loadSkillRouterCatalog();
   if (skills.length === 0) return null;
@@ -257,6 +313,11 @@ export function resolveSkillRouterContext(userMessageText: string | undefined): 
   const lines = [
     '## Skill Router',
     '你可以使用 cat-cafe skills 来辅助任务。用 `cat_cafe_list_skills` 查看可用 skill 列表，用 `cat_cafe_read_skill` 查看具体内容。',
+    '',
+    '## Workflow Reuse Gate',
+    '1. 命中 slash command、快车道或已有 skill 时，优先复用已命中的 workflow/skill；先读对应 SKILL.md 或 manifest，再执行。',
+    '2. 未命中明确 skill 时，进入探索模式：先明确目标、风险和验证方式，不重复造已有轮子。',
+    '3. 探索完成后，仅当重复、高频、步骤稳定、异常可枚举时，提示是否沉淀为 skill/workflow；一次性任务不要强行固化。',
   ];
 
   if (matchedSkills.length > 0) {
