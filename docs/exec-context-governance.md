@@ -63,8 +63,10 @@ L3（按需）：完整 shared-rules 原文 + review/评审机制 —— 仅当 
 
 ### Phase 3：历史膨胀治理（治 cache read 大头）
 长 thread 的历史是 input token 的主要来源。
-- 复用已有 `model_auto_compact_token_limit`：确认 compaction 真的在起作用、阈值合理。
-- 评估"历史摘要替代全量回放"：超过阈值的旧历史用摘要，不全量 replay。
+- 具体方案见 [`context-history-governance-phase3.md`](./context-history-governance-phase3.md)。
+- 复用已有 `model_auto_compact_token_limit`、`contextBudget`、`summary_segments`、`summary_state` 和 `compact_boundary`，不新建平行记忆系统。
+- 超过阈值后采用"历史摘要 + 最近原文窗口"替代旧历史；当前用户消息、任务状态、身份/家规、项目决策等高风险信息永远从真相源注入。
+- 先 observe-only，再 shadow summary，再 canary summary-active，最后只对长 thread 默认启用。
 - **验收**：长 thread 的单轮 input token 不随对话无限增长；有摘要兜底。
 
 ### Phase 4（可选，later）：版本边界 + 代码情报产物
