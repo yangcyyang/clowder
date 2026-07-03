@@ -401,6 +401,10 @@ export interface Thread {
   bootcampState?: BootcampStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F069/F327: user-specific unread summary hydrated from read-state store. */
+  unreadCount?: number;
+  hasUserMention?: boolean;
+  lastReadMessageId?: string;
 }
 
 /** F087: Bootcamp state for CVO onboarding threads */

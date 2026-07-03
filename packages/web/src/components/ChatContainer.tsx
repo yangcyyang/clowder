@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
@@ -109,6 +109,27 @@ function consumeUrlMessageHighlight(): string | null {
 function formatPinnedMessagePreview(message: ChatMessageData): string {
   const text = message.content?.trim() || '（无正文）';
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
+
+function findUnreadDividerIndex(
+  messages: ChatMessageData[],
+  lastReadMessageId?: string,
+  unreadCount?: number,
+): number {
+  if (!lastReadMessageId || !unreadCount || unreadCount <= 0) return -1;
+  return messages.findIndex((message) => shouldRenderChatMessage(message) && message.id > lastReadMessageId);
+}
+
+function UnreadDivider() {
+  return (
+    <div className="my-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-conn-muted">
+      <div className="h-px flex-1 bg-[var(--console-border)]" />
+      <span className="border-2 border-[var(--console-border-strong)] bg-[var(--console-panel)] px-2 py-1 text-[var(--console-text)] shadow-[var(--slock-shadow-chip)]">
+        上次读到这里
+      </span>
+      <div className="h-px flex-1 bg-[var(--console-border)]" />
+    </div>
+  );
 }
 
 function ChatTabIcon() {
@@ -599,6 +620,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const currentThread = storeThreads.find((thread) => thread.id === threadId);
   const currentThreadTitle = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
   const currentThreadMemberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? EMPTY_MEMBER_IDS;
+  const unreadDividerIndex = useMemo(
+    () => (isExport ? -1 : findUnreadDividerIndex(messages, currentThread?.lastReadMessageId, currentThread?.unreadCount)),
+    [isExport, messages, currentThread?.lastReadMessageId, currentThread?.unreadCount],
+  );
   const currentBootcampPhase = currentBootcampState?.phase;
   const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
     threadId,
@@ -1038,36 +1063,40 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             newCount: threadStates[baseThreadReplyInfo.branchThreadId]?.unreadCount ?? 0,
           }
         : undefined;
+      const showUnreadDivider = unreadDividerIndex === index;
 
       return (
-        <MessageActions
-          key={msg.id}
-          message={msg}
-          threadId={threadId}
-          onOpenThread={handleOpenInlineThread}
-          onPinMessage={setPinnedMessage}
-          onEditMessage={handleStartEditMessage}
-        >
-          <ChatMessage
+        <Fragment key={msg.id}>
+          {showUnreadDivider ? <UnreadDivider /> : null}
+          <MessageActions
             message={msg}
-            getCatById={getCatById}
-            isGrouped={isGrouped}
-            threadReplyInfo={threadReplyInfo}
             onOpenThread={handleOpenInlineThread}
-            onOpenTaskThread={handleOpenTaskThread}
-            isEditing={editingMessageId === msg.id}
-            editDraft={editingMessageId === msg.id ? editingDraft : ''}
-            isSavingEdit={isSavingEdit && editingMessageId === msg.id}
-            onChangeEditDraft={setEditingDraft}
-            onSaveEdit={handleSaveEditMessage}
-            onCancelEdit={handleCancelEditMessage}
-            onRetrySend={handleRetryFailedSend}
-          />
-        </MessageActions>
+            threadId={threadId}
+            onPinMessage={setPinnedMessage}
+            onEditMessage={handleStartEditMessage}
+          >
+            <ChatMessage
+              message={msg}
+              getCatById={getCatById}
+              isGrouped={isGrouped}
+              threadReplyInfo={threadReplyInfo}
+              onOpenThread={handleOpenInlineThread}
+              onOpenTaskThread={handleOpenTaskThread}
+              isEditing={editingMessageId === msg.id}
+              editDraft={editingMessageId === msg.id ? editingDraft : ''}
+              isSavingEdit={isSavingEdit && editingMessageId === msg.id}
+              onChangeEditDraft={setEditingDraft}
+              onSaveEdit={handleSaveEditMessage}
+              onCancelEdit={handleCancelEditMessage}
+              onRetrySend={handleRetryFailedSend}
+            />
+          </MessageActions>
+        </Fragment>
       );
     },
     [
       threadId,
+      unreadDividerIndex,
       getCatById,
       messages,
       handleOpenInlineThread,

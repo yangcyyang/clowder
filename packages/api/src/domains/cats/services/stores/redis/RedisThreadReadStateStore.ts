@@ -70,7 +70,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       const unreadCount = relevant.length;
       const hasUserMention = relevant.some((m) => !!m.mentionsUser);
 
-      summaries.push({ threadId, unreadCount, hasUserMention });
+      summaries.push({ threadId, unreadCount, hasUserMention, lastReadMessageId: afterId });
     }
 
     return summaries;

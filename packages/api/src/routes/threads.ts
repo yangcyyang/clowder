@@ -467,7 +467,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return {
         threads: threads.map((t) => {
           const s = summaryMap.get(t.id);
-          return { ...t, unreadCount: s?.unreadCount ?? 0, hasUserMention: s?.hasUserMention ?? false };
+          return {
+            ...t,
+            unreadCount: s?.unreadCount ?? 0,
+            hasUserMention: s?.hasUserMention ?? false,
+            lastReadMessageId: s?.lastReadMessageId,
+          };
         }),
       };
     }

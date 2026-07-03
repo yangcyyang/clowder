@@ -16,6 +16,7 @@ export interface ThreadUnreadSummary {
   threadId: string;
   unreadCount: number;
   hasUserMention: boolean;
+  lastReadMessageId?: string;
 }
 
 export interface IThreadReadStateStore {

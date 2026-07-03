@@ -6,8 +6,29 @@ import { ChatContainer } from '@/components/ChatContainer';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({ ok: true }));
 
+type StoreMessage = {
+  id: string;
+  type: 'assistant' | 'user' | 'system';
+  content: string;
+  timestamp: number;
+  catId?: string | null;
+};
+
+type StoreThread = {
+  id: string;
+  projectPath: string;
+  title: string | null;
+  createdBy: string;
+  participants: string[];
+  lastActiveAt: number;
+  createdAt: number;
+  unreadCount?: number;
+  hasUserMention?: boolean;
+  lastReadMessageId?: string;
+};
+
 // Mutable store state — mutate between renders to simulate thread switching
-let storeState = {
+let storeState: { currentThreadId: string; messages: StoreMessage[]; threads?: StoreThread[] } = {
   currentThreadId: 'thread-A',
   messages: [
     {
@@ -37,6 +58,7 @@ const baseStore = () => ({
   setTargetCats: vi.fn(),
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
+  setCurrentProject: vi.fn(),
   updateThreadTitle: vi.fn(),
   setCurrentGame: vi.fn(),
   currentGame: null,
@@ -56,7 +78,7 @@ const baseStore = () => ({
   queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
-  threads: [],
+  threads: storeState.threads ?? [],
 });
 
 vi.mock('@/stores/chatStore', () => {
@@ -123,7 +145,7 @@ vi.mock('@/hooks/useCatData', () => ({
   }),
 }));
 
-vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null, shouldRenderChatMessage: () => true }));
 vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
@@ -173,6 +195,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
           catId: 'opus',
         },
       ],
+      threads: [],
     };
   });
 
@@ -241,6 +264,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
           catId: 'opus',
         },
       ],
+      threads: [],
     };
 
     act(() => {
@@ -292,6 +316,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
           catId: 'opus',
         },
       ],
+      threads: [],
     };
 
     // Re-render with updated store state (simulating store update from socket)
@@ -309,5 +334,50 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  it('renders unread divider before the first message after the read cursor', async () => {
+    storeState = {
+      currentThreadId: 'thread-A',
+      messages: [
+        {
+          id: '0000001772900001-000001-aabbcc01',
+          type: 'assistant',
+          content: 'read reply',
+          timestamp: Date.now() - 1000,
+          catId: 'opus',
+        },
+        {
+          id: '0000001772900002-000002-aabbcc02',
+          type: 'assistant',
+          content: 'unread reply',
+          timestamp: Date.now(),
+          catId: 'opus',
+        },
+      ],
+      threads: [
+        {
+          id: 'thread-A',
+          projectPath: '',
+          title: 'A',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now() - 2000,
+          unreadCount: 1,
+          hasUserMention: false,
+          lastReadMessageId: '0000001772900001-000001-aabbcc01',
+        },
+      ],
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(container.textContent).toContain('上次读到这里');
   });
 });

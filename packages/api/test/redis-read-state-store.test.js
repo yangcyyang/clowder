@@ -148,6 +148,7 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(summaries[0].threadId, tid);
     assert.equal(summaries[0].unreadCount, 2);
     assert.equal(summaries[0].hasUserMention, false);
+    assert.equal(summaries[0].lastReadMessageId, m1.id);
   });
 
   it('getUnreadSummaries() excludes user own messages (catId=null)', async () => {
@@ -289,6 +290,7 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     const summaries = await store.getUnreadSummaries('user1', [tid], messageStore);
     assert.equal(summaries[0].unreadCount, 0);
     assert.equal(summaries[0].hasUserMention, false);
+    assert.equal(summaries[0].lastReadMessageId, undefined);
   });
 
   it('getUnreadSummaries() handles multiple threads (mixed cursor states)', async () => {
@@ -325,7 +327,9 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     const summaries = await store.getUnreadSummaries('user1', [tA, tB], messageStore);
     const map = new Map(summaries.map((s) => [s.threadId, s]));
     assert.equal(map.get(tA).unreadCount, 1);
+    assert.equal(map.get(tA).lastReadMessageId, mA1.id);
     assert.equal(map.get(tB).unreadCount, 0); // no cursor = fully read
+    assert.equal(map.get(tB).lastReadMessageId, undefined);
   });
 
   // --- deleteByThread ---
