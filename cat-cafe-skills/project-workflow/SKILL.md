@@ -7,10 +7,15 @@ description: >
   Output: takeover summary + next-step plan + necessary fact-source updates or review risk report.
   GOTCHA: read brief/progress/decisions/handoff-index first; do not load every handoff, handoff-log, or full chat history by default.
 triggers:
+  - "/continue-project"
+  - "/project-status"
   - "继续推进"
   - "接手项目"
   - "项目工作流"
   - "看下当前进度"
+  - "项目状态"
+  - "当前进度"
+  - "项目进度"
   - "写交接"
   - "判断影响范围"
   - "review 任务"

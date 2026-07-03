@@ -171,10 +171,68 @@ P0 includes:
 
 P0 excludes:
 - broad UI redesign
-- Obsidian integration
+- Obsidian integration, except the later Phase 6 read-only collection hook
 - Figma or opencli integration
 - automatic skill marketplace routing
 - importing every personal skill
+
+## Phase 6: Read-Only Knowledge Collections
+
+Clowder can mount an Obsidian vault as a read-only knowledge collection.
+This is for retrieval and citation only.
+
+Configure:
+
+```bash
+OBSIDIAN_READONLY_ROOTS=domain:orbitos-knowledge=/Users/cy/Documents/03 life/AI design/OrbitOS-CN/400知识库
+```
+
+Behavior:
+- registers the vault as an internal `domain:*` collection
+- never writes to the Obsidian vault
+- writes only Clowder index cache under `~/.cat-cafe/library/`
+- skips `.obsidian/`
+- requires explicit rebuild before fresh content appears in search
+
+Rebuild locally:
+
+```bash
+POST /api/library/domain:orbitos-knowledge/rebuild
+```
+
+Search with citation source:
+
+```bash
+GET /api/evidence/search?q=<query>&dimension=collection&collections=domain:orbitos-knowledge
+```
+
+Search results include `sourcePath`, so an agent can cite the original note path in handoff or review output.
+
+## Phase 7: Controlled External Tools
+
+Figma MCP and opencli-style browser tools are allowed only through the capability system.
+They must not be silently enabled by an agent.
+
+Install preview policy:
+- Figma/opencli MCP entries are created with `enabled=false`
+- install does not automatically probe them
+- preview risks must mention task-scoped authorization
+- preview risks must mention capability audit / tool usage evidence
+- high-risk external writes, batch operations, or credentialed access require explicit confirmation
+
+Expected flow:
+
+```text
+User requests Figma/opencli task
+  → agent checks capability board / marketplace
+  → install preview shows risks
+  → owner installs but capability remains disabled
+  → user enables for the task scope
+  → tool usage and capability changes remain auditable
+```
+
+This phase creates the first safety gate.
+It does not grant broad tool execution permission by itself.
 
 ## Acceptance Criteria
 

@@ -129,16 +129,30 @@ skills:
       Not for: 一次性小问答、无项目状态变化的纯解释、明确局部 trivial 修复。
       Output: 接手摘要 + 下一步计划 + 必要的项目事实源更新 + review 风险结论。
     triggers:
+      - "/continue-project"
+      - "/project-status"
       - "继续推进"
       - "接手项目"
       - "项目工作流"
       - "看下当前进度"
+      - "项目状态"
+      - "当前进度"
+      - "项目进度"
       - "写交接"
       - "判断影响范围"
       - "review 任务"
       - "验收任务"
       - "项目接手"
       - "上下文接手"
+    slashCommands:
+      - name: /continue-project
+        usage: /continue-project [projectId]
+        description: 读取项目事实源并输出接手摘要
+        surface: both
+      - name: /project-status
+        usage: /project-status [projectId]
+        description: 查看项目事实源中的当前状态
+        surface: both
     not_for:
       - "一次性小问答"
       - "纯解释"

@@ -2,6 +2,7 @@
  * Commands API route tests
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';

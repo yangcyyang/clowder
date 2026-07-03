@@ -1,8 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Tests for manifest.yaml slashCommands discovery.
@@ -14,6 +15,8 @@ import { describe, it } from 'node:test';
 // that calls into the same code path via the capabilities module.
 // Since parseManifestSkillMeta is not exported, we test via a thin wrapper.
 import { parseManifestSlashCommands } from '../dist/infrastructure/commands/manifest-commands.js';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 describe('parseManifestSlashCommands', () => {
   async function createTempManifest(yaml) {
@@ -46,6 +49,18 @@ skills:
     assert.equal(cmds[1].name, '/trace');
     assert.equal(cmds[1].surface, 'both');
     assert.deepEqual(cmds[1].subcommands, ['start', 'stop']);
+  });
+
+  it('exposes project-workflow takeover commands from the repo manifest', async () => {
+    const result = await parseManifestSlashCommands(join(REPO_ROOT, 'cat-cafe-skills'));
+    const commands = result.get('project-workflow') ?? [];
+    const names = commands.map((command) => command.name).sort();
+
+    assert.deepEqual(names, ['/continue-project', '/project-status']);
+    for (const command of commands) {
+      assert.equal(command.surface, 'both');
+      assert.match(command.description, /项目|接手|状态/);
+    }
   });
 
   it('skips skill with no slashCommands field', async () => {
