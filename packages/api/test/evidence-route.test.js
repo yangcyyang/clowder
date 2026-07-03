@@ -41,6 +41,7 @@ describe('GET /api/evidence/search', () => {
           status: 'active',
           title: 'ADR-005 Hindsight Integration',
           summary: 'ADR-005 decided single bank strategy for Hindsight integration',
+          sourcePath: 'decisions/005-hindsight-integration-decisions.md',
           updatedAt: '2026-01-01T00:00:00Z',
           authority: 'validated',
         },
@@ -66,6 +67,7 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.degraded, false);
     assert.equal(body.results.length, 2);
     assert.equal(body.results[0].sourceType, 'decision');
+    assert.equal(body.results[0].sourcePath, 'decisions/005-hindsight-integration-decisions.md');
     // Phase E: confidence = f(rank), rank 0 of 2 → high
     assert.equal(body.results[0].confidence, 'high');
     assert.equal(body.results[0].authority, 'validated');

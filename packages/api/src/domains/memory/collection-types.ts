@@ -32,6 +32,7 @@ export interface CollectionManifest {
     authorityCeiling: F163Authority;
     requireOwnerApproval: boolean;
   };
+  readOnly?: boolean;
   exclude?: string[];
   createdAt: string;
   updatedAt: string;

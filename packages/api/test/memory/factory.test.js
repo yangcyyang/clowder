@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, it } from 'node:test';
+
+const originalObsidianRoots = process.env.OBSIDIAN_READONLY_ROOTS;
 
 describe('createMemoryServices', () => {
+  afterEach(() => {
+    if (originalObsidianRoots === undefined) delete process.env.OBSIDIAN_READONLY_ROOTS;
+    else process.env.OBSIDIAN_READONLY_ROOTS = originalObsidianRoots;
+  });
+
   it('creates sqlite services', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
 
@@ -65,6 +75,53 @@ describe('createMemoryServices', () => {
     assert.ok(project, 'project collection registered');
     assert.equal(project.sensitivity, 'internal');
     assert.equal(project.root, '/tmp/f186-test-docs');
+  });
+
+  it('registers OBSIDIAN_READONLY_ROOTS as read-only internal collections', async () => {
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+
+    const vaultRoot = mkdtempSync(join(tmpdir(), 'obsidian-vault-'));
+    mkdirSync(join(vaultRoot, '.obsidian'));
+    writeFileSync(join(vaultRoot, 'clowder-loop.md'), '# Clowder Loop\n\nProject workflow notes.');
+    const beforeFiles = readdirSync(vaultRoot).sort();
+
+    const dataDir = mkdtempSync(join(tmpdir(), 'obsidian-data-'));
+    const docsRoot = mkdtempSync(join(tmpdir(), 'obsidian-docs-'));
+    const markersDir = mkdtempSync(join(tmpdir(), 'obsidian-markers-'));
+
+    const services = await createMemoryServices({
+      type: 'sqlite',
+      sqlitePath: ':memory:',
+      docsRoot,
+      markersDir,
+      globalDbPath: join(dataDir, 'global.sqlite'),
+      dataDir,
+      obsidianReadonlyRoots: `domain:orbitos-knowledge=${vaultRoot}`,
+    });
+
+    const manifest = services.catalog?.get('domain:orbitos-knowledge');
+    assert.ok(manifest, 'Obsidian collection should be registered');
+    assert.equal(manifest.root, vaultRoot);
+    assert.equal(manifest.sensitivity, 'internal');
+    assert.equal(manifest.scannerLevel, 'auto');
+    assert.equal(manifest.indexPolicy.autoRebuild, false);
+    assert.equal(manifest.reviewPolicy.requireOwnerApproval, true);
+    assert.equal(manifest.readOnly, true);
+    assert.ok(services.collectionStores?.has('domain:orbitos-knowledge'));
+
+    const { CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js');
+    const { resolveCollectionScanner } = await import('../../dist/domains/memory/scanner-resolver.js');
+    const store = services.collectionStores.get('domain:orbitos-knowledge');
+    const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
+    const rebuildResult = await builder.rebuild();
+    assert.equal(rebuildResult.indexed, 1);
+
+    const searchResult = await services.knowledgeResolver.resolve('workflow notes', {
+      dimension: 'collection',
+      collections: ['domain:orbitos-knowledge'],
+    });
+    assert.ok(searchResult.results.some((result) => result.sourcePath === 'clowder-loop.md'));
+    assert.deepEqual(readdirSync(vaultRoot).sort(), beforeFiles, 'factory must not write into the Obsidian vault');
   });
 
   it('embedMode=on creates embedding service (HTTP client, fail-open)', async () => {

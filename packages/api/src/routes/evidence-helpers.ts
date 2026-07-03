@@ -35,6 +35,8 @@ export interface EvidenceResult {
   sourceType: EvidenceSourceType;
   /** F102 Batch 3: knowledge dimension origin — project or global */
   source?: 'project' | 'global';
+  /** Collection/doc relative source path for citation and handoff. */
+  sourcePath?: string;
   status?: EvidenceStatus;
   /** F163 Phase E: document authority — orthogonal to confidence (which reflects rank) */
   authority?: string;

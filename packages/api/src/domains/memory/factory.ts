@@ -22,6 +22,7 @@ import { KnowledgeResolver } from './KnowledgeResolver.js';
 import { LibraryCatalog } from './LibraryCatalog.js';
 import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
+import { loadObsidianReadonlyCollections } from './obsidian-readonly-collections.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { ensureVectorTable } from './schema.js';
@@ -74,6 +75,10 @@ export interface MemoryConfig {
   skillsRoot?: string;
   /** F-4: Claude projects memory root (default: ~/.claude/projects/) */
   memoryRoot?: string;
+  /** F186: override external collection data dir (default: ~/.cat-cafe) */
+  dataDir?: string;
+  /** Obsidian read-only vault roots, comma/newline separated; entry can be id=/path */
+  obsidianReadonlyRoots?: string;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -190,9 +195,13 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     stores.set('global:methods', globalStore);
   }
 
-  const dataDir = join(homedir(), '.cat-cafe');
+  const dataDir = config.dataDir ?? join(homedir(), '.cat-cafe');
   const externals = loadExternalCollections(dataDir);
-  for (const manifest of externals) {
+  const obsidianReadonlyCollections = loadObsidianReadonlyCollections(
+    config.obsidianReadonlyRoots ?? process.env.OBSIDIAN_READONLY_ROOTS,
+    now,
+  );
+  for (const manifest of [...externals, ...obsidianReadonlyCollections]) {
     try {
       catalog.register(manifest);
       const storePath = resolveCollectionStorePath(dataDir, manifest.id);

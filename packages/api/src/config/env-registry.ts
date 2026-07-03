@@ -1502,6 +1502,16 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'OBSIDIAN_READONLY_ROOTS',
+    defaultValue: '(未设置)',
+    description:
+      'Obsidian 只读知识库根目录，逗号或换行分隔；可写成 domain:orbitos-knowledge=/path/to/400知识库。仅写 Clowder 索引缓存，不写 vault 原文。',
+    category: 'evidence',
+    sensitive: false,
+    restartRequired: true,
+    exampleRecommended: true,
+  },
+  {
     name: 'WORLD_DB',
     defaultValue: '{repoRoot}/world.sqlite',
     description: 'F093 World Engine SQLite 数据库路径',

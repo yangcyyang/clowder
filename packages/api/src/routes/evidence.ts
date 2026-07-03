@@ -169,6 +169,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         boostSource: effectiveBoostSource,
         ...(item.authority ? { authority: item.authority } : {}),
         ...(singleSource ? { source: singleSource } : {}),
+        ...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
         ...(item.passages ? { passages: item.passages } : {}),
       }));
       // F163 AC-A3: report always_on injection sources in response envelope
