@@ -182,6 +182,7 @@ import {
   registerCallbackDocsRoutes,
   remindersRoutes,
   resolutionRoutes,
+  runLedgerRoutes,
   rulesRoutes,
   runtimeTrafficLightRoutes,
   servicesRoutes,
@@ -1390,6 +1391,7 @@ async function main(): Promise<void> {
     invocationTracker,
     queueProcessor,
   });
+  await app.register(runLedgerRoutes, { invocationRecordStore, messageStore, taskStore });
   await app.register(runtimeTrafficLightRoutes, {
     invocationRecordStore,
   });

@@ -543,6 +543,7 @@ export class QueueProcessor {
 
   private async appendUsageTaskEvents(params: {
     threadId: string;
+    invocationId?: string;
     sourceMessageIds: readonly string[];
     aggregates: Iterable<TokenUsageAggregate>;
   }): Promise<void> {
@@ -566,6 +567,7 @@ export class QueueProcessor {
             {
               ts: new Date().toISOString(),
               catId: aggregate.catId,
+              ...(params.invocationId ? { invocationId: params.invocationId } : {}),
               type: 'usage',
               data: {
                 provider: aggregate.provider,
@@ -606,6 +608,7 @@ export class QueueProcessor {
 
   private async appendArtifactTaskEvent(params: {
     threadId: string;
+    invocationId?: string;
     catId: string;
     sourceMessageIds: readonly string[];
     before: GitArtifactSnapshot | null;
@@ -626,6 +629,7 @@ export class QueueProcessor {
           {
             ts: new Date().toISOString(),
             catId: params.catId,
+            ...(params.invocationId ? { invocationId: params.invocationId } : {}),
             type: 'artifact',
             data: {
               files: artifact.files,
@@ -645,6 +649,7 @@ export class QueueProcessor {
 
   private async appendFastLaneTaskEvent(params: {
     threadId: string;
+    invocationId?: string;
     catId: string;
     sourceMessageIds: readonly string[];
     type: Extract<TaskEvent['type'], 'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'>;
@@ -663,6 +668,7 @@ export class QueueProcessor {
           {
             ts: new Date().toISOString(),
             catId: params.catId,
+            ...(params.invocationId ? { invocationId: params.invocationId } : {}),
             type: params.type,
             data: params.data,
           },
@@ -1518,6 +1524,7 @@ export class QueueProcessor {
         );
         await this.appendFastLaneTaskEvent({
           threadId,
+          invocationId,
           catId: primaryCat,
           sourceMessageIds: allMessageIds,
           type: 'fast_lane_decision',
@@ -1532,6 +1539,7 @@ export class QueueProcessor {
         if (contentBlocks.length > 0) {
           await this.appendFastLaneTaskEvent({
             threadId,
+            invocationId,
             catId: primaryCat,
             sourceMessageIds: allMessageIds,
             type: 'fast_lane_decision',
@@ -1545,6 +1553,7 @@ export class QueueProcessor {
         } else {
           await this.appendFastLaneTaskEvent({
             threadId,
+            invocationId,
             catId: primaryCat,
             sourceMessageIds: allMessageIds,
             type: 'fast_lane_started',
@@ -1558,6 +1567,7 @@ export class QueueProcessor {
           if (result.status === 'skipped') {
             await this.appendFastLaneTaskEvent({
               threadId,
+              invocationId,
               catId: primaryCat,
               sourceMessageIds: allMessageIds,
               type: 'fast_lane_decision',
@@ -1600,6 +1610,7 @@ export class QueueProcessor {
             );
             await this.appendFastLaneTaskEvent({
               threadId,
+              invocationId,
               catId: primaryCat,
               sourceMessageIds: allMessageIds,
               type: 'fast_lane_completed',
@@ -1619,6 +1630,7 @@ export class QueueProcessor {
             if (artifactBaseline) {
               await this.appendArtifactTaskEvent({
                 threadId,
+                invocationId,
                 catId: primaryCat,
                 sourceMessageIds: allMessageIds,
                 before: artifactBaseline,
@@ -1634,6 +1646,7 @@ export class QueueProcessor {
             });
             await this.appendFastLaneTaskEvent({
               threadId,
+              invocationId,
               catId: primaryCat,
               sourceMessageIds: allMessageIds,
               type: 'fast_lane_failed',
@@ -1977,6 +1990,7 @@ export class QueueProcessor {
 
       await this.appendUsageTaskEvents({
         threadId,
+        invocationId,
         sourceMessageIds: allMessageIds,
         aggregates: tokenUsageAggregates.values(),
       });
@@ -1985,6 +1999,7 @@ export class QueueProcessor {
         const artifactAfter = await this.collectGitArtifacts(threadId);
         await this.appendArtifactTaskEvent({
           threadId,
+          invocationId,
           catId: primaryCat,
           sourceMessageIds: allMessageIds,
           before: artifactBaseline,

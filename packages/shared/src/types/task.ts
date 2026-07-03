@@ -86,6 +86,8 @@ export interface TaskEvent {
   readonly ts: string;
   /** Actor cat id, or 'user'/'system' when no cat actor exists. */
   readonly catId: string;
+  /** Optional standard pointer to the agent invocation that produced this event. */
+  readonly invocationId?: string;
   readonly type: TaskEventType;
   readonly data?: Record<string, unknown>;
 }
