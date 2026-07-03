@@ -8,7 +8,7 @@ function printNativeModuleFailure(err) {
   console.error('[runtime-preflight] better-sqlite3 native module failed to load.');
   console.error('[runtime-preflight] This usually means Node changed and native modules need rebuild.');
   console.error(`[runtime-preflight] Node: ${process.execPath} ${process.version} modules=${process.versions.modules}`);
-  console.error('[runtime-preflight] Fix: PATH="/Users/cy/.uclaw/node/bin:$PATH" pnpm rebuild better-sqlite3');
+  console.error('[runtime-preflight] Fix: from repo root, run `bash scripts/rebuild-native.sh`.');
   console.error(err);
 }
 
