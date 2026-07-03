@@ -68,4 +68,49 @@ describe('invocationCostPanel', () => {
       ],
     });
   });
+
+  it('reads observe-only history governance fields from usage events', () => {
+    const summaries = readTaskUsageSummaries(
+      task([
+        {
+          ts: new Date().toISOString(),
+          catId: 'codex',
+          type: 'usage',
+          data: {
+            historyMode: 'observe',
+            historyFullTokens: 12000,
+            historyBudgetRatio: 0.4,
+            historyGovernanceDegraded: false,
+          },
+        },
+        {
+          ts: new Date().toISOString(),
+          catId: 'claude',
+          type: 'usage',
+          data: {
+            historyMode: 'observe',
+            historyFullTokens: 18000,
+            historyBudgetRatio: 0.6,
+            historyGovernanceDegraded: true,
+          },
+        },
+      ]),
+    );
+
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatchObject({
+      historyMode: 'observe',
+      historyFullTokens: 12000,
+      historyBudgetRatio: 0.4,
+      historyGovernanceDegraded: false,
+    });
+
+    const total = summarizeTaskUsage(summaries);
+    expect(total).toMatchObject({
+      historyMode: 'observe',
+      historyFullTokens: 18000,
+      historyBudgetRatio: 0.6,
+      historyGovernanceDegraded: true,
+    });
+  });
 });

@@ -183,6 +183,12 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     usesFullHistory: Boolean(parsed.usesFullHistory),
     maxPromptTokens: Number(parsed.maxPromptTokens) || 0,
     maxContextTokens: Number(parsed.maxContextTokens) || 0,
+    ...(parsed.historyMode === 'observe' ? { historyMode: 'observe' as const } : {}),
+    ...(Number.isFinite(Number(parsed.historyFullTokens)) ? { historyFullTokens: Number(parsed.historyFullTokens) } : {}),
+    ...(Number.isFinite(Number(parsed.historyBudgetRatio)) ? { historyBudgetRatio: Number(parsed.historyBudgetRatio) } : {}),
+    ...(parsed.historyGovernanceDegraded != null
+      ? { historyGovernanceDegraded: Boolean(parsed.historyGovernanceDegraded) }
+      : {}),
   };
 }
 

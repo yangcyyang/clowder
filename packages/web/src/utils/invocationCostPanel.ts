@@ -17,6 +17,10 @@ export interface InvocationUsageSummary {
   durationMs?: number;
   durationApiMs?: number;
   sourceBreakdown?: PromptSourceBreakdown;
+  historyMode?: 'observe';
+  historyFullTokens?: number;
+  historyBudgetRatio?: number;
+  historyGovernanceDegraded?: boolean;
 }
 
 export function isInvocationCostPanelEnabled(): boolean {
@@ -97,6 +101,11 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     durationMs: asNumber(data.durationMs),
     durationApiMs: asNumber(data.durationApiMs),
     sourceBreakdown: readSourceBreakdown(data.sourceBreakdown),
+    historyMode: data.historyMode === 'observe' ? 'observe' : undefined,
+    historyFullTokens: asNumber(data.historyFullTokens),
+    historyBudgetRatio: asNumber(data.historyBudgetRatio),
+    historyGovernanceDegraded:
+      typeof data.historyGovernanceDegraded === 'boolean' ? data.historyGovernanceDegraded : undefined,
   };
   const hasSignal =
     summary.inputTokens != null ||
@@ -107,7 +116,8 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     summary.costUsd != null ||
     summary.durationMs != null ||
     summary.durationApiMs != null ||
-    summary.sourceBreakdown != null;
+    summary.sourceBreakdown != null ||
+    summary.historyMode != null;
   return hasSignal ? summary : null;
 }
 
@@ -128,6 +138,12 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
     total.durationMs = (total.durationMs ?? 0) + (event.durationMs ?? 0);
     total.durationApiMs = (total.durationApiMs ?? 0) + (event.durationApiMs ?? 0);
     total.sourceBreakdown = mergeSourceBreakdown(total.sourceBreakdown, event.sourceBreakdown);
+    if (event.historyMode === 'observe') {
+      total.historyMode = 'observe';
+      total.historyFullTokens = Math.max(total.historyFullTokens ?? 0, event.historyFullTokens ?? 0);
+      total.historyBudgetRatio = Math.max(total.historyBudgetRatio ?? 0, event.historyBudgetRatio ?? 0);
+      total.historyGovernanceDegraded = Boolean(total.historyGovernanceDegraded || event.historyGovernanceDegraded);
+    }
   }
   return total;
 }

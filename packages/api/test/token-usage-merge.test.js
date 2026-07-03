@@ -64,4 +64,28 @@ describe('F8: mergeTokenUsage', () => {
     assert.equal(result.contextUsedTokens, 190000);
     assert.equal(result.contextResetsAtMs, 1771723048000);
   });
+
+  it('keeps latest observe-only history governance fields', () => {
+    const first = {
+      inputTokens: 1000,
+      historyMode: 'observe',
+      historyFullTokens: 12000,
+      historyBudgetRatio: 0.4,
+      historyGovernanceDegraded: false,
+    };
+    const second = {
+      inputTokens: 500,
+      historyMode: 'observe',
+      historyFullTokens: 18000,
+      historyBudgetRatio: 0.6,
+      historyGovernanceDegraded: true,
+    };
+    const result = mergeTokenUsage(first, second);
+
+    assert.equal(result.inputTokens, 1500);
+    assert.equal(result.historyMode, 'observe');
+    assert.equal(result.historyFullTokens, 18000);
+    assert.equal(result.historyBudgetRatio, 0.6);
+    assert.equal(result.historyGovernanceDegraded, true);
+  });
 });

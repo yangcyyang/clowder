@@ -328,6 +328,10 @@ export interface InvocationParams {
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;
+    historyMode?: 'observe';
+    historyFullTokens?: number;
+    historyBudgetRatio?: number;
+    historyGovernanceDegraded?: boolean;
   };
 }
 
@@ -1484,6 +1488,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (msg.metadata?.usage) {
           if (promptSourceBreakdown && !msg.metadata.usage.sourceBreakdown) {
             msg.metadata.usage = { ...msg.metadata.usage, sourceBreakdown: promptSourceBreakdown };
+          }
+          if (params.contextBudget?.historyMode === 'observe') {
+            msg.metadata.usage = {
+              ...msg.metadata.usage,
+              historyMode: params.contextBudget.historyMode,
+              historyFullTokens: params.contextBudget.historyFullTokens,
+              historyBudgetRatio: params.contextBudget.historyBudgetRatio,
+              historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded,
+            };
           }
           // F152: Record OTel token usage + LLM call duration
           const modelBucket = normalizeModel(msg.metadata.model ?? '');

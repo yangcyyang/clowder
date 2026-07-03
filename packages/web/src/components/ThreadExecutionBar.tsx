@@ -45,6 +45,10 @@ export function ThreadExecutionBar() {
         governanceSourceInjected: boolean;
         usesFullHistory: boolean;
         maxPromptTokens: number;
+        historyMode?: 'observe';
+        historyFullTokens?: number;
+        historyBudgetRatio?: number;
+        historyGovernanceDegraded?: boolean;
       };
     }>,
   );
@@ -149,6 +153,10 @@ function CatStatusChip({
     governanceSourceInjected: boolean;
     usesFullHistory: boolean;
     maxPromptTokens: number;
+    historyMode?: 'observe';
+    historyFullTokens?: number;
+    historyBudgetRatio?: number;
+    historyGovernanceDegraded?: boolean;
   };
   onStop: (catId: string) => void;
 }) {
@@ -167,6 +175,10 @@ function CatStatusChip({
         ? '家规:运营'
         : undefined;
   const phaseLabel = getPhaseLabel(phase);
+  const historyObserveLabel =
+    contextBudget?.historyMode === 'observe' && contextBudget.historyBudgetRatio != null
+      ? `历史${Math.round(contextBudget.historyBudgetRatio * 100)}%`
+      : undefined;
   const budgetLabel = contextBudget
     ? `${Math.round(contextBudget.estimatedTokens / 1000)}k/${Math.round(contextBudget.maxPromptTokens / 1000)}k · ${contextBudget.historyMessages}条`
     : undefined;
@@ -177,6 +189,13 @@ function CatStatusChip({
         `家规层级：${contextBudget.governanceTier === 'core' ? '核心摘要' : '运营规则'} · ${contextBudget.governanceEstimatedTokens} tokens${
           contextBudget.governanceSourceInjected ? ' · 已按需注入原文' : ''
         }`,
+        ...(contextBudget.historyMode === 'observe'
+          ? [
+              `历史治理：observe · full=${contextBudget.historyFullTokens ?? 0} tokens · ratio=${Math.round(
+                (contextBudget.historyBudgetRatio ?? 0) * 100,
+              )}%${contextBudget.historyGovernanceDegraded ? ' · degraded' : ''}`,
+            ]
+          : []),
         `加载：${contextBudget.loadedBlocks.join(', ') || '无'}`,
         `跳过：${contextBudget.skippedBlocks.join(', ') || '无'}`,
       ].join('\n')
@@ -197,6 +216,11 @@ function CatStatusChip({
       {budgetLabel ? (
         <span className="text-cafe-muted" title={contextTitle}>
           {budgetLabel}
+        </span>
+      ) : null}
+      {historyObserveLabel ? (
+        <span className="text-conn-amber-text tabular-nums" title={contextTitle}>
+          {historyObserveLabel}
         </span>
       ) : null}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>

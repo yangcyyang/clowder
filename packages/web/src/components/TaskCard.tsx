@@ -135,6 +135,12 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
         {usage.outputTokens != null && <span>output {formatTokenCount(usage.outputTokens)}</span>}
         {usage.costUsd != null && <span className="text-conn-amber-text">cost {formatCost(usage.costUsd)}</span>}
         {usage.durationMs != null && <span>duration {formatDuration(usage.durationMs)}</span>}
+        {usage.historyMode === 'observe' && usage.historyFullTokens != null && (
+          <span className="text-conn-amber-text">
+            history {formatTokenCount(usage.historyFullTokens)}
+            {usage.historyBudgetRatio != null ? ` · ${Math.round(usage.historyBudgetRatio * 100)}%` : ''}
+          </span>
+        )}
       </div>
       {usage.sourceBreakdown && <UsageSourceBreakdown breakdown={usage.sourceBreakdown} />}
     </div>

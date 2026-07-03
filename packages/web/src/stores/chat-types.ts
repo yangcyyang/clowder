@@ -55,6 +55,10 @@ export interface TokenUsage {
   contextResetsAtMs?: number;
   /** Estimated prompt-source composition. Display-only, not provider billing truth. */
   sourceBreakdown?: PromptSourceBreakdown;
+  historyMode?: 'observe';
+  historyFullTokens?: number;
+  historyBudgetRatio?: number;
+  historyGovernanceDegraded?: boolean;
 }
 
 export interface ChatMessageMetadata {
@@ -503,6 +507,10 @@ export interface CatInvocationInfo {
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;
+    historyMode?: 'observe';
+    historyFullTokens?: number;
+    historyBudgetRatio?: number;
+    historyGovernanceDegraded?: boolean;
   };
   durationMs?: number;
   startedAt?: number;

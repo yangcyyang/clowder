@@ -42,6 +42,24 @@ function createOptionsCapturingService(catId, text = 'hello') {
   };
 }
 
+function createUsageService(catId, text = 'hello') {
+  return {
+    async *invoke() {
+      yield { type: 'text', catId, content: text, timestamp: Date.now() };
+      yield {
+        type: 'done',
+        catId,
+        timestamp: Date.now(),
+        metadata: {
+          provider: 'unit-test',
+          model: 'unit-test-model',
+          usage: { inputTokens: 100, outputTokens: 20 },
+        },
+      };
+    },
+  };
+}
+
 function createSequentialCapturingService(catId, responses) {
   const calls = [];
   let index = 0;
@@ -199,6 +217,19 @@ function degradationSystemInfos(messages) {
       return true;
     }
   });
+}
+
+function findSystemInfoPayload(messages, type) {
+  for (const msg of messages) {
+    if (msg.type !== 'system_info' || typeof msg.content !== 'string') continue;
+    try {
+      const parsed = JSON.parse(msg.content);
+      if (parsed?.type === type) return parsed;
+    } catch {
+      // Ignore non-JSON system info.
+    }
+  }
+  return null;
 }
 
 describe('bootcamp invocation context', () => {
@@ -2360,6 +2391,114 @@ describe('routeParallel per-cat budget', () => {
     // Both cats should receive history in their prompts
     assert.ok(opusService.calls[0].includes('对话历史'), 'opus prompt should include history');
     assert.ok(codexService.calls[0].includes('历史消息'), 'codex prompt should include history content');
+  });
+});
+
+describe('history governance observation', () => {
+  it('keeps observe-only fields absent and does not read full history when the flag is off', async () => {
+    const previousObserve = process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE;
+    const previousMode = process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+    delete process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE;
+    delete process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const deps = createMockDeps({ opus: createUsageService('opus', 'ack') });
+      let fullHistoryReads = 0;
+      deps.messageStore.getByThreadAfter = async () => {
+        fullHistoryReads += 1;
+        return [];
+      };
+
+      const messages = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+        messages.push(msg);
+      }
+
+      assert.equal(fullHistoryReads, 0, 'flag-off route must not scan full thread history');
+      const created = findSystemInfoPayload(messages, 'invocation_created');
+      assert.ok(created?.contextBudget, 'invocation_created should include contextBudget');
+      assert.equal(created.contextBudget.historyMode, undefined);
+      assert.equal(created.contextBudget.historyFullTokens, undefined);
+
+      const usage = findSystemInfoPayload(messages, 'invocation_usage');
+      assert.ok(usage?.usage, 'done metadata should emit invocation_usage');
+      assert.equal(usage.usage.historyMode, undefined);
+      assert.equal(usage.usage.historyFullTokens, undefined);
+    } finally {
+      if (previousObserve == null) delete process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE;
+      else process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE = previousObserve;
+      if (previousMode == null) delete process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+      else process.env.CAT_CAFE_HISTORY_GOVERNANCE = previousMode;
+    }
+  });
+
+  it('reads full thread history in observe mode and surfaces non-zero budget ratio on real route events', async () => {
+    const previousObserve = process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE;
+    const previousMode = process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+    process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE = '1';
+    delete process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const deps = createMockDeps({ opus: createUsageService('opus', 'ack') });
+      const readCalls = [];
+      deps.messageStore.getByThreadAfter = async (threadId, afterId, limit, userId) => {
+        readCalls.push({ threadId, afterId, limit, userId });
+        return [
+          {
+            id: 'm1',
+            threadId,
+            userId,
+            catId: null,
+            content: '用户历史消息'.repeat(30),
+            mentions: [],
+            timestamp: Date.now() - 2000,
+          },
+          {
+            id: 'm2',
+            threadId,
+            userId,
+            catId: 'opus',
+            content: '助手历史回复'.repeat(30),
+            mentions: [],
+            timestamp: Date.now() - 1000,
+          },
+        ];
+      };
+
+      const messages = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+        messages.push(msg);
+      }
+
+      assert.equal(readCalls.length, 1, 'observe mode should read full history once per route');
+      assert.deepEqual(readCalls[0], {
+        threadId: 'thread1',
+        afterId: undefined,
+        limit: undefined,
+        userId: 'user1',
+      });
+
+      const created = findSystemInfoPayload(messages, 'invocation_created');
+      const budget = created?.contextBudget;
+      assert.equal(budget?.historyMode, 'observe');
+      assert.ok(budget.historyFullTokens > 0, 'full history token estimate should be non-zero');
+      assert.ok(budget.historyBudgetRatio > 0, 'historyBudgetRatio should show history share');
+      assert.equal(budget.historyGovernanceDegraded, false);
+      assert.equal(budget.historyMessages, 0, 'observe-only must not change included prompt history');
+
+      const usage = findSystemInfoPayload(messages, 'invocation_usage');
+      assert.equal(usage?.usage?.historyMode, 'observe');
+      assert.equal(usage.usage.historyFullTokens, budget.historyFullTokens);
+      assert.equal(usage.usage.historyBudgetRatio, budget.historyBudgetRatio);
+      assert.equal(usage.usage.historyGovernanceDegraded, false);
+    } finally {
+      if (previousObserve == null) delete process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE;
+      else process.env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE = previousObserve;
+      if (previousMode == null) delete process.env.CAT_CAFE_HISTORY_GOVERNANCE;
+      else process.env.CAT_CAFE_HISTORY_GOVERNANCE = previousMode;
+    }
   });
 });
 

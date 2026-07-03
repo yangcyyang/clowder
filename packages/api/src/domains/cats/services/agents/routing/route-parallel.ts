@@ -58,15 +58,19 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildHistoryGovernanceObservation,
   buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  estimateFullHistoryTokens,
   getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
+  isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   persistSilentCompletionNotice,
+  readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldAppendExplicitCurrentMessage,
@@ -150,6 +154,10 @@ export async function* routeParallel(
     }
   }
   const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
+  const historyGovernanceObserveEnabled = isHistoryGovernanceObserveEnabled();
+  const historyGovernanceHistory = historyGovernanceObserveEnabled
+    ? await readHistoryForGovernanceObservation(deps, threadId, userId, history)
+    : undefined;
 
   // F155: Guide interceptor — resume existing guide state only
   const guideCtx = await prepareGuideContext({
@@ -183,6 +191,12 @@ export async function* routeParallel(
       const effectiveContextBudget = getEffectiveRuntimeContextBudget(catId, resolvedToolPolicy.toolPolicy, {
         isDM: routeThread?.isDM,
         title: routeThread?.title,
+      });
+      const historyObservation = buildHistoryGovernanceObservation({
+        enabled: historyGovernanceObserveEnabled,
+        historyFullTokens: estimateFullHistoryTokens(historyGovernanceHistory?.messages),
+        maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        degraded: historyGovernanceHistory?.degraded,
       });
       const teammates = targetCats.filter((id) => id !== catId);
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
@@ -499,6 +513,7 @@ export async function* routeParallel(
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
+        ...(historyObservation ? { historyObservation } : {}),
       });
 
       return invokeSingleCat(deps.invocationDeps, {

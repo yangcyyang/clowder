@@ -91,15 +91,19 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  buildHistoryGovernanceObservation,
   buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  estimateFullHistoryTokens,
   getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
+  isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   persistSilentCompletionNotice,
+  readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldAppendExplicitCurrentMessage,
@@ -331,6 +335,10 @@ export async function* routeSerial(
     }
   }
   const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
+  const historyGovernanceObserveEnabled = isHistoryGovernanceObserveEnabled();
+  const historyGovernanceHistory = historyGovernanceObserveEnabled
+    ? await readHistoryForGovernanceObservation(deps, threadId, userId, history)
+    : undefined;
 
   // F153: Trace propagation — track per-invocation spans and route-level token totals
   const catInvocationSpans = new Map<number, Span>();
@@ -382,6 +390,12 @@ export async function* routeSerial(
       const effectiveContextBudget = getEffectiveRuntimeContextBudget(catId, resolvedToolPolicy.toolPolicy, {
         isDM: routeThread?.isDM,
         title: routeThread?.title,
+      });
+      const historyObservation = buildHistoryGovernanceObservation({
+        enabled: historyGovernanceObserveEnabled,
+        historyFullTokens: estimateFullHistoryTokens(historyGovernanceHistory?.messages),
+        maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+        degraded: historyGovernanceHistory?.degraded,
       });
       const teammates = [...new Set(worklist.filter((id) => id !== catId))];
       const directMessageFrom = worklistEntry.a2aFrom.get(catId);
@@ -756,6 +770,7 @@ export async function* routeSerial(
         governanceEstimatedTokens,
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
+        ...(historyObservation ? { historyObservation } : {}),
       });
 
       let textContent = '';

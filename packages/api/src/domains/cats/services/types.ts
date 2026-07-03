@@ -45,6 +45,14 @@ export interface TokenUsage {
   contextResetsAtMs?: number;
   /** Estimated prompt-source composition. Display-only, not provider billing truth. */
   sourceBreakdown?: PromptSourceBreakdown;
+  /** Phase 3A history governance mode. Observe-only never changes the prompt. */
+  historyMode?: 'observe';
+  /** Estimated tokens of the full delivered thread history before context trimming. */
+  historyFullTokens?: number;
+  /** historyFullTokens / maxPromptTokens for the current invocation. */
+  historyBudgetRatio?: number;
+  /** True when the history governance observation had to fall back/degrade. */
+  historyGovernanceDegraded?: boolean;
 }
 
 type NumericTokenUsageKey =
@@ -88,6 +96,12 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     if (val != null) {
       result[key] = val;
     }
+  }
+  if (incoming.historyMode != null) result.historyMode = incoming.historyMode;
+  if (incoming.historyFullTokens != null) result.historyFullTokens = incoming.historyFullTokens;
+  if (incoming.historyBudgetRatio != null) result.historyBudgetRatio = incoming.historyBudgetRatio;
+  if (incoming.historyGovernanceDegraded != null) {
+    result.historyGovernanceDegraded = incoming.historyGovernanceDegraded;
   }
   if (incoming.sourceBreakdown) {
     result.sourceBreakdown = incoming.sourceBreakdown;
