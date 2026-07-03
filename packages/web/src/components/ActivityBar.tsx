@@ -4,10 +4,13 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
+import { useChatStore } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
+import { buildActivityInboxItems, countActivityUnread, type ActivityInboxItem } from './activity-inbox';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { isDailySettingsSection, SETTINGS_SECTIONS } from './settings/settings-nav-config';
-import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
+import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 type VisualTheme = 'claude' | 'slockv1' | 'slock' | 'kami';
 
@@ -47,6 +50,16 @@ function MissionIcon({ className = 'w-5 h-5' }: { className?: string }) {
       <path d="M15 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9 13h6" strokeLinecap="round" />
       <path d="M9 17h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ActivityIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>Activity</title>
+      <path d="M5 5h14v11H8l-3 3V5Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 9h8M8 12h5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -194,13 +207,27 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
   );
 }
 
+function activityKindLabel(kind: ActivityInboxItem['kind']): string {
+  if (kind === 'mention') return '@你';
+  if (kind === 'reply') return '回复';
+  return '更新';
+}
+
+function activityKindTone(kind: ActivityInboxItem['kind']): string {
+  if (kind === 'mention') return 'bg-[var(--console-rail-active)] text-[var(--console-rail-fg)]';
+  if (kind === 'reply') return 'bg-conn-amber-bg text-conn-amber-text';
+  return 'bg-[var(--console-hover-bg)] text-[var(--clowder-sidebar-row-muted)]';
+}
+
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
   const router = useRouter();
   const { toggleTheme, resolvedTheme } = useCafeTheme();
   const { pinned } = usePinnedSections();
+  const { threads, threadStates, currentThreadId, getThreadState, clearUnread } = useChatStore();
   const [mounted, setMounted] = useState(false);
   const [visualTheme, setVisualTheme] = useState<VisualTheme>(DEFAULT_VISUAL_THEME);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   useEffect(() => {
     // Honor any stored valid theme; default-version bumps must never reset a user's explicit choice.
@@ -245,11 +272,132 @@ export function ActivityBar({ className }: ActivityBarProps) {
     [pathname, router],
   );
 
+  const activitySnapshots = Array.from(new Set([...threads.map((thread) => thread.id), ...Object.keys(threadStates)]))
+    .map((threadId) => {
+      const thread = threads.find((candidate) => candidate.id === threadId);
+      if (!thread) return null;
+      return { thread, state: getThreadState(threadId) };
+    })
+    .filter((value): value is NonNullable<typeof value> => value != null);
+  const activityItems = buildActivityInboxItems(activitySnapshots, { limit: 30 });
+  const activityUnread = countActivityUnread(activitySnapshots);
+
+  useEffect(() => {
+    if (!activityOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-activity-inbox-root]')) return;
+      setActivityOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [activityOpen]);
+
+  const handleActivitySelect = useCallback(
+    (item: ActivityInboxItem) => {
+      clearUnread(item.threadId);
+      setActivityOpen(false);
+
+      if (item.threadId === currentThreadId && item.messageId) {
+        window.setTimeout(() => scrollToMessage(item.messageId!), 80);
+        return;
+      }
+
+      if (typeof window === 'undefined') {
+        const href = item.messageId
+          ? `${getThreadHref(item.threadId)}?highlight=${encodeURIComponent(item.messageId)}`
+          : getThreadHref(item.threadId);
+        router.push(href);
+        return;
+      }
+
+      const href = item.messageId
+        ? `${getThreadHref(item.threadId)}?highlight=${encodeURIComponent(item.messageId)}`
+        : getThreadHref(item.threadId);
+      window.history.pushState({}, '', href);
+      window.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
+    },
+    [clearUnread, currentThreadId, router],
+  );
+
   return (
     <nav
-      className={`console-activity-rail flex w-[var(--slock-rail-width)] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
+      className={`console-activity-rail relative flex w-[var(--slock-rail-width)] flex-shrink-0 flex-col items-center gap-1.5 border-r border-[var(--slock-border-color)] bg-[var(--console-rail-bg)] px-[6px] py-2.5 text-[var(--console-rail-fg)] ${className ?? ''}`}
       aria-label="主导航"
+      data-activity-inbox-root
     >
+      <button
+        type="button"
+        onClick={() => setActivityOpen((open) => !open)}
+        className={`console-activity-button relative flex h-10 w-10 items-center justify-center rounded-[9px] transition-all ${
+          activityOpen
+            ? 'bg-[var(--console-rail-active)] shadow-[0_5px_14px_rgba(43,37,32,0.07)]'
+            : 'bg-[var(--console-rail-item)] hover:bg-[var(--console-hover-bg)]'
+        }`}
+        title="Activity"
+        aria-label="Activity 聚合收件箱"
+        aria-expanded={activityOpen}
+        data-active={activityOpen ? 'true' : 'false'}
+        data-guide-id="nav.activity"
+      >
+        <ActivityIcon className="h-5 w-5" />
+        {activityUnread > 0 && (
+          <span className="slock-unread-badge absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
+            {activityUnread > 99 ? '99+' : activityUnread}
+          </span>
+        )}
+      </button>
+
+      {activityOpen && (
+        <div className="absolute left-[calc(var(--slock-rail-width)+8px)] top-2 z-[80] w-[320px] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-sidebar-bg)] shadow-[4px_4px_0_var(--slock-border-color)]">
+          <div className="flex items-center justify-between border-b-2 border-[var(--slock-border-color)] px-3 py-2">
+            <div>
+              <div className="text-[13px] font-semibold text-[var(--clowder-sidebar-title)]">Activity</div>
+              <div className="text-[10px] text-[var(--clowder-sidebar-row-muted)]">跨频道 @你 / 回复 / Thread 更新</div>
+            </div>
+            {activityUnread > 0 && (
+              <span className="rounded-full bg-conn-red-text px-2 py-0.5 text-[10px] font-semibold text-[var(--cafe-surface)]">
+                {activityUnread > 99 ? '99+' : activityUnread}
+              </span>
+            )}
+          </div>
+
+          <div className="max-h-[420px] overflow-y-auto py-1">
+            {activityItems.length === 0 ? (
+              <div className="px-3 py-5 text-center text-xs text-[var(--clowder-sidebar-row-muted)]">
+                暂无需要处理的 Activity
+              </div>
+            ) : (
+              activityItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleActivitySelect(item)}
+                  className="group flex w-full flex-col gap-1 border-b border-[var(--console-border-soft)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--console-hover-bg)]"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-semibold ${activityKindTone(item.kind)}`}>
+                      {activityKindLabel(item.kind)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--clowder-sidebar-row-text)]">
+                      {item.threadTitle}
+                    </span>
+                    {item.unreadCount > 1 && (
+                      <span className="text-[10px] text-[var(--clowder-sidebar-row-muted)]">
+                        {item.unreadCount} new
+                      </span>
+                    )}
+                  </div>
+                  <span className="line-clamp-2 text-[12px] leading-[1.45] text-[var(--clowder-sidebar-row-muted)] group-hover:text-[var(--clowder-sidebar-row-text)]">
+                    {item.content}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {NAV_ITEMS.map((item) => {
         const Icon = ICON_MAP[item.id];
         const active = item.match(pathname);
