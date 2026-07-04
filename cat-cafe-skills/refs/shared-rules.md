@@ -123,6 +123,11 @@ P1/P2 当轮修完。P3 当场决定修或不修，不记 TECH-DEBT。
 ### 交付任务
 交付必须附证据：commit、改动文件、测试命令、build 结果、截图、API smoke、导出文件路径，至少给一项。
 
+### 工兵优先
+目录盘点、格式核对、清单核查、任务板对账、批量 `rg` 后整理，默认先派 `@checklist-worker`。
+工兵只产出清单、证据路径、状态和建议动作，不做最终裁决，不改高风险配置，不执行删除、force push、密钥或生产 API 相关操作。
+工兵发现 P0/P1 风险、密钥/账号/权限问题，或需要架构判断、最终 review、merge 放行时，升级给主执行猫或铲屎官。
+
 ### 长任务台账
 预计跨 session 或超过 1 小时的任务，开工先按 `cat-cafe-skills/refs/task-ledger-template.md` 建台账。位置放在任务相关目录，或 `.cat-cafe/projects/<名>/`。
 每完成一步立即回写 checklist、证据栏和当前断点；恢复 session 时先读台账，再读取最小必要上下文后继续。
