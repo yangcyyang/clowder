@@ -5,7 +5,8 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -13,6 +14,42 @@ import { writeCapabilitiesConfig } from '../dist/config/capabilities/capability-
 import { skillsRoutes } from '../dist/routes/skills.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
+const PERSONAL_ENV_KEYS = [
+  'CAT_CAFE_PERSONAL_SKILLS_ENABLED',
+  'CAT_CAFE_PERSONAL_SKILL_ROOTS',
+  'CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES',
+  'CAT_CAFE_PERSONAL_SKILL_INDEX_PATH',
+];
+
+async function withPersonalSkillEnv(overrides, fn) {
+  const previous = new Map(PERSONAL_ENV_KEYS.map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(overrides)) {
+    process.env[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function writeSkill(path, frontmatter, body = '# Skill Body\n') {
+  await mkdir(path, { recursive: true });
+  await writeFile(join(path, 'SKILL.md'), `---\n${frontmatter.trim()}\n---\n\n${body}`, 'utf-8');
+}
+
+function resolveMainRepoForTest() {
+  return execFileSync('git', ['worktree', 'list', '--porcelain'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+    .split('\n')[0]
+    .replace(/^worktree\s+/, '')
+    .trim();
+}
 
 describe('Skills Route', () => {
   it('returns 401 when no identity header is provided', async () => {
@@ -54,6 +91,139 @@ describe('Skills Route', () => {
     assert.equal(typeof body.summary.registrationConsistent, 'boolean');
 
     await app.close();
+  });
+
+  it('POST /api/skills/personal/rebuild returns 401 without identity', async () => {
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/skills/personal/rebuild',
+    });
+
+    assert.equal(res.statusCode, 401);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('Identity required'));
+
+    await app.close();
+  });
+
+  it('POST /api/skills/personal/rebuild returns disabled without writing an index', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'skills-route-personal-disabled-'));
+    const indexPath = join(projectDir, '.cat-cafe', 'personal-skills-index.json');
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      await withPersonalSkillEnv(
+        {
+          CAT_CAFE_PERSONAL_SKILLS_ENABLED: '0',
+          CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+        },
+        async () => {
+          const res = await app.inject({
+            method: 'POST',
+            url: '/api/skills/personal/rebuild',
+            headers: AUTH_HEADERS,
+            payload: { projectPath: projectDir },
+          });
+
+          assert.equal(res.statusCode, 200);
+          assert.deepEqual(JSON.parse(res.body), {
+            enabled: false,
+            total: 0,
+            visible: 0,
+            duplicates: 0,
+            ignored: 0,
+            indexPath: '.cat-cafe/personal-skills-index.json',
+          });
+          await assert.rejects(readFile(indexPath, 'utf-8'), /ENOENT/);
+        },
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('POST /api/skills/personal/rebuild writes the configured personal skill index', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'skills-route-personal-project-'));
+    const personalRoot = await mkdtemp(join(tmpdir(), 'skills-route-personal-root-'));
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      await writeSkill(
+        join(personalRoot, 'create-prd'),
+        `
+name: create-prd
+description: Create a PRD from product context
+triggers:
+  - PRD
+`,
+      );
+
+      await withPersonalSkillEnv(
+        {
+          CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
+          CAT_CAFE_PERSONAL_SKILL_ROOTS: personalRoot,
+          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+          CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+        },
+        async () => {
+          const res = await app.inject({
+            method: 'POST',
+            url: '/api/skills/personal/rebuild',
+            headers: AUTH_HEADERS,
+            payload: { projectPath: projectDir },
+          });
+
+          assert.equal(res.statusCode, 200);
+          assert.deepEqual(JSON.parse(res.body), {
+            enabled: true,
+            total: 1,
+            visible: 1,
+            duplicates: 0,
+            ignored: 0,
+            indexPath: '.cat-cafe/personal-skills-index.json',
+          });
+
+          const raw = await readFile(join(projectDir, '.cat-cafe', 'personal-skills-index.json'), 'utf-8');
+          const index = JSON.parse(raw);
+          assert.equal(index.skills[0].name, 'create-prd');
+          assert.equal(index.skills[0].visible, true);
+        },
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(personalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('POST /api/skills/personal/rebuild rejects invalid projectPath', async () => {
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/skills/personal/rebuild',
+        headers: AUTH_HEADERS,
+        payload: { projectPath: join(tmpdir(), `missing-project-${Date.now()}`) },
+      });
+
+      assert.equal(res.statusCode, 400);
+      const body = JSON.parse(res.body);
+      assert.ok(body.error.includes('Invalid project path'));
+    } finally {
+      await app.close();
+    }
   });
 
   it('each skill entry has required fields', async () => {
@@ -138,7 +308,7 @@ describe('Skills Route', () => {
   it('treats directory-level project skills symlinks as mounted for all providers', async () => {
     const projectDir = join('/tmp', `skills-route-test-dir-symlink-${Date.now()}`);
     const homeDir = join('/tmp', `skills-route-test-home-${Date.now()}`);
-    const sourceSkillsDir = join(process.cwd(), '..', '..', 'cat-cafe-skills');
+    const sourceSkillsDir = join(resolveMainRepoForTest(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
 
     await Promise.all([
@@ -188,13 +358,7 @@ describe('Skills Route', () => {
     const projectDir = join('/tmp', `skills-route-test-fallback-project-${Date.now()}`);
     const homeDir = join('/tmp', `skills-route-test-fallback-home-${Date.now()}`);
     const prevHome = process.env.HOME;
-    const mainRepo = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-    })
-      .split('\n')[0]
-      .replace(/^worktree\s+/, '')
-      .trim();
+    const mainRepo = resolveMainRepoForTest();
     const mainSkillsDir = join(mainRepo, 'cat-cafe-skills');
 
     await Promise.all([

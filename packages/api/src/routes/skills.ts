@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { parse as parseYaml } from 'yaml';
@@ -17,6 +17,7 @@ import { detectConflicts } from '../config/governance/skill-conflict.js';
 import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
 import type { SkillsStaleness } from '../config/governance/skills-state.js';
 import { checkStaleness, readSkillsState } from '../config/governance/skills-state.js';
+import { rebuildPersonalSkillIndexFromEnv } from '../config/skills/personal-skill-scanner.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -141,9 +142,13 @@ async function listLocalClaudeSkills(skillsDir: string): Promise<SkillEntry[]> {
     }),
   );
 
-  return skills
-    .filter((skill): skill is SkillEntry => Boolean(skill))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return skills.filter((skill): skill is SkillEntry => Boolean(skill)).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function toProjectRelativePath(projectRoot: string, targetPath: string): string {
+  const rel = relative(projectRoot, targetPath);
+  if (rel && !rel.startsWith('..') && !isAbsolute(rel)) return rel.split(/[\\/]+/).join('/');
+  return targetPath;
 }
 
 export const skillsRoutes: FastifyPluginAsync = async (app) => {
@@ -266,6 +271,36 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     };
 
     return response;
+  });
+
+  app.post('/api/skills/personal/rebuild', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const body = (request.body ?? {}) as { projectPath?: string };
+    const repoRoot = dirname(CAT_CAFE_SKILLS_SRC);
+    let projectRoot = repoRoot;
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
+      }
+      projectRoot = validated;
+    }
+
+    const result = await rebuildPersonalSkillIndexFromEnv(projectRoot, process.env);
+    return {
+      enabled: result.enabled,
+      total: result.total,
+      visible: result.visible,
+      duplicates: result.duplicates,
+      ignored: result.ignoredHiddenDirs,
+      indexPath: toProjectRelativePath(projectRoot, result.indexPath),
+    };
   });
 
   app.post('/api/skills/sync', async (request, reply) => {
