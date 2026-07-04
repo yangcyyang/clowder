@@ -563,10 +563,10 @@ skills:
   # ── 跨猫交接 ──
   cross-cat-handoff:
     description: >
-      跨猫传话/交接的五件套结构（What/Why/Tradeoff/Open/Next）。
+      跨猫传话/交接的六项结构（What/Why/Tradeoff/Open/Next + 接球方回述确认）。
       Use when: 交接工作给其他猫、传话、写 review 信。
       Not for: 自己的任务、不涉及其他猫的工作。
-      Output: 结构化交接信。
+      Output: 结构化交接信 + 接球方回述确认。
     triggers:
       - "交接"
       - "传话"
@@ -574,7 +574,7 @@ skills:
     not_for:
       - "自己的任务"
       - "不涉及其他猫"
-    output: "5-part handoff message"
+    output: "6-part handoff message with receiver restatement"
     next: []
     sop_step: null
     merged_from: null
@@ -1181,7 +1181,7 @@ refs:
     path: "refs/commit-signatures.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   shared-rules:
-    description: "三猫共用协作规则（交接五件套、提问原则、开放邀请、技术债务、Review 立场等）"
+    description: "三猫共用协作规则（A2A 交接六项、提问原则、开放邀请、技术债务、Review 立场等）"
     path: "refs/shared-rules.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 去重合并"
 
