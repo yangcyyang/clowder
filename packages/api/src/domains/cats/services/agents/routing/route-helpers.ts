@@ -3,7 +3,7 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, ContextBudget, MessageContent, RichBlock, RichBlockBase, ToolPolicy } from '@cat-cafe/shared';
+import type { CatId, ContextBudget, MessageContent, RichBlock, RichBlockBase, TaskItem, ToolPolicy } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -770,6 +770,88 @@ export interface RouteStrategyDeps {
 export interface HistoryGovernanceHistorySnapshot {
   messages: readonly StoredMessage[];
   degraded: boolean;
+}
+
+export interface CompactBoundarySignal {
+  preTokens?: number;
+}
+
+export function parseCompactBoundarySystemInfo(content: string): CompactBoundarySignal | null {
+  try {
+    const parsed = JSON.parse(content) as { type?: unknown; preTokens?: unknown };
+    if (parsed.type !== 'compact_boundary') return null;
+    return {
+      ...(typeof parsed.preTokens === 'number' && Number.isFinite(parsed.preTokens)
+        ? { preTokens: parsed.preTokens }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function findSourceTaskForRouteLedger(input: {
+  deps: RouteStrategyDeps;
+  threadId: string;
+  currentUserMessageId?: string;
+}): Promise<TaskItem | null> {
+  const taskStore = input.deps.taskStore ?? input.deps.invocationDeps.taskStore;
+  if (!taskStore) return null;
+  const tasks = await Promise.resolve(taskStore.listByThread(input.threadId));
+  const byMessage = input.currentUserMessageId
+    ? tasks.find((task) => task.sourceMessageId === input.currentUserMessageId)
+    : undefined;
+  if (byMessage) return byMessage;
+  const byTaskThread = tasks.find((task) => task.taskThreadId === input.threadId);
+  if (byTaskThread) return byTaskThread;
+  if (typeof taskStore.listByKind === 'function') {
+    const workTasks = await Promise.resolve(taskStore.listByKind('work'));
+    return workTasks.find((task) => task.taskThreadId === input.threadId) ?? null;
+  }
+  return null;
+}
+
+export async function appendCompactBoundaryTaskEvent(
+  deps: RouteStrategyDeps,
+  input: {
+    threadId: string;
+    currentUserMessageId?: string;
+    catId: string;
+    invocationId?: string;
+    timestamp?: number;
+    preTokens?: number;
+  },
+): Promise<void> {
+  const taskStore = deps.taskStore ?? deps.invocationDeps.taskStore;
+  if (!taskStore) return;
+  try {
+    const sourceTask = await findSourceTaskForRouteLedger({
+      deps,
+      threadId: input.threadId,
+      currentUserMessageId: input.currentUserMessageId,
+    });
+    if (!sourceTask) return;
+    const updated = await taskStore.update(sourceTask.id, {
+      events: [
+        {
+          ts: new Date(input.timestamp ?? Date.now()).toISOString(),
+          catId: input.catId,
+          ...(input.invocationId ? { invocationId: input.invocationId } : {}),
+          type: 'compact_boundary',
+          data: {
+            boundary: 'compact_boundary',
+            source: 'provider',
+            ...(input.preTokens !== undefined ? { preTokens: input.preTokens } : {}),
+          },
+        },
+      ],
+    });
+    if (updated && deps.socketManager) {
+      deps.socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    }
+  } catch (err) {
+    log.warn({ err, threadId: input.threadId, catId: input.catId }, 'append compact boundary task event failed');
+  }
 }
 
 export async function readHistoryForGovernanceObservation(

@@ -23,8 +23,10 @@ export type RunLedgerEventType =
   | 'tool_started'
   | 'tool_completed'
   | 'tool_failed'
+  | 'tool_usage'
   | 'artifact_delta'
   | 'usage_recorded'
+  | 'compact_boundary'
   | 'message_persisted'
   | 'succeeded'
   | 'failed'
@@ -306,7 +308,7 @@ export class RunLedgerAssembler {
     const records = await this.scanAllRecords();
     const eventInvocationIds = new Set(
       (task.events ?? [])
-        .map((event) => event.data?.invocationId)
+        .map((event) => event.invocationId ?? event.data?.invocationId)
         .filter((value): value is string => typeof value === 'string' && value.length > 0),
     );
     const matched = records
@@ -368,17 +370,20 @@ function isInvocationMessage(message: StoredMessage, record: InvocationRecord): 
 function isTaskAssociated(task: TaskItem, record: InvocationRecord, messageIds: Set<string>): boolean {
   if (task.sourceMessageId && messageIds.has(task.sourceMessageId)) return true;
   if (task.taskThreadId && task.taskThreadId === record.threadId) return true;
-  return (task.events ?? []).some((event) => event.data?.invocationId === record.id);
+  return (task.events ?? []).some((event) => event.invocationId === record.id || event.data?.invocationId === record.id);
 }
 
 function collectTaskEvents(tasks: TaskItem[], invocationId: string): TaskEvent[] {
   return tasks.flatMap((task) =>
     (task.events ?? []).filter((event) => {
+      if (event.invocationId === invocationId) return true;
       if (event.data?.invocationId === invocationId) return true;
       return (
         event.type === 'usage' ||
         event.type === 'artifact' ||
         event.type === 'capability_usage' ||
+        event.type === 'tool_usage' ||
+        event.type === 'compact_boundary' ||
         event.type.startsWith('fast_lane_')
       );
     }),
@@ -441,6 +446,25 @@ function toTaskLedgerEvent(event: TaskEvent): DraftEvent | null {
       },
     };
   }
+  if (event.type === 'tool_usage') {
+    return {
+      ts,
+      type: 'tool_usage',
+      actor,
+      severity: event.data?.status === 'failed' ? 'warning' : 'info',
+      data: {
+        usageKind: 'tool',
+        provider: sanitizeUnknown(event.data?.provider),
+        serverId: sanitizeUnknown(event.data?.serverId),
+        toolName: sanitizeUnknown(event.data?.toolName),
+        toolId: sanitizeUnknown(event.data?.toolId),
+        status: sanitizeUnknown(event.data?.status),
+        title: sanitizeUnknown(event.data?.title),
+        target: sanitizeUnknown(event.data?.target),
+        durationMs: sanitizeUnknown(event.data?.durationMs),
+      },
+    };
+  }
   if (event.type === 'artifact') {
     return {
       ts,
@@ -448,6 +472,15 @@ function toTaskLedgerEvent(event: TaskEvent): DraftEvent | null {
       actor,
       severity: 'info',
       data: pickArtifactEventData(event.data ?? {}),
+    };
+  }
+  if (event.type === 'compact_boundary') {
+    return {
+      ts,
+      type: 'compact_boundary',
+      actor,
+      severity: 'info',
+      data: pickCompactBoundaryEventData(event.data ?? {}),
     };
   }
   if (event.type === 'fast_lane_completed') {
@@ -578,6 +611,10 @@ function pickUsageEventData(data: Record<string, unknown>): Record<string, unkno
 
 function pickArtifactEventData(data: Record<string, unknown>): Record<string, unknown> {
   return pickKeys(data, ['files', 'totalAdded', 'totalRemoved', 'artifactCount']);
+}
+
+function pickCompactBoundaryEventData(data: Record<string, unknown>): Record<string, unknown> {
+  return pickKeys(data, ['boundary', 'source', 'preTokens', 'sessionId', 'compressionCount']);
 }
 
 function pickKeys(data: Record<string, unknown>, keys: string[]): Record<string, unknown> {

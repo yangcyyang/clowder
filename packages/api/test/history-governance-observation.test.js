@@ -20,6 +20,30 @@ function createUsageService(catId, text = 'hello') {
   };
 }
 
+function createCompactBoundaryService(catId, text = 'continued') {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({ type: 'compact_boundary', catId, preTokens: 42000 }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'text', catId, content: text, timestamp: Date.now() };
+      yield {
+        type: 'done',
+        catId,
+        timestamp: Date.now(),
+        metadata: {
+          provider: 'unit-test',
+          model: 'unit-test-model',
+          usage: { inputTokens: 100, outputTokens: 20 },
+        },
+      };
+    },
+  };
+}
+
 function createMockDeps(services) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -411,5 +435,71 @@ describe('history governance observation', () => {
       restoreEnv('CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE', previousObserve);
       restoreEnv('CAT_CAFE_HISTORY_GOVERNANCE', previousMode);
     }
+  });
+
+  it('serial route records provider compact boundary as a task debug event', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const taskStore = new TaskStore();
+    const deps = createMockDeps({ opus: createCompactBoundaryService('opus') });
+    deps.taskStore = taskStore;
+    deps.invocationDeps.taskStore = taskStore;
+    const currentUserMessageId = '0000000000000005-000001-compacta';
+    const task = taskStore.create({
+      threadId: 'thread1',
+      title: 'Compact boundary handoff',
+      why: 'B4 provider compact visibility',
+      createdBy: 'user',
+      sourceMessageId: currentUserMessageId,
+    });
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', { currentUserMessageId })) {
+      messages.push(msg);
+    }
+
+    const updated = taskStore.get(task.id);
+    const compactEvent = updated.events.find((event) => event.type === 'compact_boundary');
+
+    assert.ok(compactEvent);
+    assert.equal(compactEvent.catId, 'opus');
+    assert.equal(compactEvent.invocationId, 'inv-1');
+    assert.equal(compactEvent.data.boundary, 'compact_boundary');
+    assert.equal(compactEvent.data.source, 'provider');
+    assert.equal(compactEvent.data.preTokens, 42000);
+    assert.ok(messages.some((msg) => msg.type === 'text' && msg.content === 'continued'));
+  });
+
+  it('parallel route records provider compact boundary as a task debug event', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const taskStore = new TaskStore();
+    const deps = createMockDeps({ opus: createCompactBoundaryService('opus') });
+    deps.taskStore = taskStore;
+    deps.invocationDeps.taskStore = taskStore;
+    const currentUserMessageId = '0000000000000006-000001-compactb';
+    const task = taskStore.create({
+      threadId: 'thread1',
+      title: 'Compact boundary handoff',
+      why: 'B4 provider compact visibility',
+      createdBy: 'user',
+      sourceMessageId: currentUserMessageId,
+    });
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'test', 'user1', 'thread1', { currentUserMessageId })) {
+      messages.push(msg);
+    }
+
+    const updated = taskStore.get(task.id);
+    const compactEvent = updated.events.find((event) => event.type === 'compact_boundary');
+
+    assert.ok(compactEvent);
+    assert.equal(compactEvent.catId, 'opus');
+    assert.equal(compactEvent.invocationId, 'inv-1');
+    assert.equal(compactEvent.data.boundary, 'compact_boundary');
+    assert.equal(compactEvent.data.source, 'provider');
+    assert.equal(compactEvent.data.preTokens, 42000);
+    assert.ok(messages.some((msg) => msg.type === 'text' && msg.content === 'continued'));
   });
 });

@@ -185,6 +185,50 @@ describe('run ledger route', () => {
     await app.close();
   });
 
+  test('surfaces compact boundary task events without leaking raw control data', async () => {
+    const records = [
+      makeInvocation({
+        id: 'inv-compact',
+        updatedAt: NOW + 2_100,
+      }),
+    ];
+    const messages = [makeMessage({ id: 'msg-user', catId: null, content: 'continue after compact', extra: undefined })];
+    const tasks = [
+      makeTask({
+        events: [
+          {
+            ts: new Date(NOW + 1_500).toISOString(),
+            catId: 'codex',
+            invocationId: 'inv-compact',
+            type: 'compact_boundary',
+            data: {
+              boundary: 'compact_boundary',
+              source: 'provider',
+              preTokens: 42000,
+              sessionId: 'sess-sk_agent_supersecret',
+            },
+          },
+        ],
+      }),
+    ];
+    const app = await buildApp({ records, messages, tasks, traceStore: { query: () => [] } });
+
+    const res = await app.inject({ method: 'GET', url: '/api/run-ledger/inv-compact' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const compactEvent = body.events.find((event) => event.type === 'compact_boundary');
+
+    assert.ok(compactEvent);
+    assert.equal(compactEvent.actor, 'codex');
+    assert.equal(compactEvent.data.boundary, 'compact_boundary');
+    assert.equal(compactEvent.data.source, 'provider');
+    assert.equal(compactEvent.data.preTokens, 42000);
+    assert.equal(compactEvent.data.sessionId, 'sess-sk_agent_<redacted>');
+    assert.equal(res.body.includes('sk_agent_supersecret'), false);
+
+    await app.close();
+  });
+
   test('lists task-bound run ledgers by associated source message', async () => {
     const records = [makeInvocation(), makeInvocation({ id: 'inv-other', userMessageId: 'other-message' })];
     const messages = [makeMessage({ id: 'msg-user', catId: null, extra: undefined }), makeMessage()];

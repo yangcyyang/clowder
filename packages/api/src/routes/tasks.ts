@@ -141,11 +141,14 @@ const taskEventSchema = z.object({
     'usage',
     'capability_authorized',
     'capability_usage',
+    'tool_usage',
+    'compact_boundary',
     'fast_lane_decision',
     'fast_lane_started',
     'fast_lane_completed',
     'fast_lane_failed',
   ]),
+  invocationId: z.string().min(1).optional(),
   data: z.record(z.unknown()).optional(),
 });
 
