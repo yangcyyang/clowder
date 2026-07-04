@@ -1238,6 +1238,7 @@ async function main(): Promise<void> {
     agentRegistry,
     registry,
     messageStore,
+    invocationRecordStore,
     taskProgressStore,
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
     ...(sessionStore ? { sessionStore } : {}),

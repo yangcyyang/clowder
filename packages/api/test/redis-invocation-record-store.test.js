@@ -179,6 +179,49 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(record.error, 'CLI ENOENT');
   });
 
+  it('A4: update() persists route-layer SkillRouter matches', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'skill-router-key',
+    });
+
+    const matchedAt = Date.now();
+    await store.update(invocationId, {
+      skillRouterMatchedSkills: ['debugging', 'project-workflow'],
+      skillRouterMatchedAt: matchedAt,
+      skillRouterSource: 'route-serial',
+      skillRouterPersistVersion: 1,
+    });
+
+    const record = await store.get(invocationId);
+    assert.deepEqual(record.skillRouterMatchedSkills, ['debugging', 'project-workflow']);
+    assert.equal(record.skillRouterMatchedAt, matchedAt);
+    assert.equal(record.skillRouterSource, 'route-serial');
+    assert.equal(record.skillRouterPersistVersion, 1);
+
+    const { invocationId: noMatchInvocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'skill-router-no-match-key',
+    });
+    await store.update(noMatchInvocationId, {
+      skillRouterMatchedSkills: [],
+      skillRouterMatchedAt: matchedAt + 1,
+      skillRouterSource: 'route-parallel',
+      skillRouterPersistVersion: 1,
+    });
+
+    const noMatchRecord = await store.get(noMatchInvocationId);
+    assert.deepEqual(noMatchRecord.skillRouterMatchedSkills, []);
+    assert.equal(noMatchRecord.skillRouterMatchedAt, matchedAt + 1);
+    assert.equal(noMatchRecord.skillRouterSource, 'route-parallel');
+  });
+
   it('update() returns null for non-existent id', async () => {
     const result = await store.update('non-existent', { status: 'running' });
     assert.equal(result, null);

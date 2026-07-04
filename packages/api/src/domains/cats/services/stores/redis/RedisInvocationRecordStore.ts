@@ -171,6 +171,16 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
+    if (input.skillRouterMatchedSkills !== undefined) {
+      pairs.push('skillRouterMatchedSkills', JSON.stringify(input.skillRouterMatchedSkills));
+    }
+    if (input.skillRouterMatchedAt !== undefined) {
+      pairs.push('skillRouterMatchedAt', String(input.skillRouterMatchedAt));
+    }
+    if (input.skillRouterSource !== undefined) pairs.push('skillRouterSource', input.skillRouterSource);
+    if (input.skillRouterPersistVersion !== undefined) {
+      pairs.push('skillRouterPersistVersion', String(input.skillRouterPersistVersion));
+    }
 
     // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
     if (input.usageByCat !== undefined) {
@@ -294,7 +304,9 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   private hydrateRecord(data: Record<string, string>): InvocationRecord {
     const errorValue = data.error;
     const hasError = errorValue !== undefined && errorValue !== '';
+    const hasSkillRouterMatchedSkills = data.skillRouterMatchedSkills !== undefined;
     const usageByCat = safeParseObject(data.usageByCat);
+    const skillRouterMatchedSkills = safeParseArray(data.skillRouterMatchedSkills);
     return {
       id: data.id!,
       threadId: data.threadId!,
@@ -310,6 +322,14 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       ...(hasError ? { error: errorValue } : {}),
       ...(usageByCat ? { usageByCat } : {}),
       ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
+      ...(hasSkillRouterMatchedSkills ? { skillRouterMatchedSkills } : {}),
+      ...(data.skillRouterMatchedAt ? { skillRouterMatchedAt: parseInt(data.skillRouterMatchedAt, 10) } : {}),
+      ...(data.skillRouterSource
+        ? { skillRouterSource: data.skillRouterSource as InvocationRecord['skillRouterSource'] }
+        : {}),
+      ...(data.skillRouterPersistVersion
+        ? { skillRouterPersistVersion: parseInt(data.skillRouterPersistVersion, 10) }
+        : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };
@@ -320,7 +340,7 @@ function safeParseArray(value: string | undefined): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
   } catch {
     return [];
   }

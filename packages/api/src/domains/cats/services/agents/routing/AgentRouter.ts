@@ -39,6 +39,7 @@ import type { TranscriptWriter } from '../../session/TranscriptWriter.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1, ThreadRoutingScope } from '../../stores/ports/ThreadStore.js';
@@ -49,6 +50,10 @@ import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
 import type { PersistenceContext, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
+import {
+  isSkillRouterMatchPersistenceEnabled,
+  SKILL_ROUTER_MATCH_PERSIST_VERSION,
+} from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
@@ -132,6 +137,8 @@ export interface AgentRouterOptions {
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
+  /** A4: optional parent InvocationRecord store for route-layer SkillRouter match persistence. */
+  invocationRecordStore?: Pick<IInvocationRecordStore, 'update'>;
   /** F045 Gap #4: Redis-backed task progress snapshots */
   taskProgressStore?: TaskProgressStore;
   sessionStore?: SessionStore;
@@ -194,6 +201,7 @@ export class AgentRouter {
   private services: Record<string, AgentService>;
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
+  private invocationRecordStore?: Pick<IInvocationRecordStore, 'update'>;
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -253,6 +261,7 @@ export class AgentRouter {
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
+    this.invocationRecordStore = options.invocationRecordStore;
     this.sessionManager = new SessionManager(options.sessionStore);
     this.deliveryCursorStore = options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore);
     this.threadStore = options.threadStore ?? null;
@@ -873,6 +882,27 @@ export class AgentRouter {
     }
 
     const strategyDeps = this.getStrategyDeps();
+    const persistSkillRouterMatches =
+      options?.parentInvocationId && this.invocationRecordStore && isSkillRouterMatchPersistenceEnabled()
+        ? async (input: {
+            parentInvocationId: string;
+            matchedSkillNames: readonly string[];
+            source: 'route-serial' | 'route-parallel';
+          }) => {
+            const updated = await this.invocationRecordStore!.update(input.parentInvocationId, {
+              skillRouterMatchedSkills: [...input.matchedSkillNames],
+              skillRouterMatchedAt: Date.now(),
+              skillRouterSource: input.source,
+              skillRouterPersistVersion: SKILL_ROUTER_MATCH_PERSIST_VERSION,
+            });
+            if (!updated) {
+              log.warn(
+                { parentInvocationId: input.parentInvocationId, source: input.source },
+                'skill router match persistence skipped: parent invocation record not found',
+              );
+            }
+          }
+        : undefined;
     const routeOptions = {
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,
@@ -893,6 +923,7 @@ export class AgentRouter {
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+      ...(persistSkillRouterMatches ? { persistSkillRouterMatches } : {}),
       routeSpan,
     };
 

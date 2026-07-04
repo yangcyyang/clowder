@@ -236,6 +236,56 @@ describe('InvocationRecordStore', () => {
     assert.equal(record.usageByCat.codex.outputTokens, 100);
   });
 
+  test('A4: update() stores route-layer SkillRouter matches', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'skill-router-key',
+    });
+
+    const matchedAt = Date.now();
+    store.update(invocationId, {
+      skillRouterMatchedSkills: ['debugging', 'project-workflow'],
+      skillRouterMatchedAt: matchedAt,
+      skillRouterSource: 'route-serial',
+      skillRouterPersistVersion: 1,
+    });
+
+    const record = store.get(invocationId);
+    assert.ok(record);
+    assert.deepEqual(record.skillRouterMatchedSkills, ['debugging', 'project-workflow']);
+    assert.equal(record.skillRouterMatchedAt, matchedAt);
+    assert.equal(record.skillRouterSource, 'route-serial');
+    assert.equal(record.skillRouterPersistVersion, 1);
+
+    const { invocationId: noMatchInvocationId } = store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'skill-router-no-match-key',
+    });
+    store.update(noMatchInvocationId, {
+      skillRouterMatchedSkills: [],
+      skillRouterMatchedAt: matchedAt + 1,
+      skillRouterSource: 'route-parallel',
+      skillRouterPersistVersion: 1,
+    });
+
+    const noMatchRecord = store.get(noMatchInvocationId);
+    assert.ok(noMatchRecord);
+    assert.deepEqual(noMatchRecord.skillRouterMatchedSkills, []);
+    assert.equal(noMatchRecord.skillRouterMatchedAt, matchedAt + 1);
+    assert.equal(noMatchRecord.skillRouterSource, 'route-parallel');
+  });
+
   test('update() returns null for non-existent id', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

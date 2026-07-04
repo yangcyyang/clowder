@@ -99,6 +99,53 @@ export function isHistoryGovernanceObserveEnabled(env: NodeJS.ProcessEnv = proce
   return isEnabledValue(env.CAT_CAFE_HISTORY_GOVERNANCE_OBSERVE) || env.CAT_CAFE_HISTORY_GOVERNANCE === 'observe';
 }
 
+export const SKILL_ROUTER_MATCH_PERSIST_VERSION = 1;
+
+export type SkillRouterMatchPersistenceSource = 'route-serial' | 'route-parallel';
+
+export interface PersistSkillRouterMatchesInput {
+  parentInvocationId: string;
+  matchedSkillNames: readonly string[];
+  source: SkillRouterMatchPersistenceSource;
+}
+
+export type PersistSkillRouterMatches = (input: PersistSkillRouterMatchesInput) => void | Promise<void>;
+
+export function isSkillRouterMatchPersistenceEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isEnabledValue(env.CAT_CAFE_PERSIST_SKILL_ROUTER_MATCHES);
+}
+
+function normalizeSkillRouterMatches(skillNames: readonly string[] | undefined): string[] {
+  if (!skillNames || skillNames.length === 0) return [];
+  return Array.from(new Set(skillNames.map((name) => name.trim()).filter(Boolean)));
+}
+
+export async function persistSkillRouterMatchesFromRoute(
+  options: RouteOptions,
+  input: {
+    matchedSkillNames: readonly string[] | undefined;
+    source: SkillRouterMatchPersistenceSource;
+  },
+): Promise<void> {
+  const matchedSkillNames = normalizeSkillRouterMatches(input.matchedSkillNames);
+  if (!options.parentInvocationId || !options.persistSkillRouterMatches || matchedSkillNames.length === 0) {
+    return;
+  }
+
+  try {
+    await options.persistSkillRouterMatches({
+      parentInvocationId: options.parentInvocationId,
+      matchedSkillNames,
+      source: input.source,
+    });
+  } catch (err) {
+    log.warn(
+      { err, parentInvocationId: options.parentInvocationId, source: input.source },
+      'skill router match persistence failed',
+    );
+  }
+}
+
 export function estimateFullHistoryTokens(messages: readonly StoredMessage[] | undefined): number {
   if (!messages || messages.length === 0) return 0;
   const delivered = messages.filter(
@@ -393,6 +440,8 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** A4: route-layer hook for persisting actual SkillRouter prompt injections. */
+  persistSkillRouterMatches?: PersistSkillRouterMatches | undefined;
   /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
   invocationController?: AbortController | undefined;
   /** Queue-backed A2A text-scan dispatch. When present, routeSerial should not grow the in-memory worklist. */

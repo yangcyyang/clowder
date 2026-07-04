@@ -69,6 +69,7 @@ import {
   getThreadBootcampMemberCount,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
+  persistSkillRouterMatchesFromRoute,
   persistSilentCompletionNotice,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
@@ -277,6 +278,10 @@ export async function* routeParallel(
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
+      await persistSkillRouterMatchesFromRoute(options, {
+        matchedSkillNames: skillRouterContext?.matchedSkillNames,
+        source: 'route-parallel',
+      });
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,

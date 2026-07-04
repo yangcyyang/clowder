@@ -52,6 +52,14 @@ export interface InvocationRecord {
   /** F128: Epoch ms when usageByCat was first recorded. Stable for daily bucketing
    *  (unlike updatedAt which any subsequent update can shift). */
   usageRecordedAt?: number;
+  /** Skills that the route-layer SkillRouter actually injected for this invocation. */
+  skillRouterMatchedSkills?: string[];
+  /** Epoch ms when skillRouterMatchedSkills was persisted. */
+  skillRouterMatchedAt?: number;
+  /** Persistence source; route layer records real prompt injection, not queue precompute. */
+  skillRouterSource?: 'route-serial' | 'route-parallel';
+  /** Schema version for skill router match persistence. */
+  skillRouterPersistVersion?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -83,6 +91,11 @@ export interface UpdateInvocationInput {
   expectedStatus?: InvocationStatus;
   /** F8: Per-cat token usage (key = catId) */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
+  /** A4: route-layer SkillRouter matches, persisted only behind CAT_CAFE_PERSIST_SKILL_ROUTER_MATCHES. */
+  skillRouterMatchedSkills?: string[];
+  skillRouterMatchedAt?: number;
+  skillRouterSource?: InvocationRecord['skillRouterSource'];
+  skillRouterPersistVersion?: number;
 }
 
 /**
@@ -196,6 +209,14 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       record.usageByCat = input.usageByCat;
       // F128: stamp usageRecordedAt only on first write (stable for daily bucketing)
       if (record.usageRecordedAt == null) record.usageRecordedAt = Date.now();
+    }
+    if (input.skillRouterMatchedSkills !== undefined) {
+      record.skillRouterMatchedSkills = [...input.skillRouterMatchedSkills];
+    }
+    if (input.skillRouterMatchedAt !== undefined) record.skillRouterMatchedAt = input.skillRouterMatchedAt;
+    if (input.skillRouterSource !== undefined) record.skillRouterSource = input.skillRouterSource;
+    if (input.skillRouterPersistVersion !== undefined) {
+      record.skillRouterPersistVersion = input.skillRouterPersistVersion;
     }
     record.updatedAt = Date.now();
 
