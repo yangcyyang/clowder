@@ -123,6 +123,10 @@ P1/P2 当轮修完。P3 当场决定修或不修，不记 TECH-DEBT。
 ### 交付任务
 交付必须附证据：commit、改动文件、测试命令、build 结果、截图、API smoke、导出文件路径，至少给一项。
 
+### 长任务台账
+预计跨 session 或超过 1 小时的任务，开工先按 `cat-cafe-skills/refs/task-ledger-template.md` 建台账。位置放在任务相关目录，或 `.cat-cafe/projects/<名>/`。
+每完成一步立即回写 checklist、证据栏和当前断点；恢复 session 时先读台账，再读取最小必要上下文后继续。
+
 ### 阻塞任务
 做不了就明确写：阻塞原因 + 缺什么 + 谁能补。不要用“我会继续”冒充交付。
 

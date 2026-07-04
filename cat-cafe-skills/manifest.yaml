@@ -358,10 +358,10 @@ skills:
 
   context-reset-planner:
     description: >
-      上下文接班规划师：为长任务、重启续跑、上下文压缩或 session reset 设计上下文生命周期和 handoff。
+      上下文接班规划师：为长任务、重启续跑、上下文压缩或 session reset 设计上下文生命周期、任务台账和 handoff。
       Use when: Agent 跑久了、重启后要继续、长任务需要接班、或上下文变脏需要 reset 方案。
       Not for: 一次性短问答、无状态普通聊天、只需要压缩一段文案。
-      Output: Context lifecycle plan + handoff 模板 + reset 验证方式。
+      Output: Context lifecycle plan + task ledger 位置 + handoff 模板 + reset 验证方式。
     triggers:
       - "上下文接班"
       - "长任务续跑"
@@ -374,7 +374,7 @@ skills:
       - "一次性短问答"
       - "无状态普通聊天"
       - "只需要压缩文案"
-    output: "Context lifecycle plan + handoff template + reset validation"
+    output: "Context lifecycle plan + task ledger path + handoff template + reset validation"
     next: ["cross-cat-handoff", "agent-harness-review"]
     sop_step: null
     merged_from: ["AI-trae/context-reset-planner"]
@@ -1172,6 +1172,10 @@ refs:
     description: "需求点 checklist 模板（B3）"
     path: "refs/requirements-checklist-template.md"
     source: "F046 Phase B B3"
+  task-ledger-template:
+    description: "跨 session / 超 1 小时任务台账模板（目标、步骤、证据、断点、恢复指引）"
+    path: "refs/task-ledger-template.md"
+    source: "N6 long-running task ledger"
   decision-matrix:
     description: "决策权漏斗矩阵（铲屎官/三猫/自治）"
     path: "refs/decision-matrix.md"
