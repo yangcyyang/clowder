@@ -29,6 +29,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
+  'cat_cafe_generate_image',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
   // Guide tools
@@ -76,6 +77,9 @@ const EXPECTED_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  // Skill router pull model
+  'cat_cafe_list_skills',
+  'cat_cafe_read_skill',
   // Limb tools
   'limb_list_available',
   'limb_invoke',
@@ -108,6 +112,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
+  'cat_cafe_generate_image',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
@@ -144,6 +149,8 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_skills',
+  'cat_cafe_read_skill',
 ];
 
 const EXPECTED_SIGNAL_TOOLS = [

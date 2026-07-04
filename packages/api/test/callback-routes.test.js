@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, mock, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 
@@ -1801,6 +1801,109 @@ describe('Callback Routes', () => {
       assert.equal(docMsg.invocationId, invocationId, 'generate-document broadcast must include invocationId');
     } finally {
       delete process.env.UPLOAD_DIR;
+      await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  test('generate-image saves upload and broadcasts media_gallery rich block', async () => {
+    const { tmpdir } = await import('node:os');
+    const { access, rm } = await import('node:fs/promises');
+    const uploadDir = `${tmpdir()}/cat-cafe-test-uploads-image-${Date.now()}`;
+    const previousUploadDir = process.env.UPLOAD_DIR;
+    const previousKey = process.env.CAT_CAFE_GPT_IMAGE_API_KEY;
+    process.env.UPLOAD_DIR = uploadDir;
+    process.env.CAT_CAFE_GPT_IMAGE_API_KEY = 'test-image-key';
+    const fetchMock = mock.method(globalThis, 'fetch', async () => {
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: Buffer.from('fake-png').toString('base64'), revised_prompt: 'pixel cat revised' }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    try {
+      const app = await createApp();
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-image');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/generate-image',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: {
+          prompt: 'pixel cat',
+          n: 1,
+          size: '1024x1024',
+        },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.body);
+      assert.equal(body.status, 'ok');
+      assert.equal(body.images.length, 1);
+      assert.match(body.images[0].url, /^\/uploads\//);
+      await access(`${uploadDir}/${body.images[0].url.replace('/uploads/', '')}`);
+
+      const msgs = socketManager.getMessages();
+      const imageMsg = msgs.find((m) => m.type === 'system_info' && JSON.parse(m.content).type === 'rich_block');
+      assert.ok(imageMsg, 'generate-image should broadcast system_info with rich_block');
+      assert.equal(imageMsg.invocationId, invocationId, 'generate-image broadcast must include invocationId');
+      const block = JSON.parse(imageMsg.content).block;
+      assert.equal(block.kind, 'media_gallery');
+      assert.equal(block.items[0].url, body.images[0].url);
+      assert.equal(fetchMock.mock.calls.length, 1);
+    } finally {
+      fetchMock.mock.restore();
+      if (previousUploadDir === undefined) delete process.env.UPLOAD_DIR;
+      else process.env.UPLOAD_DIR = previousUploadDir;
+      if (previousKey === undefined) delete process.env.CAT_CAFE_GPT_IMAGE_API_KEY;
+      else process.env.CAT_CAFE_GPT_IMAGE_API_KEY = previousKey;
+      await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  test('generate-image broadcasts rich block with parentInvocationId when present', async () => {
+    const { tmpdir } = await import('node:os');
+    const { rm } = await import('node:fs/promises');
+    const uploadDir = `${tmpdir()}/cat-cafe-test-uploads-image-parent-${Date.now()}`;
+    const previousUploadDir = process.env.UPLOAD_DIR;
+    const previousKey = process.env.CAT_CAFE_GPT_IMAGE_API_KEY;
+    process.env.UPLOAD_DIR = uploadDir;
+    process.env.CAT_CAFE_GPT_IMAGE_API_KEY = 'test-image-key';
+    const fetchMock = mock.method(globalThis, 'fetch', async () => {
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('fake-png').toString('base64') }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      const app = await createApp();
+      const parentInvocationId = 'outer-parent-image';
+      const { invocationId, callbackToken } = await registry.create(
+        'user-1',
+        'opus',
+        'thread-image-parent',
+        parentInvocationId,
+      );
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/generate-image',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { prompt: 'pixel cat' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const imageMsg = socketManager
+        .getMessages()
+        .find((m) => m.type === 'system_info' && JSON.parse(m.content).type === 'rich_block');
+      assert.ok(imageMsg, 'generate-image should broadcast rich block');
+      assert.equal(imageMsg.invocationId, parentInvocationId);
+    } finally {
+      fetchMock.mock.restore();
+      if (previousUploadDir === undefined) delete process.env.UPLOAD_DIR;
+      else process.env.UPLOAD_DIR = previousUploadDir;
+      if (previousKey === undefined) delete process.env.CAT_CAFE_GPT_IMAGE_API_KEY;
+      else process.env.CAT_CAFE_GPT_IMAGE_API_KEY = previousKey;
       await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
     }
   });

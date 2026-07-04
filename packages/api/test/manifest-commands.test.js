@@ -63,6 +63,16 @@ skills:
     }
   });
 
+  it('exposes /image from the repo manifest', async () => {
+    const result = await parseManifestSlashCommands(join(REPO_ROOT, 'cat-cafe-skills'));
+    const commands = result.get('image-generation') ?? [];
+    const imageCommand = commands.find((command) => command.name === '/image');
+
+    assert.ok(imageCommand, 'image-generation should expose /image');
+    assert.equal(imageCommand.surface, 'both');
+    assert.match(imageCommand.usage, /^\/image <prompt>/);
+  });
+
   it('skips skill with no slashCommands field', async () => {
     const dir = await createTempManifest(`
 skills:

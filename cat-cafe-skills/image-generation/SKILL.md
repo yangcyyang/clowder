@@ -1,14 +1,14 @@
 ---
 name: image-generation
 description: >
-  AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
+  AI 图片生成：Clowder 内优先用 cat_cafe_generate_image；外部/特殊需求再用原生 tool call 或浏览器自动化。
   Use when: 需要 AI 生成概念图、UI 参考、像素画素材。
   Not for: 已有图片的展示（用 media_gallery rich block）、SVG 图标制作（手写或用设计工具）。
 ---
 
 # AI 图片生成 Skill
 
-> 用途：生成 AI 图片——优先原生 tool call，降级浏览器自动化
+> 用途：生成 AI 图片——Clowder 对话内优先走 MCP 回调工具，特殊平台能力再降级
 > 适用猫猫：所有猫
 
 ## 何时使用
@@ -17,11 +17,34 @@ description: >
 - 铲屎官要求生成特定风格的图片
 - 需要批量生成多个变体
 
-## 路径选择（先问自己有没有原生能力）
+## Clowder 内优先路径
+
+在 Clowder thread 里，**优先调用 `cat_cafe_generate_image`**。
 
 ```
-你有内置图片生成 tool 吗？
-├─ 是（Codex / Antigravity）→ 用原生 tool call（§ 原生路径）
+cat_cafe_generate_image(prompt, size?, quality?, outputFormat?, n?)
+  → 后端调用配置好的 GPT 图片模型
+  → 图片保存到 /uploads/
+  → 自动生成 media_gallery 富块
+  → Web / IM 正常投递 ✓
+```
+
+也可以让用户走快车道：
+
+```text
+/image <prompt> [--size 1024x1024|1024x1536|1536x1024] [--n 1-4]
+```
+
+**不要**手动调用外部图片 CLI 后再 `create_rich_block`，那会绕开 canonical 发布/IM 投递链路。
+
+## 降级路径（没有 Clowder 回调工具时）
+
+```
+你在 Clowder 且有 cat_cafe_generate_image 吗？
+├─ 是 → 用 cat_cafe_generate_image（§ Clowder 内优先路径）
+│
+├─ 否，但有内置图片生成 tool 吗？
+│   └─ 是（Codex / Antigravity）→ 用原生 tool call（§ 原生路径）
 │   优势：快、自动发布到气泡、无需浏览器
 │
 ├─ 否（Claude / 其他）→ 能 shell out 到有能力的 CLI 吗？

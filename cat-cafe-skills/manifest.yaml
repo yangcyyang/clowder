@@ -1005,10 +1005,10 @@ skills:
   # ── AI 图片生成 ──
   image-generation:
     description: >
-      通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载。
+      AI 图片生成：优先使用 Clowder GPT 图片生成回调，必要时降级到浏览器自动化。
       Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
-      Not for: Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
-      Output: 生成的图片文件（PNG）保存到项目 assets/ 目录。
+      Not for: 已有图片展示（用 media_gallery rich block）、Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
+      Output: 生成图片保存到 /uploads/ 并贴回 media_gallery。
     triggers:
       - "生成图片"
       - "画一张"
@@ -1016,10 +1016,16 @@ skills:
       - "AI 画图"
       - "画头像"
       - "画个"
+    slashCommands:
+      - name: /image
+        usage: /image <prompt> [--size 1024x1024|1024x1536|1536x1024] [--n 1-4]
+        description: 生成图片并贴回当前对话
+        surface: both
     not_for:
+      - "已有图片展示"
       - "Pencil 内部设计"
       - "简单形状布局"
-    output: "Generated PNG saved to assets/"
+    output: "Generated image files in /uploads/ + media_gallery rich block"
     next: []
     sop_step: null
     merged_from: null

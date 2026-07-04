@@ -10,35 +10,40 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { catRegistry, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
+import { type CatId, catRegistry, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
+import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
 import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
+import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
   flattenTextParts,
   flattenTurnTextParts,
 } from '../text-aggregation.js';
-import { mergeTokenUsage, type MessageMetadata, type TokenUsage } from '../../types.js';
+import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
   formatContinuationPrompt,
   isCollaborationContinuityCapsuleV1,
 } from './CollaborationContinuityCapsule.js';
+import { type FastLaneExecutionResult, FastLaneExecutor } from './FastLaneExecutor.js';
+import {
+  FastLaneRouter,
+  IMAGE_GENERATION_WORKFLOW_ID,
+  isFastLaneEnabled,
+  PROJECT_INIT_WORKFLOW_ID,
+} from './FastLaneRouter.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import type {
   ConsumedContinuationToken,
   InvocationFinalStatus,
   SessionContinuationCoordinator,
 } from './SessionContinuationCoordinator.js';
-import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
-import { FastLaneExecutor, type FastLaneExecutionResult } from './FastLaneExecutor.js';
-import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
-import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -135,9 +140,24 @@ interface TokenPricing {
 }
 
 const TOKEN_PRICING_BY_MODEL: Record<string, TokenPricing> = {
-  'claude-opus-4': { inputPerMillion: 15, outputPerMillion: 75, cacheReadPerMillion: 1.5, cacheCreationPerMillion: 18.75 },
-  'claude-sonnet-4': { inputPerMillion: 3, outputPerMillion: 15, cacheReadPerMillion: 0.3, cacheCreationPerMillion: 3.75 },
-  'claude-haiku-4': { inputPerMillion: 0.8, outputPerMillion: 4, cacheReadPerMillion: 0.08, cacheCreationPerMillion: 1 },
+  'claude-opus-4': {
+    inputPerMillion: 15,
+    outputPerMillion: 75,
+    cacheReadPerMillion: 1.5,
+    cacheCreationPerMillion: 18.75,
+  },
+  'claude-sonnet-4': {
+    inputPerMillion: 3,
+    outputPerMillion: 15,
+    cacheReadPerMillion: 0.3,
+    cacheCreationPerMillion: 3.75,
+  },
+  'claude-haiku-4': {
+    inputPerMillion: 0.8,
+    outputPerMillion: 4,
+    cacheReadPerMillion: 0.08,
+    cacheCreationPerMillion: 1,
+  },
   'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.6 },
   'gpt-4o': { inputPerMillion: 2.5, outputPerMillion: 10 },
   'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
@@ -448,6 +468,8 @@ export interface QueueProcessorDeps {
     SessionContinuationCoordinator,
     'prepareInvocationContext' | 'commitInvocationOutcome'
   >;
+  /** Test seam for deterministic fast-lane execution. */
+  fastLaneExecutor?: FastLaneExecutor;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -480,13 +502,15 @@ export class QueueProcessor {
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
   private fastLaneRouter = new FastLaneRouter();
-  private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
+  private fastLaneExecutor: FastLaneExecutor;
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
   private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
 
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
     this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+    this.fastLaneExecutor =
+      deps.fastLaneExecutor ?? new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
   }
 
   private async appendA2AHandoffTaskEvent(params: {
@@ -635,7 +659,9 @@ export class QueueProcessor {
                 inputTokens: aggregate.usage.inputTokens ?? 0,
                 outputTokens: aggregate.usage.outputTokens ?? 0,
                 totalTokens,
-                ...(aggregate.usage.cacheReadTokens != null ? { cacheReadTokens: aggregate.usage.cacheReadTokens } : {}),
+                ...(aggregate.usage.cacheReadTokens != null
+                  ? { cacheReadTokens: aggregate.usage.cacheReadTokens }
+                  : {}),
                 ...(aggregate.usage.cacheCreationTokens != null
                   ? { cacheCreationTokens: aggregate.usage.cacheCreationTokens }
                   : {}),
@@ -750,7 +776,10 @@ export class QueueProcessor {
     invocationId?: string;
     catId: string;
     sourceMessageIds: readonly string[];
-    type: Extract<TaskEvent['type'], 'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'>;
+    type: Extract<
+      TaskEvent['type'],
+      'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'
+    >;
     data: Record<string, unknown>;
   }): Promise<void> {
     const { taskStore } = this.deps;
@@ -781,8 +810,71 @@ export class QueueProcessor {
   }
 
   private formatFastLaneSuccessMessage(result: Extract<FastLaneExecutionResult, { status: 'succeeded' }>): string {
+    if (result.richBlocks?.length) {
+      const urls = (result.publishedUrls ?? result.files).map((file) => `- ${file}`).join('\n');
+      return `image 快车道已完成。\n\n生成图片：\n${urls}`;
+    }
     const files = result.files.map((file) => `- ${file}`).join('\n');
     return `project-init 快车道已完成。\n\n生成文件：\n${files}`;
+  }
+
+  private formatFastLaneFailureMessage(
+    workflowId: string,
+    result: Extract<FastLaneExecutionResult, { status: 'failed' }>,
+  ): string {
+    const label = workflowId === IMAGE_GENERATION_WORKFLOW_ID ? 'image' : workflowId;
+    return `${label} 快车道失败。\n\n错误：${result.stderr || result.reason}`;
+  }
+
+  private async resolveThreadMetaForFastLane(threadId: string, log: LoggerLike): Promise<ThreadMetaLike | undefined> {
+    const rawResult = this.deps.threadMetaLookup?.(threadId);
+    if (!rawResult) return undefined;
+    try {
+      const LOOKUP_TIMEOUT_MS = 2000;
+      return await Promise.race([
+        Promise.resolve(rawResult).catch((err: unknown) => {
+          log.warn({ err, threadId }, '[QueueProcessor] fast lane threadMetaLookup late rejection');
+          return undefined;
+        }),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS)),
+      ]);
+    } catch (err) {
+      log.warn({ err, threadId }, '[QueueProcessor] fast lane threadMetaLookup failed');
+      return undefined;
+    }
+  }
+
+  private async deliverFastLaneOutbound(params: {
+    threadId: string;
+    catId: string;
+    content: string;
+    richBlocks: ReadonlyArray<{ kind: string; [key: string]: unknown }>;
+    triggerMessageId?: string;
+    log: LoggerLike;
+  }): Promise<void> {
+    if (!this.deps.outboundHook) return;
+    const DELIVER_TIMEOUT_MS = 10_000;
+    const threadMeta = await this.resolveThreadMetaForFastLane(params.threadId, params.log);
+    const deliverPromise = this.deps.outboundHook.deliver(
+      params.threadId,
+      params.content,
+      params.catId,
+      params.richBlocks,
+      threadMeta,
+      'agent',
+      params.triggerMessageId,
+    );
+    try {
+      await Promise.race([
+        deliverPromise,
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
+      ]);
+    } catch (err) {
+      params.log.error(
+        { err, threadId: params.threadId, catId: params.catId },
+        '[QueueProcessor] fast lane outbound delivery failed',
+      );
+    }
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -1645,7 +1737,7 @@ export class QueueProcessor {
             data: {
               lane: 'slow',
               workflowId: fastLaneDecision.workflowId,
-              reason: 'contentBlocks present; fast lane supports text-only project-init command',
+              reason: 'contentBlocks present; fast lane supports text-only commands',
               fallbackReason: 'content_blocks_present',
             },
           });
@@ -1662,7 +1754,14 @@ export class QueueProcessor {
               input: fastLaneDecision.input,
             },
           });
-          const result = await this.fastLaneExecutor.executeProjectInit(fastLaneDecision.input);
+          const result =
+            fastLaneDecision.workflowId === PROJECT_INIT_WORKFLOW_ID
+              ? await this.fastLaneExecutor.executeProjectInit(fastLaneDecision.input)
+              : await this.fastLaneExecutor.executeImageGeneration(fastLaneDecision.input, {
+                  invocationId,
+                  threadId,
+                  catId: primaryCat,
+                });
           if (result.status === 'skipped') {
             await this.appendFastLaneTaskEvent({
               threadId,
@@ -1687,6 +1786,21 @@ export class QueueProcessor {
             });
             finalStatus = 'succeeded';
             responseText = this.formatFastLaneSuccessMessage(result);
+            const richBlocks = result.richBlocks ?? [];
+            let fastLaneMessageId: string | undefined;
+            if (richBlocks.length > 0) {
+              const stored = await messageStore.append({
+                userId,
+                catId: primaryCat as CatId,
+                content: responseText,
+                mentions: [],
+                timestamp: Date.now(),
+                threadId,
+                origin: 'callback',
+                extra: { rich: { v: 1, blocks: richBlocks } },
+              });
+              fastLaneMessageId = stored.id;
+            }
             socketManager.broadcastAgentMessage(
               {
                 type: 'text',
@@ -1695,9 +1809,24 @@ export class QueueProcessor {
                 origin: 'fast_lane',
                 timestamp: Date.now(),
                 invocationId,
+                ...(fastLaneMessageId ? { messageId: fastLaneMessageId } : {}),
               },
               threadId,
             );
+            for (const block of richBlocks) {
+              socketManager.broadcastAgentMessage(
+                {
+                  type: 'system_info',
+                  catId: primaryCat,
+                  content: JSON.stringify({ type: 'rich_block', block }),
+                  origin: 'fast_lane',
+                  timestamp: Date.now(),
+                  invocationId,
+                  ...(fastLaneMessageId ? { messageId: fastLaneMessageId } : {}),
+                },
+                threadId,
+              );
+            }
             socketManager.broadcastAgentMessage(
               {
                 type: 'done',
@@ -1707,6 +1836,14 @@ export class QueueProcessor {
               },
               threadId,
             );
+            await this.deliverFastLaneOutbound({
+              threadId,
+              catId: primaryCat,
+              content: responseText,
+              richBlocks: richBlocks.map((block) => block as unknown as { kind: string; [key: string]: unknown }),
+              triggerMessageId: messageId ?? fastLaneMessageId,
+              log,
+            });
             await this.appendFastLaneTaskEvent({
               threadId,
               invocationId,
@@ -1720,6 +1857,12 @@ export class QueueProcessor {
                 stdout: result.stdout,
                 stderr: result.stderr,
                 files: result.files,
+                ...(result.publishedUrls ? { publishedUrls: result.publishedUrls } : {}),
+                ...(result.provider ? { provider: result.provider } : {}),
+                ...(result.model ? { model: result.model } : {}),
+                ...(result.prompt ? { prompt: result.prompt } : {}),
+                ...(richBlocks.length > 0 ? { richBlockIds: richBlocks.map((block) => block.id) } : {}),
+                ...(fastLaneMessageId ? { messageId: fastLaneMessageId } : {}),
                 artifactCount: artifact?.files.length ?? 0,
                 routeExecutionBypassed: true,
                 tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
@@ -1738,6 +1881,7 @@ export class QueueProcessor {
             }
             return 'succeeded';
           } else {
+            responseText = this.formatFastLaneFailureMessage(fastLaneDecision.workflowId, result);
             await invocationRecordStore.update(invocationId, {
               status: 'failed',
               phase: 'done',
@@ -1761,6 +1905,21 @@ export class QueueProcessor {
                 routeExecutionBypassed: true,
               },
             });
+            let fastLaneMessageId: string | undefined;
+            try {
+              const stored = await messageStore.append({
+                userId,
+                catId: primaryCat as CatId,
+                content: responseText,
+                mentions: [],
+                timestamp: Date.now(),
+                threadId,
+                origin: 'callback',
+              });
+              fastLaneMessageId = stored.id;
+            } catch (err) {
+              log.warn({ err, threadId, entryId: entry.id }, '[QueueProcessor] persist fast lane failure failed');
+            }
             socketManager.broadcastAgentMessage(
               {
                 type: 'error',
@@ -1770,9 +1929,18 @@ export class QueueProcessor {
                 origin: 'fast_lane',
                 timestamp: Date.now(),
                 invocationId,
+                ...(fastLaneMessageId ? { messageId: fastLaneMessageId } : {}),
               },
               threadId,
             );
+            await this.deliverFastLaneOutbound({
+              threadId,
+              catId: primaryCat,
+              content: responseText,
+              richBlocks: [],
+              triggerMessageId: messageId ?? fastLaneMessageId,
+              log,
+            });
             finalStatus = 'failed';
             return 'failed';
           }

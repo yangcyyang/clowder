@@ -433,12 +433,7 @@ describe('QueueProcessor', () => {
         /wechat-cli/,
       );
       const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
-      assert.deepEqual(eventTypes, [
-        'fast_lane_decision',
-        'fast_lane_started',
-        'fast_lane_completed',
-        'artifact',
-      ]);
+      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_completed', 'artifact']);
       const completed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_completed');
       assert.equal(completed.data.workflowId, 'project-init');
       assert.equal(completed.data.routeExecutionBypassed, true);
@@ -452,6 +447,219 @@ describe('QueueProcessor', () => {
       if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
       else process.env.CAT_CAFE_FAST_LANE = previous;
       await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 executes explicit /image command and persists media_gallery', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    try {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-task',
+        events: [],
+      };
+      const updatedTasks = [];
+      const richBlock = {
+        id: 'generated-image-test',
+        kind: 'media_gallery',
+        v: 1,
+        items: [{ url: '/uploads/cat.png', alt: 'pixel cat' }],
+      };
+      const fastDeps = stubDeps({
+        fastLaneExecutor: {
+          executeProjectInit: mock.fn(async () => {
+            throw new Error('project-init should not run');
+          }),
+          executeImageGeneration: mock.fn(async (input, context) => ({
+            status: 'succeeded',
+            stdout: JSON.stringify({ input, context }),
+            stderr: '',
+            durationMs: 12,
+            files: ['/uploads/cat.png'],
+            richBlocks: [richBlock],
+            publishedUrls: ['/uploads/cat.png'],
+            provider: 'openai',
+            model: 'gpt-image-2',
+            prompt: input.prompt,
+          })),
+        },
+        messageStore: {
+          append: mock.fn(async (msg) => ({ id: 'msg-image', ...msg })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
+        outboundHook: {
+          deliver: mock.fn(async () => {}),
+        },
+        threadMetaLookup: mock.fn(async () => ({
+          threadShortId: 'T1',
+          threadTitle: 'Image Thread',
+          deepLinkUrl: 'http://localhost/thread/t1',
+        })),
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [updatedTasks.at(-1) ?? sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previousTask = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previousTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+      });
+      const fastProcessor = new QueueProcessor(fastDeps);
+      const entry = enqueueEntry(fastDeps.queue, {
+        content: '/image "pixel cat" --size 1024x1024 --n 2',
+        targetCats: ['opus'],
+      });
+      fastDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      const result = await fastProcessor.processNext('t1', 'u1');
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 100));
+
+      assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'image fast lane must bypass routeExecution');
+      assert.equal(fastDeps.fastLaneExecutor.executeImageGeneration.mock.calls.length, 1);
+      assert.deepEqual(fastDeps.fastLaneExecutor.executeImageGeneration.mock.calls[0].arguments[0], {
+        prompt: 'pixel cat',
+        size: '1024x1024',
+        n: 2,
+      });
+
+      const assistantAppend = fastDeps.messageStore.append.mock.calls.find(
+        (call) => call.arguments[0].catId === 'opus' && call.arguments[0].extra?.rich,
+      );
+      assert.ok(assistantAppend, 'image fast lane should persist assistant message with rich block');
+      assert.equal(assistantAppend.arguments[0].extra.rich.blocks[0].kind, 'media_gallery');
+
+      const richBroadcast = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
+        (call) => call.arguments[0].type === 'system_info' && call.arguments[0].messageId === 'msg-image',
+      );
+      assert.ok(richBroadcast, 'image fast lane should broadcast rich_block system_info');
+      assert.equal(fastDeps.outboundHook.deliver.mock.calls.length, 1, 'image fast lane should deliver to connectors');
+      assert.deepEqual(fastDeps.outboundHook.deliver.mock.calls[0].arguments.slice(0, 5), [
+        't1',
+        'image 快车道已完成。\n\n生成图片：\n- /uploads/cat.png',
+        'opus',
+        [richBlock],
+        {
+          threadShortId: 'T1',
+          threadTitle: 'Image Thread',
+          deepLinkUrl: 'http://localhost/thread/t1',
+        },
+      ]);
+
+      const completed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_completed');
+      assert.equal(completed.data.workflowId, 'image-generation');
+      assert.deepEqual(completed.data.publishedUrls, ['/uploads/cat.png']);
+      assert.equal(completed.data.provider, 'openai');
+      assert.equal(completed.data.model, 'gpt-image-2');
+      assert.deepEqual(completed.data.richBlockIds, ['generated-image-test']);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 persists and delivers /image failures', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    try {
+      const sourceTask = {
+        id: 'task-source',
+        threadId: 't1',
+        sourceMessageId: 'msg-task',
+        events: [],
+      };
+      const updatedTasks = [];
+      const fastDeps = stubDeps({
+        fastLaneExecutor: {
+          executeProjectInit: mock.fn(async () => {
+            throw new Error('project-init should not run');
+          }),
+          executeImageGeneration: mock.fn(async () => ({
+            status: 'failed',
+            reason: 'provider_error',
+            stdout: '',
+            stderr: 'image provider down',
+            durationMs: 13,
+          })),
+        },
+        messageStore: {
+          append: mock.fn(async (msg) => ({ id: 'msg-image-failed', ...msg })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
+        outboundHook: {
+          deliver: mock.fn(async () => {}),
+        },
+        threadMetaLookup: mock.fn(async () => ({
+          threadShortId: 'T1',
+          threadTitle: 'Image Thread',
+          deepLinkUrl: 'http://localhost/thread/t1',
+        })),
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [updatedTasks.at(-1) ?? sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previousTask = updatedTasks.at(-1) ?? sourceTask;
+            const updated = {
+              ...sourceTask,
+              events: [...previousTask.events, ...(input.events ?? [])],
+            };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+      });
+      const fastProcessor = new QueueProcessor(fastDeps);
+      const entry = enqueueEntry(fastDeps.queue, {
+        content: '/image pixel cat',
+        targetCats: ['opus'],
+      });
+      fastDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      const result = await fastProcessor.processNext('t1', 'u1');
+      assert.equal(result.started, true);
+      await new Promise((r) => setTimeout(r, 100));
+
+      assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'image fast lane must not rerun slow lane');
+      const assistantAppend = fastDeps.messageStore.append.mock.calls.find(
+        (call) => call.arguments[0].catId === 'opus' && /image 快车道失败/.test(call.arguments[0].content),
+      );
+      assert.ok(assistantAppend, 'image fast lane failure should be persisted as an assistant message');
+      assert.equal(assistantAppend.arguments[0].origin, 'callback');
+
+      const errorBroadcast = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
+        (call) => call.arguments[0].type === 'error',
+      );
+      assert.equal(errorBroadcast.arguments[0].messageId, 'msg-image-failed');
+      assert.match(errorBroadcast.arguments[0].error, /image provider down/);
+
+      assert.equal(fastDeps.outboundHook.deliver.mock.calls.length, 1, 'image failures should deliver to connectors');
+      assert.deepEqual(fastDeps.outboundHook.deliver.mock.calls[0].arguments.slice(0, 5), [
+        't1',
+        'image 快车道失败。\n\n错误：image provider down',
+        'opus',
+        [],
+        {
+          threadShortId: 'T1',
+          threadTitle: 'Image Thread',
+          deepLinkUrl: 'http://localhost/thread/t1',
+        },
+      ]);
+
+      const failed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_failed');
+      assert.equal(failed.data.workflowId, 'image-generation');
+      assert.equal(failed.data.routeExecutionBypassed, true);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
     }
   });
 
@@ -537,10 +745,7 @@ describe('QueueProcessor', () => {
 
       assert.equal(result.started, true);
       assert.equal(result.entries?.length, 2);
-      assert.deepEqual(
-        result.entries?.map((entry) => entry.targetCats[0]).sort(),
-        ['codex', 'opus'],
-      );
+      assert.deepEqual(result.entries?.map((entry) => entry.targetCats[0]).sort(), ['codex', 'opus']);
       await new Promise((r) => setTimeout(r, 20));
       assert.equal(slowDeps.invocationTracker.startAll.mock.calls.length, 2);
     } finally {
@@ -1813,20 +2018,22 @@ describe('QueueProcessor', () => {
           }),
         },
         router: {
-          routeExecution: mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
-            if (targetCats[0] === 'opus') {
-              const enqueued = await opts.enqueueA2ATargets({
-                threadId: 't1',
-                userId: 'u1',
-                callerCatId: 'opus',
-                targetCats: ['pi', 'codex'],
-                content: '@Pi 做 A，@codex 做 B',
-                triggerMessageId: 'msg-opus-handoff',
-              });
-              assert.deepEqual(enqueued, ['pi', 'codex']);
-            }
-            yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
-          }),
+          routeExecution: mock.fn(
+            async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
+              if (targetCats[0] === 'opus') {
+                const enqueued = await opts.enqueueA2ATargets({
+                  threadId: 't1',
+                  userId: 'u1',
+                  callerCatId: 'opus',
+                  targetCats: ['pi', 'codex'],
+                  content: '@Pi 做 A，@codex 做 B',
+                  triggerMessageId: 'msg-opus-handoff',
+                });
+                assert.deepEqual(enqueued, ['pi', 'codex']);
+              }
+              yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+            },
+          ),
           ackCollectedCursors: mock.fn(async () => {}),
         },
       });
@@ -1864,7 +2071,10 @@ describe('QueueProcessor', () => {
           updatedTasks.map((task) => task.events.at(-1).data.toCatId),
           ['pi', 'codex'],
         );
-        const handoffLog = await readFile(join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'), 'utf-8');
+        const handoffLog = await readFile(
+          join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'),
+          'utf-8',
+        );
         assert.ok(handoffLog.includes('**from**: opus'), 'handoff-log should include sender');
         assert.ok(handoffLog.includes('**to**: pi'), 'handoff-log should include first target');
         assert.ok(handoffLog.includes('**to**: codex'), 'handoff-log should include second target');
@@ -2511,7 +2721,9 @@ describe('QueueProcessor', () => {
           await hookProcessor.processNext('t1', 'u1');
           await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 2);
 
-          const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+          const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map(
+            (call) => call.arguments[0],
+          );
           const textMessages = agentMessages.filter((msg) => msg.type === 'text');
           const doneMessages = agentMessages.filter((msg) => msg.type === 'done');
           const roomEvents = hookDeps.socketManager.broadcastToRoom.mock.calls.map((call) => call.arguments[1]);

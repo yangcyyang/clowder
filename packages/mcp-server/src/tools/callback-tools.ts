@@ -693,6 +693,48 @@ export async function handleGenerateDocument(input: {
   return result;
 }
 
+/** C6: Generate images and attach them as media_gallery RichBlock */
+export const generateImageInputSchema = {
+  prompt: z
+    .string()
+    .min(1)
+    .max(8000)
+    .describe('Image prompt to generate. Example: "一只像素风猫猫程序员，在黄色咖啡馆里写代码".'),
+  n: z.number().int().min(1).max(4).optional().describe('Number of image variants to generate. Default: 1, max: 4.'),
+  size: z
+    .enum(['auto', '1024x1024', '1024x1536', '1536x1024'])
+    .optional()
+    .describe('Image size. Default: 1024x1024. Use 1024x1536 for portrait, 1536x1024 for landscape.'),
+  quality: z
+    .enum(['auto', 'low', 'medium', 'high'])
+    .optional()
+    .describe('Image quality. Default: auto. Use low for drafts, high for final assets.'),
+  outputFormat: z
+    .enum(['png', 'jpeg', 'webp'])
+    .optional()
+    .describe('Output image format. Default: png. Use webp/jpeg only when smaller files matter.'),
+  title: z.string().min(1).max(120).optional().describe('Optional gallery title shown above the generated image(s).'),
+};
+
+export async function handleGenerateImage(input: {
+  prompt: string;
+  n?: number;
+  size?: string;
+  quality?: string;
+  outputFormat?: string;
+  title?: string;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/generate-image', {
+    prompt: input.prompt,
+    ...(input.n != null ? { n: input.n } : {}),
+    ...(input.size ? { size: input.size } : {}),
+    ...(input.quality ? { quality: input.quality } : {}),
+    ...(input.outputFormat ? { outputFormat: input.outputFormat } : {}),
+    ...(input.title ? { title: input.title } : {}),
+  });
+  return result;
+}
+
 export const requestPermissionInputSchema = {
   action: z.string().min(1).describe('The action requiring permission (e.g. "git_commit", "file_delete")'),
   reason: z.string().min(1).describe('Why you need this permission'),
@@ -1209,6 +1251,18 @@ export const callbackTools = [
       'Degradation: PDF needs LaTeX engine → falls back to DOCX → falls back to MD. No pandoc → .md only.',
     inputSchema: generateDocumentInputSchema,
     handler: handleGenerateDocument,
+  },
+  {
+    name: 'cat_cafe_generate_image',
+    description:
+      'Generate new AI images via the configured GPT image provider and deliver them to the current conversation. ' +
+      'Use when: user asks "生成图片", "画一张", "做个头像", "generate image", "make a concept image", or needs visual assets from text. ' +
+      'NOT for: showing existing images you already have (use create_rich_block with kind:"media_gallery" + /uploads/ URLs). ' +
+      'NOT for: generating PDF/DOCX/MD documents (use generate_document). ' +
+      'Output: image files saved to /uploads/, attached as a media_gallery RichBlock, and delivered through the normal IM/web outbound pipeline. ' +
+      'GOTCHA: Do NOT manually call an external image CLI then create_rich_block — that skips the canonical publication path and may miss Feishu/Telegram delivery. Always use this tool for text-to-image generation.',
+    inputSchema: generateImageInputSchema,
+    handler: handleGenerateImage,
   },
   {
     name: 'cat_cafe_request_permission',

@@ -21,16 +21,17 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
 } from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
+import { FastLaneRouter, isFastLaneEnabled } from '../domains/cats/services/agents/invocation/FastLaneRouter.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
-import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type {
   ConsumedContinuationToken,
   SessionContinuationCoordinator,
@@ -259,6 +260,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // multipart transport cap; image-specif
 const MAX_FILES = 5;
 
 const DECISION_NOTIFICATION_RE = /\b(review|lgtm|merge|pr)\b/i;
+const fastLaneRouter = new FastLaneRouter();
 
 function isMessageVisibleToUser(message: StoredMessage, userId: string): boolean {
   if (message.deletedAt) return false;
@@ -597,10 +599,27 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         (opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false)
       );
     })();
-    const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
-    log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
+    const fastLaneDecision = isFastLaneEnabled() ? fastLaneRouter.decide({ content, intent: intent.intent }) : null;
+    const shouldQueueFastLane =
+      !deliveryMode &&
+      fastLaneDecision?.lane === 'fast' &&
+      !contentBlocks?.length &&
+      !!opts.invocationQueue &&
+      !!opts.queueProcessor;
+    const mode = deliveryMode ?? (shouldQueueFastLane || hasActive ? 'queue' : 'immediate');
+    log.debug(
+      {
+        threadId: resolvedThreadId,
+        targetCats,
+        intent: intent.intent,
+        mode,
+        hasActive,
+        fastLaneDecision,
+      },
+      'Dispatch decision',
+    );
 
-    if (mode === 'queue' && hasActive && opts.invocationQueue) {
+    if (mode === 'queue' && (hasActive || shouldQueueFastLane) && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
@@ -673,7 +692,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         queue: opts.invocationQueue.list(resolvedThreadId, userId),
         action: enqueueResult.outcome,
       });
-      if (isParallelDispatchEnabled()) {
+      if (shouldQueueFastLane || isParallelDispatchEnabled()) {
         void opts.queueProcessor?.processNext(resolvedThreadId, userId).catch((err) => {
           log.error({ err, threadId: resolvedThreadId, userId }, 'Parallel dispatch after enqueue failed');
         });
