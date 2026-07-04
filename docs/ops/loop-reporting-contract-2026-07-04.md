@@ -39,4 +39,9 @@ Rules:
 
 ## Smoke
 
-Pending until the N8 completion report is posted after the N8 commit exists.
+- Helper commit: `cee1214 docs(ops): add loop completion reporting`
+- Report message id: `0001783180193133-000029-6463fee2`
+- Report invocation id: `3aa728e6-8da9-4113-a477-2dbe0c411342`
+- Invocation result: `succeeded`
+- Reviewer response: `0001783180194455-000030-14418606`
+- Review result: `N8 验收：通过`
