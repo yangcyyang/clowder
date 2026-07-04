@@ -31,9 +31,19 @@ topics: [clowder, github-backup, secret-scan]
 Most visible samples are test fixtures, placeholder-like examples, environment variable names, or code variables that contain words such as `token`, `secret`, or `key`.
 However, this is still a non-clean scan report. Per N7, the first GitHub push remains frozen until the owner/reviewer explicitly decides whether to allowlist false positives, remove fixtures, or rewrite history.
 
-## Result
+## Triage Resolution
 
-Findings were detected. Do not push history until owner/reviewer decides remediation. Snippets below are masked.
+2026-07-05 follow-up triage classified all 266 masked findings as false
+positives or intentional test fixtures. No finding remained in manual-review
+state, and no real hard-coded secret was identified.
+
+Evidence: `docs/ops/secret-scan-triage-allowlist-2026-07-05.md`.
+
+## Original Result
+
+Findings were detected. At the time of the original scan, history was not to be
+pushed until owner/reviewer decided remediation. The 2026-07-05 triage
+resolution above records that decision. Snippets below are masked.
 
 | Type | Commit | File | Line | Snippet |
 |------|--------|------|------|---------|
