@@ -58,6 +58,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  appendCompactBoundaryTaskEvent,
   buildHistoryGovernanceObservation,
   buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
@@ -70,6 +71,7 @@ import {
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   persistSilentCompletionNotice,
+  parseCompactBoundarySystemInfo,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -567,6 +569,7 @@ export async function* routeParallel(
   const catMeta = new Map<string, MessageMetadata>();
   const catSawUserFacingSystemInfo = new Map<string, boolean>();
   const catToolEvents = new Map<string, StoredToolEvent[]>();
+  const catCompactBoundarySignals = new Map<string, Array<{ timestamp?: number; preTokens?: number }>>();
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
   const catErrorText = new Map<string, string>();
@@ -691,6 +694,15 @@ export async function* routeParallel(
             }
           } catch {
             /* ignore parse errors */
+          }
+          const compactBoundary = parseCompactBoundarySystemInfo(effectiveMsg.content);
+          if (compactBoundary) {
+            const arr = catCompactBoundarySignals.get(effectiveMsg.catId) ?? [];
+            arr.push({
+              timestamp: effectiveMsg.timestamp,
+              ...(compactBoundary.preTokens !== undefined ? { preTokens: compactBoundary.preTokens } : {}),
+            });
+            catCompactBoundarySignals.set(effectiveMsg.catId, arr);
           }
         }
         if (effectiveMsg.type === 'error' && effectiveMsg.catId) {
@@ -1143,6 +1155,18 @@ export async function* routeParallel(
         }
 
         // F155: Ack guide completion only after cat produced visible output.
+        for (const compactBoundary of catCompactBoundarySignals.get(msg.catId) ?? []) {
+          await appendCompactBoundaryTaskEvent(deps, {
+            threadId,
+            currentUserMessageId,
+            catId: msg.catId,
+            invocationId: persistedInvocationId,
+            timestamp: compactBoundary.timestamp,
+            ...(compactBoundary.preTokens !== undefined ? { preTokens: compactBoundary.preTokens } : {}),
+          });
+        }
+        catCompactBoundarySignals.delete(msg.catId);
+
         if (deps.invocationDeps.threadStore) {
           const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
           const sessionStore = deps.invocationDeps.guideSessionStore!;

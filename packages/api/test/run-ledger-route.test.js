@@ -202,6 +202,70 @@ describe('run ledger route', () => {
     await app.close();
   });
 
+  test('surfaces compact boundary task events without leaking raw control data', async () => {
+    const { app, invocationRecordStore, messageStore, taskStore } = await buildFixture();
+    const threadId = 'thread-ledger-compact';
+    const userId = 'alice';
+    const { invocationId } = invocationRecordStore.create({
+      threadId,
+      userId,
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'client-msg-compact',
+    });
+    const userMessage = messageStore.append({
+      threadId,
+      userId,
+      catId: null,
+      content: 'continue after compact',
+      mentions: ['codex'],
+      timestamp: 1710000020000,
+    });
+    invocationRecordStore.update(invocationId, {
+      userMessageId: userMessage.id,
+      status: 'succeeded',
+      phase: 'done',
+      updatedAt: 1710000021000,
+    });
+
+    taskStore.create({
+      threadId,
+      title: 'Compact handoff',
+      why: 'B4 compact boundary visibility',
+      createdBy: 'user',
+      sourceMessageId: userMessage.id,
+      events: [
+        {
+          ts: new Date(1710000020500).toISOString(),
+          catId: 'codex',
+          invocationId,
+          type: 'compact_boundary',
+          data: {
+            boundary: 'compact_boundary',
+            source: 'provider',
+            preTokens: 42000,
+            sessionId: 'sess-API_KEY=sk-ant-secret-value',
+          },
+        },
+      ],
+    });
+
+    const res = await app.inject({ method: 'GET', url: `/api/run-ledger/${invocationId}` });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const compactEvent = body.events.find((event) => event.type === 'compact_boundary');
+
+    assert.ok(compactEvent);
+    assert.equal(compactEvent.actor, 'codex');
+    assert.equal(compactEvent.data.boundary, 'compact_boundary');
+    assert.equal(compactEvent.data.source, 'provider');
+    assert.equal(compactEvent.data.preTokens, 42000);
+    assert.match(compactEvent.data.sessionId, /\[redacted-secret\]/);
+    assert.equal(res.body.includes('sk-ant-secret-value'), false);
+
+    await app.close();
+  });
+
   test('returns 404 for an unknown invocation', async () => {
     const { app } = await buildFixture();
 

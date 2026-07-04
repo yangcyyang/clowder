@@ -73,6 +73,42 @@ describe('SessionContinuationCoordinator', () => {
     assert.equal(result.consumedContinuation.capsule, capsule);
   });
 
+  it('resume consumes compact boundary capsule and re-injects identity plus unfinished task guardrails', async () => {
+    const capsule = makeCapsule({
+      continuationReason: 'compact_boundary',
+      seal: undefined,
+      threadId: 'thread-compact',
+      catId: 'codex',
+      mode: 'serial',
+      chainIndex: 1,
+      chainTotal: 2,
+      directMessageFrom: 'opus',
+    });
+    const coord = new SessionContinuationCoordinator({
+      threadStore: {
+        getMemberSessionStrategy: () => 'resume',
+        consumePendingContinuation: () => capsule,
+      },
+    });
+
+    const result = await coord.prepareInvocationContext({
+      threadId: 'thread-compact',
+      catId: 'codex',
+      userId: 'u1',
+      content: '继续执行 B4 验收',
+    });
+
+    assert.match(result.content, /compact_boundary/);
+    assert.match(result.content, /Thread: thread-compact/);
+    assert.match(result.content, /Cat: codex/);
+    assert.match(result.content, /Mode: serial \(1 \/ 2\)/);
+    assert.match(result.content, /Direct message from: opus/);
+    assert.match(result.content, /unfinished work/i);
+    assert.match(result.content, /git status --short --branch/i);
+    assert.match(result.content, /继续执行 B4 验收/);
+    assert.equal(result.consumedContinuation.capsule, capsule);
+  });
+
   it('success stores produced capsule for next invocation', async () => {
     const calls = [];
     const capsule = makeCapsule();

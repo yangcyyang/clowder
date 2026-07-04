@@ -26,6 +26,7 @@ export type RunLedgerEventType =
   | 'tool_usage'
   | 'artifact_delta'
   | 'usage_recorded'
+  | 'compact_boundary'
   | 'message_persisted'
   | 'succeeded'
   | 'failed'
@@ -229,6 +230,15 @@ function sanitizeTaskEventData(event: TaskEvent): Record<string, unknown> {
       durationMs: finiteNumber(data.durationMs),
     });
   }
+  if (event.type === 'compact_boundary') {
+    return compactRecord({
+      boundary: data.boundary === 'compact_boundary' ? 'compact_boundary' : undefined,
+      source: typeof data.source === 'string' ? redactString(data.source) : undefined,
+      preTokens: finiteNumber(data.preTokens),
+      sessionId: typeof data.sessionId === 'string' ? redactString(data.sessionId) : undefined,
+      compressionCount: finiteNumber(data.compressionCount),
+    });
+  }
   if (event.type === 'failed') {
     return compactRecord({
       failureClass: typeof data.failureClass === 'string' ? redactString(data.failureClass) : undefined,
@@ -266,6 +276,7 @@ function mapTaskEventType(type: TaskEvent['type']): RunLedgerEventType {
   if (type === 'usage') return 'usage_recorded';
   if (type === 'artifact') return 'artifact_delta';
   if (type === 'tool_usage') return 'tool_usage';
+  if (type === 'compact_boundary') return 'compact_boundary';
   if (type === 'handoff') return 'recovered';
   if (type === 'failed' || type === 'fast_lane_failed') return 'failed';
   return 'task_event';
@@ -351,13 +362,14 @@ const EVENT_TYPE_ORDER: Partial<Record<RunLedgerEventType, number>> = {
   tool_failed: 10,
   tool_usage: 11,
   usage_recorded: 12,
-  artifact_delta: 13,
-  message_persisted: 14,
-  task_event: 15,
-  recovered: 16,
-  succeeded: 17,
-  failed: 17,
-  canceled: 17,
+  compact_boundary: 13,
+  artifact_delta: 14,
+  message_persisted: 15,
+  task_event: 16,
+  recovered: 17,
+  succeeded: 18,
+  failed: 18,
+  canceled: 18,
 };
 
 export class RunLedgerAssembler {

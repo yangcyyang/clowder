@@ -91,6 +91,7 @@ import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  appendCompactBoundaryTaskEvent,
   buildHistoryGovernanceObservation,
   buildContextUsageWarning,
   buildRuntimeContextBudgetSnapshot,
@@ -103,6 +104,7 @@ import {
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   persistSilentCompletionNotice,
+  parseCompactBoundarySystemInfo,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -816,6 +818,7 @@ export async function* routeSerial(
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
+      const compactBoundarySignals: Array<{ timestamp?: number; preTokens?: number }> = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
       // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
@@ -953,6 +956,13 @@ export async function* routeSerial(
                 }
               } catch {
                 /* ignore parse errors */
+              }
+              const compactBoundary = parseCompactBoundarySystemInfo(effectiveMsg.content);
+              if (compactBoundary) {
+                compactBoundarySignals.push({
+                  timestamp: effectiveMsg.timestamp,
+                  ...(compactBoundary.preTokens !== undefined ? { preTokens: compactBoundary.preTokens } : {}),
+                });
               }
             }
             // Accumulate tool events for persistence (before draft flush so current event is available)
@@ -1403,6 +1413,17 @@ export async function* routeSerial(
         }
 
         if (invocationSpanRef.current) catInvocationSpans.set(index, invocationSpanRef.current);
+
+        for (const compactBoundary of compactBoundarySignals) {
+          await appendCompactBoundaryTaskEvent(deps, {
+            threadId,
+            currentUserMessageId,
+            catId,
+            invocationId: options.parentInvocationId ?? ownInvocationId,
+            timestamp: compactBoundary.timestamp,
+            ...(compactBoundary.preTokens !== undefined ? { preTokens: compactBoundary.preTokens } : {}),
+          });
+        }
 
         // A2A: extend worklist if mention found + depth allows + queue fairness gate
         // F27: dedup only against pending (not-yet-executed) tail — cats that already ran
