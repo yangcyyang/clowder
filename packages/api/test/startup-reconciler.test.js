@@ -287,6 +287,91 @@ describe('StartupReconciler', () => {
     assert.equal(updated.error, 'process_restart_requeued');
   });
 
+  test('skips requeue when a target cat already replied after the source user message', async () => {
+    const r1 = makeRecord({
+      id: 'recover-already-answered',
+      threadId: 'thread-recover',
+      userId: 'user-recover',
+      status: 'running',
+      userMessageId: 'user-msg-1',
+      targetCats: ['opencode'],
+      intent: 'execute',
+    });
+    store.seed(r1);
+
+    const enqueued = [];
+    const messageStore = {
+      append() {},
+      getById(id) {
+        if (id !== 'user-msg-1') return null;
+        return {
+          id,
+          threadId: 'thread-recover',
+          userId: 'user-recover',
+          catId: null,
+          content: '@opencode 继续整理文档',
+          mentions: ['opencode'],
+          timestamp: Date.now() - 60_000,
+        };
+      },
+      getByThread() {
+        return [
+          {
+            id: 'user-msg-1',
+            threadId: 'thread-recover',
+            userId: 'user-recover',
+            catId: null,
+            content: '@opencode 继续整理文档',
+            mentions: ['opencode'],
+            timestamp: Date.now() - 60_000,
+          },
+          {
+            id: 'assistant-msg-1',
+            threadId: 'thread-recover',
+            userId: 'user-recover',
+            catId: 'opencode',
+            content: '已经整理完成。',
+            mentions: [],
+            timestamp: Date.now() - 30_000,
+          },
+        ];
+      },
+      markDelivered(id, deliveredAt) {
+        return { id, deliveryStatus: 'delivered', deliveredAt };
+      },
+    };
+    const invocationQueue = {
+      enqueue(input) {
+        enqueued.push(input);
+        return { outcome: 'enqueued', entry: { id: 'queue-recover-1' } };
+      },
+      backfillMessageId() {},
+    };
+    const queueProcessor = {
+      async tryAutoExecute() {},
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+      invocationQueue,
+      queueProcessor,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.running, 1);
+    assert.equal(result.requeued, 0);
+    assert.equal(result.notifiedThreads, 0);
+    assert.equal(enqueued.length, 0, 'already answered request must not be enqueued again');
+
+    const updated = await store.get('recover-already-answered');
+    assert.equal(updated.status, 'failed', 'old dead invocation is still closed');
+    assert.equal(updated.error, 'process_restart');
+  });
+
   test('requeues recoverable A2A records with caller and trigger metadata', async () => {
     const r1 = makeRecord({
       id: 'recover-a2a-1',
@@ -685,7 +770,9 @@ describe('StartupReconciler', () => {
   });
 
   test('suppresses duplicate restart notice already visible in recent thread history', async () => {
-    store.seed(makeRecord({ id: 'dup-restart-1', threadId: 'thread-restart', status: 'running', targetCats: ['opus'] }));
+    store.seed(
+      makeRecord({ id: 'dup-restart-1', threadId: 'thread-restart', status: 'running', targetCats: ['opus'] }),
+    );
 
     const content = '运行服务已恢复，opus 的进行中请求已中断；已发送的消息会保留，若存在流式草稿会自动恢复到对话中。';
     const appendedMessages = [];
