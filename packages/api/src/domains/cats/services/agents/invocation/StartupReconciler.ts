@@ -45,9 +45,23 @@ interface MessageAppender {
     threadId: string,
     limit?: number,
     userId?: string,
-  ): Array<{ content?: string; timestamp?: number; source?: ConnectorSource }> | Promise<
-    Array<{ content?: string; timestamp?: number; source?: ConnectorSource }>
-  >;
+  ):
+    | Array<{
+        id?: string;
+        content?: string;
+        timestamp?: number;
+        catId?: CatId | string | null;
+        source?: ConnectorSource;
+      }>
+    | Promise<
+        Array<{
+          id?: string;
+          content?: string;
+          timestamp?: number;
+          catId?: CatId | string | null;
+          source?: ConnectorSource;
+        }>
+      >;
   /** Mark a queued message as delivered (make visible in timeline). */
   markDelivered?(id: string, deliveredAt: number): unknown;
 }
@@ -104,6 +118,7 @@ export interface StartupReconcilerDeps {
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
 type AffectedThread = { catIds: CatId[]; userId: string; requeued: number };
+type RequeueDecision = 'requeued' | 'already_answered' | 'skipped';
 
 const STALE_QUEUED_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -178,12 +193,15 @@ export class StartupReconciler {
         });
         if (updated) {
           running++;
-          const wasRequeued = await this.tryRequeueRunningInvocation(record);
+          const requeueDecision = await this.tryRequeueRunningInvocation(record);
+          const wasRequeued = requeueDecision === 'requeued';
           if (wasRequeued) {
             requeued++;
             await store.update(id, { error: 'process_restart_requeued' });
           }
-          this.trackAffectedThread(affectedThreads, record, wasRequeued);
+          if (requeueDecision !== 'already_answered') {
+            this.trackAffectedThread(affectedThreads, record, wasRequeued);
+          }
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
           // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
           // so already-visible messages won't be re-scored. Only catches the edge case where
@@ -322,13 +340,14 @@ export class StartupReconciler {
     }
   }
 
-  private async tryRequeueRunningInvocation(record: InvocationRecord): Promise<boolean> {
+  private async tryRequeueRunningInvocation(record: InvocationRecord): Promise<RequeueDecision> {
     const { invocationQueue, queueProcessor, messageStore } = this.deps;
-    if (!invocationQueue || !queueProcessor || !messageStore?.getById || !record.userMessageId) return false;
+    if (!invocationQueue || !queueProcessor || !messageStore?.getById || !record.userMessageId) return 'skipped';
 
     try {
       const userMessage = await messageStore.getById(record.userMessageId);
-      if (!userMessage) return false;
+      if (!userMessage) return 'skipped';
+      if (await this.hasTargetReplyAfterUserMessage(record)) return 'already_answered';
 
       const result = invocationQueue.enqueue({
         threadId: record.threadId,
@@ -344,14 +363,32 @@ export class StartupReconciler {
         ...(record.callerCatId ? { callerCatId: record.callerCatId } : {}),
         ...(record.a2aTriggerMessageId ? { a2aTriggerMessageId: record.a2aTriggerMessageId } : {}),
       });
-      if (result.outcome !== 'enqueued' || !result.entry) return false;
+      if (result.outcome !== 'enqueued' || !result.entry) return 'skipped';
 
       invocationQueue.backfillMessageId?.(record.threadId, record.userId, result.entry.id, record.userMessageId);
       await queueProcessor.tryAutoExecute(record.threadId);
-      return true;
+      return 'requeued';
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to requeue running invocation ${record.id}: ${String(err)}`);
+      return 'skipped';
+    }
+  }
+
+  private async hasTargetReplyAfterUserMessage(record: InvocationRecord): Promise<boolean> {
+    const getByThread = this.deps.messageStore?.getByThread;
+    if (!getByThread || !record.userMessageId) return false;
+    try {
+      const recent = await getByThread.call(this.deps.messageStore, record.threadId, 200);
+      const sourceIndex = recent.findIndex((msg) => msg.id === record.userMessageId);
+      if (sourceIndex < 0) return false;
+      const targetCats = new Set(record.targetCats);
+      return recent.slice(sourceIndex + 1).some((msg) => {
+        if (!msg.catId || !targetCats.has(msg.catId as CatId)) return false;
+        return Boolean(msg.content?.trim());
+      });
     } catch (err) {
       this.deps.log.warn(
-        `[startup-reconciler] Failed to requeue running invocation ${record.id}: ${String(err)}`,
+        `[startup-reconciler] Failed to inspect completed replies for invocation ${record.id}: ${String(err)}`,
       );
       return false;
     }
