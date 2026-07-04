@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveActiveCats, statusLabel, statusTone } from '../status-helpers';
+import { buildThreadPresenceRows, deriveActiveCats, statusLabel, statusTone } from '../status-helpers';
 
 describe('statusLabel — liveness states (F118 AC-C1)', () => {
   it('returns 静默等待 for alive_but_silent', () => {
@@ -88,5 +88,55 @@ describe('deriveActiveCats — slot-first truth source', () => {
     });
 
     expect(active).toEqual(['opus', 'codex']);
+  });
+});
+
+describe('buildThreadPresenceRows — sidebar activity copy', () => {
+  const label = (catId: string) => (catId === 'codex' ? '老者-codex' : catId);
+
+  it('uses invocation phase as the most specific action label', () => {
+    const rows = buildThreadPresenceRows({
+      targetCats: [],
+      catStatuses: { codex: 'streaming' },
+      activeInvocations: {
+        'inv-1': { catId: 'codex', mode: 'execute', phase: 'tool_calling' },
+      },
+      hasActiveInvocation: true,
+      getCatLabel: label,
+    });
+
+    expect(rows).toEqual([
+      {
+        catId: 'codex',
+        label: '老者-codex',
+        action: '正在执行工具',
+        status: 'streaming',
+        phase: 'tool_calling',
+      },
+    ]);
+  });
+
+  it('does not show stale status when no invocation remains', () => {
+    const rows = buildThreadPresenceRows({
+      targetCats: [],
+      catStatuses: { codex: 'streaming' },
+      activeInvocations: {},
+      hasActiveInvocation: false,
+      getCatLabel: label,
+    });
+
+    expect(rows).toEqual([]);
+  });
+
+  it('falls back to target cats while active slots are not ready yet', () => {
+    const rows = buildThreadPresenceRows({
+      targetCats: ['codex'],
+      catStatuses: { codex: 'pending' },
+      activeInvocations: {},
+      hasActiveInvocation: true,
+      getCatLabel: label,
+    });
+
+    expect(rows.map((row) => `${row.label} ${row.action}`)).toEqual(['老者-codex 排队中']);
   });
 });

@@ -11,11 +11,26 @@ export type CatStatus =
   | 'error'
   | 'alive_but_silent'
   | 'suspected_stall';
-export type ActiveInvocationSlot = { catId: string; mode?: string; startedAt?: number };
+export type InvocationPhase =
+  | 'queued'
+  | 'context_building'
+  | 'runtime_starting'
+  | 'first_token_waiting'
+  | 'tool_calling'
+  | 'persisting'
+  | 'done';
+export type ActiveInvocationSlot = { catId: string; mode?: string; startedAt?: number; phase?: InvocationPhase };
 export type TaskProgressSnapshot = {
   tasks?: unknown[];
   snapshotStatus?: 'running' | 'interrupted' | 'completed' | string;
 };
+export interface ThreadPresenceRow {
+  catId: string;
+  label: string;
+  action: string;
+  status?: CatStatus;
+  phase?: InvocationPhase;
+}
 
 /**
  * Extract cats that still have a non-completed task-progress snapshot.
@@ -67,6 +82,87 @@ export function deriveActiveCats({
   if (slotCats.length > 0) return Array.from(new Set([...slotCats, ...snapshotCats]));
   if (hasActiveInvocation) return Array.from(new Set([...targetCats, ...snapshotCats]));
   return Array.from(new Set(snapshotCats));
+}
+
+function phaseActionLabel(phase: InvocationPhase | undefined): string | null {
+  switch (phase) {
+    case 'queued':
+      return '排队中';
+    case 'context_building':
+      return '正在整理上下文';
+    case 'runtime_starting':
+      return '正在启动模型';
+    case 'first_token_waiting':
+      return '正在思考';
+    case 'tool_calling':
+      return '正在执行工具';
+    case 'persisting':
+      return '正在整理回复';
+    case 'done':
+      return null;
+    default:
+      return null;
+  }
+}
+
+export function threadPresenceActionLabel(status?: CatStatus, phase?: InvocationPhase): string | null {
+  const phaseLabel = phaseActionLabel(phase);
+  if (phaseLabel) return phaseLabel;
+
+  switch (status) {
+    case 'spawning':
+      return '正在启动';
+    case 'pending':
+      return '排队中';
+    case 'streaming':
+      return '正在回复';
+    case 'alive_but_silent':
+      return '仍在处理';
+    case 'suspected_stall':
+      return '可能卡住';
+    case 'error':
+      return '遇到异常';
+    case 'done':
+      return null;
+    default:
+      return null;
+  }
+}
+
+export function buildThreadPresenceRows({
+  targetCats,
+  catStatuses,
+  catInvocations = {},
+  activeInvocations,
+  hasActiveInvocation,
+  getCatLabel,
+}: {
+  targetCats: string[];
+  catStatuses: Record<string, CatStatus>;
+  catInvocations?: Record<string, { taskProgress?: TaskProgressSnapshot }>;
+  activeInvocations?: Record<string, ActiveInvocationSlot>;
+  hasActiveInvocation?: boolean;
+  getCatLabel: (catId: string) => string;
+}): ThreadPresenceRow[] {
+  const snapshotCats = collectSnapshotActiveCats(catInvocations);
+  const activeCats = deriveActiveCats({ targetCats, snapshotCats, activeInvocations, hasActiveInvocation });
+  const slots = Object.values(activeInvocations ?? {});
+
+  return activeCats.flatMap((catId) => {
+    const slot = slots.find((candidate) => candidate?.catId === catId);
+    const status = catStatuses[catId];
+    const action = threadPresenceActionLabel(status, slot?.phase) ?? (slot ? '正在处理' : null);
+    if (!action) return [];
+    return [
+      {
+        catId,
+        label: getCatLabel(catId),
+        action,
+        status,
+        phase: slot?.phase,
+      },
+    ];
+  });
 }
 
 export function modeLabel(mode: IntentMode): string {

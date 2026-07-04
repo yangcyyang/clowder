@@ -10,6 +10,7 @@ import { API_URL } from '@/utils/api-client';
 import { CatAvatar } from '../CatAvatar';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
+import { buildThreadPresenceRows } from '../status-helpers';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { ThreadCatSettings } from './ThreadCatSettings';
 import { formatRelativeTime } from './thread-utils';
@@ -104,6 +105,19 @@ export function ThreadItem({
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
   tooltipLines.push(formatRelativeTime(lastActiveAt, false));
   const tooltip = tooltipLines.join('\n');
+  const presenceRows = threadState
+    ? buildThreadPresenceRows({
+        targetCats: threadState.targetCats,
+        catStatuses: threadState.catStatuses,
+        catInvocations: threadState.catInvocations,
+        activeInvocations: threadState.activeInvocations,
+        hasActiveInvocation: threadState.hasActiveInvocation,
+        getCatLabel: (catId) => getCatById(catId)?.displayName ?? catId,
+      })
+    : [];
+  const visiblePresenceRows = presenceRows.slice(0, 2);
+  const hiddenPresenceCount = Math.max(0, presenceRows.length - visiblePresenceRows.length);
+  const presenceTooltip = presenceRows.map((row) => `${row.label} ${row.action}`).join('\n');
 
   return (
     <div
@@ -249,6 +263,28 @@ export function ThreadItem({
           )}
         </div>
       </div>
+      {visiblePresenceRows.length > 0 && (
+        <div
+          className="mb-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-[10px] leading-tight text-cafe-muted"
+          data-testid="thread-presence-line"
+          title={presenceTooltip}
+        >
+          {visiblePresenceRows.map((row) => (
+            <span key={row.catId} className="inline-flex min-w-0 max-w-full shrink items-center gap-1">
+              <span
+                className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
+                style={{ backgroundColor: getCatById(row.catId)?.color.primary ?? 'var(--console-cat-fallback)' }}
+              />
+              <span className="truncate">
+                {row.label} {row.action}
+              </span>
+            </span>
+          ))}
+          {hiddenPresenceCount > 0 && (
+            <span className="shrink-0 text-[9px] text-cafe-muted">+{hiddenPresenceCount}</span>
+          )}
+        </div>
+      )}
       {/* Bottom row: avatars + status + compact time */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
