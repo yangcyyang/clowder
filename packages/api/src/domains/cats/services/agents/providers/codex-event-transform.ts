@@ -7,22 +7,75 @@ const IMAGE_MIME_WHITELIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'i
 const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
 
 /**
- * Mutable state for tracking Codex multi-turn text separation.
- * Each `item.completed` with `agent_message` is a complete turn;
- * without explicit separation, consecutive turns get concatenated
- * without paragraph breaks (unlike Claude's incremental deltas which
- * naturally include the model's own whitespace).
+ * Mutable state for tracking Codex text events.
+ *
+ * Codex CLI currently reports both process updates and final answers as
+ * `item.completed` / `agent_message`. In streaming mode, we keep the latest
+ * text as a candidate answer; if another message/tool event arrives before
+ * the turn ends, the previous candidate is process text and should render as
+ * `thinking` instead of answer content.
  */
 export interface CodexStreamState {
   hadPriorTextTurn: boolean;
+  pendingTextTurn?: string;
+}
+
+function createTextMessage(catId: CatId, content: string): AgentMessage {
+  return {
+    type: 'text',
+    catId,
+    content,
+    timestamp: Date.now(),
+  };
+}
+
+function createThinkingMessage(catId: CatId, text: string): AgentMessage {
+  return {
+    type: 'system_info',
+    catId,
+    content: JSON.stringify({ type: 'thinking', catId, text }),
+    timestamp: Date.now(),
+  };
+}
+
+function takePendingText(state: CodexStreamState): string | null {
+  const text = state.pendingTextTurn;
+  delete state.pendingTextTurn;
+  return typeof text === 'string' && text.trim().length > 0 ? text : null;
+}
+
+export function flushCodexPendingText(state: CodexStreamState, catId: CatId): AgentMessage | null {
+  const text = takePendingText(state);
+  if (!text) return null;
+  state.hadPriorTextTurn = true;
+  return createTextMessage(catId, text);
+}
+
+function flushCodexPendingThinking(state: CodexStreamState | undefined, catId: CatId): AgentMessage | null {
+  if (!state) return null;
+  const text = takePendingText(state);
+  if (!text) return null;
+  return createThinkingMessage(catId, text);
+}
+
+function withPendingThinking(
+  state: CodexStreamState | undefined,
+  catId: CatId,
+  result: AgentMessage | AgentMessage[] | null,
+): AgentMessage | AgentMessage[] | null {
+  const thinking = flushCodexPendingThinking(state, catId);
+  if (!thinking) return result;
+  if (result === null) return thinking;
+  return Array.isArray(result) ? [thinking, ...result] : [thinking, result];
 }
 
 /**
  * Transform a raw Codex CLI NDJSON event into an AgentMessage.
  * Returns null to skip events we don't care about.
  *
- * When `state` is provided, consecutive agent_message text turns are
- * separated by `\n\n` to preserve paragraph breaks between turns.
+ * When `state` is provided, Codex agent_message text is buffered until
+ * `turn.completed` (or service end-of-stream) so process chatter can be
+ * separated from the final answer.
  */
 export function transformCodexEvent(
   event: unknown,
@@ -41,6 +94,10 @@ export function transformCodexEvent(
       sessionId: threadId,
       timestamp: Date.now(),
     };
+  }
+
+  if (e.type === 'turn.completed') {
+    return state ? flushCodexPendingText(state, catId) : null;
   }
 
   // F045: todo_list (started/updated/completed) → system_info(task_progress)
@@ -71,12 +128,12 @@ export function transformCodexEvent(
         status: normalizeTaskStatus(rawStatus),
       };
     });
-    return {
+    return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,
       content: JSON.stringify({ type: 'task_progress', catId, action: 'snapshot', tasks }),
       timestamp: Date.now(),
-    };
+    });
   }
 
   if (e.type === 'item.started') {
@@ -90,25 +147,25 @@ export function transformCodexEvent(
         typeof item.arguments === 'object' && item.arguments !== null
           ? (item.arguments as Record<string, unknown>)
           : {};
-      return {
+      return withPendingThinking(state, catId, {
         type: 'tool_use',
         catId,
         toolName: `mcp:${server}/${tool}`,
         toolInput: args,
         timestamp: Date.now(),
-      };
+      });
     }
 
     if (item?.type !== 'command_execution') return null;
     const command = item.command;
     if (typeof command !== 'string') return null;
-    return {
+    return withPendingThinking(state, catId, {
       type: 'tool_use',
       catId,
       toolName: 'command_execution',
       toolInput: { command },
       timestamp: Date.now(),
-    };
+    });
   }
 
   if (e.type === 'error') {
@@ -127,14 +184,11 @@ export function transformCodexEvent(
   const item = e.item as Record<string, unknown> | undefined;
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
-    const prefix = state?.hadPriorTextTurn ? '\n\n' : '';
-    if (state) state.hadPriorTextTurn = true;
-    return {
-      type: 'text',
-      catId,
-      content: prefix + item.text,
-      timestamp: Date.now(),
-    };
+    if (!state) return createTextMessage(catId, item.text);
+
+    const thinking = flushCodexPendingThinking(state, catId);
+    state.pendingTextTurn = item.text;
+    return thinking;
   }
 
   if (item?.type === 'command_execution') {
@@ -150,24 +204,24 @@ export function transformCodexEvent(
     const trimmedOutput = output.trimEnd();
     if (trimmedOutput) sections.push(trimmedOutput);
 
-    return {
+    return withPendingThinking(state, catId, {
       type: 'tool_result',
       catId,
       content: sections.join('\n'),
       timestamp: Date.now(),
-    };
+    });
   }
 
   if (item?.type === 'file_change') {
     const changes = Array.isArray(item.changes) ? item.changes : [];
     const status = typeof item.status === 'string' ? item.status : 'completed';
-    return {
+    return withPendingThinking(state, catId, {
       type: 'tool_use',
       catId,
       toolName: 'file_change',
       toolInput: { status, changes: changes.length },
       timestamp: Date.now(),
-    };
+    });
   }
 
   // F045: mcp_tool_call completed → tool_result (+ F060: optional rich_block for images)
@@ -205,7 +259,7 @@ export function transformCodexEvent(
       }));
 
     if (imageItems.length === 0) {
-      return toolResult;
+      return withPendingThinking(state, catId, toolResult);
     }
 
     const richBlock: AgentMessage = {
@@ -224,37 +278,32 @@ export function transformCodexEvent(
       timestamp: Date.now(),
     };
 
-    return [toolResult, richBlock];
+    return withPendingThinking(state, catId, [toolResult, richBlock]);
   }
 
   // F045: web_search → system_info — count only, no query (privacy)
   if (item?.type === 'web_search') {
-    return {
+    return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,
       content: JSON.stringify({ type: 'web_search', catId, count: 1 }),
       timestamp: Date.now(),
-    };
+    });
   }
 
   // F045: reasoning → system_info(thinking)
   if (item?.type === 'reasoning' && typeof item.text === 'string' && item.text.length > 0) {
-    return {
-      type: 'system_info',
-      catId,
-      content: JSON.stringify({ type: 'thinking', catId, text: item.text }),
-      timestamp: Date.now(),
-    };
+    return withPendingThinking(state, catId, createThinkingMessage(catId, item.text));
   }
 
   // F045: item-level error → system_info(warning)
   if (item?.type === 'error' && typeof item.message === 'string') {
-    return {
+    return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,
       content: JSON.stringify({ type: 'warning', catId, message: item.message }),
       timestamp: Date.now(),
-    };
+    });
   }
 
   return null;

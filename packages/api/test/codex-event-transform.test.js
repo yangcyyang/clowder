@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformCodexEvent } = await import('../dist/domains/cats/services/agents/providers/codex-event-transform.js');
+const { flushCodexPendingText, transformCodexEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/codex-event-transform.js'
+);
 
 const CAT = 'codex';
 
@@ -22,6 +24,73 @@ test('item.completed agent_message → text', () => {
   const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'Hello' } }, CAT);
   assert.equal(msg?.type, 'text');
   assert.equal(msg?.content, 'Hello');
+});
+
+test('stateful agent_message buffering separates process text from final answer', () => {
+  const state = { hadPriorTextTurn: false };
+
+  const first = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: 'I am checking the repo.' } },
+    CAT,
+    state,
+  );
+  assert.equal(first, null, 'first agent_message is held as answer candidate');
+
+  const second = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: 'The fix is complete.' } },
+    CAT,
+    state,
+  );
+  assert.equal(second?.type, 'system_info');
+  const thinkingPayload = JSON.parse(second?.content ?? '{}');
+  assert.equal(thinkingPayload.type, 'thinking');
+  assert.equal(thinkingPayload.text, 'I am checking the repo.');
+
+  const final = transformCodexEvent({ type: 'turn.completed' }, CAT, state);
+  assert.equal(final?.type, 'text');
+  assert.equal(final?.content, 'The fix is complete.');
+});
+
+test('stateful pending agent_message flushes as thinking before tool_use', () => {
+  const state = { hadPriorTextTurn: false };
+
+  assert.equal(
+    transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: 'I will inspect the files.' } },
+      CAT,
+      state,
+    ),
+    null,
+  );
+
+  const result = transformCodexEvent(
+    { type: 'item.started', item: { type: 'command_execution', command: 'rg Codex' } },
+    CAT,
+    state,
+  );
+  assert.ok(Array.isArray(result));
+  assert.equal(result[0].type, 'system_info');
+  assert.equal(JSON.parse(result[0].content).text, 'I will inspect the files.');
+  assert.equal(result[1].type, 'tool_use');
+  assert.equal(result[1].toolName, 'command_execution');
+});
+
+test('flushCodexPendingText emits trailing answer at stream end', () => {
+  const state = { hadPriorTextTurn: false };
+
+  assert.equal(
+    transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: 'Trailing final answer.' } },
+      CAT,
+      state,
+    ),
+    null,
+  );
+
+  const msg = flushCodexPendingText(state, CAT);
+  assert.equal(msg?.type, 'text');
+  assert.equal(msg?.content, 'Trailing final answer.');
+  assert.equal(flushCodexPendingText(state, CAT), null);
 });
 
 test('item.started command_execution → tool_use', () => {

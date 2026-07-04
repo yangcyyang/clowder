@@ -458,20 +458,28 @@ test('handles multiple agent_message items', async () => {
 
   const msgs = await promise;
   const textMsgs = msgs.filter((m) => m.type === 'text');
-  assert.equal(textMsgs.length, 2);
-  assert.equal(textMsgs[0].content, 'First message');
-  // Second turn gets \n\n prefix to preserve paragraph break between turns
-  assert.equal(textMsgs[1].content, '\n\nSecond message');
+  const thinkingMsgs = msgs.filter((m) => {
+    if (m.type !== 'system_info') return false;
+    try {
+      return JSON.parse(m.content).type === 'thinking';
+    } catch {
+      return false;
+    }
+  });
+  assert.equal(thinkingMsgs.length, 1);
+  assert.equal(JSON.parse(thinkingMsgs[0].content).text, 'First message');
+  assert.equal(textMsgs.length, 1);
+  assert.equal(textMsgs[0].content, 'Second message');
 });
 
-test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
+test('separates Codex process updates from final answer text', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ spawnFn });
 
   const promise = collect(service.invoke('Multi-turn'));
 
-  // Simulate: text → tool use → text → text (3 text turns with tools in between)
+  // Simulate: process text → tool use → process text → final answer.
   emitCodexEvents(proc, [
     { type: 'thread.started', thread_id: 'thread-turns' },
     {
@@ -504,15 +512,21 @@ test('separates multi-turn text with paragraph breaks (turn newline fix)', async
 
   const msgs = await promise;
   const textMsgs = msgs.filter((m) => m.type === 'text');
-  assert.equal(textMsgs.length, 3);
-  assert.equal(textMsgs[0].content, 'Checking implementation...');
-  assert.equal(textMsgs[1].content, '\n\nRunning verification...');
-  assert.equal(textMsgs[2].content, '\n\nAll checks passed.');
+  const thinkingTexts = msgs
+    .filter((m) => m.type === 'system_info')
+    .map((m) => {
+      try {
+        return JSON.parse(m.content);
+      } catch {
+        return null;
+      }
+    })
+    .filter((payload) => payload?.type === 'thinking')
+    .map((payload) => payload.text);
 
-  // When concatenated (as route-strategies does), should produce readable paragraphs
-  const concatenated = textMsgs.map((m) => m.content).join('');
-  assert.ok(concatenated.includes('Checking implementation...\n\nRunning verification...'));
-  assert.ok(concatenated.includes('Running verification...\n\nAll checks passed.'));
+  assert.deepEqual(thinkingTexts, ['Checking implementation...', 'Running verification...']);
+  assert.equal(textMsgs.length, 1);
+  assert.equal(textMsgs[0].content, 'All checks passed.');
 });
 
 test('maps command_execution and file_change items into tool events', async () => {
@@ -534,11 +548,11 @@ test('maps command_execution and file_change items into tool events', async () =
     },
     {
       type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Response' },
+      item: { id: 'file-1', type: 'file_change', changes: [], status: 'completed' },
     },
     {
       type: 'item.completed',
-      item: { id: 'file-1', type: 'file_change', changes: [], status: 'completed' },
+      item: { id: 'msg-1', type: 'agent_message', text: 'Response' },
     },
   ]);
 

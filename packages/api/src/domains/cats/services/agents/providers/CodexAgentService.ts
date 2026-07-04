@@ -32,7 +32,11 @@ import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
-import { type CodexStreamState, transformCodexEvent } from '../providers/codex-event-transform.js';
+import {
+  type CodexStreamState,
+  flushCodexPendingText,
+  transformCodexEvent,
+} from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
   type CodexSessionContextSnapshotResolver,
@@ -647,6 +651,11 @@ export class CodexAgentService implements AgentService {
             yield { ...result, metadata };
           }
         }
+      }
+
+      const trailingText = flushCodexPendingText(codexStreamState, this.catId);
+      if (trailingText) {
+        yield { ...trailingText, metadata };
       }
 
       if (metadata.sessionId) {
