@@ -1,10 +1,10 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { ActivityBar } from './ActivityBar';
-import { buildGlobalSearchHref } from './global-search-navigation';
+import { QuickSwitchPalette } from './QuickSwitchPalette';
 import { ThreadSidebar } from './ThreadSidebar';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
@@ -21,8 +21,8 @@ const SIDEBAR_MAX_WIDTH = 340;
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
-  const router = useRouter();
   const [isExport, setIsExport] = useState(false);
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth, resetSidebarWidth] = usePersistedState(
     'cat-cafe:sidebarWidth',
     SIDEBAR_DEFAULT_WIDTH,
@@ -45,21 +45,18 @@ export function AppShell({ children }: AppShellProps) {
       if (event.key.toLowerCase() !== 'k') return;
 
       event.preventDefault();
-      if (pathname.startsWith('/search')) {
-        document.querySelector<HTMLInputElement>('[data-testid="global-search-input"]')?.focus();
-        return;
-      }
-      router.push(buildGlobalSearchHref(pathname, window.location.search));
+      setQuickSwitchOpen(true);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pathname, router]);
+  }, []);
 
   if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
     return <>{children}</>;
   }
   const hideThreadSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r));
+  const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
   return (
     <div className="console-shell flex h-screen h-dvh overflow-hidden">
       {/* Left: ActivityBar */}
@@ -71,7 +68,9 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-1 min-w-0 overflow-hidden">
         {!hideThreadSidebar && (
           <Suspense
-            fallback={<div className="hidden md:block w-[var(--slock-sidebar-width)] flex-shrink-0" aria-hidden="true" />}
+            fallback={
+              <div className="hidden md:block w-[var(--slock-sidebar-width)] flex-shrink-0" aria-hidden="true" />
+            }
           >
             <div
               className="hidden md:block flex-shrink-0 border-r border-[var(--slock-border-color)]"
@@ -80,16 +79,18 @@ export function AppShell({ children }: AppShellProps) {
               <ThreadSidebar className="w-full h-full" />
             </div>
             <div className="hidden md:flex">
-              <ResizeHandle
-                direction="horizontal"
-                onResize={handleSidebarResize}
-                onDoubleClick={resetSidebarWidth}
-              />
+              <ResizeHandle direction="horizontal" onResize={handleSidebarResize} onDoubleClick={resetSidebarWidth} />
             </div>
           </Suspense>
         )}
         <div className="flex-1 min-w-0 overflow-y-auto">{children}</div>
       </div>
+      <QuickSwitchPalette
+        open={quickSwitchOpen}
+        pathname={pathname}
+        currentSearch={currentSearch}
+        onClose={() => setQuickSwitchOpen(false)}
+      />
     </div>
   );
 }
