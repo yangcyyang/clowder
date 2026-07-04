@@ -1185,7 +1185,7 @@ refs:
     path: "refs/commit-signatures.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   shared-rules:
-    description: "三猫共用协作规则（A2A 交接六项、工兵优先、提问原则、开放邀请、技术债务、Review 立场等）"
+    description: "三猫共用协作规则（A2A 交接六项、Loop 完成回报、工兵优先、提问原则、开放邀请、技术债务、Review 立场等）"
     path: "refs/shared-rules.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 去重合并"
 
