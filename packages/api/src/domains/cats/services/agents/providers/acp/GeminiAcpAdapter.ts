@@ -337,6 +337,7 @@ const RECENT_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 
 /** Pattern for stream idle stall errors thrown by AcpClient idle watchdog. */
 const STREAM_IDLE_RE = /Stream idle|STREAM_IDLE_STALL/i;
+const ACCOUNT_ELIGIBILITY_RE = /not eligible|not currently available in your location|Gemini Code Assist/i;
 
 function classifyError(
   err: unknown,
@@ -344,6 +345,9 @@ function classifyError(
   clientRecentSignal?: AcpCapacitySignal | null,
 ): { errorCode: string; errorMsg: string } {
   if (err instanceof AcpProtocolError) {
+    if (ACCOUNT_ELIGIBILITY_RE.test(err.message)) {
+      return { errorCode: 'account_eligibility', errorMsg: err.message };
+    }
     if (err.code === -32000 || err.message.includes('capacity')) {
       return { errorCode: 'model_capacity', errorMsg: err.message };
     }
@@ -389,6 +393,8 @@ function toUserFacingError(errorCode: string, errorMsg: string): string {
   switch (errorCode) {
     case 'model_capacity':
       return `${base}\n⚠️ Gemini 服务端容量不足（Google 服务器繁忙），非 Clowder AI 系统故障。`;
+    case 'account_eligibility':
+      return `${base}\n⚠️ 当前 Google 账号不具备 Gemini Code Assist 个人版资格，或该服务暂未在当前地区开放。请换可用账号/地区，或改用 @antigravity。`;
     case 'stream_idle_stall':
       return `${base}\n⚠️ Gemini 服务端响应中断（Google 服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
     case 'turn_budget_exceeded':
