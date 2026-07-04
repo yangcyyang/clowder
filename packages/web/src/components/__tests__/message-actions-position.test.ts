@@ -11,6 +11,12 @@ vi.mock('@/stores/chatStore', () => ({
     selector({ removeMessage: () => {} }),
 }));
 
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({ cats: [] }),
+}));
+
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ threadId: 't2' }) })),
 }));

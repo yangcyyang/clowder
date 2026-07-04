@@ -25,7 +25,10 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
-    selector: (state: { removeThreadMessage: typeof removeThreadMessageMock; patchMessage: typeof patchMessageMock }) => unknown,
+    selector: (state: {
+      removeThreadMessage: typeof removeThreadMessageMock;
+      patchMessage: typeof patchMessageMock;
+    }) => unknown,
   ) => selector({ removeThreadMessage: removeThreadMessageMock, patchMessage: patchMessageMock }),
 }));
 
@@ -33,6 +36,12 @@ vi.mock('@/stores/toastStore', () => ({
   useToastStore: {
     getState: () => ({ addToast: addToastMock }),
   },
+}));
+
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({ cats: [] }),
 }));
 
 vi.mock('@/utils/api-client', () => ({

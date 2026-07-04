@@ -8,6 +8,7 @@ interface MessageContextMenuProps {
   onClose: () => void;
   onSave?: () => void;
   onConvertToTask?: () => void;
+  onRemindLater?: () => void;
   onShare?: () => void;
   onPin?: () => void;
   onEdit?: () => void;
@@ -23,6 +24,7 @@ export function MessageContextMenu({
   onClose,
   onSave,
   onConvertToTask,
+  onRemindLater,
   onShare,
   onPin,
   onEdit,
@@ -55,6 +57,13 @@ export function MessageContextMenu({
       label: 'Convert to Task',
       onClick: () => {
         onConvertToTask?.();
+        onClose();
+      },
+    },
+    {
+      label: '稍后提醒',
+      onClick: () => {
+        onRemindLater?.();
         onClose();
       },
     },
