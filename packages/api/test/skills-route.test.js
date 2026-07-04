@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { writeCapabilitiesConfig } from '../dist/config/capabilities/capability-orchestrator.js';
@@ -39,6 +39,39 @@ async function withPersonalSkillEnv(overrides, fn) {
 async function writeSkill(path, frontmatter, body = '# Skill Body\n') {
   await mkdir(path, { recursive: true });
   await writeFile(join(path, 'SKILL.md'), `---\n${frontmatter.trim()}\n---\n\n${body}`, 'utf-8');
+}
+
+async function writePersonalIndex(indexPath, skills) {
+  await mkdir(dirname(indexPath), { recursive: true });
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        roots: [],
+        ignoredGlobs: [],
+        visibleNames: skills.filter((skill) => skill.visible).map((skill) => skill.name),
+        skills: skills.map((skill) => ({
+          id: `personal:${skill.name}`,
+          name: skill.name,
+          description: skill.description ?? skill.name,
+          triggers: skill.triggers ?? [],
+          category: skill.category ?? 'personal',
+          source: 'personal',
+          sourcePath: skill.sourcePath ?? join(dirname(indexPath), `${skill.name}.md`),
+          relativePath: `${skill.name}/SKILL.md`,
+          visible: skill.visible ?? true,
+          contentHash: `${skill.name}-hash`,
+        })),
+        duplicates: [],
+        ignoredPaths: [],
+      },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
 }
 
 function resolveMainRepoForTest() {
@@ -223,6 +256,72 @@ triggers:
       assert.ok(body.error.includes('Invalid project path'));
     } finally {
       await app.close();
+    }
+  });
+
+  it('GET /api/skills exposes indexed personal skills without requiring provider mounts', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'skills-route-personal-board-'));
+    const personalRoot = await mkdtemp(join(tmpdir(), 'skills-route-personal-board-root-'));
+    const indexPath = join(projectDir, '.cat-cafe', 'personal-skills-index.json');
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      await writePersonalIndex(indexPath, [
+        {
+          name: 'create-prd',
+          description: 'Create a PRD from product context',
+          triggers: ['PRD'],
+          category: 'product',
+          visible: true,
+        },
+        {
+          name: 'opencli-usage',
+          description: 'OpenCLI usage notes',
+          triggers: ['opencli'],
+          category: 'tooling',
+          visible: false,
+        },
+      ]);
+
+      await withPersonalSkillEnv(
+        {
+          CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
+          CAT_CAFE_PERSONAL_SKILL_ROOTS: personalRoot,
+          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+          CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+        },
+        async () => {
+          const res = await app.inject({
+            method: 'GET',
+            url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+            headers: AUTH_HEADERS,
+          });
+
+          assert.equal(res.statusCode, 200);
+          const body = JSON.parse(res.body);
+          const createPrd = body.skills.find((skill) => skill.name === 'create-prd');
+          const opencliUsage = body.skills.find((skill) => skill.name === 'opencli-usage');
+
+          assert.ok(createPrd, 'visible personal skill should be listed');
+          assert.ok(opencliUsage, 'hidden personal skill should still be listed in the skills dashboard');
+          assert.equal(createPrd.source, 'personal');
+          assert.equal(opencliUsage.source, 'personal');
+          assert.equal(createPrd.visible, true);
+          assert.equal(opencliUsage.visible, false);
+          assert.deepEqual(createPrd.mounts, { claude: false, codex: false, gemini: false, kimi: false });
+          assert.deepEqual(opencliUsage.mounts, { claude: false, codex: false, gemini: false, kimi: false });
+          assert.equal(body.summary.personalTotal, 2);
+          assert.equal(body.summary.personalVisible, 1);
+          assert.equal(body.summary.personalHidden, 1);
+          assert.equal(typeof body.summary.registrationConsistent, 'boolean');
+        },
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(personalRoot, { recursive: true, force: true });
     }
   });
 

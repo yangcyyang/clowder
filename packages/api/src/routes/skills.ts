@@ -17,7 +17,11 @@ import { detectConflicts } from '../config/governance/skill-conflict.js';
 import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
 import type { SkillsStaleness } from '../config/governance/skills-state.js';
 import { checkStaleness, readSkillsState } from '../config/governance/skills-state.js';
-import { rebuildPersonalSkillIndexFromEnv } from '../config/skills/personal-skill-scanner.js';
+import {
+  type PersonalSkillIndexEntry,
+  readPersonalSkillIndexFromEnv,
+  rebuildPersonalSkillIndexFromEnv,
+} from '../config/skills/personal-skill-scanner.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -45,6 +49,8 @@ interface SkillEntry {
   category: string;
   trigger: string;
   mounts: SkillMount;
+  source?: 'personal';
+  visible?: boolean;
   requiresMcp?: SkillMcpDependency[];
 }
 
@@ -52,6 +58,9 @@ interface SkillsSummary {
   total: number;
   allMounted: boolean;
   registrationConsistent: boolean;
+  personalTotal?: number;
+  personalVisible?: number;
+  personalHidden?: number;
 }
 
 interface SkillsResponse {
@@ -145,6 +154,19 @@ async function listLocalClaudeSkills(skillsDir: string): Promise<SkillEntry[]> {
   return skills.filter((skill): skill is SkillEntry => Boolean(skill)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function toPersonalSkillEntry(entry: PersonalSkillIndexEntry): SkillEntry | null {
+  if (typeof entry.name !== 'string' || !entry.name.trim()) return null;
+  const triggers = Array.isArray(entry.triggers) ? entry.triggers.filter(Boolean) : [];
+  return {
+    name: entry.name.trim(),
+    category: entry.category || 'personal',
+    trigger: triggers.length > 0 ? triggers.join('、') : entry.description,
+    mounts: { claude: false, codex: false, gemini: false, kimi: false },
+    source: 'personal',
+    visible: entry.visible,
+  };
+}
+
 function toProjectRelativePath(projectRoot: string, targetPath: string): string {
   const rel = relative(projectRoot, targetPath);
   if (rel && !rel.startsWith('..') && !isAbsolute(rel)) return rel.split(/[\\/]+/).join('/');
@@ -189,6 +211,11 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
     const mainRepo = await resolveMainRepoPath();
     const mainSkillsSrc = join(mainRepo, 'cat-cafe-skills');
+    const personalSkillIndex = await readPersonalSkillIndexFromEnv(projectRoot, process.env);
+    const personalSkills = (personalSkillIndex.index?.skills ?? [])
+      .map(toPersonalSkillEntry)
+      .filter((skill): skill is SkillEntry => Boolean(skill));
+    const personalSkillNames = new Set(personalSkills.map((skill) => skill.name));
 
     const [sourceSkills, bootstrapEntries, manifestMeta] = await Promise.all([
       listSkillDirs(skillsSrc),
@@ -243,9 +270,9 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const unregisteredSkills = unregisteredOrdered.map((n) => mountLookup.get(n)!).filter(Boolean);
     const builtinSkillNames = new Set(sourceSkills);
     const localClaudeSkills = (await listLocalClaudeSkills(join(home, '.claude', 'skills'))).filter(
-      (skill) => !builtinSkillNames.has(skill.name),
+      (skill) => !builtinSkillNames.has(skill.name) && !personalSkillNames.has(skill.name),
     );
-    const skills = [...registeredSkills, ...localClaudeSkills, ...unregisteredSkills];
+    const skills = [...registeredSkills, ...localClaudeSkills, ...personalSkills, ...unregisteredSkills];
 
     // Registration consistency check
     const sourceNames = new Set(sourceSkills);
@@ -253,7 +280,10 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const unregistered = sourceSkills.filter((n) => !bootstrapNames.has(n));
     const phantom = [...bootstrapNames].filter((n) => !sourceNames.has(n));
     const registrationConsistent = unregistered.length === 0 && phantom.length === 0;
-    const allMounted = skills.every((s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini && s.mounts.kimi);
+    const mountCheckedSkills = skills.filter((skill) => skill.source !== 'personal');
+    const allMounted = mountCheckedSkills.every(
+      (s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini && s.mounts.kimi,
+    );
 
     // ADR-025 Phase 2: staleness + conflicts
     const state = await readSkillsState(projectRoot);
@@ -265,7 +295,14 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
 
     const response: SkillsResponse = {
       skills,
-      summary: { total: skills.length, allMounted, registrationConsistent },
+      summary: {
+        total: skills.length,
+        allMounted,
+        registrationConsistent,
+        personalTotal: personalSkills.length,
+        personalVisible: personalSkills.filter((skill) => skill.visible).length,
+        personalHidden: personalSkills.filter((skill) => !skill.visible).length,
+      },
       staleness,
       conflicts,
     };

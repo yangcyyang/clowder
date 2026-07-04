@@ -119,7 +119,7 @@ function splitCsv(value: string | undefined, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
-function isEnabled(value: string | undefined): boolean {
+export function isPersonalSkillsEnabled(value: string | undefined): boolean {
   if (!value) return false;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
@@ -365,9 +365,34 @@ export async function buildPersonalSkillIndex(options: BuildPersonalSkillIndexOp
   };
 }
 
-function resolveIndexPath(projectRoot: string, rawIndexPath: string | undefined, homeDir: string): string {
+export function resolvePersonalSkillIndexPath(
+  projectRoot: string,
+  rawIndexPath: string | undefined,
+  homeDir: string,
+): string {
   const indexPath = expandTildePath(rawIndexPath?.trim() || DEFAULT_PERSONAL_SKILL_INDEX_PATH, homeDir);
   return isAbsolute(indexPath) ? resolve(indexPath) : resolve(projectRoot, indexPath);
+}
+
+export async function readPersonalSkillIndexFromEnv(
+  projectRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ enabled: boolean; indexPath: string; index: PersonalSkillIndex | null }> {
+  const homeDir = env.HOME ?? env.USERPROFILE ?? homedir();
+  const indexPath = resolvePersonalSkillIndexPath(projectRoot, env.CAT_CAFE_PERSONAL_SKILL_INDEX_PATH, homeDir);
+  const enabled = isPersonalSkillsEnabled(env.CAT_CAFE_PERSONAL_SKILLS_ENABLED);
+  if (!enabled) return { enabled, indexPath, index: null };
+
+  try {
+    const raw = await readFile(indexPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<PersonalSkillIndex> | null;
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.skills)) {
+      return { enabled, indexPath, index: null };
+    }
+    return { enabled, indexPath, index: parsed as PersonalSkillIndex };
+  } catch {
+    return { enabled, indexPath, index: null };
+  }
 }
 
 export async function rebuildPersonalSkillIndexFromEnv(
@@ -375,8 +400,8 @@ export async function rebuildPersonalSkillIndexFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<RebuildPersonalSkillIndexResult> {
   const homeDir = env.HOME ?? env.USERPROFILE ?? homedir();
-  const indexPath = resolveIndexPath(projectRoot, env.CAT_CAFE_PERSONAL_SKILL_INDEX_PATH, homeDir);
-  const enabled = isEnabled(env.CAT_CAFE_PERSONAL_SKILLS_ENABLED);
+  const indexPath = resolvePersonalSkillIndexPath(projectRoot, env.CAT_CAFE_PERSONAL_SKILL_INDEX_PATH, homeDir);
+  const enabled = isPersonalSkillsEnabled(env.CAT_CAFE_PERSONAL_SKILLS_ENABLED);
 
   if (!enabled) {
     return {

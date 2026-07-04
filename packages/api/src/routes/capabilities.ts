@@ -50,9 +50,10 @@ import {
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
+import { readPersonalSkillIndexFromEnv } from '../config/skills/personal-skill-scanner.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   buildProviderSkillDirCandidates,
   isSkillMountedForProvider,
@@ -568,7 +569,12 @@ export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> =
     }
 
     // Multi-project: accept ?projectPath=... to manage capabilities for any project
-    const query = request.query as { projectPath?: string; probe?: string | boolean; probeId?: string; threadId?: string };
+    const query = request.query as {
+      projectPath?: string;
+      probe?: string | boolean;
+      probeId?: string;
+      threadId?: string;
+    };
     const probeEnabled = query.probe === true || query.probe === 'true' || query.probe === '1';
     const requestedProbeId = typeof query.probeId === 'string' && query.probeId.trim() ? query.probeId.trim() : null;
     const currentThreadId = typeof query.threadId === 'string' && query.threadId.trim() ? query.threadId.trim() : null;
@@ -662,6 +668,14 @@ export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> =
       ...(projectKimiSkills ?? []),
       ...(catCafeOwnSkills ?? []),
     ]);
+    const personalSkillIndex = await readPersonalSkillIndexFromEnv(projectRoot, process.env);
+    const personalSkillNames = new Set(
+      (personalSkillIndex.index?.skills ?? [])
+        .map((skill) => skill.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    );
+    const isPersonalOnlySkill = (skillName: string) =>
+      personalSkillNames.has(skillName) && !projectSkillNames.has(skillName);
 
     // 3. Sync discovered skills into capabilities.json
     const allSkillNames = new Set<string>();
@@ -678,6 +692,7 @@ export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> =
     const removedSet = new Set(config.removedExternalSkills ?? []);
     // Add newly discovered skills
     for (const skillName of allSkillNames) {
+      if (isPersonalOnlySkill(skillName)) continue;
       const isCatCafe =
         isManagedSkill(skillsState, skillName) ||
         (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
@@ -730,6 +745,15 @@ export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> =
     }
     // Sync removedExternalSkills back (may have been cleaned above)
     config.removedExternalSkills = removedSet.size > 0 ? [...removedSet] : undefined;
+
+    // Personal skills are surfaced by /api/skills and MCP skill tools, not by
+    // the capability board. Remove historical external rows that were synced
+    // before the personal index existed.
+    if (personalSkillNames.size > 0) {
+      const before = config.capabilities.length;
+      config.capabilities = config.capabilities.filter((cap) => cap.type !== 'skill' || !isPersonalOnlySkill(cap.id));
+      if (config.capabilities.length !== before) configDirty = true;
+    }
 
     // Prune stale skills no longer on filesystem.
     // Guard: only prune when ALL provider scans succeeded (no null returns).
