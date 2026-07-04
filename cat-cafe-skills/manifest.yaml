@@ -100,6 +100,27 @@ skills:
     sop_step: null
     merged_from: ["brainstorming", "multi-cat-brainstorm", "discussion-convergence"]
 
+  parallel-merge:
+    description: >
+      多猫并行回答后的合流卡：压缩共识、保留分歧、给出仅供参考的建议裁决。
+      Use when: 并行轮结束后被指定为合流猫，或用户说“合流一下/汇总一下大家的观点/收敛一下分歧”。
+      Not for: 单猫回答、原始 brainstorm 生成、没有多份实质回答的普通总结。
+      Output: 三段式合流卡（共识 / 分歧点 / 建议裁决）。
+    triggers:
+      - "合流一下"
+      - "汇总一下大家的观点"
+      - "收敛一下分歧"
+      - "并行合流"
+      - "parallel merge"
+    not_for:
+      - "单猫回答"
+      - "普通总结"
+      - "原始 brainstorm"
+    output: "Consensus / divergences / suggested decision card"
+    next: ["collaborative-thinking", "writing-plans"]
+    sop_step: null
+    merged_from: null
+
   # ── 项目脚手架 ──
   project-init:
     description: >
