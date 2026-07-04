@@ -4,8 +4,31 @@
  * Tests parsing of /api/evidence/status response.
  */
 
-import { describe, expect, it } from 'vitest';
-import { filterEvidenceVars, getConfigVars, parseIndexStatus } from '@/components/memory/IndexStatus';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { filterEvidenceVars, getConfigVars, IndexStatus, parseIndexStatus } from '@/components/memory/IndexStatus';
+import { apiFetch } from '@/utils/api-client';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
+
+const mockedApiFetch = vi.mocked(apiFetch);
+
+function jsonResponse(body: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  } as Response;
+}
+
+async function flushPromises(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
 
 describe('parseIndexStatus', () => {
   it('parses healthy response', () => {
@@ -131,5 +154,108 @@ describe('getConfigVars', () => {
 
   it('returns empty for no evidence vars', () => {
     expect(getConfigVars([mkVar('PORT', 'server', '3001')])).toEqual([]);
+  });
+});
+
+describe('IndexStatus knowledge library controls', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    mockedApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/evidence/status') {
+        return Promise.resolve(jsonResponse({ backend: 'sqlite', healthy: true, docs_count: 2 }));
+      }
+      if (path === '/api/config/env-summary') {
+        return Promise.resolve(jsonResponse({ variables: [] }));
+      }
+      if (path === '/api/library/catalog') {
+        return Promise.resolve(
+          jsonResponse({
+            collections: [
+              {
+                manifest: {
+                  id: 'domain:orbitos-knowledge',
+                  displayName: '400知识库 (Obsidian Read-only)',
+                  kind: 'domain',
+                  root: '/vault/400知识库',
+                  sensitivity: 'internal',
+                  readOnly: true,
+                  indexPolicy: { autoRebuild: true, rebuildIntervalMs: 300000 },
+                },
+                overview: { docCount: 1 },
+                health: { indexFreshness: '2026-07-04T10:00:00.000Z' },
+              },
+              {
+                manifest: {
+                  id: 'project:cat-cafe',
+                  displayName: 'Clowder AI Project',
+                  kind: 'project',
+                  root: '/repo/docs',
+                  sensitivity: 'internal',
+                  readOnly: false,
+                  indexPolicy: { autoRebuild: true },
+                },
+                overview: { docCount: 99 },
+                health: { indexFreshness: '2026-07-04T10:00:00.000Z' },
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/library/domain%3Aorbitos-knowledge/rebuild' && init?.method === 'POST') {
+        return Promise.resolve(
+          jsonResponse({
+            indexed: 1,
+            skipped: 2,
+            blocked: false,
+            secretFindings: [{ type: 'api_key', path: 'secret.md', line: 3 }],
+            quarantinedFiles: [{ path: 'secret.md', findings: [{ type: 'api_key', line: 3 }] }],
+          }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected request: ${path}`));
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    mockedApiFetch.mockReset();
+  });
+
+  it('triggers a collection rebuild and shows the quarantine report', async () => {
+    await act(async () => {
+      root.render(React.createElement(IndexStatus));
+    });
+    await flushPromises();
+    await flushPromises();
+
+    expect(container.textContent).toContain('400知识库 (Obsidian Read-only)');
+    expect(container.textContent).toContain('自动刷新');
+    expect(container.textContent).not.toContain('Clowder AI Project');
+
+    const rebuildButton = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('重建索引'),
+    ) as HTMLButtonElement | undefined;
+    expect(rebuildButton).toBeTruthy();
+
+    await act(async () => {
+      rebuildButton!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await flushPromises();
+
+    expect(mockedApiFetch).toHaveBeenCalledWith('/api/library/domain%3Aorbitos-knowledge/rebuild', {
+      method: 'POST',
+    });
+    expect(container.textContent).toContain('已索引 1');
+    expect(container.textContent).toContain('隔离 1');
+    expect(container.textContent).toContain('secret.md');
   });
 });

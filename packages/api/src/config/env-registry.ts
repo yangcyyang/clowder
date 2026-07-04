@@ -1512,6 +1512,14 @@ export const ENV_VARS: EnvDefinition[] = [
     exampleRecommended: true,
   },
   {
+    name: 'CAT_CAFE_COLLECTION_AUTO_REBUILD_INTERVAL_MS',
+    defaultValue: '300000',
+    description: '只读知识库自动刷新间隔，默认 5 分钟；低于 30 秒会回退到默认值。',
+    category: 'evidence',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
     name: 'WORLD_DB',
     defaultValue: '{repoRoot}/world.sqlite',
     description: 'F093 World Engine SQLite 数据库路径',

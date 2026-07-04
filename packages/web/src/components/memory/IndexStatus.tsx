@@ -61,6 +61,50 @@ interface EnvSummaryResponse {
   variables: EnvVar[];
 }
 
+interface LibraryCollectionManifest {
+  id: string;
+  displayName: string;
+  kind: string;
+  root?: string;
+  sensitivity?: string;
+  readOnly?: boolean;
+  indexPolicy?: {
+    autoRebuild?: boolean;
+    rebuildIntervalMs?: number;
+  };
+}
+
+interface LibraryCollectionStatus {
+  manifest: LibraryCollectionManifest;
+  overview?: {
+    docCount?: number;
+  } | null;
+  health?: {
+    indexFreshness?: string | null;
+  } | null;
+}
+
+interface LibraryCatalogResponse {
+  collections?: LibraryCollectionStatus[];
+}
+
+interface CollectionRebuildFinding {
+  type?: string;
+  path?: string;
+  line?: number;
+}
+
+interface CollectionRebuildReport {
+  indexed: number;
+  skipped: number;
+  blocked: boolean;
+  secretFindings?: CollectionRebuildFinding[];
+  quarantinedFiles?: Array<{
+    path: string;
+    findings?: CollectionRebuildFinding[];
+  }>;
+}
+
 const EVIDENCE_CATEGORY = 'evidence';
 
 /** Pure: filter to evidence-category on/off toggle flags only (excludes URLs, paths, ports) */
@@ -82,6 +126,14 @@ function StatusRow({ label, value }: { label: string; value: string | number }) 
       <span className="font-medium text-cafe">{String(value)}</span>
     </div>
   );
+}
+
+function formatRefreshPolicy(manifest: LibraryCollectionManifest): string {
+  if (!manifest.indexPolicy?.autoRebuild) return '手动刷新';
+  const intervalMs = manifest.indexPolicy.rebuildIntervalMs;
+  if (!intervalMs) return '自动刷新';
+  const minutes = Math.max(1, Math.round(intervalMs / 60_000));
+  return `自动刷新 · 每 ${minutes} 分钟`;
 }
 
 function CollapsibleGroup({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
@@ -112,20 +164,31 @@ export function IndexStatus() {
   const [error, setError] = useState<string | null>(null);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+  const [libraryCollections, setLibraryCollections] = useState<LibraryCollectionStatus[]>([]);
+  const [rebuildingCollectionId, setRebuildingCollectionId] = useState<string | null>(null);
+  const [rebuildReports, setRebuildReports] = useState<Record<string, CollectionRebuildReport>>({});
+  const [rebuildError, setRebuildError] = useState<string | null>(null);
 
   const evidenceVars = useMemo(() => filterEvidenceVars(envVars), [envVars]);
   const configVars = useMemo(() => getConfigVars(envVars), [envVars]);
+  const readOnlyLibraryCollections = useMemo(
+    () => libraryCollections.filter((collection) => collection.manifest.readOnly === true),
+    [libraryCollections],
+  );
 
   const fetchAll = useCallback(async () => {
     try {
-      const [statusRes, envRes] = await Promise.all([
+      const [statusRes, envRes, libraryRes] = await Promise.all([
         apiFetch('/api/evidence/status'),
         apiFetch('/api/config/env-summary'),
+        apiFetch('/api/library/catalog'),
       ]);
       const raw = (await statusRes.json()) as RawStatusResponse;
       setStatus(parseIndexStatus(raw));
       const envData = (await envRes.json()) as EnvSummaryResponse;
       setEnvVars(envData.variables ?? []);
+      const libraryData = libraryRes.ok ? ((await libraryRes.json()) as LibraryCatalogResponse) : { collections: [] };
+      setLibraryCollections(libraryData.collections ?? []);
       setError(null);
     } catch {
       setError('Failed to fetch memory status');
@@ -147,6 +210,29 @@ export function IndexStatus() {
         /* fetchAll will refresh state */
       } finally {
         setUpdatingKey(null);
+      }
+    },
+    [fetchAll],
+  );
+
+  const rebuildCollection = useCallback(
+    async (collectionId: string) => {
+      setRebuildingCollectionId(collectionId);
+      setRebuildError(null);
+      try {
+        const res = await apiFetch(`/api/library/${encodeURIComponent(collectionId)}/rebuild`, {
+          method: 'POST',
+        });
+        const body = (await res.json()) as CollectionRebuildReport | { error?: string };
+        if (!res.ok) {
+          throw new Error('error' in body && body.error ? body.error : 'Rebuild failed');
+        }
+        setRebuildReports((current) => ({ ...current, [collectionId]: body as CollectionRebuildReport }));
+        await fetchAll();
+      } catch (err) {
+        setRebuildError(err instanceof Error ? err.message : 'Rebuild failed');
+      } finally {
+        setRebuildingCollectionId(null);
       }
     },
     [fetchAll],
@@ -245,7 +331,76 @@ export function IndexStatus() {
             ))}
           </CollapsibleGroup>
         )}
+
+        {readOnlyLibraryCollections.length > 0 && (
+          <CollapsibleGroup label="知识库" count={readOnlyLibraryCollections.length}>
+            {readOnlyLibraryCollections.map((collection) => {
+              const manifest = collection.manifest;
+              const report = rebuildReports[manifest.id];
+              const quarantinedCount = report?.quarantinedFiles?.length ?? 0;
+              const isRebuilding = rebuildingCollectionId === manifest.id;
+              return (
+                <div key={manifest.id} className="space-y-2 px-1 py-3 text-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-cafe">{manifest.displayName}</span>
+                        {manifest.readOnly && (
+                          <span className="rounded bg-conn-emerald-bg px-1.5 py-0.5 text-[10px] font-medium text-conn-emerald-text">
+                            只读
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-cafe-muted">
+                        <span>{manifest.id}</span>
+                        <span>{formatRefreshPolicy(manifest)}</span>
+                        {collection.overview?.docCount != null && <span>{collection.overview.docCount} docs</span>}
+                        {collection.health?.indexFreshness && (
+                          <span>{new Date(collection.health.indexFreshness).toLocaleString()}</span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => rebuildCollection(manifest.id)}
+                      disabled={isRebuilding}
+                      className="console-button-ghost shrink-0 px-3 py-1.5 text-xs disabled:opacity-50"
+                    >
+                      {isRebuilding ? '重建中...' : '重建索引'}
+                    </button>
+                  </div>
+
+                  {report && (
+                    <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-bg-subtle)] px-3 py-2 text-[11px] text-cafe-muted">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        <span className="font-medium text-cafe">已索引 {report.indexed}</span>
+                        <span>跳过 {report.skipped}</span>
+                        <span>{report.blocked ? '已阻断' : '完成'}</span>
+                        <span>隔离 {quarantinedCount}</span>
+                      </div>
+                      {quarantinedCount > 0 && (
+                        <ul className="mt-1 space-y-0.5">
+                          {report.quarantinedFiles?.slice(0, 3).map((file) => (
+                            <li key={file.path} className="font-mono text-[10px] text-conn-amber-text">
+                              {file.path}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </CollapsibleGroup>
+        )}
       </div>
+
+      {rebuildError && (
+        <p className="mt-3 rounded-xl border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
+          {rebuildError}
+        </p>
+      )}
 
       <button type="button" onClick={fetchAll} className="console-button-ghost text-xs px-3 py-1.5 mt-3">
         刷新状态

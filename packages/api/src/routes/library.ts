@@ -2,7 +2,8 @@ import { mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { BindingDryRun } from '../domains/memory/BindingDryRun.js';
-import { CollectionIndexBuilder } from '../domains/memory/CollectionIndexBuilder.js';
+import type { CollectionAutoRebuildScheduler } from '../domains/memory/CollectionAutoRebuildScheduler.js';
+import { rebuildCollectionIndex } from '../domains/memory/CollectionAutoRebuildScheduler.js';
 import { CollectionReadModel } from '../domains/memory/CollectionReadModel.js';
 import type { CollectionKind, CollectionManifest, CollectionSensitivity } from '../domains/memory/collection-types.js';
 import { validateManifestInput } from '../domains/memory/collection-types.js';
@@ -11,12 +12,12 @@ import { GraphResolver } from '../domains/memory/GraphResolver.js';
 import type { IEvidenceStore } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
-import { resolveCollectionScanner } from '../domains/memory/scanner-resolver.js';
 
 export interface LibraryRoutesOptions {
   catalog: LibraryCatalog;
   stores: Map<string, IEvidenceStore>;
   dataDir?: string;
+  autoRebuildScheduler?: CollectionAutoRebuildScheduler;
 }
 
 type StoreWithDb = IEvidenceStore & { getDb?: () => import('better-sqlite3').Database };
@@ -147,27 +148,39 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     return { collectionId, groups };
   });
 
-  app.post<{ Params: { collectionId: string } }>('/api/library/:collectionId/rebuild', async (request, reply) => {
-    const ip = request.ip;
-    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
-      reply.status(403);
-      return { error: 'Forbidden: localhost only' };
-    }
-    const manifest = opts.catalog.get(request.params.collectionId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: 'Collection not found' };
-    }
-    const store = opts.stores.get(manifest.id);
-    if (!store) {
-      reply.status(404);
-      return { error: 'Store not found' };
-    }
-    const scanner = resolveCollectionScanner(manifest);
-    const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner);
-    const result = await builder.rebuild();
-    return result;
-  });
+  app.post<{ Params: { collectionId: string }; Body?: { force?: unknown } }>(
+    '/api/library/:collectionId/rebuild',
+    async (request, reply) => {
+      const ip = request.ip;
+      if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+        reply.status(403);
+        return { error: 'Forbidden: localhost only' };
+      }
+      const force = request.body?.force;
+      if (force !== undefined && typeof force !== 'boolean') {
+        reply.status(400);
+        return { error: 'force must be a boolean' };
+      }
+      const manifest = opts.catalog.get(request.params.collectionId);
+      if (!manifest) {
+        reply.status(404);
+        return { error: 'Collection not found' };
+      }
+      if (manifest.readOnly !== true) {
+        reply.status(400);
+        return { error: 'Only read-only knowledge collections can be rebuilt through this endpoint' };
+      }
+      const store = opts.stores.get(manifest.id);
+      if (!store) {
+        reply.status(404);
+        return { error: 'Store not found' };
+      }
+      const result = opts.autoRebuildScheduler
+        ? await opts.autoRebuildScheduler.rebuildCollection(manifest.id, { force: force ?? true })
+        : await rebuildCollectionIndex(manifest, store as SqliteEvidenceStore, { force: force ?? true });
+      return result;
+    },
+  );
 
   app.post('/api/library/bind-dry-run', async (request, reply) => {
     const ip = request.ip;

@@ -104,7 +104,8 @@ describe('createMemoryServices', () => {
     assert.equal(manifest.root, vaultRoot);
     assert.equal(manifest.sensitivity, 'internal');
     assert.equal(manifest.scannerLevel, 'auto');
-    assert.equal(manifest.indexPolicy.autoRebuild, false);
+    assert.equal(manifest.indexPolicy.autoRebuild, true);
+    assert.equal(manifest.indexPolicy.rebuildIntervalMs, 300000);
     assert.equal(manifest.reviewPolicy.requireOwnerApproval, true);
     assert.equal(manifest.readOnly, true);
     assert.ok(services.collectionStores?.has('domain:orbitos-knowledge'));

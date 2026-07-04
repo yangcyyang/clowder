@@ -1,6 +1,7 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
+import { resolveCollectionAutoRebuildIntervalMs } from './CollectionAutoRebuildScheduler.js';
 import type { CollectionManifest } from './collection-types.js';
 import { validateCollectionId, validateManifestInput } from './collection-types.js';
 
@@ -46,7 +47,12 @@ export function loadObsidianReadonlyCollections(raw: string | undefined, now = n
       root,
       sensitivity: DEFAULT_SENSITIVITY,
       scannerLevel: 'auto',
-      indexPolicy: { autoRebuild: false },
+      indexPolicy: {
+        autoRebuild: true,
+        rebuildIntervalMs: resolveCollectionAutoRebuildIntervalMs(
+          process.env.CAT_CAFE_COLLECTION_AUTO_REBUILD_INTERVAL_MS,
+        ),
+      },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
       readOnly: true,
       exclude: DEFAULT_EXCLUDE,

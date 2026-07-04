@@ -2,6 +2,11 @@
 
 // F152 Phase A: Scanners
 export { CatCafeScanner } from './CatCafeScanner.js';
+export {
+  CollectionAutoRebuildScheduler,
+  DEFAULT_COLLECTION_AUTO_REBUILD_INTERVAL_MS,
+  resolveCollectionAutoRebuildIntervalMs,
+} from './CollectionAutoRebuildScheduler.js';
 export type { CollectionRebuildResult } from './CollectionIndexBuilder.js';
 // F186 Phase B: Collection scanners
 export { CollectionIndexBuilder } from './CollectionIndexBuilder.js';

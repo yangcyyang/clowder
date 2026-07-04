@@ -1919,10 +1919,21 @@ async function main(): Promise<void> {
     if (!libraryStores.has('project:cat-cafe')) libraryStores.set('project:cat-cafe', memoryServices.store);
     if (memoryServices.globalStore && !libraryStores.has('global:methods'))
       libraryStores.set('global:methods', memoryServices.globalStore);
+    const { CollectionAutoRebuildScheduler } = await import('./domains/memory/CollectionAutoRebuildScheduler.js');
+    const collectionAutoRebuildScheduler = new CollectionAutoRebuildScheduler({
+      catalog: memoryServices.catalog,
+      stores: libraryStores,
+      logger: app.log,
+    });
+    collectionAutoRebuildScheduler.start();
+    app.addHook('onClose', async () => {
+      collectionAutoRebuildScheduler.stop();
+    });
     await app.register(libraryRoutes, {
       catalog: memoryServices.catalog,
       stores: libraryStores,
       dataDir: memoryServices.dataDir,
+      autoRebuildScheduler: collectionAutoRebuildScheduler,
     });
   }
 
