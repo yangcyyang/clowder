@@ -10,6 +10,7 @@ vi.mock('next/navigation', () => ({
     back: backMock,
     push: pushMock,
   }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock('@/utils/api-client', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 import { GlobalSearchPage } from '@/components/GlobalSearchPage';
+import { apiFetch } from '@/utils/api-client';
 
 describe('GlobalSearchPage keyboard navigation', () => {
   let container: HTMLDivElement;
@@ -30,6 +32,8 @@ describe('GlobalSearchPage keyboard navigation', () => {
   beforeEach(() => {
     backMock.mockClear();
     pushMock.mockClear();
+    vi.mocked(apiFetch).mockClear();
+    window.history.pushState({}, '', '/search');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -50,12 +54,12 @@ describe('GlobalSearchPage keyboard navigation', () => {
       root.render(<GlobalSearchPage />);
     });
 
-    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     await act(async () => {
-      window.dispatchEvent(escape);
+      window.dispatchEvent(escapeEvent);
     });
 
-    expect(escape.defaultPrevented).toBe(true);
+    expect(escapeEvent.defaultPrevented).toBe(true);
     expect(backMock).toHaveBeenCalledTimes(1);
   });
 
@@ -72,5 +76,33 @@ describe('GlobalSearchPage keyboard navigation', () => {
     });
 
     expect(backMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the message search from q query param', async () => {
+    window.history.pushState({}, '', '/search?q=%E8%B7%AF%E7%BA%BF');
+
+    await act(async () => {
+      root.render(<GlobalSearchPage />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/messages/search?q=%E8%B7%AF%E7%BA%BF&limit=50');
+  });
+
+  it('reruns message search when q changes on the mounted page', async () => {
+    await act(async () => {
+      root.render(<GlobalSearchPage />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    vi.mocked(apiFetch).mockClear();
+
+    window.history.pushState({}, '', '/search?q=%E6%96%B0%E7%BA%BF%E7%B4%A2');
+
+    await act(async () => {
+      root.render(<GlobalSearchPage />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/messages/search?q=%E6%96%B0%E7%BA%BF%E7%B4%A2&limit=50');
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Thread } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getThreadHref } from './ThreadSidebar/thread-navigation';
@@ -34,6 +34,8 @@ function getThreadDisplayTitle(thread: Pick<Thread, 'id' | 'title' | 'isDM'>): s
 
 export function GlobalSearchPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryParam = searchParams.get('q') ?? '';
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
@@ -42,10 +44,6 @@ export function GlobalSearchPage() {
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
   const [isSearchingMessages, setIsSearchingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   const handleBack = useCallback(() => {
     router.back();
@@ -97,29 +95,35 @@ export function GlobalSearchPage() {
       .slice(0, 12);
   }, [submittedQuery, threads]);
 
-  const runSearch = useCallback(
-    async (nextQuery = query) => {
-      const trimmed = nextQuery.trim();
-      setSubmittedQuery(trimmed);
-      setMessages([]);
-      setError(null);
-      if (!trimmed) return;
+  const runSearch = useCallback(async (nextQuery: string) => {
+    const trimmed = nextQuery.trim();
+    setSubmittedQuery(trimmed);
+    setMessages([]);
+    setError(null);
+    if (!trimmed) return;
 
-      setIsSearchingMessages(true);
-      try {
-        const res = await apiFetch(`/api/messages/search?q=${encodeURIComponent(trimmed)}&limit=50`);
-        if (!res.ok) throw new Error(`搜索失败：${res.status}`);
-        const data = (await res.json()) as { messages?: MessageSearchResult[] };
-        setMessages(data.messages ?? []);
-      } catch {
-        setError('消息搜索失败，请稍后重试。');
-        setMessages([]);
-      } finally {
-        setIsSearchingMessages(false);
-      }
-    },
-    [query],
-  );
+    setIsSearchingMessages(true);
+    try {
+      const res = await apiFetch(`/api/messages/search?q=${encodeURIComponent(trimmed)}&limit=50`);
+      if (!res.ok) throw new Error(`搜索失败：${res.status}`);
+      const data = (await res.json()) as { messages?: MessageSearchResult[] };
+      setMessages(data.messages ?? []);
+    } catch {
+      setError('消息搜索失败，请稍后重试。');
+      setMessages([]);
+    } finally {
+      setIsSearchingMessages(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    setQuery(queryParam);
+    void runSearch(queryParam);
+  }, [queryParam, runSearch]);
 
   const openThread = useCallback(
     (threadId: string, messageId?: string) => {
@@ -138,7 +142,7 @@ export function GlobalSearchPage() {
           className="flex items-center gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            void runSearch();
+            void runSearch(query);
           }}
         >
           <span className="flex h-9 w-9 items-center justify-center border-2 border-[var(--slock-border-color)] bg-[var(--console-rail-active)] text-lg">
@@ -198,7 +202,9 @@ export function GlobalSearchPage() {
                     className="border-2 border-[var(--slock-border-color)] bg-[var(--cafe-surface)] px-3 py-2 text-left shadow-[var(--shadow-chip)] transition-colors hover:bg-[var(--clowder-sidebar-active-bg)]"
                   >
                     <div className="truncate font-semibold"># {getThreadDisplayTitle(thread)}</div>
-                    <div className="mt-1 truncate text-xs text-[var(--clowder-muted-soft)]">{thread.projectPath ?? thread.id}</div>
+                    <div className="mt-1 truncate text-xs text-[var(--clowder-muted-soft)]">
+                      {thread.projectPath ?? thread.id}
+                    </div>
                   </button>
                 ))}
                 {!isLoadingThreads && matchingThreads.length === 0 && (
@@ -233,7 +239,9 @@ export function GlobalSearchPage() {
                   >
                     <div className="mb-1 flex items-center gap-2 text-xs text-[var(--clowder-muted-soft)]">
                       <span className="font-semibold text-[var(--cafe-text)]">
-                        # {message.threadTitle ?? getThreadDisplayTitle({ id: message.threadId, title: null, isDM: false })}
+                        #{' '}
+                        {message.threadTitle ??
+                          getThreadDisplayTitle({ id: message.threadId, title: null, isDM: false })}
                       </span>
                       <span>{message.type}</span>
                     </div>

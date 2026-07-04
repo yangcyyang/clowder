@@ -21,4 +21,10 @@ describe('buildGlobalSearchHref', () => {
   it('falls back to plain search when no referrer exists', () => {
     expect(buildGlobalSearchHref('/settings')).toBe('/search');
   });
+
+  it('carries the quick-switch query into global search', () => {
+    expect(buildGlobalSearchHref('/thread/thread-abc', '', '设计 agent')).toBe(
+      '/search?from=thread-abc&q=%E8%AE%BE%E8%AE%A1+agent',
+    );
+  });
 });
