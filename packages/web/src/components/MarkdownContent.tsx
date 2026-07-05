@@ -1,9 +1,19 @@
 'use client';
 
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useCallback, useRef, useState } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { useTaskThreadActions } from '@/contexts/TaskThreadActionsContext';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -163,10 +173,10 @@ const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\w.@-]+)+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const REL_PATH_RE = /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
 const INLINE_FILE_PATH_RE =
   /^(?:\/[\w.@-]+)+(?:\.[\w]+)(?::\d+)?$|^(?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::\d+)?$/;
-const TASK_REF_RE = /(^|[\s（(「『【\[])(task\s+#(\d+))(?![\w-])/giu;
+const TASK_REF_RE = /(^|[\s（(「『【[])(task\s+#(\d+))(?![\w-])/giu;
 const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
 const LOCAL_FILE_NAME_RE =
-  /(?:^|[\s（(「『【\[])(`?)([^`"'<>/\\|:：\s]+(?:[\s-][^`"'<>/\\|:：\s]+)*\.(?:html?|mdx?|pdf|pptx?|docx?|xlsx?|txt|json|png|jpe?g|svg|webp))(`?)(?=$|[\s，。；;、）)」』】\].,!?！？])/giu;
+  /(?:^|[\s（(「『【[])(`?)([^`"'<>/\\|:：\s]+(?:[\s-][^`"'<>/\\|:：\s]+)*\.(?:html?|mdx?|pdf|pptx?|docx?|xlsx?|txt|json|png|jpe?g|svg|webp))(`?)(?=$|[\s，。；;、）)」』】\].,!?！？])/giu;
 
 function linkifyFilePaths(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
@@ -289,7 +299,7 @@ function linkifyLocalFileNames(text: string): ReactNode[] {
   LOCAL_FILE_NAME_RE.lastIndex = 0;
   while ((m = LOCAL_FILE_NAME_RE.exec(text)) !== null) {
     const fullMatch = m[0];
-    const leading = fullMatch.match(/^[\s（(「『【\[]/)?.[0] ?? '';
+    const leading = fullMatch.match(/^[\s（(「『【[]/)?.[0] ?? '';
     const fileName = m[2];
     if (!fileName) continue;
 
@@ -390,6 +400,7 @@ function linkifyTaskReferences(text: string): ReactNode[] {
 function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
   const tasks = useTaskStore((state) => state.tasks);
   const addToast = useToastStore((state) => state.addToast);
+  const taskThreadActions = useTaskThreadActions();
   const task = tasks.filter((item) => item.kind !== 'pr_tracking')[seq - 1];
 
   const handleClick = useCallback(
@@ -402,6 +413,11 @@ function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
           message: `${label} 不在当前可见任务列表中。`,
           duration: 3200,
         });
+        return;
+      }
+
+      if (taskThreadActions) {
+        taskThreadActions.openTaskThread(task);
         return;
       }
 
@@ -437,7 +453,7 @@ function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
         { duration: 900, easing: 'ease-out' },
       );
     },
-    [addToast, label, task],
+    [addToast, label, task, taskThreadActions],
   );
 
   return (
@@ -445,7 +461,7 @@ function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
       type="button"
       data-task-ref-link
       onClick={handleClick}
-      className="inline rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1 py-0.5 font-mono text-[0.85em] font-semibold text-[var(--clowder-markdown-chip-text)] hover:underline"
+      className="inline cursor-pointer rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1 py-0.5 font-mono text-[0.85em] font-semibold text-[var(--clowder-markdown-chip-text)] transition-opacity hover:opacity-80 hover:underline"
       title={task ? `${label} · ${task.title}` : `${label} · 未找到当前可见任务`}
     >
       {label}
@@ -639,9 +655,7 @@ const mdComponents: Components = {
     // as styled text instead.
     const isExternal = href?.startsWith('http://') || href?.startsWith('https://') || href?.startsWith('vscode://');
     if (!isExternal) {
-      return (
-        <span className="text-[var(--color-cafe-accent)] break-all">{withMentions(children)}</span>
-      );
+      return <span className="text-[var(--color-cafe-accent)] break-all">{withMentions(children)}</span>;
     }
     return (
       <a
@@ -715,10 +729,18 @@ function createSearchMdComponents(searchHighlight?: string): Components {
     strong: ({ children }) => <strong className="font-semibold">{decorate(withMentions(children))}</strong>,
     em: ({ children }) => <em>{decorate(withMentions(children))}</em>,
     del: ({ children }) => <del className="opacity-60">{decorate(withMentions(children))}</del>,
-    h1: ({ children }) => <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h1>,
-    h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h2>,
-    h3: ({ children }) => <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h3>,
-    h4: ({ children }) => <h4 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h4>,
+    h1: ({ children }) => (
+      <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h1>
+    ),
+    h2: ({ children }) => (
+      <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{decorate(withMentions(children))}</h2>
+    ),
+    h3: ({ children }) => (
+      <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h3>
+    ),
+    h4: ({ children }) => (
+      <h4 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{decorate(withMentions(children))}</h4>
+    ),
     h5: ({ children }) => (
       <h5 className="text-xs font-semibold mb-1 mt-1.5 first:mt-0 uppercase tracking-wide">
         {decorate(withMentions(children))}
@@ -794,7 +816,14 @@ export function resolveRelativePath(base: string, relative: string): string {
   return parts.join('/');
 }
 
-export function MarkdownContent({ content, className, searchHighlight, disableCommandPrefix, basePath, worktreeId }: Props) {
+export function MarkdownContent({
+  content,
+  className,
+  searchHighlight,
+  disableCommandPrefix,
+  basePath,
+  worktreeId,
+}: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = cmdMatch ? content.slice(cmdMatch[1].length) : content;
 

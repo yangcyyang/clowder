@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
+import { TaskThreadActionsContext } from '@/contexts/TaskThreadActionsContext';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
@@ -50,8 +51,8 @@ import { ChatInput } from './ChatInput';
 import { ChatMessage, shouldRenderChatMessage } from './ChatMessage';
 import { ConnectionStatusBar } from './ConnectionStatusBar';
 import { EditChannelModal } from './EditChannelModal';
-import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { FilesPanel } from './FilesPanel';
+import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
@@ -61,21 +62,21 @@ import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { InlineThreadPanel } from './InlineThreadPanel';
+import { BootcampIcon } from './icons/BootcampIcon';
+import { PawIcon } from './icons/PawIcon';
 import {
   applyInlineThreadReplyCountUpdate,
   type InlineThreadReplyCountUpdateOptions,
   type InlineThreadReplyState,
 } from './inline-thread-reply-state';
-import { BootcampIcon } from './icons/BootcampIcon';
-import { PawIcon } from './icons/PawIcon';
 import { KnowledgeCaptureModal } from './KnowledgeCaptureModal';
 import { MessageActions } from './MessageActions';
 import { MobileStatusSheet } from './MobileStatusSheet';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { QueuePanel } from './QueuePanel';
 import { RightStatusPanel } from './RightStatusPanel';
-import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SavedMessagesPanel } from './SavedMessagesPanel';
+import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { TasksPanel } from './TasksPanel';
 import { ThreadSidebar } from './ThreadSidebar';
@@ -115,11 +116,7 @@ function formatPinnedMessagePreview(message: ChatMessageData): string {
   return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 
-function findUnreadDividerIndex(
-  messages: ChatMessageData[],
-  lastReadMessageId?: string,
-  unreadCount?: number,
-): number {
+function findUnreadDividerIndex(messages: ChatMessageData[], lastReadMessageId?: string, unreadCount?: number): number {
   if (!lastReadMessageId || !unreadCount || unreadCount <= 0) return -1;
   return messages.findIndex((message) => shouldRenderChatMessage(message) && message.id > lastReadMessageId);
 }
@@ -476,7 +473,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [addToast, clearUnread, handleInlineThreadReplyCountChange, inlineThreadReplies, openInlineThread, setThreads, threadId],
+    [
+      addToast,
+      clearUnread,
+      handleInlineThreadReplyCountChange,
+      inlineThreadReplies,
+      openInlineThread,
+      setThreads,
+      threadId,
+    ],
   );
   const handleOpenInlineThread = useCallback(
     async (messageId: string) => {
@@ -536,6 +541,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     },
     [addToast, openInlineThread, threadId, updateTask],
   );
+  const taskThreadActions = useMemo(() => ({ openTaskThread: handleOpenTaskThread }), [handleOpenTaskThread]);
   useEffect(() => {
     clearInlineThreadCloseTimer();
     setInlineThreadClosing(false);
@@ -635,7 +641,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const currentThreadTitle = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
   const currentThreadMemberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? EMPTY_MEMBER_IDS;
   const unreadDividerIndex = useMemo(
-    () => (isExport ? -1 : findUnreadDividerIndex(messages, currentThread?.lastReadMessageId, currentThread?.unreadCount)),
+    () =>
+      isExport ? -1 : findUnreadDividerIndex(messages, currentThread?.lastReadMessageId, currentThread?.unreadCount),
     [isExport, messages, currentThread?.lastReadMessageId, currentThread?.unreadCount],
   );
   const currentBootcampPhase = currentBootcampState?.phase;
@@ -1325,480 +1332,484 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }
 
   return (
-    <div ref={containerRef} className="flex h-full">
-      {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
-      {sidebarOpen && (
-        <div className="md:hidden">
-          <div
-            className="fixed inset-0 bg-[var(--console-overlay-backdrop)] z-20"
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="fixed inset-y-0 left-0 z-30 flex-shrink-0" style={{ width: sidebarWidth }}>
-            <ThreadSidebar onClose={() => setSidebarOpen(false)} className="w-full" />
-          </div>
-        </div>
-      )}
-
-      <div
-        className="flex flex-col min-w-0"
-        style={
-          statusPanelOpen && rightPanelMode === 'workspace'
-            ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
-            : { flex: '1 1 0%' }
-        }
-      >
-        <ChatContainerHeader
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((v) => !v)}
-          threadId={threadId}
-          authPendingCount={authPending.length}
-          viewMode={viewMode}
-          onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
-          onOpenMobileStatus={() => setMobileStatusOpen(true)}
-          statusPanelOpen={statusPanelOpen}
-          onToggleStatusPanel={() => setStatusPanelOpen((v) => !v)}
-          onOpenChannelSettings={() => {
-            setChannelSettingsError(null);
-            setChannelSettingsOpen(true);
-          }}
-          onOpenKnowledgeCapture={() => setKnowledgeCaptureOpen(true)}
-        />
-
-        <ChannelTabs activeTab={activeTab} onTabChange={setActiveTab} />
-
-        {pinnedMessage && (
-          <div className="flex h-9 flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 text-xs text-[var(--cafe-text)]">
-            <span aria-hidden="true">📌</span>
-            <span className="font-semibold text-[var(--cafe-text-secondary)]">Pinned message</span>
-            <span className="min-w-0 flex-1 truncate">{formatPinnedMessagePreview(pinnedMessage)}</span>
-            <button
-              type="button"
-              onClick={() => setPinnedMessage(null)}
-              className="rounded px-1.5 py-0.5 text-[var(--cafe-text-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]"
-              aria-label="关闭置顶消息横幅"
-            >
-              ×
-            </button>
+    <TaskThreadActionsContext.Provider value={taskThreadActions}>
+      <div ref={containerRef} className="flex h-full">
+        {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
+        {sidebarOpen && (
+          <div className="md:hidden">
+            <div
+              className="fixed inset-0 bg-[var(--console-overlay-backdrop)] z-20"
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 z-30 flex-shrink-0" style={{ width: sidebarWidth }}>
+              <ThreadSidebar onClose={() => setSidebarOpen(false)} className="w-full" />
+            </div>
           </div>
         )}
 
-        {savedMessagesViewOpen ? (
-          <div className="flex-1 overflow-hidden">
-            <SavedMessagesPanel currentThreadId={threadId} />
-          </div>
-        ) : activeTab === 'chat' ? (
-          <div className="flex-1 relative overflow-hidden">
-            <main
-              ref={scrollContainerRef}
-              onScroll={handleScroll}
-              className="h-full overflow-y-auto p-4"
-              data-guide-id="bootcamp.preview-result"
-              data-bootcamp-host="chat-messages"
-              data-chat-container
-            >
-              {isLoadingHistory && <div className="text-center py-3 text-sm text-cafe-muted">加载历史消息...</div>}
-              <ConnectionStatusBar
-                api={connectionStatus.api}
-                socket={connectionStatus.socket}
-                upstream={connectionStatus.upstream}
-                isReadonly={connectionStatus.isReadonly}
-                checkedAt={connectionStatus.checkedAt}
-                isOfflineSnapshot={isOfflineSnapshot}
-              />
-              {showAgentHookNotice && (
-                <div className="mb-3 flex justify-center text-left">
-                  <div className="max-w-[85%] w-full">
-                    <AgentHookHealthNotice
-                      health={agentHookHealth.health}
-                      error={agentHookHealth.error}
-                      syncing={agentHookHealth.syncing}
-                      synced={agentHookHealth.synced}
-                      onSync={agentHookHealth.sync}
-                    />
-                  </div>
-                </div>
-              )}
-              {!hasMore && messages.length > 0 && (
-                <div className="text-center py-3 text-xs text-cafe-muted">没有更多消息了</div>
-              )}
-              {messages.length === 0 && !isLoadingHistory ? (
-                <div className="text-center mt-20">
-                  <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
-                  <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
-                  <p className="text-sm text-cafe-muted">
-                    {cats.length > 0 ? '输入 @布偶 召唤布偶猫开始聊天' : '还没有可用成员，先开始新手教程创建第一只猫猫'}
-                  </p>
-                  {showSetupCard && govStatus && (
-                    <div className="mt-6 text-left">
-                      <ProjectSetupCard
-                        key={threadId}
-                        projectPath={currentProjectPath}
-                        isEmptyDir={govStatus.isEmptyDir}
-                        isGitRepo={govStatus.isGitRepo}
-                        gitAvailable={govStatus.gitAvailable}
-                        agentHookHealth={agentHookHealth.health}
-                        agentHookHealthError={agentHookHealth.error}
-                        agentHookSyncing={agentHookHealth.syncing}
-                        agentHookSynced={agentHookHealth.synced}
-                        onSyncAgentHooks={agentHookHealth.sync}
-                        onComplete={() => {
-                          setSetupDone(true);
-                          govRefetch();
-                        }}
+        <div
+          className="flex flex-col min-w-0"
+          style={
+            statusPanelOpen && rightPanelMode === 'workspace'
+              ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
+              : { flex: '1 1 0%' }
+          }
+        >
+          <ChatContainerHeader
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            threadId={threadId}
+            authPendingCount={authPending.length}
+            viewMode={viewMode}
+            onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
+            onOpenMobileStatus={() => setMobileStatusOpen(true)}
+            statusPanelOpen={statusPanelOpen}
+            onToggleStatusPanel={() => setStatusPanelOpen((v) => !v)}
+            onOpenChannelSettings={() => {
+              setChannelSettingsError(null);
+              setChannelSettingsOpen(true);
+            }}
+            onOpenKnowledgeCapture={() => setKnowledgeCaptureOpen(true)}
+          />
+
+          <ChannelTabs activeTab={activeTab} onTabChange={setActiveTab} />
+
+          {pinnedMessage && (
+            <div className="flex h-9 flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 text-xs text-[var(--cafe-text)]">
+              <span aria-hidden="true">📌</span>
+              <span className="font-semibold text-[var(--cafe-text-secondary)]">Pinned message</span>
+              <span className="min-w-0 flex-1 truncate">{formatPinnedMessagePreview(pinnedMessage)}</span>
+              <button
+                type="button"
+                onClick={() => setPinnedMessage(null)}
+                className="rounded px-1.5 py-0.5 text-[var(--cafe-text-muted)] transition-colors hover:bg-[var(--console-hover-bg)] hover:text-[var(--cafe-text)]"
+                aria-label="关闭置顶消息横幅"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {savedMessagesViewOpen ? (
+            <div className="flex-1 overflow-hidden">
+              <SavedMessagesPanel currentThreadId={threadId} />
+            </div>
+          ) : activeTab === 'chat' ? (
+            <div className="flex-1 relative overflow-hidden">
+              <main
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="h-full overflow-y-auto p-4"
+                data-guide-id="bootcamp.preview-result"
+                data-bootcamp-host="chat-messages"
+                data-chat-container
+              >
+                {isLoadingHistory && <div className="text-center py-3 text-sm text-cafe-muted">加载历史消息...</div>}
+                <ConnectionStatusBar
+                  api={connectionStatus.api}
+                  socket={connectionStatus.socket}
+                  upstream={connectionStatus.upstream}
+                  isReadonly={connectionStatus.isReadonly}
+                  checkedAt={connectionStatus.checkedAt}
+                  isOfflineSnapshot={isOfflineSnapshot}
+                />
+                {showAgentHookNotice && (
+                  <div className="mb-3 flex justify-center text-left">
+                    <div className="max-w-[85%] w-full">
+                      <AgentHookHealthNotice
+                        health={agentHookHealth.health}
+                        error={agentHookHealth.error}
+                        syncing={agentHookHealth.syncing}
+                        synced={agentHookHealth.synced}
+                        onSync={agentHookHealth.sync}
                       />
                     </div>
-                  )}
-                  {/* F152 Phase B: memory bootstrap orchestrator */}
-                  {!showSetupCard &&
-                    currentProjectPath &&
-                    currentProjectPath !== 'default' &&
-                    currentProjectPath !== 'lobby' && (
-                      <div className="mt-4 text-left">
-                        <BootstrapOrchestrator
+                  </div>
+                )}
+                {!hasMore && messages.length > 0 && (
+                  <div className="text-center py-3 text-xs text-cafe-muted">没有更多消息了</div>
+                )}
+                {messages.length === 0 && !isLoadingHistory ? (
+                  <div className="text-center mt-20">
+                    <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
+                    <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
+                    <p className="text-sm text-cafe-muted">
+                      {cats.length > 0
+                        ? '输入 @布偶 召唤布偶猫开始聊天'
+                        : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+                    </p>
+                    {showSetupCard && govStatus && (
+                      <div className="mt-6 text-left">
+                        <ProjectSetupCard
+                          key={threadId}
                           projectPath={currentProjectPath}
-                          indexState={indexState}
-                          isSnoozed={isSnoozed}
-                          progress={bootstrapProgress}
-                          summary={bootstrapSummary}
-                          durationMs={bootstrapDurationMs}
-                          isNewProject={setupDone}
-                          governanceDone={
-                            setupDone || !!(govStatus && !govStatus.needsBootstrap && !govStatus.needsConfirmation)
-                          }
-                          onStartBootstrap={startBootstrap}
-                          onSnooze={snoozeBootstrap}
-                          onSearchKnowledge={handleSearchKnowledge}
-                          onGoToMemoryHub={handleGoToMemoryHub}
+                          isEmptyDir={govStatus.isEmptyDir}
+                          isGitRepo={govStatus.isGitRepo}
+                          gitAvailable={govStatus.gitAvailable}
+                          agentHookHealth={agentHookHealth.health}
+                          agentHookHealthError={agentHookHealth.error}
+                          agentHookSyncing={agentHookHealth.syncing}
+                          agentHookSynced={agentHookHealth.synced}
+                          onSyncAgentHooks={agentHookHealth.sync}
+                          onComplete={() => {
+                            setSetupDone(true);
+                            govRefetch();
+                          }}
                         />
                       </div>
                     )}
-                  {(() => {
-                    const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
-                    if (isCurrentBootcamp) return null; // already in bootcamp thread
-                    if (bootcampCount > 0) {
+                    {/* F152 Phase B: memory bootstrap orchestrator */}
+                    {!showSetupCard &&
+                      currentProjectPath &&
+                      currentProjectPath !== 'default' &&
+                      currentProjectPath !== 'lobby' && (
+                        <div className="mt-4 text-left">
+                          <BootstrapOrchestrator
+                            projectPath={currentProjectPath}
+                            indexState={indexState}
+                            isSnoozed={isSnoozed}
+                            progress={bootstrapProgress}
+                            summary={bootstrapSummary}
+                            durationMs={bootstrapDurationMs}
+                            isNewProject={setupDone}
+                            governanceDone={
+                              setupDone || !!(govStatus && !govStatus.needsBootstrap && !govStatus.needsConfirmation)
+                            }
+                            onStartBootstrap={startBootstrap}
+                            onSnooze={snoozeBootstrap}
+                            onSearchKnowledge={handleSearchKnowledge}
+                            onGoToMemoryHub={handleGoToMemoryHub}
+                          />
+                        </div>
+                      )}
+                    {(() => {
+                      const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
+                      if (isCurrentBootcamp) return null; // already in bootcamp thread
+                      if (bootcampCount > 0) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setShowBootcampList(true)}
+                            className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
+                            data-testid="empty-state-bootcamp-list"
+                          >
+                            <BootcampIcon className="w-4 h-4" />
+                            我的训练营（{bootcampCount}）
+                          </button>
+                        );
+                      }
                       return (
                         <button
                           type="button"
                           onClick={() => setShowBootcampList(true)}
                           className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
-                          data-testid="empty-state-bootcamp-list"
+                          data-testid="empty-state-bootcamp"
                         >
                           <BootcampIcon className="w-4 h-4" />
-                          我的训练营（{bootcampCount}）
+                          第一次来？开始猫猫训练营
                         </button>
                       );
-                    }
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => setShowBootcampList(true)}
-                        className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
-                        data-testid="empty-state-bootcamp"
-                      >
-                        <BootcampIcon className="w-4 h-4" />
-                        第一次来？开始猫猫训练营
-                      </button>
-                    );
-                  })()}
-                </div>
-              ) : (
-                messages.map(renderSingleMessage)
-              )}
-              <div ref={messagesEndRef} />
-            </main>
-            <ScrollToBottomButton
-              scrollContainerRef={scrollContainerRef}
-              messagesEndRef={messagesEndRef}
-              recomputeSignal={computeScrollRecomputeSignal(threadId, messages, uiThinkingExpandedByDefault ? 1 : 0)}
-              observerKey={threadId}
+                    })()}
+                  </div>
+                ) : (
+                  messages.map(renderSingleMessage)
+                )}
+                <div ref={messagesEndRef} />
+              </main>
+              <ScrollToBottomButton
+                scrollContainerRef={scrollContainerRef}
+                messagesEndRef={messagesEndRef}
+                recomputeSignal={computeScrollRecomputeSignal(threadId, messages, uiThinkingExpandedByDefault ? 1 : 0)}
+                observerKey={threadId}
+              />
+            </div>
+          ) : activeTab === 'tasks' ? (
+            <div className="flex-1 overflow-hidden">
+              <TasksPanel threadId={threadId} onOpenTaskThread={handleOpenTaskThread} />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-hidden">
+              <FilesPanel messages={messages} getCatById={getCatById} />
+            </div>
+          )}
+
+          <div
+            ref={attachBottomChromeRef}
+            className={`sticky bottom-0 z-20 bg-[var(--console-shell-bg)] ${
+              activeTab === 'chat' && !savedMessagesViewOpen ? '' : 'hidden'
+            }`}
+          >
+            {authPending.length > 0 && (
+              <div className="border-t border-conn-amber-ring bg-conn-amber-bg/40 py-2">
+                {authPending.map((req) => (
+                  <AuthorizationCard key={req.requestId} request={req} onRespond={authRespond} />
+                ))}
+              </div>
+            )}
+
+            <AgentStatusIndicator
+              threadId={threadId}
+              activeInvocations={activeInvocations}
+              catStatuses={catStatuses}
+              catInvocations={catInvocations}
+              getCatById={getCatById}
             />
+            <QueuePanel threadId={threadId} />
+            <VoteActiveBar threadId={threadId} onEnd={() => {}} />
+
+            {!showFirstRunQuestPrompt &&
+              !showQuestWizard &&
+              (() => {
+                const currentThread = storeThreads.find((t) => t.id === threadId);
+                const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
+                  | { phase: string; firstCatName?: string }
+                  | undefined;
+                if (!questState) return null;
+                return (
+                  <QuestBanner
+                    phase={questState.phase}
+                    firstCatName={questState.firstCatName}
+                    onAddSecondCat={() => setShowQuestWizard(true)}
+                    onStartBootcamp={() => setShowBootcampList(true)}
+                    onComplete={() => router.push('/settings')}
+                  />
+                );
+              })()}
+
+            {isResearchMode && (
+              <div className="mx-4 mb-2 rounded-lg border border-conn-emerald-ring bg-conn-emerald-bg px-3 py-2 text-xs text-conn-emerald-text">
+                多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
+              </div>
+            )}
+            <div
+              className={(() => {
+                if (showFirstRunQuestPrompt || showQuestWizard) return '';
+                const ct = storeThreads.find((t) => t.id === threadId);
+                // Bootcamp phase-1 with no messages: highlight + punch through overlay
+                const bs = ct?.bootcampState as { phase: string } | undefined;
+                if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
+                  return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
+                }
+                // Legacy quest support
+                const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
+                  | { phase: string }
+                  | undefined;
+                return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
+              })()}
+            >
+              <ChatInput
+                key={threadId}
+                threadId={threadId}
+                onSend={(content, images, attachments, whisper, deliveryMode) =>
+                  handleSend(content, images, undefined, whisper, deliveryMode, attachments)
+                }
+                onStop={handleStop}
+                disabled={connectionStatus.isReadonly}
+                hasActiveInvocation={hasActiveInvocation}
+                uploadStatus={uploadStatus}
+                uploadError={uploadError}
+              />
+            </div>
+
+            {/* F101: "Return to game" banner when overlay is minimized */}
+            {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
+              <button
+                onClick={() => useGameStore.getState().restoreOverlay()}
+                className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe hover:bg-[var(--console-hover-bg)] transition-colors"
+              >
+                🎮 返回游戏
+              </button>
+            )}
           </div>
-        ) : activeTab === 'tasks' ? (
-          <div className="flex-1 overflow-hidden">
-            <TasksPanel threadId={threadId} onOpenTaskThread={handleOpenTaskThread} />
-          </div>
-        ) : (
-          <div className="flex-1 overflow-hidden">
-            <FilesPanel messages={messages} getCatById={getCatById} />
+
+          {/* F101: Game overlay — renders when a game is active */}
+          <GameOverlayConnector
+            gameView={gameView}
+            isGameActive={isGameActive}
+            overlayMinimized={overlayMinimized}
+            currentThreadId={threadId}
+            isNight={isNight}
+            selectedTarget={selectedTarget}
+            godScopeFilter={godScopeFilter}
+            isGodView={isGodView}
+            isDetective={isDetective}
+            detectiveBoundName={detectiveBoundName ?? undefined}
+            godSeats={godSeats}
+            godNightSteps={godNightSteps}
+            hasTargetedAction={hasTargetedAction}
+            myRole={myRole ?? undefined}
+            myRoleIcon={myRoleIcon ?? undefined}
+            myActionLabel={myActionLabel ?? undefined}
+            myActionHint={myActionHint ?? undefined}
+            altActionName={altActionName ?? undefined}
+            onClose={() => {
+              useGameStore.getState().minimizeOverlay();
+            }}
+            onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
+            onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}
+            onGodAction={(action) => godAction(threadId, action)}
+            onVote={() => {
+              const state = useGameStore.getState();
+              if (state.selectedTarget && state.mySeatId) {
+                submitAction(threadId, state.mySeatId, 'vote', state.selectedTarget);
+                state.setSelectedTarget(null);
+              }
+            }}
+            onSpeak={(content) => {
+              const state = useGameStore.getState();
+              if (state.mySeatId) {
+                submitAction(threadId, state.mySeatId, 'speak', undefined, { content });
+              }
+            }}
+            onConfirmAction={() => {
+              const state = useGameStore.getState();
+              if (state.selectedTarget && state.mySeatId && state.currentActionName) {
+                submitAction(threadId, state.mySeatId, state.currentActionName, state.selectedTarget);
+                state.setSelectedTarget(null);
+              }
+            }}
+            onConfirmAltAction={() => {
+              const state = useGameStore.getState();
+              if (state.selectedTarget && state.mySeatId && state.altActionName) {
+                submitAction(threadId, state.mySeatId, state.altActionName, state.selectedTarget);
+                state.setSelectedTarget(null);
+              }
+            }}
+          />
+        </div>
+
+        {statusPanelOpen && rightPanelMode === 'status' && (
+          <>
+            <div className="hidden lg:flex">
+              <ResizeHandle
+                direction="horizontal"
+                onResize={handleStatusPanelResize}
+                onDoubleClick={resetStatusPanelWidth}
+              />
+            </div>
+            <RightStatusPanel
+              intentMode={intentMode}
+              targetCats={targetCats}
+              catStatuses={catStatuses}
+              catInvocations={catInvocations}
+              activeInvocations={activeInvocations}
+              hasActiveInvocation={hasActiveInvocation}
+              threadId={threadId}
+              messageSummary={messageSummary}
+              width={statusPanelWidth}
+            />
+          </>
+        )}
+        {statusPanelOpen && rightPanelMode === 'workspace' && (
+          <>
+            <ResizeHandle direction="horizontal" onResize={handleHorizontalResize} onDoubleClick={resetChatBasis} />
+            <WorkspacePanel />
+          </>
+        )}
+        {inlineThread && (
+          <InlineThreadPanel
+            threadId={inlineThread.threadId}
+            parentThreadId={inlineThread.parentThreadId}
+            sourceMessage={inlineThread.sourceMessage}
+            task={inlineThread.task}
+            parentThreadTitle={currentThreadTitle}
+            isClosing={inlineThreadClosing}
+            onClose={closeInlineThread}
+            onReplyCountChange={handleInlineThreadReplyCountChange}
+          />
+        )}
+        <MobileStatusSheet
+          open={mobileStatusOpen}
+          onClose={() => setMobileStatusOpen(false)}
+          intentMode={intentMode}
+          targetCats={targetCats}
+          catStatuses={catStatuses}
+          catInvocations={catInvocations}
+          activeInvocations={activeInvocations}
+          hasActiveInvocation={hasActiveInvocation}
+          threadId={threadId}
+          messageSummary={messageSummary}
+        />
+        {showFirstRunQuestPrompt && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4">
+            <div
+              className="w-full max-w-md rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[var(--console-shadow)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-cafe">开始猫猫新手教程？</h3>
+              <p className="mt-2 text-sm text-cafe-secondary">
+                当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
+              </p>
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleSkipFirstRunQuest}
+                  className="rounded-lg bg-[var(--console-card-soft-bg)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
+                >
+                  跳过
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartFirstRunQuest}
+                  className="console-button-primary rounded-lg px-3 py-2 text-sm font-medium"
+                >
+                  开始教程
+                </button>
+              </div>
+            </div>
           </div>
         )}
-
-        <div
-          ref={attachBottomChromeRef}
-          className={`sticky bottom-0 z-20 bg-[var(--console-shell-bg)] ${
-            activeTab === 'chat' && !savedMessagesViewOpen ? '' : 'hidden'
-          }`}
-        >
-          {authPending.length > 0 && (
-            <div className="border-t border-conn-amber-ring bg-conn-amber-bg/40 py-2">
-              {authPending.map((req) => (
-                <AuthorizationCard key={req.requestId} request={req} onRespond={authRespond} />
-              ))}
-            </div>
-          )}
-
-          <AgentStatusIndicator
-            threadId={threadId}
-            activeInvocations={activeInvocations}
-            catStatuses={catStatuses}
-            catInvocations={catInvocations}
-            getCatById={getCatById}
-          />
-          <QueuePanel threadId={threadId} />
-          <VoteActiveBar threadId={threadId} onEnd={() => {}} />
-
-          {!showFirstRunQuestPrompt &&
-            !showQuestWizard &&
-            (() => {
-              const currentThread = storeThreads.find((t) => t.id === threadId);
-              const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
-                | { phase: string; firstCatName?: string }
-                | undefined;
-              if (!questState) return null;
-              return (
-                <QuestBanner
-                  phase={questState.phase}
-                  firstCatName={questState.firstCatName}
-                  onAddSecondCat={() => setShowQuestWizard(true)}
-                  onStartBootcamp={() => setShowBootcampList(true)}
-                  onComplete={() => router.push('/settings')}
-                />
-              );
-            })()}
-
-          {isResearchMode && (
-            <div className="mx-4 mb-2 rounded-lg border border-conn-emerald-ring bg-conn-emerald-bg px-3 py-2 text-xs text-conn-emerald-text">
-              多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
-            </div>
-          )}
-          <div
-            className={(() => {
-              if (showFirstRunQuestPrompt || showQuestWizard) return '';
-              const ct = storeThreads.find((t) => t.id === threadId);
-              // Bootcamp phase-1 with no messages: highlight + punch through overlay
-              const bs = ct?.bootcampState as { phase: string } | undefined;
-              if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
-                return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
-              }
-              // Legacy quest support
-              const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
-                | { phase: string }
-                | undefined;
-              return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
-            })()}
-          >
-            <ChatInput
-              key={threadId}
-              threadId={threadId}
-              onSend={(content, images, attachments, whisper, deliveryMode) =>
-                handleSend(content, images, undefined, whisper, deliveryMode, attachments)
-              }
-              onStop={handleStop}
-              disabled={connectionStatus.isReadonly}
-              hasActiveInvocation={hasActiveInvocation}
-              uploadStatus={uploadStatus}
-              uploadError={uploadError}
-            />
-          </div>
-
-          {/* F101: "Return to game" banner when overlay is minimized */}
-          {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
-            <button
-              onClick={() => useGameStore.getState().restoreOverlay()}
-              className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe hover:bg-[var(--console-hover-bg)] transition-colors"
-            >
-              🎮 返回游戏
-            </button>
-          )}
-        </div>
-
-        {/* F101: Game overlay — renders when a game is active */}
-        <GameOverlayConnector
-          gameView={gameView}
-          isGameActive={isGameActive}
-          overlayMinimized={overlayMinimized}
-          currentThreadId={threadId}
-          isNight={isNight}
-          selectedTarget={selectedTarget}
-          godScopeFilter={godScopeFilter}
-          isGodView={isGodView}
-          isDetective={isDetective}
-          detectiveBoundName={detectiveBoundName ?? undefined}
-          godSeats={godSeats}
-          godNightSteps={godNightSteps}
-          hasTargetedAction={hasTargetedAction}
-          myRole={myRole ?? undefined}
-          myRoleIcon={myRoleIcon ?? undefined}
-          myActionLabel={myActionLabel ?? undefined}
-          myActionHint={myActionHint ?? undefined}
-          altActionName={altActionName ?? undefined}
+        <StandaloneMemberEditor />
+        <StandaloneCoCreatorEditor />
+        <FirstRunQuestWizard
+          open={showQuestWizard}
+          onClose={() => setShowQuestWizard(false)}
+          onCreated={handleQuestCreated}
+        />
+        <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
+        {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
+        <EditChannelModal
+          open={channelSettingsOpen}
+          title={currentThreadTitle}
+          availableCats={cats}
+          selectedCatIds={currentThreadMemberIds}
+          isDefaultThread={threadId === 'default'}
+          isSaving={isSavingChannel}
+          isDeleting={isDeletingChannel}
+          error={channelSettingsError}
           onClose={() => {
-            useGameStore.getState().minimizeOverlay();
+            if (isSavingChannel || isDeletingChannel) return;
+            setChannelSettingsOpen(false);
           }}
-          onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
-          onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}
-          onGodAction={(action) => godAction(threadId, action)}
-          onVote={() => {
-            const state = useGameStore.getState();
-            if (state.selectedTarget && state.mySeatId) {
-              submitAction(threadId, state.mySeatId, 'vote', state.selectedTarget);
-              state.setSelectedTarget(null);
-            }
-          }}
-          onSpeak={(content) => {
-            const state = useGameStore.getState();
-            if (state.mySeatId) {
-              submitAction(threadId, state.mySeatId, 'speak', undefined, { content });
-            }
-          }}
-          onConfirmAction={() => {
-            const state = useGameStore.getState();
-            if (state.selectedTarget && state.mySeatId && state.currentActionName) {
-              submitAction(threadId, state.mySeatId, state.currentActionName, state.selectedTarget);
-              state.setSelectedTarget(null);
-            }
-          }}
-          onConfirmAltAction={() => {
-            const state = useGameStore.getState();
-            if (state.selectedTarget && state.mySeatId && state.altActionName) {
-              submitAction(threadId, state.mySeatId, state.altActionName, state.selectedTarget);
-              state.setSelectedTarget(null);
-            }
-          }}
+          onSave={handleSaveChannelSettings}
+          onDelete={handleDeleteChannel}
         />
+        <KnowledgeCaptureModal
+          open={knowledgeCaptureOpen}
+          sourceThreadId={threadId}
+          defaultTitle={currentThreadTitle}
+          onClose={() => setKnowledgeCaptureOpen(false)}
+          onCreated={handleKnowledgeCreated}
+        />
+        {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
+        {(() => {
+          if (showFirstRunQuestPrompt || showQuestWizard) return null;
+          const bt = storeThreads.find((t) => t.id === threadId);
+          const raw = bt?.bootcampState;
+          if (!raw) return null;
+          const phase = raw.phase;
+          // Guide engine handles phase-7.5 and phase-10 — no custom overlay needed
+          if (phase === 'phase-7.5-add-teammate' || phase === 'phase-10-retro') return null;
+          const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
+          if (!isLifecyclePhase && messages.length > 0) return null;
+          const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
+          const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
+          if (!catName) return null;
+          return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
+        })()}
       </div>
-
-      {statusPanelOpen && rightPanelMode === 'status' && (
-        <>
-          <div className="hidden lg:flex">
-            <ResizeHandle
-              direction="horizontal"
-              onResize={handleStatusPanelResize}
-              onDoubleClick={resetStatusPanelWidth}
-            />
-          </div>
-          <RightStatusPanel
-            intentMode={intentMode}
-            targetCats={targetCats}
-            catStatuses={catStatuses}
-            catInvocations={catInvocations}
-            activeInvocations={activeInvocations}
-            hasActiveInvocation={hasActiveInvocation}
-            threadId={threadId}
-            messageSummary={messageSummary}
-            width={statusPanelWidth}
-          />
-        </>
-      )}
-      {statusPanelOpen && rightPanelMode === 'workspace' && (
-        <>
-          <ResizeHandle direction="horizontal" onResize={handleHorizontalResize} onDoubleClick={resetChatBasis} />
-          <WorkspacePanel />
-        </>
-      )}
-      {inlineThread && (
-        <InlineThreadPanel
-          threadId={inlineThread.threadId}
-          parentThreadId={inlineThread.parentThreadId}
-          sourceMessage={inlineThread.sourceMessage}
-          task={inlineThread.task}
-          parentThreadTitle={currentThreadTitle}
-          isClosing={inlineThreadClosing}
-          onClose={closeInlineThread}
-          onReplyCountChange={handleInlineThreadReplyCountChange}
-        />
-      )}
-      <MobileStatusSheet
-        open={mobileStatusOpen}
-        onClose={() => setMobileStatusOpen(false)}
-        intentMode={intentMode}
-        targetCats={targetCats}
-        catStatuses={catStatuses}
-        catInvocations={catInvocations}
-        activeInvocations={activeInvocations}
-        hasActiveInvocation={hasActiveInvocation}
-        threadId={threadId}
-        messageSummary={messageSummary}
-      />
-      {showFirstRunQuestPrompt && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4">
-          <div
-            className="w-full max-w-md rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[var(--console-shadow)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-cafe">开始猫猫新手教程？</h3>
-            <p className="mt-2 text-sm text-cafe-secondary">
-              当前还没有可用成员。我们可以先带你创建第一只猫猫，再开始首个协作任务。
-            </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleSkipFirstRunQuest}
-                className="rounded-lg bg-[var(--console-card-soft-bg)] px-3 py-2 text-sm text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
-              >
-                跳过
-              </button>
-              <button
-                type="button"
-                onClick={handleStartFirstRunQuest}
-                className="console-button-primary rounded-lg px-3 py-2 text-sm font-medium"
-              >
-                开始教程
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      <StandaloneMemberEditor />
-      <StandaloneCoCreatorEditor />
-      <FirstRunQuestWizard
-        open={showQuestWizard}
-        onClose={() => setShowQuestWizard(false)}
-        onCreated={handleQuestCreated}
-      />
-      <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
-      {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
-      <EditChannelModal
-        open={channelSettingsOpen}
-        title={currentThreadTitle}
-        availableCats={cats}
-        selectedCatIds={currentThreadMemberIds}
-        isDefaultThread={threadId === 'default'}
-        isSaving={isSavingChannel}
-        isDeleting={isDeletingChannel}
-        error={channelSettingsError}
-        onClose={() => {
-          if (isSavingChannel || isDeletingChannel) return;
-          setChannelSettingsOpen(false);
-        }}
-        onSave={handleSaveChannelSettings}
-        onDelete={handleDeleteChannel}
-      />
-      <KnowledgeCaptureModal
-        open={knowledgeCaptureOpen}
-        sourceThreadId={threadId}
-        defaultTitle={currentThreadTitle}
-        onClose={() => setKnowledgeCaptureOpen(false)}
-        onCreated={handleKnowledgeCreated}
-      />
-      {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
-      {(() => {
-        if (showFirstRunQuestPrompt || showQuestWizard) return null;
-        const bt = storeThreads.find((t) => t.id === threadId);
-        const raw = bt?.bootcampState;
-        if (!raw) return null;
-        const phase = raw.phase;
-        // Guide engine handles phase-7.5 and phase-10 — no custom overlay needed
-        if (phase === 'phase-7.5-add-teammate' || phase === 'phase-10-retro') return null;
-        const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
-        if (!isLifecyclePhase && messages.length > 0) return null;
-        const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
-        const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
-        if (!catName) return null;
-        return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
-      })()}
-    </div>
+    </TaskThreadActionsContext.Provider>
   );
 }
 
