@@ -24,10 +24,10 @@ import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker'
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const THREAD_PANEL_DEFAULT_WIDTH = 460;
-const THREAD_PANEL_MIN_WIDTH = 360;
+const THREAD_PANEL_DEFAULT_WIDTH = 520;
+const THREAD_PANEL_MIN_WIDTH = 420;
 const THREAD_PANEL_FALLBACK_MAX_WIDTH = 720;
-const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.6;
+const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.66;
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
@@ -78,9 +78,16 @@ const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
 export type InlineThreadSearchHit = { id: string; index: number };
+type InlineThreadSendKeyEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>;
 
 export function shouldShowInlineThreadRuntimeStatus(status: CatStatusType): boolean {
   return status !== 'done' && status !== 'alive_but_silent';
+}
+
+export function shouldSendInlineThreadMessage(event: InlineThreadSendKeyEvent): boolean {
+  if (event.key !== 'Enter') return false;
+  if (event.shiftKey) return false;
+  return true;
 }
 
 function getThreadPanelMaxWidth() {
@@ -232,7 +239,7 @@ export function InlineThreadPanel({
   const { cats } = useCatData();
   const threadRuntime = useChatStore((state) => state.threadStates[threadId]);
   const [panelWidth, setPanelWidth, resetPanelWidth] = usePersistedState(
-    'cat-cafe:inlineThreadPanelWidth',
+    'cat-cafe:inlineThreadPanelWidth:v2',
     THREAD_PANEL_DEFAULT_WIDTH,
   );
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
@@ -664,7 +671,7 @@ export function InlineThreadPanel({
         }
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      if (shouldSendInlineThreadMessage(event)) {
         event.preventDefault();
         void handleSend();
       }
@@ -694,7 +701,7 @@ export function InlineThreadPanel({
         className="slock-inline-thread-panel flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
         style={{ width: panelWidth }}
       >
-        <div className="slock-inline-thread-header flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-4">
+        <div className="slock-inline-thread-header flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-5">
           <div className="min-w-0 text-sm font-semibold text-[var(--cafe-text)]">
             <span>Thread</span>
             <span className="ml-1.5 text-[var(--cafe-text-muted)]">— {parentThreadLabel}</span>
@@ -738,7 +745,7 @@ export function InlineThreadPanel({
           </div>
         </div>
         {searchOpen && (
-          <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+          <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2">
             <div className="flex min-w-0 flex-1 items-center gap-2 border-2 border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] px-2 py-1">
               <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="7" cy="7" r="4" />
@@ -790,7 +797,7 @@ export function InlineThreadPanel({
         )}
         <InlineThreadTaskStatusCard task={task} />
         {runtimeCats.length > 0 && (
-          <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-3 py-2">
+          <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
               当前回复
             </div>
@@ -813,7 +820,7 @@ export function InlineThreadPanel({
             ))}
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3" onWheel={stopScrollPropagation}>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" onWheel={stopScrollPropagation}>
           <div className="mb-4">
             <div
               className={`px-1 py-1 transition-colors ${
@@ -863,7 +870,7 @@ export function InlineThreadPanel({
           )}
         </div>
 
-        <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-3">
+        <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-4">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
           <div className="slock-composer-frame relative">
             {showMentionPicker && (
@@ -910,7 +917,7 @@ export function InlineThreadPanel({
               <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">▧</span>
               <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">⌘</span>
             </div>
-            <span className="text-[11px] text-[var(--cafe-text-muted)]">⌘/Ctrl + Enter 发送</span>
+            <span className="text-[11px] text-[var(--cafe-text-muted)]">Enter 发送 · Shift+Enter 换行</span>
           </div>
         </div>
       </aside>

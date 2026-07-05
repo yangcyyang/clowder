@@ -8,6 +8,7 @@ import {
   InlineThreadTaskStatusCard,
   isUnsafeInlineThreadTarget,
   normalizeInlineThreadMessage,
+  shouldSendInlineThreadMessage,
   shouldShowInlineThreadRuntimeStatus,
 } from '@/components/InlineThreadPanel';
 import type { ChatMessage } from '@/stores/chatStore';
@@ -67,6 +68,19 @@ describe('InlineThreadPanel thread target guard', () => {
 
   it('allows real branch threads to receive replies', () => {
     expect(isUnsafeInlineThreadTarget('thread-branch', { threadId: 'thread-main' })).toBe(false);
+  });
+});
+
+describe('InlineThreadPanel send shortcut', () => {
+  it('sends on Enter and keeps Shift+Enter for newline', () => {
+    expect(shouldSendInlineThreadMessage({ key: 'Enter', shiftKey: false, metaKey: false, ctrlKey: false })).toBe(true);
+    expect(shouldSendInlineThreadMessage({ key: 'Enter', shiftKey: true, metaKey: false, ctrlKey: false })).toBe(false);
+  });
+
+  it('keeps command/control Enter compatible', () => {
+    expect(shouldSendInlineThreadMessage({ key: 'Enter', shiftKey: false, metaKey: true, ctrlKey: false })).toBe(true);
+    expect(shouldSendInlineThreadMessage({ key: 'Enter', shiftKey: false, metaKey: false, ctrlKey: true })).toBe(true);
+    expect(shouldSendInlineThreadMessage({ key: 'a', shiftKey: false, metaKey: false, ctrlKey: false })).toBe(false);
   });
 });
 
