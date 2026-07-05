@@ -7,9 +7,10 @@
  */
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
@@ -18,12 +19,82 @@ import {
 } from '../dist/config/capabilities/capability-orchestrator.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
+const PERSONAL_ENV_KEYS = [
+  'CAT_CAFE_PERSONAL_SKILLS_ENABLED',
+  'CAT_CAFE_PERSONAL_SKILL_ROOTS',
+  'CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES',
+  'CAT_CAFE_PERSONAL_SKILL_INDEX_PATH',
+];
 
 /** @param {string} prefix */
 async function makeTmpDir(prefix) {
   const dir = join(tmpdir(), `cap-route-test-${prefix}-${Date.now()}`);
   await mkdir(dir, { recursive: true });
   return dir;
+}
+
+async function withPersonalSkillEnv(overrides, fn) {
+  const previous = new Map(PERSONAL_ENV_KEYS.map((key) => [key, process.env[key]]));
+  for (const key of PERSONAL_ENV_KEYS) {
+    if (Object.hasOwn(overrides, key)) process.env[key] = overrides[key];
+    else delete process.env[key];
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function writeSkill(path, frontmatter, body = '# Skill Body\n') {
+  await mkdir(path, { recursive: true });
+  await writeFile(join(path, 'SKILL.md'), `---\n${frontmatter.trim()}\n---\n\n${body}`, 'utf-8');
+}
+
+async function writePersonalIndex(indexPath, skills) {
+  await mkdir(dirname(indexPath), { recursive: true });
+  await writeFile(
+    indexPath,
+    JSON.stringify(
+      {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        roots: [],
+        ignoredGlobs: [],
+        visibleNames: skills.filter((skill) => skill.visible).map((skill) => skill.name),
+        skills: skills.map((skill) => ({
+          id: `personal:${skill.name}`,
+          name: skill.name,
+          description: skill.description ?? skill.name,
+          triggers: skill.triggers ?? [],
+          category: skill.category ?? 'personal',
+          source: 'personal',
+          sourcePath: skill.sourcePath ?? join(dirname(indexPath), `${skill.name}.md`),
+          relativePath: `${skill.name}/SKILL.md`,
+          visible: skill.visible ?? true,
+          contentHash: `${skill.name}-hash`,
+        })),
+        duplicates: [],
+        ignoredPaths: [],
+      },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
+}
+
+function resolveMainRepoForTest() {
+  return execFileSync('git', ['worktree', 'list', '--porcelain'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+    .split('\n')[0]
+    .replace(/^worktree\s+/, '')
+    .trim();
 }
 
 // ────────── PATCH logic (unit-level, no Fastify needed) ──────────
@@ -567,6 +638,141 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('does not auto-add indexed personal skills as shared capabilities', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join(tmpdir(), `cap-route-test-personal-skill-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-personal-skill-home-${Date.now()}`);
+    const personalRoot = join(homeDir, '.claude', 'skills');
+    const indexPath = join(projectDir, '.cat-cafe', 'personal-skills-index.json');
+    const prevHome = process.env.HOME;
+
+    await writeSkill(join(personalRoot, 'create-prd'), 'name: create-prd\ndescription: Create PRD');
+    await writePersonalIndex(indexPath, [{ name: 'create-prd', visible: true }]);
+    await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
+
+    process.env.HOME = homeDir;
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      await withPersonalSkillEnv(
+        {
+          CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
+          CAT_CAFE_PERSONAL_SKILL_ROOTS: personalRoot,
+          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+          CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+        },
+        async () => {
+          const res = await app.inject({
+            method: 'GET',
+            url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+            headers: AUTH_HEADERS,
+          });
+
+          assert.equal(res.statusCode, 200);
+          const body = res.json();
+          assert.equal(
+            (body.items ?? []).some((item) => item.type === 'skill' && item.id === 'create-prd'),
+            false,
+            'personal indexed skill should not appear on shared capabilities board',
+          );
+
+          const config = await readCapabilitiesConfig(projectDir);
+          assert.ok(config);
+          assert.equal(
+            config.capabilities.some((cap) => cap.type === 'skill' && cap.id === 'create-prd'),
+            false,
+            'personal indexed skill should not be written to capabilities.json',
+          );
+        },
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes stale external rows that are now personal-index only', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join(tmpdir(), `cap-route-test-personal-cleanup-${Date.now()}`);
+    const homeDir = join(tmpdir(), `cap-route-test-personal-cleanup-home-${Date.now()}`);
+    const personalRoot = join(homeDir, '.claude', 'skills');
+    const indexPath = join(projectDir, '.cat-cafe', 'personal-skills-index.json');
+    const prevHome = process.env.HOME;
+
+    await Promise.all([
+      writeSkill(join(personalRoot, 'create-prd'), 'name: create-prd'),
+      writeSkill(join(personalRoot, 'unrelated-external'), 'name: unrelated-external'),
+      writePersonalIndex(indexPath, [{ name: 'create-prd', visible: true }]),
+      writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [
+          { id: 'create-prd', type: 'skill', enabled: true, source: 'external' },
+          { id: 'unrelated-external', type: 'skill', enabled: true, source: 'external' },
+        ],
+      }),
+    ]);
+
+    process.env.HOME = homeDir;
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      await withPersonalSkillEnv(
+        {
+          CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
+          CAT_CAFE_PERSONAL_SKILL_ROOTS: personalRoot,
+          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+          CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+        },
+        async () => {
+          const res = await app.inject({
+            method: 'GET',
+            url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+            headers: AUTH_HEADERS,
+          });
+
+          assert.equal(res.statusCode, 200);
+          const body = res.json();
+          assert.equal(
+            (body.items ?? []).some((item) => item.type === 'skill' && item.id === 'create-prd'),
+            false,
+          );
+          assert.equal(
+            (body.items ?? []).some((item) => item.type === 'skill' && item.id === 'unrelated-external'),
+            true,
+          );
+
+          const config = await readCapabilitiesConfig(projectDir);
+          assert.ok(config);
+          assert.equal(
+            config.capabilities.some((cap) => cap.id === 'create-prd' && cap.type === 'skill'),
+            false,
+          );
+          assert.equal(
+            config.capabilities.some((cap) => cap.id === 'unrelated-external' && cap.type === 'skill'),
+            true,
+          );
+        },
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it('includes Kimi mount state for cat-cafe skills in the board payload', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
@@ -599,7 +805,7 @@ describe('GET /api/capabilities (Fastify)', () => {
 
     const projectDir = join('/tmp', `cap-route-test-dir-symlink-${Date.now()}`);
     const homeDir = join('/tmp', `cap-route-test-home-${Date.now()}`);
-    const sourceSkillsDir = join(process.cwd(), '..', '..', 'cat-cafe-skills');
+    const sourceSkillsDir = join(resolveMainRepoForTest(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
 
     await Promise.all([

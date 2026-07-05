@@ -50,6 +50,7 @@ import {
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
+import { readPersonalSkillIndexFromEnv } from '../config/skills/personal-skill-scanner.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -607,6 +608,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       ...(projectKimiSkills ?? []),
       ...(catCafeOwnSkills ?? []),
     ]);
+    const personalSkillIndex = await readPersonalSkillIndexFromEnv(projectRoot, process.env);
+    const personalSkillNames = new Set(
+      (personalSkillIndex.index?.skills ?? [])
+        .map((skill) => skill.name)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    );
+    const isPersonalOnlySkill = (skillName: string) =>
+      personalSkillNames.has(skillName) && !projectSkillNames.has(skillName);
 
     // 3. Sync discovered skills into capabilities.json
     const allSkillNames = new Set<string>();
@@ -623,6 +632,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const removedSet = new Set(config.removedExternalSkills ?? []);
     // Add newly discovered skills
     for (const skillName of allSkillNames) {
+      if (isPersonalOnlySkill(skillName)) continue;
       const isCatCafe =
         isManagedSkill(skillsState, skillName) ||
         (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
@@ -675,6 +685,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
     // Sync removedExternalSkills back (may have been cleaned above)
     config.removedExternalSkills = removedSet.size > 0 ? [...removedSet] : undefined;
+
+    // Personal skills are governed by /api/skills and MCP skill tools. They
+    // should not become shared capabilities or pollute capabilities.json.
+    if (personalSkillNames.size > 0) {
+      const before = config.capabilities.length;
+      config.capabilities = config.capabilities.filter((cap) => cap.type !== 'skill' || !isPersonalOnlySkill(cap.id));
+      if (config.capabilities.length !== before) configDirty = true;
+    }
 
     // Prune stale skills no longer on filesystem.
     // Guard: only prune when ALL provider scans succeeded (no null returns).

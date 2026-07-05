@@ -1,6 +1,15 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import {
+  DEFAULT_PERSONAL_SKILL_INDEX_PATH,
+  DEFAULT_PERSONAL_SKILL_ROOTS,
+  DEFAULT_PERSONAL_SKILL_VISIBLE_NAMES,
+  expandTildePath,
+  isPersonalSkillsEnabled,
+  resolvePersonalSkillIndexPath,
+} from '../../../../config/skills/personal-skill-scanner.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
 const DEFAULT_SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理';
@@ -47,6 +56,24 @@ interface SkillRouterCatalogEntry {
   sourcePath: string;
   relativePath: string;
   content: string;
+  source: 'cat-cafe' | 'personal';
+  menuVisible: boolean;
+}
+
+interface PersonalSkillIndex {
+  version?: unknown;
+  skills?: PersonalSkillIndexEntry[];
+}
+
+interface PersonalSkillIndexEntry {
+  id?: unknown;
+  name?: unknown;
+  description?: unknown;
+  triggers?: unknown;
+  category?: unknown;
+  sourcePath?: unknown;
+  relativePath?: unknown;
+  visible?: unknown;
 }
 
 export interface SkillRouterContext {
@@ -56,9 +83,7 @@ export interface SkillRouterContext {
 }
 
 let catalogCache: {
-  manifestPath: string;
-  manifestMtimeMs: number;
-  repoManifestMtimeMs: number;
+  cacheKey: string;
   entries: SkillRouterCatalogEntry[];
 } | null = null;
 
@@ -99,6 +124,18 @@ function safeReadJson(path: string): SkillManifest | null {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
     return parsed && typeof parsed === 'object' ? (parsed as SkillManifest) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeReadPersonalIndex(path: string): PersonalSkillIndex | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const index = parsed as PersonalSkillIndex;
+    if (index.version !== 1 || !Array.isArray(index.skills)) return null;
+    return index;
   } catch {
     return null;
   }
@@ -151,8 +188,7 @@ function skillTriggers(frontmatter: SkillFrontmatter, manifestTriggers: unknown,
     new Set(
       [...toStringList(frontmatter.triggers), ...toStringList(manifestTriggers), name].map((value) => value.trim()),
     ),
-  )
-    .filter(Boolean);
+  ).filter(Boolean);
 }
 
 function makeCatalogEntry(params: {
@@ -163,10 +199,14 @@ function makeCatalogEntry(params: {
   riskLevel: string;
   sourcePath: string;
   content: string;
+  source?: 'cat-cafe' | 'personal';
+  menuVisible?: boolean;
 }): SkillRouterCatalogEntry {
   return {
     ...params,
     relativePath: toRelativeRepoPath(params.sourcePath),
+    source: params.source ?? 'cat-cafe',
+    menuVisible: params.menuVisible ?? true,
   };
 }
 
@@ -234,6 +274,90 @@ function loadRepoManifestEntries(): SkillRouterCatalogEntry[] {
     .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
 }
 
+function splitCsv(value: string | undefined, fallback: string[]): string[] {
+  if (!value?.trim()) return [...fallback];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function resolvePersonalIndexPath(): string {
+  return resolvePersonalSkillIndexPath(
+    findMonorepoRoot(),
+    process.env.CAT_CAFE_PERSONAL_SKILL_INDEX_PATH,
+    process.env.HOME ?? process.env.USERPROFILE ?? homedir(),
+  );
+}
+
+function resolvePersonalRoots(): string[] {
+  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? homedir();
+  return splitCsv(process.env.CAT_CAFE_PERSONAL_SKILL_ROOTS, DEFAULT_PERSONAL_SKILL_ROOTS).map((root) =>
+    resolve(expandTildePath(root, homeDir)),
+  );
+}
+
+function resolvePersonalVisibleNames(): Set<string> {
+  return new Set(splitCsv(process.env.CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES, DEFAULT_PERSONAL_SKILL_VISIBLE_NAMES));
+}
+
+function fileFingerprint(path: string): string {
+  try {
+    const stats = statSync(path, { bigint: true });
+    return `${stats.mtimeNs.toString()}:${stats.size.toString()}`;
+  } catch {
+    return '0:0';
+  }
+}
+
+function skillRouterCatalogCacheKey(manifestPath: string, repoManifestPath: string): string {
+  const personalEnabled = isPersonalSkillsEnabled(process.env.CAT_CAFE_PERSONAL_SKILLS_ENABLED);
+  const personalIndexPath = resolvePersonalIndexPath();
+  return JSON.stringify({
+    manifestPath,
+    manifest: fileFingerprint(manifestPath),
+    repoManifestPath,
+    repoManifest: fileFingerprint(repoManifestPath),
+    personalEnabled,
+    personalIndexPath,
+    personalIndex: personalEnabled ? fileFingerprint(personalIndexPath) : 'disabled',
+    personalRoots: resolvePersonalRoots(),
+    personalVisibleNames: [...resolvePersonalVisibleNames()].sort(),
+  });
+}
+
+function normalizePersonalIndexEntry(entry: PersonalSkillIndexEntry): SkillRouterCatalogEntry | null {
+  if (typeof entry.name !== 'string' || !entry.name.trim()) return null;
+  const name = entry.name.trim();
+  const sourcePath = typeof entry.sourcePath === 'string' && entry.sourcePath.trim() ? resolve(entry.sourcePath) : '';
+  const relativePath =
+    typeof entry.relativePath === 'string' && entry.relativePath.trim() ? entry.relativePath.trim() : sourcePath;
+  const description = typeof entry.description === 'string' ? flattenText(entry.description) : name;
+  const category = typeof entry.category === 'string' && entry.category.trim() ? entry.category.trim() : 'personal';
+
+  return {
+    id: typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : `personal:${name}`,
+    name,
+    description,
+    triggers: skillTriggers({ triggers: toStringList(entry.triggers) }, undefined, name),
+    riskLevel: category,
+    sourcePath,
+    relativePath,
+    // Personal skill bodies must not enter automatic router context.
+    content: '',
+    source: 'personal',
+    menuVisible: entry.visible === true,
+  };
+}
+
+function loadPersonalIndexEntries(): SkillRouterCatalogEntry[] {
+  if (!isPersonalSkillsEnabled(process.env.CAT_CAFE_PERSONAL_SKILLS_ENABLED)) return [];
+  const index = safeReadPersonalIndex(resolvePersonalIndexPath());
+  return (index?.skills ?? [])
+    .map(normalizePersonalIndexEntry)
+    .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
+}
+
 function mergeSkillEntries(entries: SkillRouterCatalogEntry[]): SkillRouterCatalogEntry[] {
   const byName = new Map<string, SkillRouterCatalogEntry>();
   for (const entry of entries) {
@@ -245,21 +369,20 @@ function mergeSkillEntries(entries: SkillRouterCatalogEntry[]): SkillRouterCatal
 export function loadSkillRouterCatalog(): SkillRouterCatalogEntry[] {
   const manifestPath = resolveSkillManifestPath();
   const repoManifestPath = resolve(resolveRepoSkillRoot(), 'manifest.yaml');
-  const manifestMtimeMs = existsSync(manifestPath) ? statSync(manifestPath).mtimeMs : 0;
-  const repoManifestMtimeMs = existsSync(repoManifestPath) ? statSync(repoManifestPath).mtimeMs : 0;
+  const cacheKey = skillRouterCatalogCacheKey(manifestPath, repoManifestPath);
 
-  if (
-    catalogCache?.manifestPath === manifestPath &&
-    catalogCache.manifestMtimeMs === manifestMtimeMs &&
-    catalogCache.repoManifestMtimeMs === repoManifestMtimeMs
-  ) {
+  if (catalogCache?.cacheKey === cacheKey) {
     return catalogCache.entries;
   }
 
   try {
-    const entries = mergeSkillEntries([...loadExternalManifestEntries(manifestPath), ...loadRepoManifestEntries()]);
+    const entries = mergeSkillEntries([
+      ...loadPersonalIndexEntries(),
+      ...loadExternalManifestEntries(manifestPath),
+      ...loadRepoManifestEntries(),
+    ]);
 
-    catalogCache = { manifestPath, manifestMtimeMs, repoManifestMtimeMs, entries };
+    catalogCache = { cacheKey, entries };
     return entries;
   } catch {
     catalogCache = null;
@@ -297,7 +420,8 @@ function matchSkills(userMessageText: string, skills: SkillRouterCatalogEntry[])
   const explicit = matchExplicitCommand(message, skills);
   if (explicit) return [explicit];
 
-  return skills
+  const fuzzyMatchableSkills = skills.filter((skill) => skill.source !== 'personal' || skill.menuVisible);
+  return fuzzyMatchableSkills
     .map((skill) => ({ skill, score: scoreSkillMatch(message, skill) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name, 'zh-Hans-CN'))
@@ -332,6 +456,6 @@ export function resolveSkillRouterContext(userMessageText: string | undefined): 
   return {
     promptBlock: lines.join('\n'),
     matchedSkillNames: matchedSkills.map((skill) => skill.name),
-    menuSkillCount: skills.length,
+    menuSkillCount: skills.filter((skill) => skill.menuVisible).length,
   };
 }
