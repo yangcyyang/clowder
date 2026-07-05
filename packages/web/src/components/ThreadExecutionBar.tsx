@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import type { CatInvocationInfo, InvocationPhase } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
@@ -35,21 +36,7 @@ export function ThreadExecutionBar() {
       toolPolicy?: 'minimal' | 'standard' | 'full';
       toolPolicySource?: 'agent-default' | 'user-override';
       phase?: InvocationPhase;
-      contextBudget?: {
-        estimatedTokens: number;
-        historyMessages: number;
-        loadedBlocks: string[];
-        skippedBlocks: string[];
-        governanceTier: 'core' | 'operational';
-        governanceEstimatedTokens: number;
-        governanceSourceInjected: boolean;
-        usesFullHistory: boolean;
-        maxPromptTokens: number;
-        historyMode?: 'observe';
-        historyFullTokens?: number;
-        historyBudgetRatio?: number;
-        historyGovernanceDegraded?: boolean;
-      };
+      contextBudget?: CatInvocationInfo['contextBudget'];
     }>,
   );
 
@@ -143,21 +130,7 @@ function CatStatusChip({
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
   phase?: InvocationPhase;
-  contextBudget?: {
-    estimatedTokens: number;
-    historyMessages: number;
-    loadedBlocks: string[];
-    skippedBlocks: string[];
-    governanceTier: 'core' | 'operational';
-    governanceEstimatedTokens: number;
-    governanceSourceInjected: boolean;
-    usesFullHistory: boolean;
-    maxPromptTokens: number;
-    historyMode?: 'observe';
-    historyFullTokens?: number;
-    historyBudgetRatio?: number;
-    historyGovernanceDegraded?: boolean;
-  };
+  contextBudget?: CatInvocationInfo['contextBudget'];
   onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -175,8 +148,8 @@ function CatStatusChip({
         ? '家规:运营'
         : undefined;
   const phaseLabel = getPhaseLabel(phase);
-  const historyObserveLabel =
-    contextBudget?.historyMode === 'observe' && contextBudget.historyBudgetRatio != null
+  const historyGovernanceLabel =
+    contextBudget?.historyMode && contextBudget.historyBudgetRatio != null
       ? `历史${Math.round(contextBudget.historyBudgetRatio * 100)}%`
       : undefined;
   const budgetLabel = contextBudget
@@ -189,11 +162,18 @@ function CatStatusChip({
         `家规层级：${contextBudget.governanceTier === 'core' ? '核心摘要' : '运营规则'} · ${contextBudget.governanceEstimatedTokens} tokens${
           contextBudget.governanceSourceInjected ? ' · 已按需注入原文' : ''
         }`,
-        ...(contextBudget.historyMode === 'observe'
+        ...(contextBudget.historyMode
           ? [
-              `历史治理：observe · full=${contextBudget.historyFullTokens ?? 0} tokens · ratio=${Math.round(
-                (contextBudget.historyBudgetRatio ?? 0) * 100,
-              )}%${contextBudget.historyGovernanceDegraded ? ' · degraded' : ''}`,
+              [
+                `历史治理：${contextBudget.historyMode}`,
+                `full=${contextBudget.historyFullTokens ?? 0} tokens`,
+                ...(contextBudget.historySummaryTokens != null
+                  ? [`summary=${contextBudget.historySummaryTokens} tokens`]
+                  : []),
+                `ratio=${Math.round((contextBudget.historyBudgetRatio ?? 0) * 100)}%`,
+                ...(contextBudget.summarySegmentId ? [`segment=${contextBudget.summarySegmentId}`] : []),
+                ...(contextBudget.historyGovernanceDegraded ? ['degraded'] : []),
+              ].join(' · '),
             ]
           : []),
         `加载：${contextBudget.loadedBlocks.join(', ') || '无'}`,
@@ -218,9 +198,9 @@ function CatStatusChip({
           {budgetLabel}
         </span>
       ) : null}
-      {historyObserveLabel ? (
+      {historyGovernanceLabel ? (
         <span className="text-conn-amber-text tabular-nums" title={contextTitle}>
-          {historyObserveLabel}
+          {historyGovernanceLabel}
         </span>
       ) : null}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
@@ -241,15 +221,6 @@ function CatStatusChip({
     </span>
   );
 }
-
-type InvocationPhase =
-  | 'queued'
-  | 'context_building'
-  | 'runtime_starting'
-  | 'first_token_waiting'
-  | 'tool_calling'
-  | 'persisting'
-  | 'done';
 
 function getPhaseLabel(phase: InvocationPhase | undefined): string | undefined {
   switch (phase) {
