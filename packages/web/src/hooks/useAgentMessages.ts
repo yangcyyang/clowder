@@ -167,6 +167,28 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
   ) {
     return undefined;
   }
+  const historyFullTokens =
+    typeof parsed.historyFullTokens === 'number' && Number.isFinite(parsed.historyFullTokens)
+      ? parsed.historyFullTokens
+      : undefined;
+  const historySummaryTokens =
+    typeof parsed.historySummaryTokens === 'number' && Number.isFinite(parsed.historySummaryTokens)
+      ? parsed.historySummaryTokens
+      : undefined;
+  const historyBudgetRatio =
+    typeof parsed.historyBudgetRatio === 'number' && Number.isFinite(parsed.historyBudgetRatio)
+      ? parsed.historyBudgetRatio
+      : undefined;
+  const historyMode =
+    parsed.historyMode === 'observe' ||
+    parsed.historyMode === 'shadow-summary' ||
+    parsed.historyMode === 'summary-active'
+      ? parsed.historyMode
+      : undefined;
+  const summarySegmentId = typeof parsed.summarySegmentId === 'string' ? parsed.summarySegmentId : undefined;
+  const historyGovernanceDegraded =
+    typeof parsed.historyGovernanceDegraded === 'boolean' ? parsed.historyGovernanceDegraded : undefined;
+
   return {
     surface: 'thread',
     threadId: typeof parsed.threadId === 'string' ? parsed.threadId : '',
@@ -183,12 +205,12 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     usesFullHistory: Boolean(parsed.usesFullHistory),
     maxPromptTokens: Number(parsed.maxPromptTokens) || 0,
     maxContextTokens: Number(parsed.maxContextTokens) || 0,
-    ...(parsed.historyMode === 'observe' ? { historyMode: 'observe' as const } : {}),
-    ...(Number.isFinite(Number(parsed.historyFullTokens)) ? { historyFullTokens: Number(parsed.historyFullTokens) } : {}),
-    ...(Number.isFinite(Number(parsed.historyBudgetRatio)) ? { historyBudgetRatio: Number(parsed.historyBudgetRatio) } : {}),
-    ...(parsed.historyGovernanceDegraded != null
-      ? { historyGovernanceDegraded: Boolean(parsed.historyGovernanceDegraded) }
-      : {}),
+    ...(historyMode ? { historyMode } : {}),
+    ...(historyFullTokens != null ? { historyFullTokens } : {}),
+    ...(historySummaryTokens != null ? { historySummaryTokens } : {}),
+    ...(historyBudgetRatio != null ? { historyBudgetRatio } : {}),
+    ...(summarySegmentId ? { summarySegmentId } : {}),
+    ...(historyGovernanceDegraded != null ? { historyGovernanceDegraded } : {}),
   };
 }
 

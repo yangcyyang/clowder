@@ -242,6 +242,139 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.equal(snapshot.historyMessages, 1, 'observe-only must not change included history count');
   });
 
+  test('injects formatted thread history summary while keeping recent delivered messages', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    messageStore.append(mockMsg({ content: 'old detail already summarized' }));
+    const latest = messageStore.append(mockMsg({ content: 'recent instruction stays verbatim' }));
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async (threadId) => {
+        assert.equal(threadId, 'thread-1');
+        return [
+          {
+            id: 'seg-001',
+            threadId,
+            fromMessageId: 'msg-001',
+            toMessageId: 'msg-010',
+            messageCount: 10,
+            summary: '稳定事实：已经确认使用 summary_segments 做旧历史摘要。\n下一步：接入 formatter。',
+            generatedAt: '2026-07-03T12:00:00.000Z',
+            modelId: 'cheap-summary-model',
+            promptVersion: 'history-v1',
+          },
+        ];
+      },
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 4000,
+        maxMessages: 10,
+        maxContentLengthPerMsg: 1000,
+      },
+      historySummaryEnabled: true,
+    });
+
+    assert.ok(result.contextText.includes('[Thread History Summary]'));
+    assert.ok(result.contextText.includes('Scope: thread-1, messages msg-001..msg-010'));
+    assert.ok(result.contextText.includes('This is a compressed, provenance-backed summary'));
+    assert.ok(result.contextText.includes('需要精确引用、文件路径、命令输出或敏感凭据细节时'));
+    assert.ok(result.contextText.includes('稳定事实：已经确认使用 summary_segments 做旧历史摘要。'));
+    assert.ok(result.contextText.includes('[Recent Messages]'));
+    assert.ok(result.contextText.includes('recent instruction stays verbatim'));
+    assert.equal(result.historySummary?.segmentIds[0], 'seg-001');
+    assert.ok(result.historySummary?.tokens && result.historySummary.tokens > 0);
+  });
+
+  test('keeps legacy context when thread history summary flag is off', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const latest = messageStore.append(mockMsg({ content: 'recent message only' }));
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.threadHistorySummaryStore = {
+      listLatestByThread: async () => [
+        {
+          id: 'seg-off',
+          threadId: 'thread-1',
+          fromMessageId: 'msg-a',
+          toMessageId: 'msg-b',
+          messageCount: 2,
+          summary: 'this summary must not be injected by default',
+          generatedAt: '2026-07-03T12:00:00.000Z',
+          modelId: 'cheap-summary-model',
+          promptVersion: 'history-v1',
+        },
+      ],
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', latest.id, 'play', {
+      contextBudget: {
+        maxPromptTokens: 180000,
+        maxContextTokens: 4000,
+        maxMessages: 10,
+        maxContentLengthPerMsg: 1000,
+      },
+      historySummaryEnabled: false,
+    });
+
+    assert.ok(!result.contextText.includes('[Thread History Summary]'));
+    assert.equal(result.historySummary, undefined);
+  });
+
+  test('runtime context budget snapshot exposes shadow-summary diagnostics', () => {
+    const budget = getCatContextBudget('opus');
+    const snapshot = buildRuntimeContextBudgetSnapshot({
+      threadId: 'thread-1',
+      toolPolicy: 'standard',
+      toolPolicySource: 'agent-default',
+      mode: 'serial',
+      prompt: 'hi',
+      staticIdentity: 'identity',
+      historyCount: 8,
+      includedHistoryCount: 8,
+      loadStandardContext: true,
+      loadFullContext: false,
+      hasPackBlocks: false,
+      hasWorldContext: false,
+      hasSessionBootstrap: false,
+      hasSignalArticles: false,
+      hasAlwaysOnDocs: false,
+      hasSopHint: false,
+      hasGuideContext: false,
+      hasMcpInstructions: false,
+      hasAgentMemory: false,
+      hasLessonsContext: false,
+      hasProjectContext: false,
+      projectContextDeferred: false,
+      governanceTier: 'operational',
+      governanceEstimatedTokens: 120,
+      hasGovernanceSourceContext: false,
+      catBudget: budget,
+      historyObservation: {
+        historyMode: 'observe',
+        historyFullTokens: 12000,
+        historyBudgetRatio: 0.5,
+        historyGovernanceDegraded: false,
+      },
+      historySummary: {
+        mode: 'shadow-summary',
+        tokens: 320,
+        segmentIds: ['seg-001'],
+        messageCount: 10,
+      },
+    });
+
+    assert.equal(snapshot.historyMode, 'shadow-summary');
+    assert.equal(snapshot.historySummaryTokens, 320);
+    assert.equal(snapshot.summarySegmentId, 'seg-001');
+    assert.ok(snapshot.loadedBlocks.includes('history-summary'));
+    assert.equal(snapshot.usesFullHistory, true, 'B1 shadow summary must keep full/recent history behavior unchanged');
+  });
+
   test('history governance observation is absent when observe flag is off', () => {
     const observation = buildHistoryGovernanceObservation({
       enabled: false,

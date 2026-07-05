@@ -328,9 +328,11 @@ export interface InvocationParams {
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;
-    historyMode?: 'observe';
+    historyMode?: 'observe' | 'shadow-summary' | 'summary-active';
     historyFullTokens?: number;
+    historySummaryTokens?: number;
     historyBudgetRatio?: number;
+    summarySegmentId?: string;
     historyGovernanceDegraded?: boolean;
   };
 }
@@ -1489,12 +1491,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (promptSourceBreakdown && !msg.metadata.usage.sourceBreakdown) {
             msg.metadata.usage = { ...msg.metadata.usage, sourceBreakdown: promptSourceBreakdown };
           }
-          if (params.contextBudget?.historyMode === 'observe') {
+          if (params.contextBudget?.historyMode) {
             msg.metadata.usage = {
               ...msg.metadata.usage,
               historyMode: params.contextBudget.historyMode,
               historyFullTokens: params.contextBudget.historyFullTokens,
+              historySummaryTokens: params.contextBudget.historySummaryTokens,
               historyBudgetRatio: params.contextBudget.historyBudgetRatio,
+              summarySegmentId: params.contextBudget.summarySegmentId,
               historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded,
             };
           }

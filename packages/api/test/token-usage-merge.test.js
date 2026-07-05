@@ -65,7 +65,7 @@ describe('F8: mergeTokenUsage', () => {
     assert.equal(result.contextResetsAtMs, 1771723048000);
   });
 
-  it('keeps latest observe-only history governance fields', () => {
+  it('keeps latest history governance fields', () => {
     const first = {
       inputTokens: 1000,
       historyMode: 'observe',
@@ -75,17 +75,21 @@ describe('F8: mergeTokenUsage', () => {
     };
     const second = {
       inputTokens: 500,
-      historyMode: 'observe',
+      historyMode: 'shadow-summary',
       historyFullTokens: 18000,
+      historySummaryTokens: 420,
       historyBudgetRatio: 0.6,
+      summarySegmentId: 'seg-001',
       historyGovernanceDegraded: true,
     };
     const result = mergeTokenUsage(first, second);
 
     assert.equal(result.inputTokens, 1500);
-    assert.equal(result.historyMode, 'observe');
+    assert.equal(result.historyMode, 'shadow-summary');
     assert.equal(result.historyFullTokens, 18000);
+    assert.equal(result.historySummaryTokens, 420);
     assert.equal(result.historyBudgetRatio, 0.6);
+    assert.equal(result.summarySegmentId, 'seg-001');
     assert.equal(result.historyGovernanceDegraded, true);
   });
 });

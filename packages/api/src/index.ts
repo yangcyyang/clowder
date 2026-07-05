@@ -1256,6 +1256,7 @@ async function main(): Promise<void> {
     signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
     packStore,
     evidenceStore: memoryServices.evidenceStore,
+    threadHistorySummaryStore: memoryServices.threadHistorySummaryStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
     guideSessionStore,
     dismissTracker,

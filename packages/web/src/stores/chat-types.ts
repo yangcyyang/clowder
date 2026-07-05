@@ -34,6 +34,8 @@ export interface PromptSourceBreakdown {
   sources: PromptSourceBreakdownItem[];
 }
 
+export type HistoryGovernanceMode = 'observe' | 'shadow-summary' | 'summary-active';
+
 /** F8: Token usage data from CLI invocations.
  *  inputTokens = TOTAL input (normalised across providers).
  *  cacheReadTokens = subset of inputTokens served from cache. */
@@ -55,9 +57,14 @@ export interface TokenUsage {
   contextResetsAtMs?: number;
   /** Estimated prompt-source composition. Display-only, not provider billing truth. */
   sourceBreakdown?: PromptSourceBreakdown;
-  historyMode?: 'observe';
+  /** Phase 3 history governance mode. */
+  historyMode?: HistoryGovernanceMode;
   historyFullTokens?: number;
+  /** Estimated tokens of injected thread-history summary text. */
+  historySummaryTokens?: number;
   historyBudgetRatio?: number;
+  /** Primary summary segment used for history summary injection. */
+  summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
 }
 
@@ -511,9 +518,11 @@ export interface CatInvocationInfo {
     usesFullHistory: boolean;
     maxPromptTokens: number;
     maxContextTokens: number;
-    historyMode?: 'observe';
+    historyMode?: HistoryGovernanceMode;
     historyFullTokens?: number;
+    historySummaryTokens?: number;
     historyBudgetRatio?: number;
+    summarySegmentId?: string;
     historyGovernanceDegraded?: boolean;
   };
   durationMs?: number;

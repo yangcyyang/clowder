@@ -68,7 +68,20 @@ export interface RunLedgerSummary {
     | 'tool_failed'
     | 'user_canceled'
     | 'unknown';
-  usage?: Pick<TokenUsage, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'costUsd'>;
+  usage?: Pick<
+    TokenUsage,
+    | 'inputTokens'
+    | 'outputTokens'
+    | 'cacheReadTokens'
+    | 'cacheCreationTokens'
+    | 'costUsd'
+    | 'historyMode'
+    | 'historyFullTokens'
+    | 'historySummaryTokens'
+    | 'historyBudgetRatio'
+    | 'summarySegmentId'
+    | 'historyGovernanceDegraded'
+  >;
   artifactCount?: number;
   toolCallCount?: number;
   traceId?: string;
@@ -491,13 +504,21 @@ function summarizeUsage(usageByCat: InvocationRecord['usageByCat']): RunLedgerSu
     addUsageNumber(usage, 'cacheReadTokens', item.cacheReadTokens);
     addUsageNumber(usage, 'cacheCreationTokens', item.cacheCreationTokens);
     addUsageNumber(usage, 'costUsd', item.costUsd);
+    if (item.historyMode != null) usage.historyMode = item.historyMode;
+    if (item.historyFullTokens != null) usage.historyFullTokens = item.historyFullTokens;
+    if (item.historySummaryTokens != null) usage.historySummaryTokens = item.historySummaryTokens;
+    if (item.historyBudgetRatio != null) usage.historyBudgetRatio = item.historyBudgetRatio;
+    if (item.summarySegmentId != null) usage.summarySegmentId = item.summarySegmentId;
+    if (item.historyGovernanceDegraded != null) {
+      usage.historyGovernanceDegraded = item.historyGovernanceDegraded;
+    }
   }
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
 function addUsageNumber(
   target: NonNullable<RunLedgerSummary['usage']>,
-  key: keyof NonNullable<RunLedgerSummary['usage']>,
+  key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'costUsd',
   value: number | undefined,
 ): void {
   if (typeof value !== 'number' || !Number.isFinite(value)) return;
@@ -547,7 +568,9 @@ function pickUsageEventData(data: Record<string, unknown>): Record<string, unkno
     'sourceBreakdown',
     'historyMode',
     'historyFullTokens',
+    'historySummaryTokens',
     'historyBudgetRatio',
+    'summarySegmentId',
     'historyGovernanceDegraded',
   ];
   return pickKeys(data, keys);

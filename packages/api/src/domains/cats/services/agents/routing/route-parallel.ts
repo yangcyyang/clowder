@@ -55,7 +55,7 @@ import { sanitizeAgentVisibleOutput } from './agent-output-sanitizer.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
-import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
+import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
   buildHistoryGovernanceObservation,
@@ -319,6 +319,7 @@ export async function* routeParallel(
 
       let prompt: string;
       let includedHistoryCount = 0;
+      let historySummary: HistorySummaryObservation | undefined;
       if (incrementalMode) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -349,6 +350,7 @@ export async function* routeParallel(
         );
         boundaryByCat.set(catId, inc.boundaryId);
         includedHistoryCount = inc.contextText ? (history?.length ?? 0) : 0;
+        historySummary = inc.historySummary;
         if (inc.degradation) {
           degradationMsgs.push({
             type: 'system_info' as AgentMessageType,
@@ -514,6 +516,7 @@ export async function* routeParallel(
         hasGovernanceSourceContext: Boolean(governanceSourceContext),
         catBudget: effectiveContextBudget,
         ...(historyObservation ? { historyObservation } : {}),
+        ...(historySummary ? { historySummary } : {}),
       });
 
       return invokeSingleCat(deps.invocationDeps, {

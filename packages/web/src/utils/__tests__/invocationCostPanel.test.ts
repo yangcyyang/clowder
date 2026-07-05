@@ -69,7 +69,7 @@ describe('invocationCostPanel', () => {
     });
   });
 
-  it('reads observe-only history governance fields from usage events', () => {
+  it('reads history governance summary fields from usage events', () => {
     const summaries = readTaskUsageSummaries(
       task([
         {
@@ -77,9 +77,11 @@ describe('invocationCostPanel', () => {
           catId: 'codex',
           type: 'usage',
           data: {
-            historyMode: 'observe',
+            historyMode: 'shadow-summary',
             historyFullTokens: 12000,
+            historySummaryTokens: 900,
             historyBudgetRatio: 0.4,
+            summarySegmentId: 'summary-1',
             historyGovernanceDegraded: false,
           },
         },
@@ -88,9 +90,11 @@ describe('invocationCostPanel', () => {
           catId: 'claude',
           type: 'usage',
           data: {
-            historyMode: 'observe',
+            historyMode: 'summary-active',
             historyFullTokens: 18000,
+            historySummaryTokens: 700,
             historyBudgetRatio: 0.6,
+            summarySegmentId: 'summary-2',
             historyGovernanceDegraded: true,
           },
         },
@@ -99,17 +103,21 @@ describe('invocationCostPanel', () => {
 
     expect(summaries).toHaveLength(2);
     expect(summaries[0]).toMatchObject({
-      historyMode: 'observe',
+      historyMode: 'shadow-summary',
       historyFullTokens: 12000,
+      historySummaryTokens: 900,
       historyBudgetRatio: 0.4,
+      summarySegmentId: 'summary-1',
       historyGovernanceDegraded: false,
     });
 
     const total = summarizeTaskUsage(summaries);
     expect(total).toMatchObject({
-      historyMode: 'observe',
+      historyMode: 'summary-active',
       historyFullTokens: 18000,
+      historySummaryTokens: 700,
       historyBudgetRatio: 0.6,
+      summarySegmentId: 'summary-2',
       historyGovernanceDegraded: true,
     });
   });

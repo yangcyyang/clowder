@@ -1,5 +1,10 @@
 import type { TaskEvent, TaskItem } from '@cat-cafe/shared';
-import type { PromptSource, PromptSourceBreakdown, PromptSourceBreakdownItem } from '@/stores/chat-types';
+import type {
+  HistoryGovernanceMode,
+  PromptSource,
+  PromptSourceBreakdown,
+  PromptSourceBreakdownItem,
+} from '@/stores/chat-types';
 
 const ENABLED_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const PROMPT_SOURCES = new Set<PromptSource>(['history', 'project', 'skill', 'rules', 'memory']);
@@ -17,9 +22,11 @@ export interface InvocationUsageSummary {
   durationMs?: number;
   durationApiMs?: number;
   sourceBreakdown?: PromptSourceBreakdown;
-  historyMode?: 'observe';
+  historyMode?: HistoryGovernanceMode;
   historyFullTokens?: number;
+  historySummaryTokens?: number;
   historyBudgetRatio?: number;
+  summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
 }
 
@@ -37,6 +44,10 @@ function asNumber(value: unknown): number | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function asHistoryMode(value: unknown): HistoryGovernanceMode | undefined {
+  return value === 'observe' || value === 'shadow-summary' || value === 'summary-active' ? value : undefined;
 }
 
 function readSourceBreakdown(value: unknown): PromptSourceBreakdown | undefined {
@@ -101,12 +112,20 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     durationMs: asNumber(data.durationMs),
     durationApiMs: asNumber(data.durationApiMs),
     sourceBreakdown: readSourceBreakdown(data.sourceBreakdown),
-    historyMode: data.historyMode === 'observe' ? 'observe' : undefined,
-    historyFullTokens: asNumber(data.historyFullTokens),
-    historyBudgetRatio: asNumber(data.historyBudgetRatio),
-    historyGovernanceDegraded:
-      typeof data.historyGovernanceDegraded === 'boolean' ? data.historyGovernanceDegraded : undefined,
   };
+  const historyMode = asHistoryMode(data.historyMode);
+  if (historyMode) summary.historyMode = historyMode;
+  const historyFullTokens = asNumber(data.historyFullTokens);
+  if (historyFullTokens != null) summary.historyFullTokens = historyFullTokens;
+  const historySummaryTokens = asNumber(data.historySummaryTokens);
+  if (historySummaryTokens != null) summary.historySummaryTokens = historySummaryTokens;
+  const historyBudgetRatio = asNumber(data.historyBudgetRatio);
+  if (historyBudgetRatio != null) summary.historyBudgetRatio = historyBudgetRatio;
+  const summarySegmentId = asString(data.summarySegmentId);
+  if (summarySegmentId) summary.summarySegmentId = summarySegmentId;
+  if (typeof data.historyGovernanceDegraded === 'boolean') {
+    summary.historyGovernanceDegraded = data.historyGovernanceDegraded;
+  }
   const hasSignal =
     summary.inputTokens != null ||
     summary.outputTokens != null ||
@@ -117,7 +136,12 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     summary.durationMs != null ||
     summary.durationApiMs != null ||
     summary.sourceBreakdown != null ||
-    summary.historyMode != null;
+    summary.historyMode != null ||
+    summary.historyFullTokens != null ||
+    summary.historySummaryTokens != null ||
+    summary.historyBudgetRatio != null ||
+    summary.summarySegmentId != null ||
+    summary.historyGovernanceDegraded != null;
   return hasSignal ? summary : null;
 }
 
@@ -138,11 +162,13 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
     total.durationMs = (total.durationMs ?? 0) + (event.durationMs ?? 0);
     total.durationApiMs = (total.durationApiMs ?? 0) + (event.durationApiMs ?? 0);
     total.sourceBreakdown = mergeSourceBreakdown(total.sourceBreakdown, event.sourceBreakdown);
-    if (event.historyMode === 'observe') {
-      total.historyMode = 'observe';
-      total.historyFullTokens = Math.max(total.historyFullTokens ?? 0, event.historyFullTokens ?? 0);
-      total.historyBudgetRatio = Math.max(total.historyBudgetRatio ?? 0, event.historyBudgetRatio ?? 0);
-      total.historyGovernanceDegraded = Boolean(total.historyGovernanceDegraded || event.historyGovernanceDegraded);
+    if (event.historyMode != null) total.historyMode = event.historyMode;
+    if (event.historyFullTokens != null) total.historyFullTokens = event.historyFullTokens;
+    if (event.historySummaryTokens != null) total.historySummaryTokens = event.historySummaryTokens;
+    if (event.historyBudgetRatio != null) total.historyBudgetRatio = event.historyBudgetRatio;
+    if (event.summarySegmentId != null) total.summarySegmentId = event.summarySegmentId;
+    if (event.historyGovernanceDegraded != null) {
+      total.historyGovernanceDegraded = event.historyGovernanceDegraded;
     }
   }
   return total;
