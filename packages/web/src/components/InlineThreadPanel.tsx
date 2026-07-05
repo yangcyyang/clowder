@@ -16,12 +16,13 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import type { CatStatusType } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
 import { MentionPicker } from './MentionPicker';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
-import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { CHAT_THREAD_ROUTE_EVENT, getThreadHref } from './ThreadSidebar/thread-navigation';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 520;
@@ -79,6 +80,36 @@ type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
 export type InlineThreadSearchHit = { id: string; index: number };
 type InlineThreadSendKeyEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>;
+type ReplyCountUpdateOptions = { authoritative?: boolean };
+type ViewInChannelWindow = {
+  location: { pathname: string };
+  history: { pushState: (data: unknown, unused: string, url?: string | URL | null) => void };
+  dispatchEvent: (event: Event) => boolean;
+};
+
+export function getViewInChannelHref(parentThreadId: string, sourceMessageId: string): string {
+  return `${getThreadHref(parentThreadId)}?highlight=${encodeURIComponent(sourceMessageId)}`;
+}
+
+export function navigateViewInChannel(
+  parentThreadId: string,
+  sourceMessageId: string,
+  windowObj: ViewInChannelWindow | undefined,
+  scrollToSource: (messageId: string) => void = scrollToMessage,
+): string {
+  const href = getViewInChannelHref(parentThreadId, sourceMessageId);
+  if (!windowObj) return href;
+
+  const parentHref = getThreadHref(parentThreadId);
+  if (windowObj.location.pathname === parentHref) {
+    scrollToSource(sourceMessageId);
+    return href;
+  }
+
+  windowObj.history.pushState({}, '', href);
+  windowObj.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
+  return href;
+}
 
 export function shouldShowInlineThreadRuntimeStatus(status: CatStatusType): boolean {
   return status !== 'done' && status !== 'alive_but_silent';
@@ -219,16 +250,23 @@ function detectSlashCommand(value: string, cursor: number): string | null {
 
 interface InlineThreadPanelProps {
   threadId: string;
+  parentThreadId: string;
   sourceMessage: ChatMessageData;
   task?: TaskItem;
   parentThreadTitle: string;
   isClosing?: boolean;
   onClose: () => void;
-  onReplyCountChange?: (sourceMessageId: string, branchThreadId: string, replyCount: number) => void;
+  onReplyCountChange?: (
+    sourceMessageId: string,
+    branchThreadId: string,
+    replyCount: number,
+    options?: ReplyCountUpdateOptions,
+  ) => void;
 }
 
 export function InlineThreadPanel({
   threadId,
+  parentThreadId,
   sourceMessage,
   task,
   parentThreadTitle,
@@ -297,8 +335,8 @@ export function InlineThreadPanel({
     return title.startsWith('#') ? title : `#${title}`;
   }, [parentThreadTitle]);
   const handleViewInChannel = useCallback(() => {
-    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
-  }, [threadId]);
+    navigateViewInChannel(parentThreadId, sourceMessage.id, typeof window !== 'undefined' ? window : undefined);
+  }, [parentThreadId, sourceMessage.id]);
   const handlePanelResize = useCallback(
     (delta: number) => {
       setPanelWidth((prev) => clampThreadPanelWidth(prev - delta));
@@ -512,8 +550,9 @@ export function InlineThreadPanel({
   }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
 
   useEffect(() => {
-    onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length);
-  }, [onReplyCountChange, replyMessages.length, sourceMessage.id, threadId]);
+    if (loading) return;
+    onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length, { authoritative: true });
+  }, [loading, onReplyCountChange, replyMessages.length, sourceMessage.id, threadId]);
 
   const handleSend = useCallback(async () => {
     const content = input.trim();
@@ -541,7 +580,7 @@ export function InlineThreadPanel({
       }
       setInput('');
       closeMentionPicker();
-      onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1);
+      onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1, { authoritative: false });
       void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(() => startReplyPolling());
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '发送失败');

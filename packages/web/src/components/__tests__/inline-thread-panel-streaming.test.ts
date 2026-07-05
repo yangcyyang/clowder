@@ -3,15 +3,18 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  getViewInChannelHref,
   getInlineThreadSearchHits,
   getNextInlineThreadSearchIndex,
   InlineThreadTaskStatusCard,
   isUnsafeInlineThreadTarget,
+  navigateViewInChannel,
   normalizeInlineThreadMessage,
   shouldSendInlineThreadMessage,
   shouldShowInlineThreadRuntimeStatus,
 } from '@/components/InlineThreadPanel';
 import type { ChatMessage } from '@/stores/chatStore';
+import { CHAT_THREAD_ROUTE_EVENT } from '@/components/ThreadSidebar/thread-navigation';
 
 describe('InlineThreadPanel streaming normalization', () => {
   it('maps API draft replies to streaming messages so ChatMessage hides partial content', () => {
@@ -68,6 +71,51 @@ describe('InlineThreadPanel thread target guard', () => {
 
   it('allows real branch threads to receive replies', () => {
     expect(isUnsafeInlineThreadTarget('thread-branch', { threadId: 'thread-main' })).toBe(false);
+  });
+});
+
+describe('InlineThreadPanel view-in-channel target', () => {
+  it('links back to the parent channel and highlights the source message', () => {
+    expect(getViewInChannelHref('thread-parent', 'msg-source')).toBe('/thread/thread-parent?highlight=msg-source');
+    expect(getViewInChannelHref('default', 'msg source/1')).toBe('/?highlight=msg%20source%2F1');
+  });
+
+  it('scrolls directly when the parent channel is already active', () => {
+    const pushed: string[] = [];
+    const dispatched: string[] = [];
+    const scrolled: string[] = [];
+    const fakeWindow = {
+      location: { pathname: '/thread/thread-parent' },
+      history: { pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)) },
+      dispatchEvent: (event: Event) => {
+        dispatched.push(event.type);
+        return true;
+      },
+    };
+
+    navigateViewInChannel('thread-parent', 'msg-source', fakeWindow, (messageId) => scrolled.push(messageId));
+
+    expect(scrolled).toEqual(['msg-source']);
+    expect(pushed).toEqual([]);
+    expect(dispatched).toEqual([]);
+  });
+
+  it('routes to the parent channel with highlight when another thread is active', () => {
+    const pushed: string[] = [];
+    const dispatched: string[] = [];
+    const fakeWindow = {
+      location: { pathname: '/thread/thread-branch' },
+      history: { pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)) },
+      dispatchEvent: (event: Event) => {
+        dispatched.push(event.type);
+        return true;
+      },
+    };
+
+    navigateViewInChannel('thread-parent', 'msg-source', fakeWindow, () => {});
+
+    expect(pushed).toEqual(['/thread/thread-parent?highlight=msg-source']);
+    expect(dispatched).toEqual([CHAT_THREAD_ROUTE_EVENT]);
   });
 });
 

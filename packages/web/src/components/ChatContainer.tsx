@@ -61,6 +61,11 @@ import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { InlineThreadPanel } from './InlineThreadPanel';
+import {
+  applyInlineThreadReplyCountUpdate,
+  type InlineThreadReplyCountUpdateOptions,
+  type InlineThreadReplyState,
+} from './inline-thread-reply-state';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { KnowledgeCaptureModal } from './KnowledgeCaptureModal';
@@ -87,9 +92,8 @@ interface ChatContainerProps {
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
 const INLINE_THREAD_EXIT_MS = 180;
 
-type InlineThreadReplyState = Record<string, { branchThreadId: string; replyCount: number }>;
 type ThreadReplyInfo = InlineThreadReplyState[string] & { newCount?: number };
-type InlineThreadState = { threadId: string; sourceMessage: ChatMessageData; task?: TaskItem };
+type InlineThreadState = { threadId: string; parentThreadId: string; sourceMessage: ChatMessageData; task?: TaskItem };
 type ChannelTab = 'chat' | 'tasks' | 'files';
 const EMPTY_MEMBER_IDS: string[] = [];
 
@@ -375,14 +379,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const setThreads = useChatStore((s) => s.setThreads);
   const threadStates = useChatStore((s) => s.threadStates);
   const handleInlineThreadReplyCountChange = useCallback(
-    (sourceMessageId: string, branchThreadId: string, replyCount: number) => {
-      setInlineThreadReplies((prev) => ({
-        ...prev,
-        [sourceMessageId]: {
-          branchThreadId,
-          replyCount,
-        },
-      }));
+    (
+      sourceMessageId: string,
+      branchThreadId: string,
+      replyCount: number,
+      options?: InlineThreadReplyCountUpdateOptions,
+    ) => {
+      setInlineThreadReplies((prev) =>
+        applyInlineThreadReplyCountUpdate(prev, sourceMessageId, branchThreadId, replyCount, options),
+      );
     },
     [],
   );
@@ -420,7 +425,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       const existing = inlineThreadReplies[sourceMessage.id] ?? sourceMessage.extra?.slockThread;
       if (existing) {
         clearUnread(existing.branchThreadId);
-        openInlineThread({ threadId: existing.branchThreadId, sourceMessage });
+        openInlineThread({
+          threadId: existing.branchThreadId,
+          parentThreadId: sourceMessage.threadId ?? threadId,
+          sourceMessage,
+        });
         return;
       }
 
@@ -451,7 +460,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           });
           return;
         }
-        openInlineThread({ threadId: branchThreadId, sourceMessage });
+        openInlineThread({ threadId: branchThreadId, parentThreadId: sourceThreadId, sourceMessage });
         handleInlineThreadReplyCountChange(sourceMessage.id, branchThreadId, 0);
         const threadsRes = await apiFetch('/api/threads');
         if (threadsRes.ok) {
@@ -510,7 +519,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           ...(data.sourceMessage.editedAt ? { editedAt: data.sourceMessage.editedAt } : {}),
         };
         if (data.task) updateTask(data.task);
-        openInlineThread({ threadId: data.threadId, sourceMessage, task: data.task ?? task });
+        openInlineThread({
+          threadId: data.threadId,
+          parentThreadId: data.sourceMessage?.threadId ?? threadId,
+          sourceMessage,
+          task: data.task ?? task,
+        });
       } catch {
         addToast({
           type: 'error',
@@ -520,7 +534,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [addToast, openInlineThread, updateTask],
+    [addToast, openInlineThread, threadId, updateTask],
   );
   useEffect(() => {
     clearInlineThreadCloseTimer();
@@ -1686,6 +1700,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       {inlineThread && (
         <InlineThreadPanel
           threadId={inlineThread.threadId}
+          parentThreadId={inlineThread.parentThreadId}
           sourceMessage={inlineThread.sourceMessage}
           task={inlineThread.task}
           parentThreadTitle={currentThreadTitle}
