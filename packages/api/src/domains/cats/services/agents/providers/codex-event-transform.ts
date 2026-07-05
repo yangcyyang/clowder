@@ -18,7 +18,12 @@ const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
 export interface CodexStreamState {
   hadPriorTextTurn: boolean;
   pendingTextTurn?: string;
+  lastSuppressedThinkingText?: string;
+  lastCompletionActivitySummary?: string;
+  completionFallbackEmitted?: boolean;
 }
+
+const MAX_COMPLETION_ACTIVITY_SUMMARY_LENGTH = 220;
 
 function createTextMessage(catId: CatId, content: string): AgentMessage {
   return {
@@ -38,6 +43,19 @@ function createThinkingMessage(catId: CatId, text: string): AgentMessage {
   };
 }
 
+function compactSummary(text: string): string {
+  const compacted = text.replace(/\s+/g, ' ').trim();
+  if (compacted.length <= MAX_COMPLETION_ACTIVITY_SUMMARY_LENGTH) return compacted;
+  return `${compacted.slice(0, MAX_COMPLETION_ACTIVITY_SUMMARY_LENGTH - 1)}…`;
+}
+
+function rememberCompletionActivity(state: CodexStreamState | undefined, summary: string): void {
+  if (!state) return;
+  const text = compactSummary(summary);
+  if (!text) return;
+  state.lastCompletionActivitySummary = text;
+}
+
 function takePendingText(state: CodexStreamState): string | null {
   const text = state.pendingTextTurn;
   delete state.pendingTextTurn;
@@ -51,10 +69,27 @@ export function flushCodexPendingText(state: CodexStreamState, catId: CatId): Ag
   return createTextMessage(catId, text);
 }
 
+export function flushCodexCompletionText(state: CodexStreamState, catId: CatId): AgentMessage | null {
+  const text = takePendingText(state);
+  if (text) {
+    state.hadPriorTextTurn = true;
+    return createTextMessage(catId, text);
+  }
+
+  if (state.completionFallbackEmitted) return null;
+  const lastProgress = state.lastCompletionActivitySummary ?? state.lastSuppressedThinkingText;
+  if (!lastProgress) return null;
+
+  state.completionFallbackEmitted = true;
+  state.hadPriorTextTurn = true;
+  return createTextMessage(catId, `Codex 本轮已完成，但没有输出最终总结。最后进度：${lastProgress}`);
+}
+
 function flushCodexPendingThinking(state: CodexStreamState | undefined, catId: CatId): AgentMessage | null {
   if (!state) return null;
   const text = takePendingText(state);
   if (!text) return null;
+  state.lastSuppressedThinkingText = compactSummary(text);
   return createThinkingMessage(catId, text);
 }
 
@@ -97,7 +132,7 @@ export function transformCodexEvent(
   }
 
   if (e.type === 'turn.completed') {
-    return state ? flushCodexPendingText(state, catId) : null;
+    return state ? flushCodexCompletionText(state, catId) : null;
   }
 
   // F045: todo_list (started/updated/completed) → system_info(task_progress)
@@ -128,6 +163,7 @@ export function transformCodexEvent(
         status: normalizeTaskStatus(rawStatus),
       };
     });
+    rememberCompletionActivity(state, `todo_list ${e.type}: tasks=${tasks.length}`);
     return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,
@@ -147,6 +183,7 @@ export function transformCodexEvent(
         typeof item.arguments === 'object' && item.arguments !== null
           ? (item.arguments as Record<string, unknown>)
           : {};
+      rememberCompletionActivity(state, `mcp:${server}/${tool} started`);
       return withPendingThinking(state, catId, {
         type: 'tool_use',
         catId,
@@ -159,6 +196,7 @@ export function transformCodexEvent(
     if (item?.type !== 'command_execution') return null;
     const command = item.command;
     if (typeof command !== 'string') return null;
+    rememberCompletionActivity(state, `command_execution started: ${command}`);
     return withPendingThinking(state, catId, {
       type: 'tool_use',
       catId,
@@ -204,6 +242,10 @@ export function transformCodexEvent(
     const trimmedOutput = output.trimEnd();
     if (trimmedOutput) sections.push(trimmedOutput);
 
+    rememberCompletionActivity(
+      state,
+      `command_execution ${status}: ${command || 'unknown command'}${exitCode !== null ? ` exit_code=${exitCode}` : ''}`,
+    );
     return withPendingThinking(state, catId, {
       type: 'tool_result',
       catId,
@@ -215,6 +257,7 @@ export function transformCodexEvent(
   if (item?.type === 'file_change') {
     const changes = Array.isArray(item.changes) ? item.changes : [];
     const status = typeof item.status === 'string' ? item.status : 'completed';
+    rememberCompletionActivity(state, `file_change ${status}: changes=${changes.length}`);
     return withPendingThinking(state, catId, {
       type: 'tool_use',
       catId,
@@ -235,6 +278,7 @@ export function transformCodexEvent(
     const textParts = typed.filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
 
     const toolLabel = `mcp:${server}/${tool}`;
+    rememberCompletionActivity(state, `${toolLabel} ${status}`);
     const toolResult: AgentMessage = {
       type: 'tool_result',
       catId,
@@ -283,6 +327,7 @@ export function transformCodexEvent(
 
   // F045: web_search → system_info — count only, no query (privacy)
   if (item?.type === 'web_search') {
+    rememberCompletionActivity(state, 'web_search completed');
     return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,
@@ -293,11 +338,13 @@ export function transformCodexEvent(
 
   // F045: reasoning → system_info(thinking)
   if (item?.type === 'reasoning' && typeof item.text === 'string' && item.text.length > 0) {
+    rememberCompletionActivity(state, 'reasoning completed');
     return withPendingThinking(state, catId, createThinkingMessage(catId, item.text));
   }
 
   // F045: item-level error → system_info(warning)
   if (item?.type === 'error' && typeof item.message === 'string') {
+    rememberCompletionActivity(state, 'warning emitted');
     return withPendingThinking(state, catId, {
       type: 'system_info',
       catId,

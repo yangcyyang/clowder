@@ -529,6 +529,64 @@ test('separates Codex process updates from final answer text', async () => {
   assert.equal(textMsgs[0].content, 'All checks passed.');
 });
 
+test('yields visible fallback when Codex completes after tool activity without final answer', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('Silent completion'));
+
+  emitCodexEvents(proc, [
+    { type: 'thread.started', thread_id: 'thread-silent-completion' },
+    {
+      type: 'item.completed',
+      item: { id: 'msg-1', type: 'agent_message', text: 'I will inspect and verify.' },
+    },
+    {
+      type: 'item.started',
+      item: { id: 'cmd-1', type: 'command_execution', command: 'pnpm test', status: 'in_progress' },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        id: 'cmd-1',
+        type: 'command_execution',
+        command: 'pnpm test',
+        aggregated_output: 'ok',
+        exit_code: 0,
+        status: 'completed',
+      },
+    },
+    {
+      type: 'item.completed',
+      item: { id: 'file-1', type: 'file_change', changes: ['packages/api/src/file.ts'], status: 'completed' },
+    },
+    { type: 'turn.completed' },
+  ]);
+
+  const msgs = await promise;
+  const textMsgs = msgs.filter((m) => m.type === 'text');
+  const thinkingMsgs = msgs
+    .filter((m) => m.type === 'system_info')
+    .map((m) => {
+      try {
+        return JSON.parse(m.content);
+      } catch {
+        return null;
+      }
+    })
+    .filter((payload) => payload?.type === 'thinking');
+
+  assert.equal(thinkingMsgs.length, 1);
+  assert.equal(thinkingMsgs[0].text, 'I will inspect and verify.');
+  assert.equal(textMsgs.length, 1);
+  assert.match(textMsgs[0].content, /没有输出最终总结/);
+  assert.match(textMsgs[0].content, /最后进度/);
+  assert.match(textMsgs[0].content, /file_change/);
+  assert.match(textMsgs[0].content, /changes=1/);
+  assert.ok(msgs.some((m) => m.type === 'done'));
+});
+
 test('maps command_execution and file_change items into tool events', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

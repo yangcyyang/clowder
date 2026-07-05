@@ -75,6 +75,52 @@ test('stateful pending agent_message flushes as thinking before tool_use', () =>
   assert.equal(result[1].toolName, 'command_execution');
 });
 
+test('turn.completed emits visible fallback when tool activity leaves no final answer', () => {
+  const state = { hadPriorTextTurn: false };
+
+  assert.equal(
+    transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: 'I will inspect and verify.' } },
+      CAT,
+      state,
+    ),
+    null,
+  );
+
+  const started = transformCodexEvent(
+    { type: 'item.started', item: { type: 'command_execution', command: 'pnpm test' } },
+    CAT,
+    state,
+  );
+  assert.ok(Array.isArray(started));
+  assert.equal(started[0].type, 'system_info');
+  assert.equal(JSON.parse(started[0].content).text, 'I will inspect and verify.');
+  assert.equal(started[1].type, 'tool_use');
+
+  const completed = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'pnpm test',
+        status: 'completed',
+        exit_code: 0,
+        aggregated_output: 'ok',
+      },
+    },
+    CAT,
+    state,
+  );
+  assert.equal(completed?.type, 'tool_result');
+
+  const final = transformCodexEvent({ type: 'turn.completed' }, CAT, state);
+  assert.equal(final?.type, 'text');
+  assert.match(final?.content ?? '', /没有输出最终总结/);
+  assert.match(final?.content ?? '', /最后进度/);
+  assert.match(final?.content ?? '', /command_execution/);
+  assert.match(final?.content ?? '', /pnpm test/);
+});
+
 test('flushCodexPendingText emits trailing answer at stream end', () => {
   const state = { hadPriorTextTurn: false };
 

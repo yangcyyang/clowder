@@ -34,7 +34,7 @@ import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hook
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
   type CodexStreamState,
-  flushCodexPendingText,
+  flushCodexCompletionText,
   transformCodexEvent,
 } from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
@@ -653,7 +653,7 @@ export class CodexAgentService implements AgentService {
         }
       }
 
-      const trailingText = flushCodexPendingText(codexStreamState, this.catId);
+      const trailingText = flushCodexCompletionText(codexStreamState, this.catId);
       if (trailingText) {
         yield { ...trailingText, metadata };
       }
