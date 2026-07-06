@@ -48,6 +48,12 @@ describe('getPickDirectoryCommand()', () => {
     assert.match(command.args.at(-1), /FolderBrowserDialog/);
   });
 
+  it('allows creating folders from the Windows native folder picker', () => {
+    const command = mod.getPickDirectoryCommand('win32');
+    assert.ok(command);
+    assert.match(command.args.at(-1), /\$dialog\.ShowNewFolderButton = \$true/);
+  });
+
   it('returns null on unsupported platforms', () => {
     assert.equal(mod.getPickDirectoryCommand('linux'), null);
   });

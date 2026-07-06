@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 const WINDOWS_PICK_DIRECTORY_SCRIPT = [
   'Add-Type -AssemblyName System.Windows.Forms',
   '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
-  '$dialog.ShowNewFolderButton = $false',
+  '$dialog.ShowNewFolderButton = $true',
   '$dialog.Description = "Select project directory"',
   'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {',
   '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',

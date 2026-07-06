@@ -272,6 +272,34 @@ describe('DirectoryPickerModal', () => {
     expect(browseBtn?.className).toContain('console-button-secondary');
   });
 
+  it('selects the directory returned by the native system picker before confirmation', async () => {
+    const pickedPath = '/Users/cy/Documents/new-system-picked-project';
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      if (path === '/api/projects/pick-directory')
+        return jsonOk({ path: pickedPath, name: 'new-system-picked-project' });
+      return jsonFail();
+    });
+    const fns = render();
+    await flush();
+
+    const systemPickerBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('系统选择'),
+    )!;
+    expect(systemPickerBtn).toBeTruthy();
+
+    await act(async () => {
+      systemPickerBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/projects/pick-directory', { method: 'POST' });
+    expect(fns.onSelect).not.toHaveBeenCalled();
+    clickConfirm();
+    expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: pickedPath }));
+  });
+
   it('toggles inline DirectoryBrowser when browse button is clicked', async () => {
     setupCwdSuccess();
     render();

@@ -45,6 +45,7 @@ export function DirectoryPickerModal({
   const [showBrowser, setShowBrowser] = useState(false);
   const [pathInput, setPathInput] = useState('');
   const [pathError, setPathError] = useState<string | null>(null);
+  const [isSystemPicking, setIsSystemPicking] = useState(false);
   const { getCatById } = useCatData();
   const modalRef = useRef<HTMLDivElement>(null);
   const ime = useIMEGuard();
@@ -127,6 +128,30 @@ export function DirectoryPickerModal({
     },
     [handleSelectPath],
   );
+
+  const handleSystemPickerSelect = useCallback(async () => {
+    setPathError(null);
+    setIsSystemPicking(true);
+    try {
+      const res = await apiFetch('/api/projects/pick-directory', { method: 'POST' });
+      if (res.status === 204) return;
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        setPathError(data.error || '系统目录选择失败');
+        return;
+      }
+      const data = (await res.json()) as { path?: string };
+      if (data.path) {
+        handleSelectPath(data.path);
+        setPathInput(data.path);
+        setShowBrowser(false);
+      }
+    } catch {
+      setPathError('无法打开系统目录选择器');
+    } finally {
+      setIsSystemPicking(false);
+    }
+  }, [handleSelectPath]);
 
   // F068: Submit path from text input — validate via browse endpoint before accepting
   const handlePathSubmit = useCallback(async () => {
@@ -422,7 +447,16 @@ export function DirectoryPickerModal({
 
         {/* ── Bottom: browse button + path input + confirm ── */}
         <div className="px-7 py-4 border-t border-[var(--console-border-soft)] space-y-2 flex-shrink-0">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleSystemPickerSelect}
+              disabled={isSystemPicking}
+              className="console-button-secondary flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60"
+            >
+              <FolderOpenIcon />
+              <span>{isSystemPicking ? '打开中...' : '系统选择...'}</span>
+            </button>
             <button
               type="button"
               onClick={() => setShowBrowser((v) => !v)}
@@ -443,7 +477,7 @@ export function DirectoryPickerModal({
                 if (e.key === 'Enter' && !ime.isComposing()) handlePathSubmit();
               }}
               placeholder="或输入路径..."
-              className="flex-1 rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
+              className="min-w-[180px] flex-1 rounded-[10px] border border-transparent bg-[var(--console-field-bg)] px-3 h-10 text-[13px] text-cafe outline-none placeholder:text-cafe-muted transition focus:border-cafe-accent focus:ring-2 focus:ring-cafe-accent/30"
             />
             {pathInput.trim() && (
               <button
