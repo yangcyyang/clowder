@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   DEFAULT_PERSONAL_SKILL_INDEX_PATH,
@@ -274,6 +274,46 @@ function loadRepoManifestEntries(): SkillRouterCatalogEntry[] {
     .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
 }
 
+function listExternalSkillDirs(): string[] {
+  const externalRoot = resolve(resolveRepoSkillRoot(), 'external');
+  if (!existsSync(externalRoot)) return [];
+  try {
+    return readdirSync(externalRoot, { withFileTypes: true })
+      .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && !entry.name.startsWith('.'))
+      .map((entry) => resolve(externalRoot, entry.name))
+      .filter((dirPath) => existsSync(resolve(dirPath, 'SKILL.md')));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeExternalSkillEntry(sourcePath: string): SkillRouterCatalogEntry | null {
+  const content = readSkillContent(sourcePath);
+  if (!content) return null;
+
+  const frontmatter = parseSkillFrontmatter(content);
+  const dirName = dirname(sourcePath).split('/').pop() ?? '';
+  const skillName = frontmatterName(frontmatter, dirName);
+
+  return makeCatalogEntry({
+    id: `external:${skillName}`,
+    name: skillName,
+    description: frontmatterDescription(frontmatter) || skillName,
+    triggers: skillTriggers(frontmatter, undefined, skillName),
+    riskLevel: 'external',
+    sourcePath,
+    content: '',
+    source: 'personal',
+    menuVisible: true,
+  });
+}
+
+function loadExternalSkillDirectoryEntries(): SkillRouterCatalogEntry[] {
+  return listExternalSkillDirs()
+    .map((dirPath) => normalizeExternalSkillEntry(resolve(dirPath, 'SKILL.md')))
+    .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
+}
+
 function splitCsv(value: string | undefined, fallback: string[]): string[] {
   if (!value?.trim()) return [...fallback];
   return value
@@ -310,6 +350,18 @@ function fileFingerprint(path: string): string {
   }
 }
 
+function externalSkillDirFingerprint(): string {
+  try {
+    const dirs = listExternalSkillDirs();
+    return dirs
+      .map((dirPath) => `${dirPath}:${fileFingerprint(resolve(dirPath, 'SKILL.md'))}`)
+      .sort()
+      .join('|');
+  } catch {
+    return '';
+  }
+}
+
 function skillRouterCatalogCacheKey(manifestPath: string, repoManifestPath: string): string {
   const personalEnabled = isPersonalSkillsEnabled(process.env.CAT_CAFE_PERSONAL_SKILLS_ENABLED);
   const personalIndexPath = resolvePersonalIndexPath();
@@ -323,6 +375,7 @@ function skillRouterCatalogCacheKey(manifestPath: string, repoManifestPath: stri
     personalIndex: personalEnabled ? fileFingerprint(personalIndexPath) : 'disabled',
     personalRoots: resolvePersonalRoots(),
     personalVisibleNames: [...resolvePersonalVisibleNames()].sort(),
+    externalSkillDir: externalSkillDirFingerprint(),
   });
 }
 
@@ -380,6 +433,7 @@ export function loadSkillRouterCatalog(): SkillRouterCatalogEntry[] {
       ...loadPersonalIndexEntries(),
       ...loadExternalManifestEntries(manifestPath),
       ...loadRepoManifestEntries(),
+      ...loadExternalSkillDirectoryEntries(),
     ]);
 
     catalogCache = { cacheKey, entries };
@@ -409,7 +463,11 @@ function matchExplicitCommand(message: string, skills: SkillRouterCatalogEntry[]
   if (!message.startsWith('/')) return null;
   const command = message.slice(1).split(/\s+/)[0].toLowerCase();
   if (!command) return null;
-  return skills.find((s) => s.name.toLowerCase() === command) ?? null;
+  return (
+    skills.find((s) => s.name.toLowerCase() === command) ??
+    skills.find((s) => s.triggers.some((trigger) => trigger.toLowerCase() === `/${command}`)) ??
+    null
+  );
 }
 
 function matchSkills(userMessageText: string, skills: SkillRouterCatalogEntry[]): SkillRouterCatalogEntry[] {

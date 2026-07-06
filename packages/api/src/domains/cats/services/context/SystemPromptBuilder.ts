@@ -326,6 +326,11 @@ const TOOL_QUERY_GUIDE_SECTION = `## 上下文查询指南（按需拉取）
 - 需要富呈现用 rich block 工具；规则不确定再查 cat_cafe_get_rich_block_rules。
 - 先查最小范围，主消息只写结论、关键证据和下一步。`;
 
+const LOCAL_TOOL_DISCOVERY_SECTION = `## 常用本地工具提示
+- 登录态网页、站点地图、浏览器采集：先查 \`opencli-usage\` / \`opencli-browser\`，不要默认手搓流程。
+- 用户说加载/安装/关联 skill：先查 \`skill-linker\` 或 \`cat_cafe_list_skills\`，确认本地已有再挂载。
+- 工具没出现在当前 tools 列表时，先走 Skill Router / MCP 发现，不要假设不可用。`;
+
 /**
  * L0 Governance Core — Slock-like always-on constitutional floor.
  * Keep this short: every agent sees it, including minimal/default DM responders.
@@ -727,6 +732,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   lines.push(GENERIC_WORKFLOW_TRIGGERS, '');
 
   lines.push(TOOL_QUERY_GUIDE_SECTION, '');
+  lines.push(LOCAL_TOOL_DISCOVERY_SECTION, '');
   lines.push(RULE_PRIORITY_SECTION, '');
 
   // F129: Pack workflow blocks (after breed workflow triggers)

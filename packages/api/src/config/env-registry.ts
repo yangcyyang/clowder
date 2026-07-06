@@ -605,7 +605,15 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES',
     defaultValue:
       'create-prd,product-strategy,business-model,competitor-analysis,competitive-battlecard,customer-journey-map,market-sizing,pricing-strategy,user-personas,value-proposition,design-review,high-end-visual-design,image-to-code,opencli-usage,opencli-browser,gstack,investigate,qa,review,make-pdf',
-    description: '默认显示在技能面板的个人 Skill 名称，逗号分隔，保持小集合以避免 prompt 常驻膨胀。',
+    description: '默认显示在技能面板的个人 Skill 名称，逗号分隔；自动路由仍只注入命中的少量技能。',
+    category: 'governance',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_CAFE_PERSONAL_SKILL_VISIBLE_ALL',
+    defaultValue: '0',
+    description: '个人 Skill 全可见开关；开启后 index 中所有扫到的个人 Skill 都进入面板/检索。',
     category: 'governance',
     sensitive: false,
     restartRequired: true,

@@ -124,6 +124,53 @@ description: Review work before shipping
     }
   });
 
+  it('marks every indexed skill visible when visible-all env is enabled', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'personal-skills-visible-all-home-'));
+    const projectRoot = await mkdtemp(join(tmpdir(), 'personal-skills-visible-all-project-'));
+    try {
+      await writeSkill(
+        join(home, '.claude', 'skills', 'create-prd'),
+        `
+name: create-prd
+description: Create a PRD
+`,
+      );
+      await writeSkill(
+        join(home, '.claude', 'skills', 'hidden-route'),
+        `
+name: hidden-route
+description: Hidden route
+`,
+      );
+
+      const result = await rebuildPersonalSkillIndexFromEnv(projectRoot, {
+        HOME: home,
+        CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
+        CAT_CAFE_PERSONAL_SKILL_ROOTS: '~/.claude/skills',
+        CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+        CAT_CAFE_PERSONAL_SKILL_VISIBLE_ALL: '1',
+        CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: '.cat-cafe/personal-skills-index.json',
+      });
+
+      assert.equal(result.enabled, true);
+      assert.equal(result.total, 2);
+      assert.equal(result.visible, 2);
+
+      const raw = await readFile(result.indexPath, 'utf-8');
+      const index = JSON.parse(raw);
+      assert.deepEqual(
+        index.skills.map((skill) => [skill.name, skill.visible]).sort(),
+        [
+          ['create-prd', true],
+          ['hidden-route', true],
+        ],
+      );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('skips skill symlinks that escape the configured root', async () => {
     const root = await mkdtemp(join(tmpdir(), 'personal-skills-symlink-'));
     const skillsRoot = join(root, 'skills');

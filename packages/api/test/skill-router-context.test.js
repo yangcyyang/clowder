@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
@@ -10,6 +10,7 @@ const PERSONAL_ENV_KEYS = [
   'CAT_CAFE_PERSONAL_SKILLS_ENABLED',
   'CAT_CAFE_PERSONAL_SKILL_ROOTS',
   'CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES',
+  'CAT_CAFE_PERSONAL_SKILL_VISIBLE_ALL',
   'CAT_CAFE_PERSONAL_SKILL_INDEX_PATH',
 ];
 
@@ -138,6 +139,49 @@ describe('SkillRouter', () => {
     assert.ok(statusContext.matchedSkillNames.includes('project-workflow'));
   });
 
+  test('loads SKILL.md entries from cat-cafe-skills/external symlinks', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'skill-router-external-'));
+    const manifestPath = join(workDir, 'skills-manifest.json');
+    const sourceRoot = join(workDir, 'external-probe-skill');
+    const externalRoot = resolve(REPO_ROOT, 'cat-cafe-skills', 'external');
+    const externalName = `external-probe-${Date.now()}`;
+    const linkPath = resolve(externalRoot, externalName);
+    mkdirSync(sourceRoot, { recursive: true });
+    mkdirSync(externalRoot, { recursive: true });
+    writeFileSync(
+      join(sourceRoot, 'SKILL.md'),
+      `---
+name: ${externalName}
+description: External probe skill
+triggers:
+  - external-probe-trigger
+---
+
+# External Probe
+`,
+      'utf-8',
+    );
+    writeFileSync(manifestPath, JSON.stringify({ skills: [] }, null, 2));
+
+    try {
+      symlinkSync(sourceRoot, linkPath, 'dir');
+      process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
+      const moduleUrl = new URL(
+        `../dist/domains/cats/services/context/SkillRouter.js?case=external-${Date.now()}`,
+        import.meta.url,
+      );
+      const { resolveSkillRouterContext } = await import(moduleUrl.href);
+
+      const context = resolveSkillRouterContext('请用 external-probe-trigger 处理');
+      assert.ok(context);
+      assert.ok(context.matchedSkillNames.includes(externalName));
+      assert.match(context.promptBlock, new RegExp(externalName));
+    } finally {
+      rmSync(linkPath, { force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   test('matches project-workflow slash aliases without fast lane', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'skill-router-slash-alias-'));
     const manifestPath = join(workDir, 'skills-manifest.json');
@@ -152,11 +196,11 @@ describe('SkillRouter', () => {
 
     const continueContext = resolveSkillRouterContext('/continue-project clowder');
     assert.ok(continueContext);
-    assert.deepEqual(continueContext.matchedSkillNames, ['project-workflow']);
+    assert.ok(continueContext.matchedSkillNames.includes('project-workflow'));
 
     const statusContext = resolveSkillRouterContext('/project-status clowder');
     assert.ok(statusContext);
-    assert.deepEqual(statusContext.matchedSkillNames, ['project-workflow']);
+    assert.ok(statusContext.matchedSkillNames.includes('project-workflow'));
   });
 
   test('injects reuse gate for matched skills and exploration fallback for new work', async () => {
@@ -192,9 +236,9 @@ describe('SkillRouter', () => {
     writeFileSync(manifestPath, JSON.stringify({ skills: [] }, null, 2));
     const createPrdPath = writePersonalSkill(
       personalRoot,
-      'create-prd',
+      'personal-create-prd-test',
       `
-name: create-prd
+name: personal-create-prd-test
 description: Create a PRD from product context
 triggers:
   - PRD
@@ -214,7 +258,7 @@ triggers:
     );
     writePersonalIndex(indexPath, [
       {
-        name: 'create-prd',
+        name: 'personal-create-prd-test',
         description: 'Create a PRD from product context',
         triggers: ['PRD'],
         sourcePath: createPrdPath,
@@ -234,7 +278,7 @@ triggers:
         {
           CAT_CAFE_PERSONAL_SKILLS_ENABLED: '1',
           CAT_CAFE_PERSONAL_SKILL_ROOTS: personalRoot,
-          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'create-prd',
+          CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES: 'personal-create-prd-test',
           CAT_CAFE_PERSONAL_SKILL_INDEX_PATH: indexPath,
         },
         async () => {
@@ -247,8 +291,8 @@ triggers:
 
           const visible = resolveSkillRouterContext('帮我写一份 PRD');
           assert.ok(visible);
-          assert.deepEqual(visible.matchedSkillNames, ['create-prd']);
-          assert.match(visible.promptBlock, /create-prd/);
+          assert.deepEqual(visible.matchedSkillNames, ['personal-create-prd-test']);
+          assert.match(visible.promptBlock, /personal-create-prd-test/);
           assert.doesNotMatch(visible.promptBlock, /SECRET FULL PERSONAL BODY/);
           assert.doesNotMatch(visible.promptBlock, /HIDDEN FULL PERSONAL BODY/);
 

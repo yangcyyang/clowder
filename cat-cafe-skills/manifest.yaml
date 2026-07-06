@@ -1142,6 +1142,32 @@ skills:
     sop_step: null
     merged_from: null
 
+  skill-linker:
+    description: >
+      把本地已下载的外部 skill 一键关联到 Clowder，使其可被 SkillRouter 检索和触发。
+      Use when: 用户说"帮我关联 xxx skill""加载某个 skill""把 skill 接到 Clowder""install skill"等。
+      Not for: 创建新 skill 内容（用 writing-skills）、卸载/删除 skill、修改 skill 内部逻辑。
+      Output: cat-cafe-skills/external/ 下的有效 symlink + 验证结果（列表中可见）。
+      GOTCHA: 不会自动下载 skill，只关联本地已存在的目录；遇到同名内置 skill 会跳过并提示。
+    triggers:
+      - "关联 skill"
+      - "link skill"
+      - "加载 skill"
+      - "install skill"
+      - "添加 skill"
+      - "接到 Clowder"
+      - "把 skill 接到"
+      - "帮我关联"
+    not_for:
+      - "创建新 skill"
+      - "写 SKILL.md"
+      - "删除 skill"
+      - "修改 skill 内容"
+    output: "cat-cafe-skills/external/{skill-name} symlink + verification report"
+    next: ["writing-skills", "update-skills-dashboard"]
+    sop_step: null
+    merged_from: null
+
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:
   mcp-callbacks:

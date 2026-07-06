@@ -150,6 +150,21 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!prompt.includes('cat_cafe_register_pr_tracking'));
   });
 
+  test('advertises local tool discovery hints', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+
+    assert.ok(prompt.includes('常用本地工具提示'));
+    assert.ok(prompt.includes('opencli-usage'));
+    assert.ok(prompt.includes('skill-linker'));
+    assert.ok(prompt.includes('Skill Router / MCP'));
+  });
+
   test('omits MCP tools when mcpAvailable is false', async () => {
     const build = await getBuilder();
     const prompt = build({

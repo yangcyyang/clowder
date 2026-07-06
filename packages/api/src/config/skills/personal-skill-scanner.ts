@@ -76,6 +76,7 @@ export interface PersonalSkillDuplicate {
 export interface BuildPersonalSkillIndexOptions {
   roots: string[];
   visibleNames?: string[];
+  visibleAll?: boolean;
   homeDir?: string;
   ignoredSegments?: Set<string>;
   now?: Date;
@@ -120,6 +121,11 @@ function splitCsv(value: string | undefined, fallback: string[]): string[] {
 }
 
 export function isPersonalSkillsEnabled(value: string | undefined): boolean {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+export function isPersonalSkillVisibleAllEnabled(value: string | undefined): boolean {
   if (!value) return false;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
@@ -282,6 +288,7 @@ function toContentHash(content: string): string {
 async function readCandidate(
   candidate: CandidateSkill,
   visibleNames: Set<string>,
+  visibleAll: boolean,
 ): Promise<PersonalSkillIndexEntry | null> {
   const sourceRealPath = await safeRealpath(candidate.sourcePath);
   if (!sourceRealPath || !isInsideRoot(candidate.rootRealPath, sourceRealPath)) return null;
@@ -298,7 +305,7 @@ async function readCandidate(
       source: 'personal',
       sourcePath: sourceRealPath,
       relativePath: candidate.relativePath,
-      visible: visibleNames.has(meta.name),
+      visible: visibleAll || visibleNames.has(meta.name),
       contentHash: toContentHash(content),
     };
   } catch {
@@ -310,6 +317,7 @@ export async function buildPersonalSkillIndex(options: BuildPersonalSkillIndexOp
   const homeDir = options.homeDir ?? homedir();
   const ignoredSegments = options.ignoredSegments ?? DEFAULT_IGNORED_SEGMENTS;
   const visibleNames = new Set(options.visibleNames ?? DEFAULT_PERSONAL_SKILL_VISIBLE_NAMES);
+  const visibleAll = options.visibleAll ?? false;
   const roots: string[] = [];
   const ignoredPaths: string[] = [];
   const candidates: CandidateSkill[] = [];
@@ -332,7 +340,7 @@ export async function buildPersonalSkillIndex(options: BuildPersonalSkillIndexOp
   const duplicatesByName = new Map<string, PersonalSkillDuplicate>();
 
   for (const candidate of candidates) {
-    const entry = await readCandidate(candidate, visibleNames);
+    const entry = await readCandidate(candidate, visibleNames, visibleAll);
     if (!entry) continue;
 
     const existing = byName.get(entry.name);
@@ -416,7 +424,8 @@ export async function rebuildPersonalSkillIndexFromEnv(
 
   const roots = splitCsv(env.CAT_CAFE_PERSONAL_SKILL_ROOTS, DEFAULT_PERSONAL_SKILL_ROOTS);
   const visibleNames = splitCsv(env.CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES, DEFAULT_PERSONAL_SKILL_VISIBLE_NAMES);
-  const index = await buildPersonalSkillIndex({ roots, visibleNames, homeDir });
+  const visibleAll = isPersonalSkillVisibleAllEnabled(env.CAT_CAFE_PERSONAL_SKILL_VISIBLE_ALL);
+  const index = await buildPersonalSkillIndex({ roots, visibleNames, visibleAll, homeDir });
 
   await mkdir(dirname(indexPath), { recursive: true });
   await writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf-8');

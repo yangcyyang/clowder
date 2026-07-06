@@ -76,6 +76,9 @@ const EXPECTED_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  // Skill discovery tools
+  'cat_cafe_list_skills',
+  'cat_cafe_read_skill',
   // Limb tools
   'limb_list_available',
   'limb_invoke',
@@ -144,6 +147,8 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
+  'cat_cafe_list_skills',
+  'cat_cafe_read_skill',
 ];
 
 const EXPECTED_SIGNAL_TOOLS = [
