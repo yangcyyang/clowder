@@ -7,7 +7,7 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
-import { classifyRuntimeSystemEvent } from '@/utils/runtime-notices';
+import { isUserVisibleChatMessage, sanitizeAgentVisibleContent } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
@@ -37,61 +37,8 @@ const DEFAULT_BREED_STYLE = {};
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-text/30 bg-conn-amber-bg px-2.5 py-1 text-[11px] font-semibold text-conn-amber-text shadow-sm';
 const SCHEDULER_ACCENT_BUBBLE_CLASS = 'border-l-2 border-conn-amber-text/50 pl-3';
-const MODEL_SIGNATURE_LINE_RE = /^\s*\[[^\]]*(?:gpt|opus|claude|codex|gemini|kimi|模型)[^\]]*(?:🐾|📋)?\]\s*$/i;
-const MODEL_METADATA_LINE_RE = /\bmodel\s*=\s*[a-z0-9._/-]+/i;
-const IDENTITY_PREAMBLE_RE = /当前会话身份标注|身份标注为/i;
-const SKILLS_BUDGET_WARNING_RE = /Exceeded\s+skills\s+context\s+budget|model-visible\s+skills\s+list/i;
-
-function sanitizeAgentVisibleContent(content: string): string {
-  const lines = content.split(/\r?\n/);
-  const cleaned: string[] = [];
-
-  for (const line of lines) {
-    if (MODEL_SIGNATURE_LINE_RE.test(line)) continue;
-    if (MODEL_METADATA_LINE_RE.test(line)) continue;
-    if (IDENTITY_PREAMBLE_RE.test(line)) continue;
-    if (SKILLS_BUDGET_WARNING_RE.test(line)) continue;
-    cleaned.push(line);
-  }
-
-  return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}
-
 export function shouldRenderChatMessage(message: ChatMessageType): boolean {
-  if (
-    message.type === 'connector' &&
-    classifyRuntimeSystemEvent({
-      id: message.id,
-      content: message.content,
-      source: message.source,
-      threadId: message.threadId,
-      timestamp: message.timestamp,
-    })
-  ) {
-    return false;
-  }
-
-  if (message.type === 'assistant' && message.origin === 'stream' && message.isStreaming) {
-    return false;
-  }
-
-  if (message.type === 'summary' || message.type === 'system' || message.type === 'connector') {
-    return true;
-  }
-
-  if (message.type === 'user' && !message.catId) {
-    return true;
-  }
-
-  if (message.isStreaming) return true;
-  if (message.contentBlocks?.length) return true;
-  if (sanitizeAgentVisibleContent(message.content).trim().length > 0) return true;
-  if (message.extra?.rich?.blocks?.length) return true;
-  if (message.extra?.crossPost) return true;
-  if (message.thinking) return true;
-  if (message.toolEvents?.length) return true;
-
-  return false;
+  return isUserVisibleChatMessage(message);
 }
 
 const TASK_EVIDENCE_KEYS = ['tests', 'build', 'screenshot', 'review', 'lesson'] as const;
@@ -294,9 +241,6 @@ export function ChatMessage({
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const visibleContent = sanitizeAgentVisibleContent(message.content);
   const hasTextContent = visibleContent.trim().length > 0;
-  const toolEvents = message.toolEvents ?? [];
-  const hasToolEvents = toolEvents.length > 0;
-  const lastToolLabel = toolEvents[toolEvents.length - 1]?.label;
   const taskEntry = tasks
     .filter((task) => task.kind !== 'pr_tracking')
     .map((task, index) => ({ task, seq: index + 1 }))
@@ -659,13 +603,6 @@ export function ChatMessage({
             <MarkdownContent content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
           ) : hasTextContent ? (
             <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
-          ) : hasToolEvents ? (
-            <div className="rounded-xl border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-3 py-2 text-cafe-secondary">
-              <div className="text-sm font-medium text-cafe-text">执行已完成，但没有返回文本</div>
-              <div className="mt-1 text-xs text-cafe-muted">
-                记录到 {toolEvents.length} 个工具事件{lastToolLabel ? ` · ${lastToolLabel}` : ''}
-              </div>
-            </div>
           ) : message.isStreaming ? (
             <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
           ) : null}

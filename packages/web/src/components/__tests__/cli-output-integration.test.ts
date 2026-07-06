@@ -135,5 +135,7 @@ describe('ChatMessage CLI Output integration', () => {
     });
     expect(container.textContent).not.toContain('CLI Output');
     expect(container.textContent).not.toContain('Read foo.ts');
+    expect(container.textContent).not.toContain('执行已完成');
+    expect(container.textContent).not.toContain('工具事件');
   });
 });

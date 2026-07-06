@@ -4,7 +4,7 @@ import type { ConnectorSourceData, RuntimeWarning } from '@/stores/chat-types';
 
 export interface RuntimeSystemEvent {
   id: string;
-  kind: 'startup_recovery';
+  kind: 'startup_recovery' | 'task_system_notice';
   title: string;
   message: string;
   threadId?: string;
@@ -42,6 +42,10 @@ export function isStartupRecoverySource(source?: ConnectorSourceData): boolean {
   return source?.connector === 'startup-reconciler';
 }
 
+export function isTaskSystemNoticeSource(source?: ConnectorSourceData): boolean {
+  return source?.connector === 'task-system' && source.meta?.presentation === 'system_notice';
+}
+
 export function classifyRuntimeSystemEvent(input: {
   id?: string;
   content?: string;
@@ -51,6 +55,16 @@ export function classifyRuntimeSystemEvent(input: {
 }): RuntimeSystemEvent | null {
   const message = shortMessage(input.content ?? '');
   if (!message) return null;
+  if (isTaskSystemNoticeSource(input.source)) {
+    return {
+      id: input.id ?? `runtime-event-${Date.now()}`,
+      kind: 'task_system_notice',
+      title: '任务系统事件',
+      message,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      timestamp: input.timestamp ?? Date.now(),
+    };
+  }
   if (!isStartupRecoverySource(input.source) && !STARTUP_RECOVERY_RE.test(message)) return null;
 
   return {

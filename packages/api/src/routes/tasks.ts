@@ -35,6 +35,13 @@ const VALID_FAILURE_CLASSES = [
   'infra_error',
   'manual_fail',
 ] as const;
+type TaskSystemNoticeEventType =
+  | 'task_created'
+  | 'task_claimed'
+  | 'task_unclaimed'
+  | 'task_status_changed'
+  | 'task_completed'
+  | 'task_capability_authorized';
 
 /** createdBy accepts any registered catId OR 'user' */
 const createdBySchema = z.union([catIdSchema(), z.literal('user')]);
@@ -214,11 +221,14 @@ function emitTaskAttention(socketManager: SocketManager, previous: TaskItem | nu
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, threadStore, messageStore, socketManager } = opts;
 
-  const taskSystemNoticeSource = (tone: 'info' | 'success' | 'warning' = 'info'): ConnectorSource => ({
+  const taskSystemNoticeSource = (
+    eventType: TaskSystemNoticeEventType,
+    tone: 'info' | 'success' | 'warning' = 'info',
+  ): ConnectorSource => ({
     connector: 'task-system',
     label: 'Task',
     icon: '📋',
-    meta: { presentation: 'system_notice', noticeTone: tone },
+    meta: { presentation: 'system_notice', noticeTone: tone, eventType },
   });
 
   const taskStatusLabel = (status: TaskItem['status']): string => {
@@ -271,11 +281,12 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   async function appendTaskSystemNotice(
     task: TaskItem,
     content: string,
+    eventType: TaskSystemNoticeEventType,
     tone: 'info' | 'success' | 'warning' = 'info',
   ): Promise<void> {
     if (!messageStore) return;
     try {
-      const source = taskSystemNoticeSource(tone);
+      const source = taskSystemNoticeSource(eventType, tone);
       const stored = await messageStore.append({
         userId: 'system',
         catId: null,
@@ -303,7 +314,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   async function appendTaskCreateNotice(task: TaskItem): Promise<void> {
     const label = await getTaskLabel(task);
     const verb = task.sourceMessageId ? '已从消息创建' : '已创建';
-    await appendTaskSystemNotice(task, `${verb} ${label}：${task.title}`);
+    await appendTaskSystemNotice(task, `${verb} ${label}：${task.title}`, 'task_created');
   }
 
   async function appendTaskUpdateNotices(previous: TaskItem | null, current: TaskItem): Promise<void> {
@@ -312,25 +323,27 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
     if (previous.ownerCatId !== current.ownerCatId) {
       if (current.ownerCatId) {
-        await appendTaskSystemNotice(current, `${label} 已由 ${current.ownerCatId} 认领。`);
+        await appendTaskSystemNotice(current, `${label} 已由 ${current.ownerCatId} 认领。`, 'task_claimed');
       } else if (previous.ownerCatId) {
-        await appendTaskSystemNotice(current, `${label} 已取消认领。`);
+        await appendTaskSystemNotice(current, `${label} 已取消认领。`, 'task_unclaimed');
       }
     }
 
     if (previous.status !== current.status) {
       if (current.status === 'done') {
-        await appendTaskSystemNotice(current, `${label} 已完成：${current.title}`, 'success');
+        await appendTaskSystemNotice(current, `${label} 已完成：${current.title}`, 'task_completed', 'success');
       } else if (current.status === 'blocked' || current.status === 'failed') {
         await appendTaskSystemNotice(
           current,
           `${label} 状态：${taskStatusLabel(previous.status)} → ${taskStatusLabel(current.status)}。`,
+          'task_status_changed',
           'warning',
         );
       } else {
         await appendTaskSystemNotice(
           current,
           `${label} 状态：${taskStatusLabel(previous.status)} → ${taskStatusLabel(current.status)}。`,
+          'task_status_changed',
         );
       }
     }
@@ -502,6 +515,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     await appendTaskSystemNotice(
       updated,
       `${label} 已授权外部工具 ${parsed.data.capabilityId} 仅用于本任务。`,
+      'task_capability_authorized',
     );
     return { task: updated, authorization: event };
   });

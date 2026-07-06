@@ -120,6 +120,31 @@ describe('ChatMessage notice rendering', () => {
     expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
   });
 
+  it('does not render task-system notices in the main chat flow', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'notice-task',
+            type: 'connector',
+            content: 'task #2 状态：待办 → 进行中。',
+            timestamp: Date.now(),
+            source: {
+              connector: 'task-system',
+              label: 'Task',
+              icon: '📋',
+              meta: { presentation: 'system_notice', eventType: 'task_status_changed' },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
+  });
+
   it('keeps true connector events on ConnectorBubble path', () => {
     act(() => {
       root.render(

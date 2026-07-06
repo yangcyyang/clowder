@@ -228,6 +228,8 @@ describe('Tasks Routes', () => {
     assert.equal(events[0].data.title, 'Test task');
     assert.equal(events[1].event, 'connector_message');
     assert.match(events[1].data.message.content, /已创建 task #1/);
+    assert.equal(events[1].data.message.source.connector, 'task-system');
+    assert.equal(events[1].data.message.source.meta.eventType, 'task_created');
   });
 
   test('POST with sourceMessageId leaves a visible conversion notice', async () => {
@@ -247,6 +249,7 @@ describe('Tasks Routes', () => {
     const notice = messageStore.messages.at(-1);
     assert.equal(notice.userId, 'system');
     assert.equal(notice.source.meta.presentation, 'system_notice');
+    assert.equal(notice.source.meta.eventType, 'task_created');
     assert.match(notice.content, /已从消息创建 task #1：Convert me/);
   });
 
@@ -447,6 +450,7 @@ describe('Tasks Routes', () => {
     assert.equal(events.length, 4);
     assert.equal(events[2].event, 'task_updated');
     assert.match(events[3].data.message.content, /状态：待办 → 进行中/);
+    assert.equal(events[3].data.message.source.meta.eventType, 'task_status_changed');
   });
 
   test('PATCH emits user task_attention when work task enters review', async () => {
@@ -568,9 +572,10 @@ describe('Tasks Routes', () => {
       payload: { status: 'done', eventCatId: 'codex' },
     });
 
-    const notices = messageStore.messages.map((message) => message.content);
-    assert.ok(notices.some((content) => /task #1 已由 codex 认领/.test(content)));
-    assert.ok(notices.some((content) => /task #1 已完成：Task A/.test(content)));
+    const claimNotice = messageStore.messages.find((message) => /task #1 已由 codex 认领/.test(message.content));
+    const doneNotice = messageStore.messages.find((message) => /task #1 已完成：Task A/.test(message.content));
+    assert.equal(claimNotice?.source.meta.eventType, 'task_claimed');
+    assert.equal(doneNotice?.source.meta.eventType, 'task_completed');
   });
 
   test('PATCH failed status persists failure taxonomy and writes failed event data', async () => {

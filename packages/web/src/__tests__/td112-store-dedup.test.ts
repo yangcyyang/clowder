@@ -471,6 +471,44 @@ describe('TD112: addMessageToThread store-level dedup', () => {
     expect(useChatStore.getState().threadStates['thread-B']?.unreadCount).toBe(1);
   });
 
+  it('tool-only background messages do NOT increment unreadCount', () => {
+    const store = useChatStore.getState();
+
+    store.addMessageToThread(
+      'thread-B',
+      makMsg('bg-tool-only', {
+        catId: 'gpt52',
+        origin: 'stream',
+        content: '',
+        thinking: 'internal reasoning',
+        toolEvents: [{ id: 't1', type: 'tool_use', label: 'Read file', timestamp: Date.now() }],
+      }),
+    );
+
+    const ts = useChatStore.getState().threadStates['thread-B'];
+    expect(ts?.messages).toHaveLength(1);
+    expect(ts?.unreadCount).toBe(0);
+  });
+
+  it('background A2A routing messages do NOT increment unreadCount', () => {
+    const store = useChatStore.getState();
+
+    store.addMessageToThread(
+      'thread-B',
+      makMsg('bg-a2a-routing', {
+        type: 'system',
+        catId: 'opus',
+        content: '专家猫 → Codex',
+        extra: { systemKind: 'a2a_routing' },
+      }),
+    );
+
+    const ts = useChatStore.getState().threadStates['thread-B'];
+    expect(ts?.messages).toHaveLength(1);
+    expect(ts?.messages[0]?.content).toBe('专家猫 → Codex');
+    expect(ts?.unreadCount).toBe(0);
+  });
+
   it('background dedup propagates hasUserMention on merge (cloud P1)', () => {
     const store = useChatStore.getState();
 

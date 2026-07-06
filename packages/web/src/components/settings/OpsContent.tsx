@@ -119,7 +119,7 @@ function SystemEventsPanel() {
   if (events.length === 0) {
     return (
       <div className="rounded-[var(--border-radius-base)] border-2 border-[var(--slock-border-color)] bg-[var(--console-card-bg)] p-4 text-sm text-cafe-muted">
-        暂无系统事件。重启接续、运行恢复等通知会在这里留档，不再占用主会话。
+        暂无系统事件。重启接续、运行恢复、任务状态流转等通知会在这里留档，不再占用主会话。
       </div>
     );
   }

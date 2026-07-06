@@ -957,13 +957,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       });
       if (runtimeEvent) {
         useRuntimeEventsStore.getState().addEvent(runtimeEvent);
-        useToastStore.getState().addToast({
-          type: 'info',
-          title: runtimeEvent.title,
-          message: runtimeEvent.message,
-          threadId: data.threadId,
-          duration: 4000,
-        });
+        if (runtimeEvent.kind === 'startup_recovery') {
+          useToastStore.getState().addToast({
+            type: 'info',
+            title: runtimeEvent.title,
+            message: runtimeEvent.message,
+            threadId: data.threadId,
+            duration: 4000,
+          });
+        }
         return;
       }
       const toast = data.message.extra?.scheduler?.toast;

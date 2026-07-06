@@ -28,4 +28,37 @@ describe('runtime notices', () => {
     expect(event?.kind).toBe('startup_recovery');
     expect(event?.threadId).toBe('thread_1');
   });
+
+  it('classifies task-system notices as system events without matching content text', () => {
+    const event = classifyRuntimeSystemEvent({
+      id: 'task-notice-1',
+      content: 'task #2 状态：待办 → 进行中。',
+      source: {
+        connector: 'task-system',
+        label: 'Task',
+        icon: '📋',
+        meta: { presentation: 'system_notice', eventType: 'task_status_changed' },
+      },
+      threadId: 'thread_1',
+      timestamp: 456,
+    });
+
+    expect(event?.kind).toBe('task_system_notice');
+    expect(event?.title).toBe('任务系统事件');
+  });
+
+  it('does not classify unrelated system_notice connectors as runtime events', () => {
+    const event = classifyRuntimeSystemEvent({
+      id: 'routing-hint-1',
+      content: '把 @gpt52 单独放到新起一行开头，才能交接。',
+      source: {
+        connector: 'inline-mention-hint',
+        label: '路由提示',
+        icon: '💡',
+        meta: { presentation: 'system_notice' },
+      },
+    });
+
+    expect(event).toBeNull();
+  });
 });

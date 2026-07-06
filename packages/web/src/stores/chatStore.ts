@@ -3,6 +3,7 @@ import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { getCachedCats } from '@/hooks/useCatData';
+import { isUnreadCountableChatMessage, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
 import { findBubbleStoreInvariantViolations } from './bubble-invariants';
 import type {
@@ -1432,7 +1433,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           origin: scopedMsg.origin,
         });
         // P2 fix: propagate mention notification even on merge
-        if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+        if (
+          scopedMsg.mentionsUser &&
+          isUserVisibleChatMessage(scopedMsg) &&
+          typeof document !== 'undefined' &&
+          !document.hasFocus()
+        ) {
           fireOwnerMentionNotification(scopedMsg);
         }
         const lastActivity = messageActivityTime(scopedMsg);
@@ -1448,7 +1454,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         revokeBlobUrls(messages.slice(0, messages.length - MAX_BLOB_MESSAGES));
       }
       // F067: Notify on active thread when user is not focused
-      if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+      if (
+        scopedMsg.mentionsUser &&
+        isUserVisibleChatMessage(scopedMsg) &&
+        typeof document !== 'undefined' &&
+        !document.hasFocus()
+      ) {
         fireOwnerMentionNotification(scopedMsg);
       }
       const lastActivity = messageActivityTime(scopedMsg);
@@ -2097,7 +2108,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             origin: scopedMsg.origin,
           });
           // P2 fix: propagate mention notification even on merge
-          if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+          if (
+            scopedMsg.mentionsUser &&
+            isUserVisibleChatMessage(scopedMsg) &&
+            typeof document !== 'undefined' &&
+            !document.hasFocus()
+          ) {
             fireOwnerMentionNotification(scopedMsg);
           }
           const lastActivity = messageActivityTime(scopedMsg);
@@ -2115,7 +2131,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // F067: Notify even on active thread when tab is not focused
         // document.hidden is false when switching macOS apps (only true for tab switch/minimize)
         // document.hasFocus() correctly returns false when another app is in foreground
-        if (scopedMsg.mentionsUser && typeof document !== 'undefined' && !document.hasFocus()) {
+        if (
+          scopedMsg.mentionsUser &&
+          isUserVisibleChatMessage(scopedMsg) &&
+          typeof document !== 'undefined' &&
+          !document.hasFocus()
+        ) {
           fireOwnerMentionNotification(scopedMsg);
         }
         const lastActivity = messageActivityTime(scopedMsg);
@@ -2148,7 +2169,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           origin: scopedMsg.origin,
         });
         // Cloud review P1: Propagate mention state even on merge
-        if (scopedMsg.mentionsUser) fireOwnerMentionNotification(scopedMsg);
+        if (scopedMsg.mentionsUser && isUserVisibleChatMessage(scopedMsg)) fireOwnerMentionNotification(scopedMsg);
         const lastActivity = messageActivityTime(scopedMsg);
         return {
           threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
@@ -2157,7 +2178,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             [threadId]: {
               ...existing,
               messages: updatedMessages,
-              hasUserMention: existing.hasUserMention || !!scopedMsg.mentionsUser,
+              hasUserMention:
+                existing.hasUserMention || (isUserVisibleChatMessage(scopedMsg) && !!scopedMsg.mentionsUser),
               lastActivity,
             },
           },
@@ -2165,9 +2187,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // F067 Phase 2: Fire macOS notification for @co-creator mention
-      if (scopedMsg.mentionsUser) fireOwnerMentionNotification(scopedMsg);
+      if (scopedMsg.mentionsUser && isUserVisibleChatMessage(scopedMsg)) fireOwnerMentionNotification(scopedMsg);
 
       const lastActivity = messageActivityTime(scopedMsg);
+      const shouldBumpUnread = isUnreadCountableChatMessage(scopedMsg);
       return {
         threads: bumpThreadsLastActiveAt(state.threads, threadId, lastActivity),
         threadStates: {
@@ -2175,8 +2198,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [threadId]: {
             ...existing,
             messages: insertOrAppendMessage(existing.messages, scopedMsg),
-            unreadCount: existing.unreadCount + 1,
-            hasUserMention: existing.hasUserMention || !!scopedMsg.mentionsUser,
+            unreadCount: existing.unreadCount + (shouldBumpUnread ? 1 : 0),
+            hasUserMention: existing.hasUserMention || (shouldBumpUnread && !!scopedMsg.mentionsUser),
             lastActivity,
           },
         },
