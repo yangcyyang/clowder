@@ -75,14 +75,7 @@ export function flushCodexCompletionText(state: CodexStreamState, catId: CatId):
     state.hadPriorTextTurn = true;
     return createTextMessage(catId, text);
   }
-
-  if (state.completionFallbackEmitted) return null;
-  const lastProgress = state.lastCompletionActivitySummary ?? state.lastSuppressedThinkingText;
-  if (!lastProgress) return null;
-
-  state.completionFallbackEmitted = true;
-  state.hadPriorTextTurn = true;
-  return createTextMessage(catId, `Codex 本轮已完成，但没有输出最终总结。最后进度：${lastProgress}`);
+  return null;
 }
 
 function flushCodexPendingThinking(state: CodexStreamState | undefined, catId: CatId): AgentMessage | null {

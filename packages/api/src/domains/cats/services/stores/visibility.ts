@@ -46,3 +46,26 @@ export function canViewMessage(msg: StoredMessage, viewer: Viewer): boolean {
 
   return false;
 }
+
+const TOOL_TELEMETRY_LINE_RE =
+  /(?:执行已完成，但没有返回文本|记录到\s*\d+\s*个工具事件|最后进度：.*(?:command_execution|file_change|mcp:|exit_code))/i;
+const STARTUP_RECOVERY_RE = /运行服务已恢复|已自动接续|process_restart|服务刚重启/i;
+
+function sanitizeUnreadVisibleContent(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => !TOOL_TELEMETRY_LINE_RE.test(line))
+    .join('\n')
+    .trim();
+}
+
+export function isUserVisibleUnreadMessage(msg: StoredMessage): boolean {
+  if (msg.deletedAt || msg._tombstone) return false;
+  if (!msg.mentionsUser && msg.extra?.systemKind === 'a2a_routing') return false;
+  if (msg.source?.connector === 'startup-reconciler' || STARTUP_RECOVERY_RE.test(msg.content)) return false;
+  if (msg.contentBlocks?.length) return true;
+  if (sanitizeUnreadVisibleContent(msg.content).length > 0) return true;
+  if (msg.extra?.rich?.blocks?.length) return true;
+  if (msg.extra?.crossPost) return true;
+  return false;
+}

@@ -529,7 +529,7 @@ test('separates Codex process updates from final answer text', async () => {
   assert.equal(textMsgs[0].content, 'All checks passed.');
 });
 
-test('yields visible fallback when Codex completes after tool activity without final answer', async () => {
+test('does not yield visible fallback when Codex completes after tool activity without final answer', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ spawnFn });
@@ -579,11 +579,7 @@ test('yields visible fallback when Codex completes after tool activity without f
 
   assert.equal(thinkingMsgs.length, 1);
   assert.equal(thinkingMsgs[0].text, 'I will inspect and verify.');
-  assert.equal(textMsgs.length, 1);
-  assert.match(textMsgs[0].content, /没有输出最终总结/);
-  assert.match(textMsgs[0].content, /最后进度/);
-  assert.match(textMsgs[0].content, /file_change/);
-  assert.match(textMsgs[0].content, /changes=1/);
+  assert.equal(textMsgs.length, 0);
   assert.ok(msgs.some((m) => m.type === 'done'));
 });
 

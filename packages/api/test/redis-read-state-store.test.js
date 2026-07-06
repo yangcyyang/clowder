@@ -223,6 +223,71 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(summaries[0].unreadCount, 1);
   });
 
+  it('getUnreadSummaries() excludes internal tool-only and telemetry fallback messages', async () => {
+    const tid = uniqueId('t');
+    const m1 = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'visible baseline',
+      mentions: [],
+      timestamp: Date.now() - 4000,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'gpt52',
+      content: '',
+      toolEvents: [{ id: 't1', type: 'tool_use', label: 'Read file', timestamp: Date.now() }],
+      mentions: [],
+      timestamp: Date.now() - 3000,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'gpt52',
+      content: 'Codex 本轮已完成，但没有输出最终总结。最后进度：command_execution completed exit_code=0',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: null,
+      content: '运行服务已恢复，已自动接续 gpt52 的 1 个进行中请求；已发送的消息会保留。',
+      source: {
+        connector: 'startup-reconciler',
+        label: '重启通知',
+        icon: '⚠️',
+        meta: { presentation: 'system_notice' },
+      },
+      mentions: [],
+      timestamp: Date.now() - 1500,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '专家猫 → Codex',
+      extra: { systemKind: 'a2a_routing' },
+      mentions: [],
+      timestamp: Date.now() - 1200,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'gpt52',
+      content: '真正给用户看的结论',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId: tid,
+    });
+
+    await store.ack('user1', tid, m1.id);
+
+    const summaries = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(summaries[0].unreadCount, 1);
+  });
+
   it('getUnreadSummaries() detects mentionsUser', async () => {
     const tid = uniqueId('t');
     const m1 = await messageStore.append({

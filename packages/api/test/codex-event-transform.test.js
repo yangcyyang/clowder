@@ -75,7 +75,7 @@ test('stateful pending agent_message flushes as thinking before tool_use', () =>
   assert.equal(result[1].toolName, 'command_execution');
 });
 
-test('turn.completed emits visible fallback when tool activity leaves no final answer', () => {
+test('turn.completed does not emit visible fallback when tool activity leaves no final answer', () => {
   const state = { hadPriorTextTurn: false };
 
   assert.equal(
@@ -114,11 +114,7 @@ test('turn.completed emits visible fallback when tool activity leaves no final a
   assert.equal(completed?.type, 'tool_result');
 
   const final = transformCodexEvent({ type: 'turn.completed' }, CAT, state);
-  assert.equal(final?.type, 'text');
-  assert.match(final?.content ?? '', /没有输出最终总结/);
-  assert.match(final?.content ?? '', /最后进度/);
-  assert.match(final?.content ?? '', /command_execution/);
-  assert.match(final?.content ?? '', /pnpm test/);
+  assert.equal(final, null);
 });
 
 test('flushCodexPendingText emits trailing answer at stream end', () => {

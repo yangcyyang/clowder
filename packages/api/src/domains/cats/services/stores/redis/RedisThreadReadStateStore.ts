@@ -4,6 +4,7 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { isUserVisibleUnreadMessage } from '../visibility.js';
 import type { IMessageStore } from '../ports/MessageStore.js';
 import type { IThreadReadStateStore, ThreadReadState, ThreadUnreadSummary } from '../ports/ThreadReadStateStore.js';
 import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
@@ -63,10 +64,9 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       const afterId = state.lastReadMessageId;
 
       const unreadMessages = await messageStore.getByThreadAfter(threadId, afterId, undefined, userId);
-      // P1-2 fix: exclude user's own typed messages + deleted/tombstone messages
-      // Cat messages (catId !== null) and connector messages (source) are counted as unread.
-      // Only the user's own direct messages (catId === null, no source) are excluded.
-      const relevant = unreadMessages.filter((m) => !m.deletedAt && (m.catId !== null || !!m.source));
+      // P1-2 + BUG-01: exclude user's own typed messages and internal/system-only events.
+      // Cat/connector messages count only when they have user-facing content.
+      const relevant = unreadMessages.filter((m) => (m.catId !== null || !!m.source) && isUserVisibleUnreadMessage(m));
       const unreadCount = relevant.length;
       const hasUserMention = relevant.some((m) => !!m.mentionsUser);
 
