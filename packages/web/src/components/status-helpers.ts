@@ -88,7 +88,7 @@ export function statusLabel(status: CatStatus): string {
     case 'error':
       return '异常';
     case 'alive_but_silent':
-      return '静默等待';
+      return '仍在工作';
     case 'suspected_stall':
       return '疑似卡住';
     default:

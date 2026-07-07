@@ -81,7 +81,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
 
     const el = container.querySelector('[data-testid="liveness-warning"]');
     expect(el).toBeTruthy();
-    expect(el?.textContent).toContain('静默等待');
+    expect(el?.textContent).toContain('仍在工作');
     expect(el?.textContent).toContain('2m 30s');
     // No cancel button for alive_but_silent
     expect(container.querySelector('[data-testid="cancel-btn"]')).toBeNull();

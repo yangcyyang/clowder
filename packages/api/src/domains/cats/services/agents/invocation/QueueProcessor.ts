@@ -10,7 +10,7 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { catRegistry, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
+import { catRegistry, type ConnectorSource, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
@@ -44,6 +44,12 @@ import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js
 
 const execFileAsync = promisify(execFile);
 const GIT_ARTIFACT_MAX_FILE_BYTES = 1024 * 1024;
+const PROGRESS_HEARTBEAT_SOURCE: ConnectorSource = {
+  connector: 'agent-progress-heartbeat',
+  label: '进度心跳',
+  icon: '⏳',
+  meta: { presentation: 'status', noticeTone: 'info' },
+};
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
@@ -278,6 +284,51 @@ function parseNumstat(stdout: string): GitArtifactSnapshot {
     totalAdded: files.reduce((sum, file) => sum + file.added, 0),
     totalRemoved: files.reduce((sum, file) => sum + file.removed, 0),
   };
+}
+
+function parseSystemInfoPayload(msg: { type: string; content?: unknown }): Record<string, unknown> | null {
+  if (msg.type !== 'system_info' || typeof msg.content !== 'string') return null;
+  try {
+    const parsed = JSON.parse(msg.content) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatDuration(ms: unknown): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '一段时间';
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} 分钟`;
+}
+
+function formatProgressHeartbeatContent(catId: string, payload: Record<string, unknown>): string | null {
+  const cat = catRegistry.tryGet(catId)?.config;
+  const displayName = cat?.name ?? catId;
+  if (payload.type === 'liveness_warning') {
+    const level = typeof payload.level === 'string' ? payload.level : 'soft';
+    const duration = formatDuration(payload.silenceDurationMs);
+    const status = level === 'soft' ? '仍在工作中' : '可能卡住，正在等待恢复或输出';
+    return `${displayName} ${status}：已 ${duration} 没有新输出，运行时仍在执行。`;
+  }
+  if (payload.type === 'task_progress' && Array.isArray(payload.tasks)) {
+    const tasks = payload.tasks as Array<{ subject?: unknown; status?: unknown; activeForm?: unknown }>;
+    const active =
+      tasks.find((task) => task.status === 'in_progress') ??
+      tasks.find((task) => task.status !== 'completed') ??
+      tasks.at(-1);
+    const subject =
+      typeof active?.activeForm === 'string' && active.activeForm.trim()
+        ? active.activeForm.trim()
+        : typeof active?.subject === 'string' && active.subject.trim()
+          ? active.subject.trim()
+          : '更新任务进度';
+    const done = tasks.filter((task) => task.status === 'completed').length;
+    return `${displayName} 正在推进：${subject}（${done}/${tasks.length} 已完成）`;
+  }
+  return null;
 }
 
 async function collectUntrackedGitFiles(): Promise<GitArtifactFile[]> {
@@ -523,6 +574,79 @@ export class QueueProcessor {
       return workTasks.find((task) => task.taskThreadId === params.threadId) ?? null;
     }
     return null;
+  }
+
+  private async maybePersistProgressHeartbeatToTaskThread(params: {
+    msg: { type: string; catId?: string; content?: unknown };
+    threadId: string;
+    sourceMessageIds: readonly string[];
+    invocationId: string;
+  }): Promise<void> {
+    if (!params.msg.catId) return;
+    const payload = parseSystemInfoPayload(params.msg);
+    if (!payload) return;
+    const content = formatProgressHeartbeatContent(params.msg.catId, payload);
+    if (!content) return;
+
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      const taskThreadId = sourceTask?.taskThreadId;
+      if (!taskThreadId) return;
+
+      const now = Date.now();
+      const source: ConnectorSource = {
+        ...PROGRESS_HEARTBEAT_SOURCE,
+        meta: {
+          ...PROGRESS_HEARTBEAT_SOURCE.meta,
+          catId: params.msg.catId,
+          invocationId: params.invocationId,
+          parentThreadId: params.threadId,
+          taskId: sourceTask.id,
+        },
+      };
+      const stored = await this.deps.messageStore.append({
+        userId: 'system',
+        catId: null,
+        threadId: taskThreadId,
+        content,
+        mentions: [],
+        source,
+        timestamp: now,
+        extra: { systemKind: 'progress_heartbeat' },
+        idempotencyKey: `progress-heartbeat:${params.invocationId}:${params.msg.catId}`,
+      });
+      const updated =
+        stored.content === content ? stored : await this.deps.messageStore.updateContent(stored.id, content, now);
+      const finalMessage = updated ?? stored;
+
+      if (stored.content !== content) {
+        this.deps.socketManager.broadcastToRoom(`thread:${taskThreadId}`, 'message_edited', {
+          threadId: taskThreadId,
+          messageId: stored.id,
+          content,
+          editedAt: now,
+        });
+      }
+      this.deps.socketManager.broadcastToRoom(`thread:${taskThreadId}`, 'connector_message', {
+        threadId: taskThreadId,
+        message: {
+          id: finalMessage.id,
+          type: 'connector',
+          content: finalMessage.content,
+          source: finalMessage.source,
+          extra: finalMessage.extra,
+          timestamp: finalMessage.timestamp,
+        },
+      });
+    } catch (err) {
+      this.deps.log.warn(
+        { err, threadId: params.threadId, catId: params.msg.catId, invocationId: params.invocationId },
+        '[QueueProcessor] persist progress heartbeat failed',
+      );
+    }
   }
 
   private collectTokenUsage(
@@ -1831,6 +1955,12 @@ export class QueueProcessor {
         if (continuationCapsule) {
           continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
         }
+        await this.maybePersistProgressHeartbeatToTaskThread({
+          msg,
+          threadId,
+          sourceMessageIds: allMessageIds,
+          invocationId,
+        });
         if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }

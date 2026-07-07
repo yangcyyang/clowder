@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { deriveActiveCats, statusLabel, statusTone } from '../status-helpers';
 
 describe('statusLabel — liveness states (F118 AC-C1)', () => {
-  it('returns 静默等待 for alive_but_silent', () => {
-    expect(statusLabel('alive_but_silent')).toBe('静默等待');
+  it('returns 仍在工作 for alive_but_silent', () => {
+    expect(statusLabel('alive_but_silent')).toBe('仍在工作');
   });
 
   it('returns 疑似卡住 for suspected_stall', () => {

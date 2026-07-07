@@ -338,7 +338,7 @@ export interface ChatMessage {
      * pipeline race; without marker it ends up visually after the bubble it
      * should precede.
      */
-    systemKind?: 'a2a_routing';
+    systemKind?: 'a2a_routing' | 'progress_heartbeat';
     /** Slock 归档导入：当前批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
   };

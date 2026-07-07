@@ -110,7 +110,7 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
     );
   }
 
-  // F118: alive_but_silent — amber warning banner
+  // WI-9: alive_but_silent is a progress heartbeat, not an unread chat message.
   if (status === 'alive_but_silent' && warning) {
     const elapsed = formatDuration(warning.silenceDurationMs);
     return (
@@ -124,12 +124,12 @@ export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
           <TimerIcon className="w-4 h-4 animate-pulse" style={{ color: 'var(--notice-icon)' }} />
           <div className="flex flex-col gap-0.5">
             <span className="text-[13px] font-semibold text-cafe-black">
-              {name} 静默等待中… {elapsed}
+              {name} 仍在工作中… {elapsed}
             </span>
             <span className="text-xs text-cafe-secondary">
               {warning.state === 'busy-silent'
-                ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
-                : '进程存活，等待响应中'}
+                ? '进程存活且 CPU 活跃，正在执行工具或等待 API 响应'
+                : '进程存活，正在等待下一段响应'}
             </span>
           </div>
         </div>

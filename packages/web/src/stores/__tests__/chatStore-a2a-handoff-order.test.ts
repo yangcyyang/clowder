@@ -31,6 +31,17 @@ function makeA2AHandoffMsg(id: string, ts: number, content = '缅因猫 → 布�
   };
 }
 
+function makeProgressHeartbeatMsg(id: string, ts: number, content = 'Codex 仍在工作中… 30s'): ChatMessage {
+  return {
+    id,
+    type: 'system',
+    variant: 'info',
+    content,
+    timestamp: ts,
+    extra: { systemKind: 'progress_heartbeat' },
+  };
+}
+
 const INITIAL_FLAT_STATE = {
   messages: [],
   isLoading: false,
@@ -163,5 +174,15 @@ describe('chatStore a2a_handoff timestamp-aware insert (F173 bug fix)', () => {
 
     const ids = useChatStore.getState().threadStates['thread-bg']?.messages.map((m) => m.id) ?? [];
     expect(ids).toEqual(['user-1', 'handoff-late', 'codex-1']);
+  });
+
+  it('addMessageToThread: progress_heartbeat is visible but does not bump unread', () => {
+    useChatStore.getState().addMessageToThread('thread-bg', makeUserMsg('user-1', 100));
+    const unreadBeforeHeartbeat = useChatStore.getState().threadStates['thread-bg']?.unreadCount;
+    useChatStore.getState().addMessageToThread('thread-bg', makeProgressHeartbeatMsg('heartbeat-1', 150));
+
+    const state = useChatStore.getState().threadStates['thread-bg'];
+    expect(state?.messages.map((m) => m.id)).toEqual(['user-1', 'heartbeat-1']);
+    expect(state?.unreadCount).toBe(unreadBeforeHeartbeat);
   });
 });

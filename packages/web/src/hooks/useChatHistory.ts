@@ -513,7 +513,7 @@ export function useChatHistory(threadId: string) {
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
-              systemKind?: 'a2a_routing';
+              systemKind?: 'a2a_routing' | 'progress_heartbeat';
               slockThread?: { branchThreadId: string; replyCount: number };
             };
             timestamp: number;

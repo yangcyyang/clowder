@@ -952,7 +952,7 @@ function addBackgroundSystemMessage(
   options: HandleBackgroundMessageOptions,
   content: string,
   variant: 'info' | 'a2a_followup' = 'info',
-  extra?: { systemKind?: 'a2a_routing' },
+  extra?: { systemKind?: 'a2a_routing' | 'progress_heartbeat' },
 ): void {
   const id =
     extra?.systemKind === 'a2a_routing' && msg.messageId

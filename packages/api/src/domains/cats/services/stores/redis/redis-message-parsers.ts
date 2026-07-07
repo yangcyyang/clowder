@@ -56,7 +56,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing';
+      systemKind?: 'a2a_routing' | 'progress_heartbeat';
       slockThread?: { branchThreadId: string; replyCount: number };
     }
   | undefined {
@@ -81,7 +81,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing';
+      systemKind?: 'a2a_routing' | 'progress_heartbeat';
       slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
     let hasField = false;
@@ -130,8 +130,8 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    if (parsed.systemKind === 'a2a_routing') {
-      result.systemKind = 'a2a_routing';
+    if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'progress_heartbeat') {
+      result.systemKind = parsed.systemKind;
       hasField = true;
     }
 

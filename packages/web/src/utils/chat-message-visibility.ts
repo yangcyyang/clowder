@@ -63,6 +63,7 @@ export function isUserVisibleChatMessage(message: ChatMessage): boolean {
 export function isUnreadCountableChatMessage(message: ChatMessage): boolean {
   if (!isUserVisibleChatMessage(message)) return false;
   if (!message.mentionsUser && message.extra?.systemKind === 'a2a_routing') return false;
+  if (message.extra?.systemKind === 'progress_heartbeat') return false;
   if (!message.mentionsUser && message.variant === 'a2a_followup') return false;
   const hasPrimarySurface =
     sanitizeAgentVisibleContent(message.content).trim().length > 0 ||

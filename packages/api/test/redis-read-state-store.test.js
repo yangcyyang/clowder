@@ -274,6 +274,15 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
       threadId: tid,
     });
     await messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'Codex 仍在工作中… 30s',
+      extra: { systemKind: 'progress_heartbeat' },
+      mentions: [],
+      timestamp: Date.now() - 1100,
+      threadId: tid,
+    });
+    await messageStore.append({
       userId: 'user1',
       catId: 'gpt52',
       content: '真正给用户看的结论',

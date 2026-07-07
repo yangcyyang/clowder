@@ -165,6 +165,20 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('Skill Router / MCP'));
   });
 
+  test('injects progress visibility discipline for action tasks', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+
+    assert.ok(prompt.includes('开工预告与长任务心跳'));
+    assert.ok(prompt.includes('行动任务认领后、深入执行前'));
+    assert.ok(prompt.includes('预计超过 30 秒'));
+  });
+
   test('omits MCP tools when mcpAvailable is false', async () => {
     const build = await getBuilder();
     const prompt = build({
