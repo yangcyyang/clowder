@@ -21,6 +21,7 @@ export interface NewThreadOptions {
   pinned?: boolean;
   backlogItemId?: string;
   bootcamp?: boolean;
+  initProject?: boolean;
 }
 
 interface BacklogItemSummary {
@@ -63,6 +64,7 @@ export function DirectoryPickerModal({
   // F095 Phase C: new fields
   const [threadTitle, setThreadTitle] = useState('');
   const [pinOnCreate, setPinOnCreate] = useState(false);
+  const [initProjectOnCreate, setInitProjectOnCreate] = useState(false);
   const [backlogItems, setBacklogItems] = useState<BacklogItemSummary[]>([]);
   const [selectedBacklogItemId, setSelectedBacklogItemId] = useState('');
 
@@ -101,9 +103,10 @@ export function DirectoryPickerModal({
         pinned: pinOnCreate || undefined,
         backlogItemId: selectedBacklogItemId || undefined,
         bootcamp: bootcamp || undefined,
+        initProject: projectPath && initProjectOnCreate ? true : undefined,
       });
     },
-    [onSelect, selectedCats, sessionInputs, threadTitle, pinOnCreate, selectedBacklogItemId],
+    [onSelect, selectedCats, sessionInputs, threadTitle, pinOnCreate, selectedBacklogItemId, initProjectOnCreate],
   );
 
   // F068-R7: Confirm creation with currently selected project
@@ -204,6 +207,7 @@ export function DirectoryPickerModal({
 
   const [catsExpanded, setCatsExpanded] = useState(false);
   const catSummary = selectedCats.length > 0 ? `已选 ${selectedCats.length} 只猫` : '';
+  const canInitProject = Boolean(selectedPath && selectedPath !== 'lobby' && selectedPath !== 'bootcamp');
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
@@ -354,6 +358,21 @@ export function DirectoryPickerModal({
               className="rounded border-[var(--console-border-soft)] text-cafe-accent focus:ring-cafe-accent/20"
             />
             <span>创建后置顶</span>
+          </label>
+          <label
+            className={`flex items-center gap-1.5 text-xs flex-shrink-0 ${
+              canInitProject ? 'cursor-pointer text-cafe-secondary' : 'cursor-not-allowed text-cafe-muted'
+            }`}
+            title={canInitProject ? '为这个项目生成 brief/progress/decisions/handoff 五件套' : '选择具体项目目录后可用'}
+          >
+            <input
+              type="checkbox"
+              checked={initProjectOnCreate && canInitProject}
+              disabled={!canInitProject}
+              onChange={(e) => setInitProjectOnCreate(e.target.checked)}
+              className="rounded border-[var(--console-border-soft)] text-cafe-accent focus:ring-cafe-accent/20 disabled:opacity-50"
+            />
+            <span>这是项目</span>
           </label>
           <button
             type="button"

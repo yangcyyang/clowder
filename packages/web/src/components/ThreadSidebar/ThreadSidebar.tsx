@@ -263,6 +263,24 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       setIsCreating(true);
       setShowPicker(false);
       try {
+        if (opts.projectPath && opts.initProject) {
+          const setupRes = await apiFetch('/api/projects/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectPath: opts.projectPath,
+              mode: 'skip',
+              initProject: true,
+            }),
+          });
+          if (!setupRes.ok) {
+            const errBody = await setupRes.text().catch(() => '(no body)');
+            console.error('[createInProject] POST /api/projects/setup failed:', setupRes.status, errBody);
+            notifyThreadCreateFailure('项目五件套初始化失败，请检查项目名或目录权限后重试。');
+            return;
+          }
+        }
+
         const res = await apiFetch(`/api/threads`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

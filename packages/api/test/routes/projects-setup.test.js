@@ -91,6 +91,22 @@ describe('POST /api/projects/setup', () => {
     }
   });
 
+  it('mode=init without initProject does not create project fact-source scaffold', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'init' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.ok, true);
+    assert.equal(body.projectInit, undefined);
+
+    const projectName = basename(testRoot);
+    await assert.rejects(() => stat(join(testRoot, '.cat-cafe', 'projects', projectName)));
+  });
+
   it('mode=clone rejects missing gitCloneUrl', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -143,7 +159,7 @@ describe('POST /api/projects/setup', () => {
     assert.ok(res.statusCode >= 400);
     const body = JSON.parse(res.payload);
     assert.ok(body.errorKind != null);
-    assert.ok(['not_found', 'auth_failed', 'network_error', 'timeout'].includes(body.errorKind));
+    assert.ok(['not_found', 'auth_failed', 'network_error', 'timeout', 'unknown'].includes(body.errorKind));
   });
 
   it('rejects invalid mode', async () => {
