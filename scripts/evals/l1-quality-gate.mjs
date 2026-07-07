@@ -4,32 +4,33 @@
  * 文件: scripts/evals/l1-quality-gate.mjs
  *
  * 设计原则：
- * 1. 不重复造轮子：复用 pre-merge-check.sh 的 build/tsc/test 命令
- * 2. 复用 WI-10 的 live-worktree-build-gate.mjs 做 worktree-clean 检查
- * 3. 新增：结构化报告（QualityGateResult），让"哪条过/哪条挂"清晰可读
+ * 1. 复用 WI-10 live-worktree-build-gate.mjs 的 worktree-clean 逻辑（单一真相源）
+ * 2. web-only 范围：pnpm --filter @cat-cafe/web（避免 API 重测试拖慢）
+ * 3. 结构化报告（QualityGateResult），让"哪条过/哪条挂"清晰可读
  * 4. 收窄铁律：L1 全绿才允许 in_review
  *
  * 用法：
- *   node scripts/evals/l1-quality-gate.mjs          # 全量检查
+ *   node scripts/evals/l1-quality-gate.mjs          # 默认 web-only
  *   node scripts/evals/l1-quality-gate.mjs --json   # JSON 输出
- *   node scripts/evals/l1-quality-gate.mjs --web-only  # 只检查 web 包
+ *   node scripts/evals/l1-quality-gate.mjs --full   # 全包检查（慢，CI 用）
  */
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseDirtyEntries, isSensitiveUntrackedPath } from '../live-worktree-build-gate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '../..');
 
 // ─── 解析参数 ───
 function parseArgs(argv) {
-  const args = { json: false, webOnly: false };
+  const args = { json: false, full: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--json') args.json = true;
-    else if (arg === '--web-only') args.webOnly = true;
+    else if (arg === '--full') args.full = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -82,31 +83,8 @@ function assertWorktreeClean(repoRoot) {
       timeout: 5_000,
     });
 
-    // 复用 WI-10 的敏感路径过滤逻辑
-    function isSensitiveUntrackedPath(filePath) {
-      return (
-        filePath === 'package.json' ||
-        filePath === 'pnpm-lock.yaml' ||
-        filePath === 'pnpm-workspace.yaml' ||
-        filePath === 'ecosystem.config.cjs' ||
-        filePath.startsWith('packages/') ||
-        filePath.startsWith('scripts/') ||
-        filePath.startsWith('cat-cafe-skills/')
-      );
-    }
-
-    const dirtyEntries = stdout
-      .split('\n')
-      .map((line) => line.trimEnd())
-      .filter(Boolean)
-      .flatMap((line) => {
-        const code = line.slice(0, 2);
-        const rawPath = line.slice(3);
-        if (code === '??') {
-          return isSensitiveUntrackedPath(rawPath) ? [{ code, path: rawPath }] : [];
-        }
-        return [{ code, path: rawPath }];
-      });
+    // 复用 WI-10 的 parseDirtyEntries + isSensitiveUntrackedPath（单一真相源）
+    const dirtyEntries = parseDirtyEntries(stdout);
 
     if (dirtyEntries.length === 0) {
       return {
@@ -164,7 +142,6 @@ function assertBuildPasses(webOnly) {
 // ─── L1 断言 3: TypeScript 无类型错误 ───
 function assertTypeCheckClean(webOnly) {
   const start = Date.now();
-  // 复用 pre-merge-check.sh 的 tsc 命令：对所有含 tsc 的包跑 --noEmit
   const cmd = webOnly
     ? runCommand('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'tsc', '--noEmit'], rootDir, 60_000)
     : runCommand('pnpm', ['-r', 'exec', 'bash', '-lc', 'if command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'], rootDir, 120_000);
@@ -189,7 +166,6 @@ function assertTypeCheckClean(webOnly) {
 // ─── L1 断言 4: 测试通过 ───
 function assertTestsPass(webOnly) {
   const start = Date.now();
-  // 复用 pre-merge-check.sh 的 test 命令：清除 REDIS_URL 避免触发 Redis 隔离守卫
   const env = { ...process.env, REDIS_URL: undefined };
   const cmd = webOnly
     ? runCommand('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'vitest', 'run'], rootDir, 120_000)
@@ -213,7 +189,7 @@ function assertTestsPass(webOnly) {
 }
 
 // ─── Quality Gate 主入口 ───
-export function runL1QualityGate(webOnly = false) {
+export function runL1QualityGate(webOnly = true) {
   const repoRoot = findRepoRoot(process.cwd()) || rootDir;
   const results = [];
 
@@ -252,7 +228,7 @@ function formatReport(result) {
 // ─── CLI 入口 ───
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const result = runL1QualityGate(args.webOnly);
+  const result = runL1QualityGate(!args.full); // 默认 web-only，--full 才全包
 
   if (args.json) {
     console.log(JSON.stringify(result, null, 2));
