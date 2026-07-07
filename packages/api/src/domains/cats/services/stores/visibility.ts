@@ -61,6 +61,7 @@ function sanitizeUnreadVisibleContent(content: string): string {
 
 export function isUserVisibleUnreadMessage(msg: StoredMessage): boolean {
   if (msg.deletedAt || msg._tombstone) return false;
+  if (msg.origin === 'briefing') return false;
   if (!msg.mentionsUser && msg.extra?.systemKind === 'a2a_routing') return false;
   if (msg.extra?.systemKind === 'progress_heartbeat') return false;
   if (msg.source?.connector === 'startup-reconciler' || STARTUP_RECOVERY_RE.test(msg.content)) return false;

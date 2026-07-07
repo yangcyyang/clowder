@@ -25,6 +25,10 @@ export function sanitizeAgentVisibleContent(content: string): string {
 }
 
 export function isUserVisibleChatMessage(message: ChatMessage): boolean {
+  if (message.origin === 'briefing') {
+    return false;
+  }
+
   if (
     message.type === 'connector' &&
     classifyRuntimeSystemEvent({

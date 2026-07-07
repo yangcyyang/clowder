@@ -311,9 +311,9 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
   }
 
-  async function appendTaskCreateNotice(task: TaskItem): Promise<void> {
+  async function appendTaskCreateNotice(task: TaskItem, options: { fromSourceMessage?: boolean } = {}): Promise<void> {
     const label = await getTaskLabel(task);
-    const verb = task.sourceMessageId ? '已从消息创建' : '已创建';
+    const verb = options.fromSourceMessage ? '已从消息创建' : '已创建';
     await appendTaskSystemNotice(task, `${verb} ${label}：${task.title}`, 'task_created');
   }
 
@@ -358,6 +358,63 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return task;
   }
 
+  async function ensureTaskDiscussionThread(
+    task: TaskItem,
+    options: { userId?: string; broadcastUpdate?: boolean } = {},
+  ): Promise<{ threadId: string; sourceMessage: ReturnType<typeof toTaskThreadMessage>; task: TaskItem }> {
+    if (task.taskThreadId) {
+      const existingThread = await threadStore.get(task.taskThreadId);
+      if (existingThread) {
+        const messages = await messageStore.getByThread(task.taskThreadId, 100);
+        const sourceMessage = messages[0];
+        if (sourceMessage) {
+          return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task };
+        }
+      }
+    }
+
+    const parentThread = await threadStore.get(task.threadId);
+    const userId = options.userId ?? task.userId ?? parentThread?.createdBy ?? 'default-user';
+    const taskThread = await threadStore.create(userId, formatTaskThreadTitle(task.title), parentThread?.projectPath);
+
+    if (parentThread?.participants?.length) {
+      await threadStore.addParticipants(taskThread.id, parentThread.participants);
+    }
+
+    const originalSource = task.sourceMessageId ? await messageStore.getById(task.sourceMessageId) : null;
+    const sourceMessage = await messageStore.append({
+      userId: originalSource?.userId ?? userId,
+      catId: originalSource?.catId ?? null,
+      content: originalSource?.content ?? formatTaskSourceContent(task),
+      mentions: originalSource?.mentions ? [...originalSource.mentions] : [],
+      timestamp: originalSource?.timestamp ?? task.createdAt,
+      threadId: taskThread.id,
+      ...(originalSource?.contentBlocks ? { contentBlocks: originalSource.contentBlocks } : {}),
+      ...(originalSource?.metadata ? { metadata: originalSource.metadata } : {}),
+      ...(originalSource?.origin ? { origin: originalSource.origin } : {}),
+      ...(originalSource?.source ? { source: originalSource.source } : {}),
+    });
+
+    const updated = await taskStore.update(task.id, {
+      taskThreadId: taskThread.id,
+      ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
+    });
+    if (updated && options.broadcastUpdate !== false) {
+      socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', updated);
+    }
+
+    return {
+      threadId: taskThread.id,
+      sourceMessage: toTaskThreadMessage(sourceMessage),
+      task:
+        updated ?? {
+          ...task,
+          taskThreadId: taskThread.id,
+          ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
+        },
+    };
+  }
+
   function requireUserId(request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply): string | null {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -375,9 +432,13 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
-    const task = await taskStore.create(toCreateInput(result.data));
+    const created = await taskStore.create(toCreateInput(result.data));
+    const task =
+      created.kind === 'work'
+        ? (await ensureTaskDiscussionThread(created, { userId: result.data.userId, broadcastUpdate: false })).task
+        : created;
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
-    await appendTaskCreateNotice(task);
+    await appendTaskCreateNotice(task, { fromSourceMessage: Boolean(result.data.sourceMessageId) });
 
     reply.status(201);
     return task;
@@ -589,56 +650,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Task not found' };
     }
 
-    if (task.taskThreadId) {
-      const existingThread = await threadStore.get(task.taskThreadId);
-      if (existingThread) {
-        const messages = await messageStore.getByThread(task.taskThreadId, 100);
-        const sourceMessage = messages[0];
-        if (sourceMessage) {
-          return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task };
-        }
-      }
-    }
-
-    const parentThread = await threadStore.get(task.threadId);
-    const userId = body.data.userId ?? task.userId ?? parentThread?.createdBy ?? 'default-user';
-    const taskThread = await threadStore.create(userId, formatTaskThreadTitle(task.title), parentThread?.projectPath);
-
-    if (parentThread?.participants?.length) {
-      await threadStore.addParticipants(taskThread.id, parentThread.participants);
-    }
-
-    const originalSource = task.sourceMessageId ? await messageStore.getById(task.sourceMessageId) : null;
-    const sourceMessage = await messageStore.append({
-      userId: originalSource?.userId ?? userId,
-      catId: originalSource?.catId ?? null,
-      content: originalSource?.content ?? formatTaskSourceContent(task),
-      mentions: originalSource?.mentions ? [...originalSource.mentions] : [],
-      timestamp: originalSource?.timestamp ?? task.createdAt,
-      threadId: taskThread.id,
-      ...(originalSource?.contentBlocks ? { contentBlocks: originalSource.contentBlocks } : {}),
-      ...(originalSource?.metadata ? { metadata: originalSource.metadata } : {}),
-      ...(originalSource?.origin ? { origin: originalSource.origin } : {}),
-      ...(originalSource?.source ? { source: originalSource.source } : {}),
-    });
-
-    const updated = await taskStore.update(task.id, {
-      taskThreadId: taskThread.id,
-      ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-    });
-    if (updated) {
-      socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', updated);
-    }
-
-    return {
-      threadId: taskThread.id,
-      sourceMessage: toTaskThreadMessage(sourceMessage),
-      task: updated ?? {
-        ...task,
-        taskThreadId: taskThread.id,
-        ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-      },
-    };
+    return ensureTaskDiscussionThread(task, { userId: body.data.userId });
   });
 
   // PATCH /api/tasks/:id

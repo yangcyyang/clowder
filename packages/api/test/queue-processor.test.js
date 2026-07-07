@@ -1364,6 +1364,59 @@ describe('QueueProcessor', () => {
     assert.ok(deps.log.warn.mock.calls.length > 0, 'should warn on messageStore failure');
   });
 
+  it('persists an intent preamble into the task discussion thread before execution', async () => {
+    const sourceTask = {
+      id: 'task-1',
+      threadId: 't1',
+      taskThreadId: 'task-thread-1',
+      sourceMessageId: 'm1',
+      title: '实现 WI-9 心跳补齐',
+      status: 'doing',
+      kind: 'work',
+      createdBy: 'user',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    deps = stubDeps({
+      messageStore: {
+        append: mock.fn(async (input) => ({
+          ...input,
+          id: 'intent-msg-1',
+          timestamp: input.timestamp ?? Date.now(),
+        })),
+        getById: mock.fn(async () => null),
+        markDelivered: mock.fn(async () => null),
+      },
+      taskStore: {
+        listByThread: mock.fn(async () => [sourceTask]),
+        update: mock.fn(async () => sourceTask),
+      },
+      gitArtifactCollector: mock.fn(async () => null),
+    });
+    processor = new QueueProcessor(deps);
+
+    const entry = enqueueEntry(deps.queue, { targetCats: ['opus'], messageId: 'm1' });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'm1');
+
+    await processor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const intentAppend = deps.messageStore.append.mock.calls.find((call) =>
+      String(call.arguments[0]?.idempotencyKey ?? '').startsWith('progress-intent:'),
+    );
+    assert.ok(intentAppend, 'should append a progress intent message');
+    const input = intentAppend.arguments[0];
+    assert.equal(input.threadId, 'task-thread-1');
+    assert.equal(input.source.connector, 'agent-progress-intent');
+    assert.equal(input.extra.systemKind, 'progress_heartbeat');
+    assert.match(input.content, /我要做「实现 WI-9 心跳补齐」/);
+
+    const broadcast = deps.socketManager.broadcastToRoom.mock.calls.find(
+      (call) => call.arguments[0] === 'thread:task-thread-1' && call.arguments[1] === 'connector_message',
+    );
+    assert.ok(broadcast, 'should broadcast the intent into the task thread');
+  });
+
   // ── F108: QueueProcessor slot-aware (AC-A7) ──
 
   describe('slot-aware mutex and dequeue (F108)', () => {

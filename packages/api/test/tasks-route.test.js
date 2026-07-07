@@ -80,6 +80,13 @@ describe('Tasks Routes', () => {
     assert.equal(body.title, '重构 AgentRouter');
     assert.equal(body.status, 'todo');
     assert.equal(body.createdBy, 'opus');
+    assert.ok(body.taskThreadId, 'work task should auto-create a discussion thread');
+    assert.ok(body.sourceMessageId, 'auto-created discussion thread should backfill sourceMessageId');
+
+    const taskThreadMessages = messageStore.messages.filter((message) => message.threadId === body.taskThreadId);
+    assert.equal(taskThreadMessages.length, 1);
+    assert.equal(taskThreadMessages[0].id, body.sourceMessageId);
+    assert.match(taskThreadMessages[0].content, /📌 Task: 重构 AgentRouter/);
   });
 
   test('POST task capability authorization appends task-scoped audit event', async () => {

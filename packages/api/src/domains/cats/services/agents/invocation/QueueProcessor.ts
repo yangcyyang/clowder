@@ -50,6 +50,12 @@ const PROGRESS_HEARTBEAT_SOURCE: ConnectorSource = {
   icon: '⏳',
   meta: { presentation: 'status', noticeTone: 'info' },
 };
+const PROGRESS_INTENT_SOURCE: ConnectorSource = {
+  connector: 'agent-progress-intent',
+  label: '任务意图',
+  icon: '▶',
+  meta: { presentation: 'status', noticeTone: 'info' },
+};
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
@@ -329,6 +335,12 @@ function formatProgressHeartbeatContent(catId: string, payload: Record<string, u
     return `${displayName} 正在推进：${subject}（${done}/${tasks.length} 已完成）`;
   }
   return null;
+}
+
+function formatProgressIntentContent(catId: string, task: Pick<TaskItem, 'title'>): string {
+  const cat = catRegistry.tryGet(catId)?.config;
+  const displayName = cat?.name ?? catId;
+  return `${displayName}：我要做「${task.title}」。`;
 }
 
 async function collectUntrackedGitFiles(): Promise<GitArtifactFile[]> {
@@ -645,6 +657,62 @@ export class QueueProcessor {
       this.deps.log.warn(
         { err, threadId: params.threadId, catId: params.msg.catId, invocationId: params.invocationId },
         '[QueueProcessor] persist progress heartbeat failed',
+      );
+    }
+  }
+
+  private async maybePersistProgressIntentToTaskThread(params: {
+    catId: string;
+    threadId: string;
+    sourceMessageIds: readonly string[];
+    invocationId: string;
+  }): Promise<void> {
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      const taskThreadId = sourceTask?.taskThreadId;
+      if (!sourceTask || !taskThreadId) return;
+
+      const now = Date.now();
+      const content = formatProgressIntentContent(params.catId, sourceTask);
+      const source: ConnectorSource = {
+        ...PROGRESS_INTENT_SOURCE,
+        meta: {
+          ...PROGRESS_INTENT_SOURCE.meta,
+          catId: params.catId,
+          invocationId: params.invocationId,
+          parentThreadId: params.threadId,
+          taskId: sourceTask.id,
+        },
+      };
+      const stored = await this.deps.messageStore.append({
+        userId: 'system',
+        catId: null,
+        threadId: taskThreadId,
+        content,
+        mentions: [],
+        source,
+        timestamp: now,
+        extra: { systemKind: 'progress_heartbeat' },
+        idempotencyKey: `progress-intent:${params.invocationId}:${params.catId}`,
+      });
+      this.deps.socketManager.broadcastToRoom(`thread:${taskThreadId}`, 'connector_message', {
+        threadId: taskThreadId,
+        message: {
+          id: stored.id,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          extra: stored.extra,
+          timestamp: stored.timestamp,
+        },
+      });
+    } catch (err) {
+      this.deps.log.warn(
+        { err, threadId: params.threadId, catId: params.catId, invocationId: params.invocationId },
+        '[QueueProcessor] persist progress intent failed',
       );
     }
   }
@@ -1554,6 +1622,15 @@ export class QueueProcessor {
           messageIds: deliveredIds,
           deliveredAt: deliveredNow,
           messages: deliveredMessages,
+        });
+      }
+
+      if (primaryCat !== 'unknown') {
+        await this.maybePersistProgressIntentToTaskThread({
+          catId: primaryCat,
+          threadId,
+          sourceMessageIds: allMessageIds,
+          invocationId,
         });
       }
 

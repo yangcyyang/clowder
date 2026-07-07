@@ -9,9 +9,10 @@ import './helpers/setup-cat-registry.js';
 
 describe('canViewMessage', () => {
   let canViewMessage;
+  let isUserVisibleUnreadMessage;
 
   beforeEach(async () => {
-    ({ canViewMessage } = await import('../dist/domains/cats/services/stores/visibility.js'));
+    ({ canViewMessage, isUserVisibleUnreadMessage } = await import('../dist/domains/cats/services/stores/visibility.js'));
   });
 
   test('user always sees everything', () => {
@@ -47,6 +48,23 @@ describe('canViewMessage', () => {
   test('whisper with empty whisperTo is invisible to all cats', () => {
     const whisper = { visibility: 'whisper' }; // no whisperTo
     assert.equal(canViewMessage(whisper, { type: 'cat', catId: 'opus' }), false);
+  });
+
+  test('context briefing is not unread-countable even when it has rich blocks', () => {
+    assert.equal(
+      isUserVisibleUnreadMessage({
+        id: 'briefing-1',
+        userId: 'system',
+        catId: null,
+        content: 'CONTEXT BRIEFING',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread1',
+        origin: 'briefing',
+        extra: { rich: { blocks: [{ kind: 'briefing', title: 'CONTEXT BRIEFING' }] } },
+      }),
+      false,
+    );
   });
 });
 
