@@ -124,14 +124,7 @@ export class CatAgentService implements AgentService {
       const toolBlocks = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
       if (toolBlocks.length === 0) {
         const reason = result.stopReason ?? 'unknown';
-        log.warn(`[${this.catId}] Non-terminal stop_reason "${reason}" with no tool calls`);
-        yield {
-          type: 'error',
-          catId: this.catId,
-          error: `Unexpected non-terminal response (stop_reason: ${reason}) with no tool calls`,
-          metadata,
-          timestamp: Date.now(),
-        };
+        log.warn(`[${this.catId}] Non-terminal stop_reason "${reason}" with no tool calls; ending turn without error`);
         yield* emitDone(this.catId, metadata, totalUsage);
         return;
       }

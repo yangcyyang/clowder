@@ -308,11 +308,14 @@ function mockAnthropicApi(responses) {
 describe('D2: agentic loop', () => {
   let prevFetch;
   let prevEnv;
+  let prevOpusModel;
 
   before(() => {
     prevFetch = globalThis.fetch;
     prevEnv = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    prevOpusModel = process.env.CAT_OPUS_MODEL;
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = tmpDir;
+    process.env.CAT_OPUS_MODEL = 'claude-sonnet-4-5-20250929';
     resetMigrationState();
   });
 
@@ -320,6 +323,8 @@ describe('D2: agentic loop', () => {
     globalThis.fetch = prevFetch;
     if (prevEnv !== undefined) process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevEnv;
     else delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    if (prevOpusModel !== undefined) process.env.CAT_OPUS_MODEL = prevOpusModel;
+    else delete process.env.CAT_OPUS_MODEL;
     resetMigrationState();
   });
 
@@ -506,7 +511,7 @@ describe('D2: agentic loop', () => {
     assert.equal(doneCount, 1, 'exactly one done event');
   });
 
-  test('non-terminal stop_reason with no tool blocks emits distinct error (P2 regression)', async () => {
+  test('non-terminal stop_reason with text and no tool blocks ends without runtime error', async () => {
     globalThis.fetch = mockAnthropicApi([
       {
         id: 'msg1',
@@ -521,13 +526,31 @@ describe('D2: agentic loop', () => {
     const msgs = await collect(svc.invoke('test', { workingDirectory: tmpDir }));
 
     const error = msgs.find((m) => m.type === 'error');
+    const text = msgs.find((m) => m.type === 'text');
     const done = msgs.find((m) => m.type === 'done');
-    assert.ok(error, 'has error event');
+    assert.equal(error, undefined, 'non-terminal no-tool boundary is not a user-visible runtime error');
+    assert.ok(text, 'preserves text emitted before the non-terminal boundary');
     assert.ok(done, 'has done event');
-    // Must NOT say "loop exceeded" — should mention the actual stop_reason
-    assert.ok(!error.error.includes('loop exceeded'), 'not a loop overflow error');
-    assert.ok(error.error.includes('pause_turn'), 'mentions the actual stop_reason');
-    assert.ok(error.error.includes('non-terminal'), 'describes it as non-terminal');
+  });
+
+  test('BUG-ede: tool_use stop_reason with no tool block ends without raw runtime error', async () => {
+    globalThis.fetch = mockAnthropicApi([
+      {
+        id: 'msg1',
+        model: 'claude-sonnet-4-5-20250929',
+        stop_reason: 'tool_use',
+        content: [],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+    ]);
+
+    const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
+    const msgs = await collect(svc.invoke('test', { workingDirectory: tmpDir }));
+
+    const error = msgs.find((m) => m.type === 'error');
+    const done = msgs.find((m) => m.type === 'done');
+    assert.equal(error, undefined, 'does not surface raw provider diagnostic as runtime error');
+    assert.ok(done, 'has done event so route layer can emit silent-completion notice');
   });
 
   test('API error during tool loop still produces error + done', async () => {
