@@ -944,6 +944,84 @@ export interface RouteOptions {
   routeSpan?: import('@opentelemetry/api').Span | undefined;
 }
 
+export type A2ARoutingBlockedReason =
+  | 'queued_user_messages'
+  | 'depth_limit'
+  | 'aborted'
+  | 'active_or_queued'
+  | 'pingpong_terminated'
+  | 'trigger_not_persisted'
+  | 'enqueue_noop';
+
+const A2A_BLOCKED_REASON_TEXT: Record<A2ARoutingBlockedReason, string> = {
+  queued_user_messages: '当前线程还有用户消息在排队，系统先处理用户输入',
+  depth_limit: 'Agent 交接链路已达到深度上限',
+  aborted: '本轮调用已被中断',
+  active_or_queued: '目标 Agent 当前已有排队或执行中的任务',
+  pingpong_terminated: '连续互相交接触发了乒乓熔断',
+  trigger_not_persisted: '触发交接的 Agent 回复没有成功持久化',
+  enqueue_noop: '队列没有接受这次交接请求',
+};
+
+export async function persistA2ARoutingBlockedNotice(
+  deps: RouteStrategyDeps,
+  args: {
+    threadId: string;
+    fromCatId: string;
+    targetCatId: string;
+    reason: A2ARoutingBlockedReason;
+    triggerMessageId?: string;
+  },
+): Promise<boolean> {
+  const source = {
+    connector: 'a2a-routing-blocked',
+    label: '交接提醒',
+    icon: '⚠️',
+    meta: {
+      presentation: 'system_notice',
+      noticeTone: 'warning',
+      fromCatId: args.fromCatId,
+      targetCatId: args.targetCatId,
+      reason: args.reason,
+      ...(args.triggerMessageId ? { triggerMessageId: args.triggerMessageId } : {}),
+    },
+  } as const;
+  const targetHandle = `@${args.targetCatId}`;
+  const reasonText = A2A_BLOCKED_REASON_TEXT[args.reason];
+  const content =
+    `[交接提醒]: ${targetHandle} 未自动触发：${reasonText}。` +
+    `可稍后重试，或手动 ${targetHandle}。`;
+
+  try {
+    const stored = await deps.messageStore.append({
+      userId: 'system',
+      catId: null,
+      threadId: args.threadId,
+      content,
+      mentions: [],
+      timestamp: Date.now(),
+      source,
+    });
+    deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+      threadId: args.threadId,
+      message: {
+        id: stored.id,
+        type: 'connector',
+        content: stored.content,
+        source,
+        timestamp: stored.timestamp,
+      },
+    });
+    return true;
+  } catch (err) {
+    log.warn(
+      { err, threadId: args.threadId, fromCatId: args.fromCatId, targetCatId: args.targetCatId, reason: args.reason },
+      'persist A2A routing blocked notice failed',
+    );
+    return false;
+  }
+}
+
 export async function persistSilentCompletionNotice(
   deps: RouteStrategyDeps,
   args: {

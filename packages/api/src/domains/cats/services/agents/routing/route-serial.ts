@@ -88,7 +88,7 @@ import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
-import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
+import type { A2ARoutingBlockedReason, HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
   appendCompactBoundaryTaskEvent,
@@ -103,6 +103,7 @@ import {
   getThreadBootcampMemberCount,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
+  persistA2ARoutingBlockedNotice,
   persistSilentCompletionNotice,
   parseCompactBoundarySystemInfo,
   readHistoryForGovernanceObservation,
@@ -1436,6 +1437,24 @@ export async function* routeSerial(
             queuedMessagesPending = false;
           }
         }
+        const a2aBlockedNoticeKeys = new Set<string>();
+        const emitA2ABlockedNotice = async (
+          targets: readonly CatId[],
+          reason: A2ARoutingBlockedReason,
+        ): Promise<void> => {
+          for (const targetCatId of targets) {
+            const key = `${storedMsgId ?? 'unpersisted'}:${catId}:${targetCatId}:${reason}`;
+            if (a2aBlockedNoticeKeys.has(key)) continue;
+            a2aBlockedNoticeKeys.add(key);
+            await persistA2ARoutingBlockedNotice(deps, {
+              threadId,
+              fromCatId: catId as string,
+              targetCatId: targetCatId as string,
+              reason,
+              ...(storedMsgId ? { triggerMessageId: storedMsgId } : {}),
+            });
+          }
+        };
 
         // Diagnostic: log when A2A text-scan gate blocks (previously silent)
         if (a2aMentions.length > 0) {
@@ -1444,71 +1463,86 @@ export async function* routeSerial(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount },
               'A2A text-scan blocked: user messages pending in queue (fairness gate)',
             );
+            await emitA2ABlockedNotice(a2aMentions, 'queued_user_messages');
           } else if (worklistEntry.a2aCount >= maxDepth) {
             log.info(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount, maxDepth },
               'A2A text-scan blocked: depth limit reached',
             );
+            await emitA2ABlockedNotice(a2aMentions, 'depth_limit');
           } else if (signal?.aborted) {
             log.info({ threadId, catId, a2aMentions }, 'A2A text-scan blocked: signal aborted');
+            await emitA2ABlockedNotice(a2aMentions, 'aborted');
           }
         }
 
         if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
-          if (enqueueA2ATargets && storedMsgId) {
-            const queueTargets: CatId[] = [];
-            for (const nextCat of a2aMentions) {
-              if (worklistEntry.a2aCount >= maxDepth) break;
-              if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-                log.info(
-                  { threadId, catId: nextCat, fromCat: catId },
-                  'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
-                );
-                continue;
+          if (enqueueA2ATargets) {
+            if (!storedMsgId) {
+              await emitA2ABlockedNotice(a2aMentions, 'trigger_not_persisted');
+            } else {
+              const queueTargets: CatId[] = [];
+              for (const nextCat of a2aMentions) {
+                if (worklistEntry.a2aCount >= maxDepth) break;
+                if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
+                  log.info(
+                    { threadId, catId: nextCat, fromCat: catId },
+                    'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
+                  );
+                  await emitA2ABlockedNotice([nextCat], 'active_or_queued');
+                  continue;
+                }
+                const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
+                const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
+                  hadSubstantiveToolCall,
+                  outputLength: storedContent.length,
+                });
+                if (streak.blockPingPong) {
+                  log.info(
+                    { threadId, catId: nextCat, fromCat: catId, count: streak.count },
+                    'F167 L1: A2A ping-pong terminated (streak >= 4)',
+                  );
+                  yield {
+                    type: 'system_info' as AgentMessageType,
+                    catId,
+                    content: JSON.stringify({
+                      type: 'a2a_pingpong_terminated',
+                      fromCatId: catId,
+                      targetCatId: nextCat,
+                      pairCount: streak.count,
+                    }),
+                    timestamp: Date.now(),
+                  } as AgentMessage;
+                  await emitA2ABlockedNotice([nextCat], 'pingpong_terminated');
+                  continue;
+                }
+                queueTargets.push(nextCat);
+                worklistEntry.a2aCount++;
               }
-              const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
-              const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
-                hadSubstantiveToolCall,
-                outputLength: storedContent.length,
-              });
-              if (streak.blockPingPong) {
-                log.info(
-                  { threadId, catId: nextCat, fromCat: catId, count: streak.count },
-                  'F167 L1: A2A ping-pong terminated (streak >= 4)',
-                );
-                yield {
-                  type: 'system_info' as AgentMessageType,
-                  catId,
-                  content: JSON.stringify({
-                    type: 'a2a_pingpong_terminated',
-                    fromCatId: catId,
-                    targetCatId: nextCat,
-                    pairCount: streak.count,
-                  }),
-                  timestamp: Date.now(),
-                } as AgentMessage;
-                continue;
+              if (queueTargets.length > 0) {
+                const enqueued = await enqueueA2ATargets({
+                  threadId,
+                  userId,
+                  callerCatId: catId,
+                  targetCats: queueTargets,
+                  content: storedContent,
+                  triggerMessageId: storedMsgId,
+                });
+                const enqueuedSet = new Set(enqueued.map((pendingCat) => pendingCat as string));
+                const droppedTargets = queueTargets.filter((targetCat) => !enqueuedSet.has(targetCat as string));
+                if (droppedTargets.length > 0) {
+                  await emitA2ABlockedNotice(droppedTargets, 'enqueue_noop');
+                }
+                for (const pendingCat of enqueued) {
+                  const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+                  yield {
+                    type: 'a2a_handoff' as AgentMessageType,
+                    catId,
+                    content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
+                    timestamp: Date.now(),
+                  } as AgentMessage;
+                }
               }
-              queueTargets.push(nextCat);
-              worklistEntry.a2aCount++;
-            }
-            if (queueTargets.length === 0) continue;
-            const enqueued = await enqueueA2ATargets({
-              threadId,
-              userId,
-              callerCatId: catId,
-              targetCats: queueTargets,
-              content: storedContent,
-              triggerMessageId: storedMsgId,
-            });
-            for (const pendingCat of enqueued) {
-              const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
-              yield {
-                type: 'a2a_handoff' as AgentMessageType,
-                catId,
-                content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
-                timestamp: Date.now(),
-              } as AgentMessage;
             }
           } else {
             // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
@@ -1523,6 +1557,7 @@ export async function* routeSerial(
                   { threadId, catId: nextCat, fromCat: catId },
                   'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
                 );
+                await emitA2ABlockedNotice([nextCat], 'active_or_queued');
                 continue;
               }
               if (pendingTail.includes(nextCat)) {
@@ -1559,6 +1594,7 @@ export async function* routeSerial(
                   }),
                   timestamp: Date.now(),
                 } as AgentMessage;
+                await emitA2ABlockedNotice([nextCat], 'pingpong_terminated');
                 continue;
               }
 
