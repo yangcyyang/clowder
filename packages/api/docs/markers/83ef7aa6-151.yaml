@@ -1,0 +1,6 @@
+id: 83ef7aa6-151
+status: captured
+source: callback:kimi:67d41aae-c1b1-46b2-b5d8-5ed0bf90788f
+created_at: 2026-07-06T17:41:48.203Z
+content: |
+  创建了 skill-linker（Skill 关联助手），使用户可以用自然语言「帮我关联 xxx skill」把本地 skill 目录通过 symlink 接到 Clowder。触发词包括「关联 skill」「link skill」「加载 skill」「install skill」等。关联时需检查：源目录存在 SKILL.md、不与内置 skill 同名、优先从 agents/claude/gstack/skillstar/pi/orbitos 已知来源搜索，未找到时询问用户提供完整路径。关联后通过 cat_cafe_list_skills 或 SkillRouter catalog 验证。运行中的 API 需要重启才能刷新 skill 列表。
