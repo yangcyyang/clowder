@@ -16,6 +16,28 @@ const DEFAULT_SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产�
 const DEFAULT_SKILL_MANIFEST_PATH = `${DEFAULT_SKILL_MANAGEMENT_DIR}/skills-manifest.json`;
 const MAX_TRIGGERS_PER_SKILL = 5;
 const MAX_MATCHED_SKILLS = 2;
+const CJK_TEXT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const ROUTER_TRIGGER_ALIASES: Record<string, string[]> = {
+  // External skills often carry natural-language "when to use" text but no
+  // frontmatter triggers. Keep these aliases explicit and cheap; semantic
+  // embedding fallback belongs to a later phase only if this layer is not enough.
+  'content-research-writer': [
+    '写文档',
+    '写个文档',
+    '写报告',
+    '写个报告',
+    '写 blog',
+    '写 newsletter',
+    '写内容',
+    '技术文档',
+    '内容写作',
+  ],
+  'doc-coauthoring': ['写文档', '写报告', '写 proposal', '写 spec', 'PRD 文档', '需求文档'],
+  'khazix-writer': ['写文章', '写稿子', '续写', '扩写', '公众号文章', '长文', '写篇文章'],
+  summarize: ['总结', '总结文章', '帮我总结', '提炼', '摘要', '总结这篇文章'],
+  'dbs-content': ['写文案', '写内容', '内容怎么做', '文案', '内容诊断'],
+  brainstorm: ['头脑风暴', '发散思路', '想创意', '想点子', '发散一下'],
+};
 
 interface SkillManifest {
   skills?: SkillManifestEntry[];
@@ -93,6 +115,26 @@ function resolveSkillManifestPath(): string {
 
 function flattenText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeForLiteralMatch(value: string): string {
+  return flattenText(value).toLocaleLowerCase();
+}
+
+function shouldUseCjkLooseMatch(message: string, trigger: string): boolean {
+  return CJK_TEXT_RE.test(message) || CJK_TEXT_RE.test(trigger);
+}
+
+function normalizeForCjkLooseMatch(value: string): string {
+  return normalizeForLiteralMatch(value).replace(/\s+/g, '');
+}
+
+function includesTrigger(message: string, trigger: string): boolean {
+  const normalizedMessage = normalizeForLiteralMatch(message);
+  const normalizedTrigger = normalizeForLiteralMatch(trigger);
+  if (normalizedMessage.includes(normalizedTrigger)) return true;
+  if (!shouldUseCjkLooseMatch(normalizedMessage, normalizedTrigger)) return false;
+  return normalizeForCjkLooseMatch(normalizedMessage).includes(normalizeForCjkLooseMatch(normalizedTrigger));
 }
 
 function toStringList(value: unknown): string[] {
@@ -186,7 +228,12 @@ function frontmatterDescription(frontmatter: SkillFrontmatter): string {
 function skillTriggers(frontmatter: SkillFrontmatter, manifestTriggers: unknown, name: string): string[] {
   return Array.from(
     new Set(
-      [...toStringList(frontmatter.triggers), ...toStringList(manifestTriggers), name].map((value) => value.trim()),
+      [
+        ...toStringList(frontmatter.triggers),
+        ...toStringList(manifestTriggers),
+        ...(ROUTER_TRIGGER_ALIASES[name] ?? []),
+        name,
+      ].map((value) => value.trim()),
     ),
   ).filter(Boolean);
 }
@@ -445,17 +492,15 @@ export function loadSkillRouterCatalog(): SkillRouterCatalogEntry[] {
 }
 
 function scoreSkillMatch(message: string, skill: SkillRouterCatalogEntry): number {
-  const normalizedMessage = message.toLocaleLowerCase();
   let score = 0;
   for (const trigger of skill.triggers) {
-    const normalizedTrigger = trigger.toLocaleLowerCase();
+    const normalizedTrigger = normalizeForLiteralMatch(trigger);
     if (normalizedTrigger.length < 2) continue;
-    if (normalizedMessage.includes(normalizedTrigger)) {
+    if (includesTrigger(message, trigger)) {
       score += normalizedTrigger.length >= 4 ? 3 : 2;
     }
   }
-  const normalizedName = skill.name.toLocaleLowerCase();
-  if (normalizedMessage.includes(normalizedName)) score += 4;
+  if (includesTrigger(message, skill.name)) score += 4;
   return score;
 }
 

@@ -87,7 +87,12 @@ skills:
       Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。
     triggers:
       - "brainstorm"
+      - "头脑风暴"
       - "讨论"
+      - "发散"
+      - "发散思路"
+      - "想创意"
+      - "想点子"
       - "多猫独立思考"
       - "收敛"
       - "讨论结束"
@@ -240,6 +245,10 @@ skills:
       Output: 分步实施计划（含 TDD 步骤和检查点）。
     triggers:
       - "写计划"
+      - "需求分析"
+      - "分析需求"
+      - "需求文档"
+      - "PRD 文档"
       - "implementation plan"
       - "拆分步骤"
     not_for:
@@ -278,6 +287,15 @@ skills:
       Output: 失败测试 → 最小实现 → 重构，全程有测试保护。
     triggers:
       - "写代码"
+      - "写功能"
+      - "实现功能"
+      - "开发功能"
+      - "跑代码"
+      - "跑一下代码"
+      - "执行脚本"
+      - "运行代码"
+      - "coding"
+      - "programming"
       - "test first"
       - "TDD"
       - "红绿重构"
@@ -476,6 +494,12 @@ skills:
     triggers:
       - "请 review"
       - "帮我看看"
+      - "帮我 review"
+      - "review 代码"
+      - "审查代码"
+      - "检查代码"
+      - "代码检查"
+      - "看看代码"
       - "request review"
     not_for:
       - "收到 review"
@@ -1081,9 +1105,18 @@ skills:
       Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）。
       Output: 高密度 HTML slide + 多猫审查通过 + 导出验证。
     triggers:
+      - "PPT"
       - "做 PPT"
       - "做个 PPT"
+      - "做个PPT"
+      - "设计 PPT"
+      - "设计个 PPT"
+      - "设计个PPT"
       - "做演示"
+      - "做演示文稿"
+      - "演示文稿"
+      - "presentation"
+      - "幻灯片"
       - "做 slide"
       - "PPT review"
       - "视觉审查"

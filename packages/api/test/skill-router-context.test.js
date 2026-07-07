@@ -139,6 +139,78 @@ describe('SkillRouter', () => {
     assert.ok(statusContext.matchedSkillNames.includes('project-workflow'));
   });
 
+  test('WI-12B routes common natural Chinese utterances before semantic fallback', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'skill-router-natural-utterances-'));
+    const manifestPath = join(workDir, 'skills-manifest.json');
+    writeFileSync(manifestPath, JSON.stringify({ skills: [] }, null, 2));
+
+    process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
+    const moduleUrl = new URL(
+      `../dist/domains/cats/services/context/SkillRouter.js?case=natural-${Date.now()}`,
+      import.meta.url,
+    );
+    const { resolveSkillRouterContext } = await import(moduleUrl.href);
+
+    const cases = [
+      ['帮我发散一下思路', 'collaborative-thinking'],
+      ['帮我分析需求', 'writing-plans'],
+      ['帮我做个PPT', 'ppt-forge'],
+      ['跑一下代码', 'tdd'],
+      ['review 代码', 'request-review'],
+      ['帮我写个报告', 'content-research-writer'],
+    ];
+
+    for (const [utterance, expectedSkill] of cases) {
+      const context = resolveSkillRouterContext(utterance);
+      assert.ok(context, `${utterance}: context should exist`);
+      assert.ok(
+        context.matchedSkillNames.includes(expectedSkill),
+        `${utterance}: expected ${expectedSkill}, got ${context.matchedSkillNames.join(', ')}`,
+      );
+    }
+  });
+
+  test('WI-12B strips CJK-adjacent spaces without collapsing pure English word boundaries', async () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'skill-router-space-normalization-'));
+    const manifestPath = join(workDir, 'skills-manifest.json');
+    const skillPath = resolve(REPO_ROOT, 'cat-cafe-skills/request-review/SKILL.md');
+    writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          skills: [
+            {
+              id: 'cat-cafe:request-review',
+              name: 'request-review',
+              description: 'review',
+              triggers: ['code review', 'review 代码'],
+              source: 'cat-cafe',
+              source_path: skillPath,
+              clowder_available: true,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
+    const moduleUrl = new URL(
+      `../dist/domains/cats/services/context/SkillRouter.js?case=space-${Date.now()}`,
+      import.meta.url,
+    );
+    const { resolveSkillRouterContext } = await import(moduleUrl.href);
+
+    const mixed = resolveSkillRouterContext('帮我review代码');
+    assert.ok(mixed);
+    assert.ok(mixed.matchedSkillNames.includes('request-review'));
+
+    const pureEnglish = resolveSkillRouterContext('please codereview this branch');
+    assert.ok(pureEnglish);
+    assert.ok(!pureEnglish.matchedSkillNames.includes('request-review'));
+  });
+
   test('loads SKILL.md entries from cat-cafe-skills/external symlinks', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'skill-router-external-'));
     const manifestPath = join(workDir, 'skills-manifest.json');
