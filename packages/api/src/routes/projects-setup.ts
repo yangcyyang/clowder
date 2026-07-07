@@ -6,7 +6,7 @@
 
 import { execFile } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
@@ -14,6 +14,16 @@ import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const VALID_MODES = ['clone', 'init', 'skip'] as const;
 type SetupMode = (typeof VALID_MODES)[number];
+
+const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const PROJECT_INIT_TIMEOUT_MS = 30_000;
+
+export interface ProjectInitResult {
+  ok: boolean;
+  projectName: string;
+  projectDir: string;
+  error?: string;
+}
 
 export interface ProjectSetupRouteOptions {
   memoryBootstrapService?: { bootstrap: (projectPath: string, options?: unknown) => Promise<unknown> };
@@ -125,6 +135,41 @@ async function isEmptyDir(dirPath: string): Promise<boolean> {
   }
 }
 
+function deriveProjectName(projectPath: string): string | null {
+  const name = basename(projectPath);
+  if (!PROJECT_NAME_PATTERN.test(name)) return null;
+  return name;
+}
+
+async function runProjectInit(
+  catCafeRoot: string,
+  targetProject: string,
+  projectName: string,
+): Promise<ProjectInitResult> {
+  const scriptPath = join(catCafeRoot, 'cat-cafe-skills', 'project-init', 'scripts', 'init-project.mjs');
+  const projectDir = join(targetProject, '.cat-cafe', 'projects', projectName);
+
+  return new Promise((resolve) => {
+    const child = execFile(
+      'node',
+      [scriptPath, projectName, '--root', targetProject, '--no-commit'],
+      { timeout: PROJECT_INIT_TIMEOUT_MS },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({
+            ok: false,
+            projectName,
+            projectDir,
+            error: stderr.trim() || stdout.trim() || err.message,
+          });
+          return;
+        }
+        resolve({ ok: true, projectName, projectDir });
+      },
+    );
+  });
+}
+
 export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = async (app, opts) => {
   app.post('/api/projects/setup', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
@@ -137,11 +182,13 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       projectPath?: string;
       mode?: string;
       gitCloneUrl?: string;
+      initProject?: boolean;
     } | null;
 
     const projectPath = body?.projectPath;
     const mode = body?.mode as SetupMode | undefined;
     const gitCloneUrl = body?.gitCloneUrl;
+    const initProject = body?.initProject === true;
 
     if (!projectPath) {
       reply.status(400);
@@ -213,6 +260,25 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       const service = new GovernanceBootstrapService(catCafeRoot);
       const report = await service.bootstrap(validated, { dryRun: false });
 
+      // ── Optional project fact-source scaffold (lazy generation) ──
+      let projectInitResult: ProjectInitResult | undefined;
+      if (initProject) {
+        const projectName = deriveProjectName(validated);
+        if (!projectName) {
+          reply.status(400);
+          return {
+            ok: false,
+            error:
+              'initProject requires a valid project name (a-z, A-Z, 0-9, _, -) derived from the last segment of projectPath.',
+          };
+        }
+        projectInitResult = await runProjectInit(catCafeRoot, validated, projectName);
+        if (!projectInitResult.ok) {
+          reply.status(500);
+          return { ok: false, error: projectInitResult.error };
+        }
+      }
+
       // F152 Phase B: fire-and-forget memory bootstrap after governance succeeds
       if (opts?.memoryBootstrapService) {
         opts.memoryBootstrapService
@@ -260,7 +326,16 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
           });
       }
 
-      return { ok: true, governanceReport: report };
+      return {
+        ok: true,
+        governanceReport: report,
+        projectInit: projectInitResult
+          ? {
+              projectName: projectInitResult.projectName,
+              projectDir: projectInitResult.projectDir,
+            }
+          : undefined,
+      };
     } catch (err) {
       reply.status(500);
       return { ok: false, error: err instanceof Error ? err.message : 'Governance bootstrap failed' };

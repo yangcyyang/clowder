@@ -92,6 +92,16 @@ docs/project/api-index/
 
 没有现成资料时，只刷新当前任务相关切片，不做全仓库大地图。
 
+**吸收 ai-project-workflow 的具体做法**：
+
+- `system-map`：画一张高层系统图，标出服务、数据流、外部依赖。
+- `module-map`：列出当前任务触及的模块，说明边界和职责。
+- `api-index`：整理受影响接口的契约（请求/响应、错误码、鉴权）。
+- `diff analyzer`：在改代码前，先分析 diff 会打到哪些文件、哪些测试、哪些文档。
+- 产物落到 `docs/project/`，让后续 session 可复用。
+- 只刷新当前任务触及的切片，不推导未涉及的模块。
+- 不确定内容标记为“待确认”。
+
 ### Layer 3：审查验收
 
 当任务进入 review、验收、合并判断、风险评估时启用。
@@ -112,6 +122,15 @@ git diff HEAD
 - 未验证项
 
 参考：`refs/review-checklist.md`
+
+**吸收 ai-project-workflow 的具体做法**：
+
+- **diff-based review**：从 `git diff` 开始，不要先看总结。
+- **风险评分**：给每个 finding 标严重度（P0 阻塞 / P1 高 / P2 中 / P3 低）。
+- **结构化输出**：每条 finding 包含：位置（文件:行号）、问题、影响、建议修复、是否已验证。
+- **双视角 review**：从“实现者视角”和“接手者视角”各过一遍。
+- **未解决阻塞项不 approve**：有 P0 未解决时，不能给通过结论。
+- 审查产物落到 `docs/decisions/` 或当前项目的 `decisions.md`。
 
 ## 接手流程
 
@@ -178,6 +197,18 @@ Review：
 - 说明验证了什么。
 - 给出文件或 commit。
 - 标明剩余风险。
+
+## 与 ai-project-workflow 的关系
+
+本 skill 参考了 `ai-project-workflow` 的三层模型，但按 Clowder 的项目目录和任务系统轻量化。
+
+| ai-project-workflow | Clowder 对应 | 处理方式 |
+|---|---|---|
+| L1 项目工作流 | `feat-lifecycle`、`project-workflow`、`BACKLOG.md` | **不重复造**，继续使用 Clowder 现有流程 |
+| L2 系统代码理解 | `docs/project/system-map.md`、`module-map.md`、`api-index/` | **吸收并强化**，作为 project-workflow Layer 2 的可选输出 |
+| L3 Review 引擎 | `request-review`、`receive-review`、`quality-gate` | **吸收结构化审查方法**，diff 锚点 + 风险评分 + 结构化输出 |
+
+**不照搬整包**：ai-project-workflow 是通用项目 agent 工作流，Clowder 有自己的身份层、调度层和协作纪律层，只需要吸收其中对"改前系统地图"和"结构化审查"有明确帮助的部分。
 
 ## 参考文档
 

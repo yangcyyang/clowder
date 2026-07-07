@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import Fastify from 'fastify';
@@ -62,6 +62,33 @@ describe('POST /api/projects/setup', () => {
     // .git directory should exist
     const gitStat = await stat(join(testRoot, '.git'));
     assert.ok(gitStat.isDirectory());
+  });
+
+  it('mode=init with initProject creates project fact-source scaffold', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'init', initProject: true },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.ok, true);
+    assert.ok(body.projectInit, 'response should include projectInit');
+
+    const projectName = basename(testRoot);
+    const projectDir = join(testRoot, '.cat-cafe', 'projects', projectName);
+    assert.equal(body.projectInit.projectName, projectName);
+    assert.ok(
+      body.projectInit.projectDir.endsWith(projectDir.replace(/^\/private/, '')),
+      `projectDir should end with expected path, got ${body.projectInit.projectDir}`,
+    );
+
+    // Five fact-source files should exist
+    for (const file of ['brief.md', 'progress.md', 'decisions.md', 'handoff-index.md', 'handoff-log.md']) {
+      const fileStat = await stat(join(projectDir, file));
+      assert.ok(fileStat.isFile(), `${file} should exist`);
+    }
   });
 
   it('mode=clone rejects missing gitCloneUrl', async () => {
