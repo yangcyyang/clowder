@@ -7,11 +7,13 @@ import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
+import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 
 const updateTaskSchema = z.object({
   taskId: z.string().min(1),
@@ -46,10 +48,11 @@ export function registerCallbackTaskRoutes(
   deps: {
     taskStore: ITaskStore;
     socketManager: SocketManager;
+    messageStore?: IMessageStore;
     threadStore?: IThreadStore;
   },
 ): void {
-  const { taskStore, socketManager, threadStore } = deps;
+  const { taskStore, socketManager, messageStore, threadStore } = deps;
 
   function emitTaskAttention(previousStatus: string | undefined, task: { kind?: string; status: string; userId?: string }): void {
     if (task.kind === 'pr_tracking') return;
@@ -170,7 +173,7 @@ export function registerCallbackTaskRoutes(
       resolvedOwnerCatId = createCatId(resolved.ok);
     }
 
-    const task = await taskStore.create({
+    const created = await taskStore.create({
       threadId: actor.threadId,
       title,
       why: why ?? '',
@@ -180,6 +183,16 @@ export function registerCallbackTaskRoutes(
       ownerCatId: resolvedOwnerCatId,
       userId: actor.userId,
     });
+    const task =
+      threadStore && messageStore
+        ? (
+            await ensureTaskDiscussionThread(
+              created,
+              { taskStore, threadStore, messageStore, socketManager },
+              { userId: actor.userId, broadcastUpdate: false },
+            )
+          ).task
+        : created;
 
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
     reply.status(201);

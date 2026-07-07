@@ -12,11 +12,12 @@ import type { CatId, ConnectorSource, CreateTaskInput, TaskEvent, TaskItem, Upda
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
@@ -182,30 +183,6 @@ const taskThreadSchema = z.object({
   userId: z.string().min(1).max(100).optional(),
 });
 
-function formatTaskThreadTitle(title: string): string {
-  const trimmed = title.trim();
-  const shortTitle = trimmed.length > 80 ? `${trimmed.slice(0, 79)}…` : trimmed;
-  return `${shortTitle || '任务'} (分支)`;
-}
-
-function formatTaskSourceContent(task: { title: string; why?: string }): string {
-  return [`📌 Task: ${task.title}`, task.why?.trim() ? `\n${task.why.trim()}` : ''].join('\n');
-}
-
-function toTaskThreadMessage(message: StoredMessage) {
-  return {
-    id: message.id,
-    threadId: message.threadId,
-    userId: message.userId,
-    catId: message.catId,
-    content: message.content,
-    mentions: message.mentions,
-    timestamp: message.timestamp,
-    ...(message.editedAt ? { editedAt: message.editedAt } : {}),
-    ...(message.origin ? { origin: message.origin } : {}),
-  };
-}
-
 function shouldEmitTaskAttention(previous: TaskItem | null, current: TaskItem): boolean {
   if (current.kind === 'pr_tracking') return false;
   if (!current.userId) return false;
@@ -358,63 +335,6 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return task;
   }
 
-  async function ensureTaskDiscussionThread(
-    task: TaskItem,
-    options: { userId?: string; broadcastUpdate?: boolean } = {},
-  ): Promise<{ threadId: string; sourceMessage: ReturnType<typeof toTaskThreadMessage>; task: TaskItem }> {
-    if (task.taskThreadId) {
-      const existingThread = await threadStore.get(task.taskThreadId);
-      if (existingThread) {
-        const messages = await messageStore.getByThread(task.taskThreadId, 100);
-        const sourceMessage = messages[0];
-        if (sourceMessage) {
-          return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task };
-        }
-      }
-    }
-
-    const parentThread = await threadStore.get(task.threadId);
-    const userId = options.userId ?? task.userId ?? parentThread?.createdBy ?? 'default-user';
-    const taskThread = await threadStore.create(userId, formatTaskThreadTitle(task.title), parentThread?.projectPath);
-
-    if (parentThread?.participants?.length) {
-      await threadStore.addParticipants(taskThread.id, parentThread.participants);
-    }
-
-    const originalSource = task.sourceMessageId ? await messageStore.getById(task.sourceMessageId) : null;
-    const sourceMessage = await messageStore.append({
-      userId: originalSource?.userId ?? userId,
-      catId: originalSource?.catId ?? null,
-      content: originalSource?.content ?? formatTaskSourceContent(task),
-      mentions: originalSource?.mentions ? [...originalSource.mentions] : [],
-      timestamp: originalSource?.timestamp ?? task.createdAt,
-      threadId: taskThread.id,
-      ...(originalSource?.contentBlocks ? { contentBlocks: originalSource.contentBlocks } : {}),
-      ...(originalSource?.metadata ? { metadata: originalSource.metadata } : {}),
-      ...(originalSource?.origin ? { origin: originalSource.origin } : {}),
-      ...(originalSource?.source ? { source: originalSource.source } : {}),
-    });
-
-    const updated = await taskStore.update(task.id, {
-      taskThreadId: taskThread.id,
-      ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-    });
-    if (updated && options.broadcastUpdate !== false) {
-      socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', updated);
-    }
-
-    return {
-      threadId: taskThread.id,
-      sourceMessage: toTaskThreadMessage(sourceMessage),
-      task:
-        updated ?? {
-          ...task,
-          taskThreadId: taskThread.id,
-          ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-        },
-    };
-  }
-
   function requireUserId(request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply): string | null {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -435,7 +355,13 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     const created = await taskStore.create(toCreateInput(result.data));
     const task =
       created.kind === 'work'
-        ? (await ensureTaskDiscussionThread(created, { userId: result.data.userId, broadcastUpdate: false })).task
+        ? (
+            await ensureTaskDiscussionThread(
+              created,
+              { taskStore, threadStore, messageStore, socketManager },
+              { userId: result.data.userId, broadcastUpdate: false },
+            )
+          ).task
         : created;
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
     await appendTaskCreateNotice(task, { fromSourceMessage: Boolean(result.data.sourceMessageId) });
@@ -650,7 +576,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Task not found' };
     }
 
-    return ensureTaskDiscussionThread(task, { userId: body.data.userId });
+    return ensureTaskDiscussionThread(task, { taskStore, threadStore, messageStore, socketManager }, { userId: body.data.userId });
   });
 
   // PATCH /api/tasks/:id

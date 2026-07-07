@@ -1853,6 +1853,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackTaskRoutes(app, {
       taskStore,
       socketManager,
+      messageStore,
       ...(threadStore ? { threadStore } : {}),
     });
   }

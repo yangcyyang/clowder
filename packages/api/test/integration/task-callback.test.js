@@ -12,6 +12,7 @@ import Fastify from 'fastify';
 
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
+const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
@@ -34,12 +35,14 @@ describe('Task Callback Integration', () => {
   let registry;
   let messageStore;
   let taskStore;
+  let threadStore;
   let socketManager;
 
   beforeEach(() => {
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     taskStore = new TaskStore();
+    threadStore = new ThreadStore();
     socketManager = createMockSocketManager();
   });
 
@@ -50,6 +53,7 @@ describe('Task Callback Integration', () => {
       messageStore,
       socketManager,
       taskStore,
+      threadStore,
     });
     return app;
   }
@@ -274,11 +278,19 @@ describe('Task Callback Integration', () => {
     assert.equal(body.task.threadId, 'thread-1');
     assert.equal(body.task.createdBy, 'opus');
     assert.equal(body.task.status, 'todo');
+    assert.ok(body.task.taskThreadId, 'MCP-created work task should auto-create a discussion thread');
+    assert.ok(body.task.sourceMessageId, 'MCP-created discussion thread should backfill sourceMessageId');
+
+    const taskThreadMessages = await messageStore.getByThread(body.task.taskThreadId);
+    assert.equal(taskThreadMessages.length, 1);
+    assert.equal(taskThreadMessages[0].id, body.task.sourceMessageId);
+    assert.match(taskThreadMessages[0].content, /📌 Task: Fix login bug/);
 
     const events = socketManager.getEvents();
     const createEvent = events.find((e) => e.event === 'task_created');
     assert.ok(createEvent, 'task_created event should be broadcast');
     assert.equal(createEvent.room, 'thread:thread-1');
+    assert.equal(createEvent.data.taskThreadId, body.task.taskThreadId);
   });
 
   test('MCP create-task rejects invalid credentials', async () => {
