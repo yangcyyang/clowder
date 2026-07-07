@@ -11,7 +11,7 @@
     "build": "next build",
     "prestart": "pnpm run sync:vendor-assets && ${NODE:-node} scripts/ensure-production-build.mjs",
     "start": "next start",
-    "start:pm2": "pnpm run prestart && next start -p 3003 -H 0.0.0.0",
+    "start:pm2": "pnpm run prestart && next start . -p 3003 -H 0.0.0.0",
     "lint": "next lint",
     "test": "node scripts/run-with-node-env-test.mjs pnpm exec vitest run && node scripts/run-with-node-env-test.mjs node --test test/next-config.test.cjs test/ensure-production-build.test.mjs && node eslint-plugins/no-hardcoded-colors.test.js",
     "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js"
