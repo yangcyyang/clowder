@@ -64,6 +64,10 @@ import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAudi
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { autoUpdateAgentMemory } from '../memory/AgentMemoryAutoWriter.js';
 import {
+  inferResumeTrustForSessionHandoff,
+  writeContextHandoffForPromptProjects,
+} from '../memory/ProjectProgressStore.js';
+import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
@@ -218,6 +222,7 @@ function registerProxyUpstream(projectRoot: string, slug: string, targetUrl: str
 const _prevContextFill = new Map<string, number>();
 const _needsReinjection = new Set<string>();
 const _staticIdentityRegistryRevision = new Map<string, number>();
+const _handoffDraftWindowSessions = new Set<string>();
 
 /** @internal Exposed for testing */
 export function _resetCompressionDetection(): void {
@@ -1663,11 +1668,62 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                       case 'none':
                         break;
                       case 'warn':
-                        // warn is already emitted via context_health system_info above
+                        // Warn is already emitted via context_health; add a one-shot handoff draft marker.
+                        if (activeRecord && !_handoffDraftWindowSessions.has(activeRecord.id)) {
+                          _handoffDraftWindowSessions.add(activeRecord.id);
+                          outputs.push({
+                            type: 'system_info' as const,
+                            catId,
+                            content: JSON.stringify({
+                              type: 'handoff_draft_window',
+                              catId,
+                              sessionId: activeRecord.id,
+                              threadId,
+                              healthSnapshot: health,
+                              trust: inferResumeTrustForSessionHandoff({
+                                reason: 'warn_threshold',
+                                session: activeRecord,
+                                hasVerifyEvidence: true,
+                              }),
+                            }),
+                            timestamp: Date.now(),
+                          });
+                        }
                         break;
                       case 'seal':
                       case 'seal_after_compress': {
                         if (activeRecord) {
+                          let handoffWrite: Awaited<ReturnType<typeof writeContextHandoffForPromptProjects>>;
+                          try {
+                            handoffWrite = await writeContextHandoffForPromptProjects({
+                              threadId,
+                              catId: catId as string,
+                              fromSessionId: activeRecord.id,
+                              reason: action.reason,
+                              trust: inferResumeTrustForSessionHandoff({
+                                reason: action.reason,
+                                session: activeRecord,
+                                hasVerifyEvidence: true,
+                              }),
+                              health,
+                              source: 'runtime-threshold',
+                            });
+                          } catch (err) {
+                            outputs.push({
+                              type: 'system_info' as const,
+                              catId,
+                              content: JSON.stringify({
+                                type: 'session_handoff_write_failed',
+                                catId,
+                                sessionId: activeRecord.id,
+                                threadId,
+                                reason: action.reason,
+                                error: err instanceof Error ? err.message : String(err),
+                              }),
+                              timestamp: Date.now(),
+                            });
+                            break;
+                          }
                           const sealResult = await deps.sessionSealer.requestSeal({
                             sessionId: activeRecord.id,
                             reason: action.reason,
@@ -1697,6 +1753,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                                 sessionSeq: activeRecord.seq + 1,
                                 reason: action.reason,
                                 healthSnapshot: health,
+                                handoffWrite,
                                 ...(continuityCapsule
                                   ? {
                                       continuityCapsule,

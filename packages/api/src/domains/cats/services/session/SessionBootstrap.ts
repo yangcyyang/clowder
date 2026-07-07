@@ -16,6 +16,7 @@ import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
+import { readProjectHandoffIndexesForBootstrap } from '../agents/memory/ProjectProgressStore.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
 
@@ -101,8 +102,18 @@ export async function buildSessionBootstrap(
   );
 
   // Build sections separately for section-aware token cap (AC-5, R4 P1-1)
-  // Priority: identity (always keep) > tools (always keep) > threadMemory > digest > task snapshot
+  // Priority: identity (always keep) > durable project handoff > tools (always keep) > threadMemory > digest > task snapshot
   const identitySection = parts.join('\n');
+
+  let projectHandoffSection = '';
+  try {
+    const projectHandoffs = await readProjectHandoffIndexesForBootstrap();
+    if (projectHandoffs) {
+      projectHandoffSection = `\n[Durable Project Handoff — read before compressed session summary]\n${projectHandoffs}`;
+    }
+  } catch {
+    // best-effort; a missing project handoff must not block bootstrap
+  }
 
   // F065 Phase B: Thread Memory (rolling summary across sealed sessions)
   let threadMemorySection = '';
@@ -223,7 +234,7 @@ export async function buildSessionBootstrap(
 
   // Section-aware token cap (AC-5): identity + tools are always kept.
   // Drop order: task snapshot (lowest) → digest → threadMemory (highest variable priority).
-  const baseTokens = estimateTokens(identitySection + toolsSection);
+  const baseTokens = estimateTokens(identitySection + projectHandoffSection + toolsSection);
   const remainingBudget = MAX_BOOTSTRAP_TOKENS - baseTokens;
 
   const tmTokens = hasThreadMemory ? estimateTokens(threadMemorySection) : 0;
@@ -256,7 +267,8 @@ export async function buildSessionBootstrap(
     }
   }
 
-  const text = identitySection + threadMemorySection + recallSection + digestSection + taskSection + toolsSection;
+  const text =
+    identitySection + projectHandoffSection + threadMemorySection + recallSection + digestSection + taskSection + toolsSection;
 
   return {
     text,

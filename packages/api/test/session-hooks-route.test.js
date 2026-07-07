@@ -4,6 +4,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
@@ -23,7 +26,7 @@ describe('Session Hooks Routes', () => {
 
   const DEFAULT_HOOK_TOKEN = 'test-hook-token';
 
-  async function setup({ digestMap, hookToken = DEFAULT_HOOK_TOKEN, noToken = false } = {}) {
+  async function setup({ digestMap, hookToken = DEFAULT_HOOK_TOKEN, noToken = false, projectRoot, projectIds } = {}) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const routeMod = await import('../dist/routes/session-hooks.js');
@@ -41,6 +44,8 @@ describe('Session Hooks Routes', () => {
       sessionSealer,
       transcriptReader,
       ...(noToken ? {} : { hookToken }),
+      ...(projectRoot ? { projectRoot } : {}),
+      ...(projectIds ? { projectIds } : {}),
     });
     await app.ready();
     return { app, sessionChainStore, sessionSealer, hookToken };
@@ -76,6 +81,70 @@ describe('Session Hooks Routes', () => {
       assert.equal(body.threadId, 'thread-1');
       assert.equal(body.catId, 'opus');
       assert.ok(body.sessionId);
+    });
+
+    it('writes durable project handoff before sealing active session', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'session-hooks-handoff-'));
+      try {
+        await mkdir(join(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+        const { app, sessionChainStore } = await setup({ projectRoot: root, projectIds: ['demo'] });
+        const record = sessionChainStore.create({
+          cliSessionId: 'cli-handoff-write',
+          threadId: 'thread-handoff-write',
+          catId: 'opus',
+          userId: 'user-handoff-write',
+        });
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/sessions/seal',
+          headers: authHeaders(),
+          payload: { cliSessionId: 'cli-handoff-write', reason: 'claude-code-compact-auto' },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = JSON.parse(res.payload);
+        assert.equal(body.handoffWrite.written, 1);
+        assert.deepEqual(body.handoffWrite.projectIds, ['demo']);
+
+        const index = await readFile(join(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'), 'utf-8');
+        assert.match(index, /## /);
+        assert.match(index, /- \*\*What\*\*: Session .* reached context handoff boundary for @opus in thread thread-handoff-write\./);
+        assert.match(index, /- \*\*Trust\*\*: trusted/);
+        assert.match(index, new RegExp(`from-session: ${record.id}`));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('blocks sealing when durable project handoff write fails', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'session-hooks-handoff-fail-'));
+      try {
+        const projectDir = join(root, '.cat-cafe', 'projects', 'demo');
+        await mkdir(join(projectDir, 'handoff-index.md'), { recursive: true });
+        const { app, sessionChainStore } = await setup({ projectRoot: root, projectIds: ['demo'] });
+        const record = sessionChainStore.create({
+          cliSessionId: 'cli-handoff-fail',
+          threadId: 'thread-handoff-fail',
+          catId: 'opus',
+          userId: 'user-handoff-fail',
+        });
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/sessions/seal',
+          headers: authHeaders(),
+          payload: { cliSessionId: 'cli-handoff-fail', reason: 'claude-code-compact-auto' },
+        });
+
+        assert.equal(res.statusCode, 409);
+        const body = JSON.parse(res.payload);
+        assert.match(body.error, /Project handoff write failed/);
+        const current = await sessionChainStore.get(record.id);
+        assert.equal(current.status, 'active', 'handoff failure must not transition session to sealing');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     });
 
     it('returns 404 for unknown cliSessionId', async () => {

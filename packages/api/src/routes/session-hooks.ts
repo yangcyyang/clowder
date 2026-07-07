@@ -16,6 +16,10 @@ import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { getSessionStrategy } from '../config/session-strategy.js';
 import {
+  inferResumeTrustForSessionHandoff,
+  writeContextHandoffForPromptProjects,
+} from '../domains/cats/services/agents/memory/ProjectProgressStore.js';
+import {
   completeCapsuleForCompact,
   isCollaborationContinuityCapsuleV1,
 } from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
@@ -40,6 +44,8 @@ interface SessionHooksRouteOptions extends FastifyPluginOptions {
   transcriptReader: TranscriptReader;
   /** Shared secret for hook authentication. If set, X-Cat-Cafe-Hook-Token header is required. */
   hookToken?: string;
+  projectRoot?: string;
+  projectIds?: string[];
 }
 
 export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHooksRouteOptions): Promise<void> {
@@ -149,6 +155,31 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     // Determine seal reason: hybrid over max → 'max_compressions', otherwise use hook reason
     const sealReason = strategy.strategy === 'hybrid' ? 'max_compressions' : reason;
 
+    let handoffWrite: Awaited<ReturnType<typeof writeContextHandoffForPromptProjects>>;
+    try {
+      handoffWrite = await writeContextHandoffForPromptProjects(
+        {
+          threadId: record.threadId,
+          catId: record.catId,
+          fromSessionId: record.id,
+          reason: sealReason,
+          trust: inferResumeTrustForSessionHandoff({ reason: sealReason, session: record, hasVerifyEvidence: true }),
+          health: record.contextHealth,
+          source: 'precompact-hook',
+        },
+        opts.projectIds,
+        opts.projectRoot,
+      );
+    } catch (err) {
+      reply.status(409);
+      return {
+        error: 'Project handoff write failed; refusing to seal session',
+        sessionId: record.id,
+        reason: sealReason,
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+
     const sealResult = await sessionSealer.requestSeal({
       sessionId: record.id,
       reason: sealReason,
@@ -173,6 +204,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       threadId: record.threadId,
       catId: record.catId,
       status: 'sealing',
+      handoffWrite,
     });
   });
 

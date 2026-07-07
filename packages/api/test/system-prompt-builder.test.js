@@ -5,7 +5,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { describe, test } from 'node:test';
@@ -867,6 +867,71 @@ describe('SystemPromptBuilder', () => {
         'Should instruct agents to use handoff index before full handoffs',
       );
       assert.ok(!content?.includes('needs_brief'), 'Should not flag needs_brief when brief exists');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('writeContextHandoffForPromptProjects appends schema fields to handoff files', async () => {
+    const { writeContextHandoffForPromptProjects } = await import(
+      '../dist/domains/cats/services/agents/memory/ProjectProgressStore.js'
+    );
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-project-handoff-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+
+      const result = await writeContextHandoffForPromptProjects(
+        {
+          timestamp: '2026-07-07T22:00:00.000Z',
+          threadId: 'thread-1',
+          catId: 'codex',
+          fromSessionId: 'session-1',
+          reason: 'threshold',
+          trust: 'trusted',
+          health: {
+            usedTokens: 850,
+            windowTokens: 1000,
+            fillRatio: 0.85,
+            source: 'exact',
+            measuredAt: Date.now(),
+          },
+        },
+        ['demo'],
+        root,
+      );
+
+      assert.equal(result.written, 1);
+      const index = await readFile(resolve(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'), 'utf-8');
+      const log = await readFile(resolve(root, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'), 'utf-8');
+      for (const field of ['What', 'Why', 'Next', 'Blocker', 'Verify', 'Trust', 'refs']) {
+        assert.ok(index.includes(field), `handoff-index should include ${field}`);
+      }
+      assert.ok(index.includes('trusted'), 'handoff-index should include Resume Trust');
+      assert.ok(index.includes('from-session: session-1'), 'handoff-index should include from-session ref');
+      assert.ok(log.includes('context-threshold-handoff'), 'handoff-log should append automation event');
+      assert.ok(log.includes('85% (850/1000, exact)'), 'handoff-log should include health snapshot');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('readProjectHandoffIndexesForBootstrap returns durable handoff before session summary can be built', async () => {
+    const { readProjectHandoffIndexesForBootstrap } = await import(
+      '../dist/domains/cats/services/agents/memory/ProjectProgressStore.js'
+    );
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-project-bootstrap-handoff-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+      await writeFile(
+        resolve(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'),
+        '# Demo handoff\n\n- **Trust**: trusted\n- **Next**: continue bridge',
+        'utf-8',
+      );
+
+      const content = await readProjectHandoffIndexesForBootstrap(['demo'], root);
+      assert.ok(content?.startsWith('[Project Handoff Index'), 'Should expose handoff index as the first durable block');
+      assert.ok(content?.includes('continue bridge'), 'Should include handoff content');
+      assert.ok(content?.includes('reference only'), 'Should mark block as reference data');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

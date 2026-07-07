@@ -4939,6 +4939,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const root = await mkdtemp(join(tmpdir(), 'f062-exact-handoff-seal-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
+    await mkdir(join(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     setGlobalRoot(root);
     await createProviderProfile(root, {
@@ -5006,8 +5007,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const previousCwd = process.cwd();
     const previousProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+    const previousProjectIds = process.env.CAT_CAFE_PROJECT_CONTEXT_IDS;
     try {
       process.env.ANTHROPIC_PROXY_ENABLED = '0';
+      process.env.CAT_CAFE_PROJECT_CONTEXT_IDS = 'demo';
       process.chdir(apiDir);
       const msgs = await collect(
         invokeSingleCat(deps, {
@@ -5029,12 +5032,20 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }
       });
       assert.ok(sealEvent, 'should emit session_seal_requested in handoff mode');
+      const sealPayload = JSON.parse(sealEvent.content);
+      assert.equal(sealPayload.handoffWrite.written, 1, 'should write durable project handoff before seal');
       assert.equal(sealRequests.length, 1, 'should request seal in handoff mode');
+
+      const handoffIndex = await readFile(join(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'), 'utf-8');
+      assert.match(handoffIndex, /- \*\*Trust\*\*: trusted/);
+      assert.match(handoffIndex, /from-session: sess-exact-handoff-seal/);
     } finally {
       process.chdir(previousCwd);
       restoreGlobalRoot();
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      if (previousProjectIds === undefined) delete process.env.CAT_CAFE_PROJECT_CONTEXT_IDS;
+      else process.env.CAT_CAFE_PROJECT_CONTEXT_IDS = previousProjectIds;
       _clearTestStrategyOverrides();
       await rmWithRetry(root);
     }
