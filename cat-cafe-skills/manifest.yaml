@@ -642,6 +642,34 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── Obsidian 知识库连接 ──
+  obsidian-connector:
+    description: >
+      将 Obsidian vault 接入 Clowder，使其成为 Agent 可检索的只读知识库。
+      Use when: 用户说“连接 400 知识库”“关联 Obsidian”“接入知识库”“加载 Obsidian”“绑定 Obsidian vault”等。
+      Not for: 关联外部 skill（用 skill-linker）、修改 skill 内容（用 writing-skills）、写入 Obsidian（本 skill 只读不接写回）。
+      Output: `.env` 中写入 `OBSIDIAN_READONLY_ROOTS` 配置 + 重启 API 提示 + 验证是否生效。
+      GOTCHA: 环境变量写入后必须重启 `clowder-api` 才生效；不会自动扫描子 vault，需要为每个 vault 单独配置一行。
+    triggers:
+      - "连接 400 知识库"
+      - "关联 Obsidian"
+      - "接入知识库"
+      - "加载 Obsidian"
+      - "绑定 Obsidian"
+      - "连接 Obsidian"
+      - "接入 Obsidian"
+      - "关联 400知识库"
+      - "Obsidian 只读"
+      - "知识库接入 Clowder"
+    not_for:
+      - "关联外部 skill"
+      - "修改 skill 内容"
+      - "写入 Obsidian"
+    output: ".env config + API restart notice + verification"
+    next: []
+    sop_step: null
+    merged_from: null
+
   # ── 开源项目拆解 ──
   open-source-teardown:
     description: >
