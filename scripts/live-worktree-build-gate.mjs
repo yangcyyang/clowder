@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
+import { dirname, resolve, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
@@ -34,20 +34,38 @@ for (let index = 0; index < args.length; index += 1) {
 
 const command = commandIndex >= 0 ? args.slice(commandIndex + 1) : [];
 
-function runGit(argsForGit) {
+function runGit(argsForGit, cwd = process.cwd()) {
   return spawnSync('git', argsForGit, {
-    cwd: process.cwd(),
+    cwd,
     encoding: 'utf8',
   });
 }
 
-const rootResult = runGit(['rev-parse', '--show-toplevel']);
-if (rootResult.status !== 0) {
+function findClowderRepoRoot(startDir) {
+  let current = resolve(startDir);
+  while (true) {
+    if (
+      existsSync(resolve(current, 'pnpm-workspace.yaml')) &&
+      existsSync(resolve(current, 'ecosystem.config.cjs'))
+    ) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+const markerRoot = findClowderRepoRoot(process.cwd());
+const rootResult = markerRoot ? null : runGit(['rev-parse', '--show-toplevel']);
+if (!markerRoot && rootResult?.status !== 0) {
   console.error('[live-build-gate] current directory is not inside a git worktree');
   process.exit(1);
 }
 
-const repoRoot = rootResult.stdout.trim();
+const repoRoot = markerRoot ?? rootResult.stdout.trim();
 const statusResult = spawnSync('git', ['status', '--porcelain=v1', '-uall'], {
   cwd: repoRoot,
   encoding: 'utf8',

@@ -22,6 +22,8 @@ function initRepo() {
   run(['git', 'config', 'user.email', 'test@example.com'], dir);
   run(['git', 'config', 'user.name', 'Test User'], dir);
   mkdirSync(join(dir, 'packages', 'api', 'dist'), { recursive: true });
+  writeFileSync(join(dir, 'ecosystem.config.cjs'), 'module.exports = {};\n');
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
   writeFileSync(join(dir, 'packages', 'api', 'src.txt'), 'clean\n');
   writeFileSync(join(dir, 'packages', 'api', 'dist', 'index.js'), 'good\n');
   run(['git', 'add', '.'], dir);
@@ -51,6 +53,22 @@ test('runs build command when worktree is clean', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(marker), true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('uses Clowder repo root markers instead of nested package git metadata', () => {
+  const repo = initRepo();
+  try {
+    const packageDir = join(repo, 'packages', 'api');
+    run(['git', 'init'], packageDir);
+    writeFileSync(join(repo, 'packages', 'api', 'src.txt'), 'dirty\n');
+
+    const result = gate(packageDir, ['--artifact', 'dist/index.js', '--check-only']);
+
+    assert.equal(result.status, 10, result.stderr);
+    assert.match(result.stderr, /packages\/api\/src\.txt/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
