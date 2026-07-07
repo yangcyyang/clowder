@@ -35,7 +35,7 @@ module.exports = {
       name: 'clowder-api',
       cwd: `${__dirname}/packages/api`,
       script: pnpmBin,
-      args: 'run dev',
+      args: 'run start:pm2',
       interpreter: stableNode,
       env: stableEnv,
       watch: false,

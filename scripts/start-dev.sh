@@ -1116,8 +1116,46 @@ run_logged_step() {
     fi
 }
 
+live_build_gate_check() {
+    local status
+    set +e
+    node "$PROJECT_DIR/scripts/live-worktree-build-gate.mjs" \
+        --artifact packages/shared/dist/index.js \
+        --artifact packages/mcp-server/dist/index.js \
+        --artifact packages/api/dist/index.js \
+        --artifact packages/web/.next/BUILD_ID \
+        --check-only
+    status=$?
+    set -e
+
+    case "$status" in
+        0)
+            return 0
+            ;;
+        10)
+            return 10
+            ;;
+        *)
+            exit "$status"
+            ;;
+    esac
+}
+
 # 构建 shared + MCP + API (tsc)；--prod-web 时额外构建 Frontend
 build_packages() {
+    if [ "$PROD_WEB" = true ]; then
+        local gate_status
+        set +e
+        live_build_gate_check
+        gate_status=$?
+        set -e
+        if [ "$gate_status" -eq 10 ]; then
+            echo ""
+            echo -e "${YELLOW}跳过生产构建：工作区有未提交的运行时代码改动，继续使用上一份 good 构建产物${NC}"
+            return 0
+        fi
+    fi
+
     echo ""
     echo -e "${CYAN}构建 shared...${NC}"
     run_logged_step "shared 构建" 3 run_in_dir "$PROJECT_DIR/packages/shared" pnpm run build
