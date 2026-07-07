@@ -164,6 +164,7 @@ import {
   leaderboardEventsRoutes,
   leaderboardRoutes,
   libraryRoutes,
+  localCliProbesRoutes,
   memoryPublishRoutes,
   memoryRoutes,
   messageActionsRoutes,
@@ -1762,6 +1763,7 @@ async function main(): Promise<void> {
   await app.register(projectsRoutes);
   await app.register(mkdirRoute);
   await app.register(agentHooksRoutes);
+  await app.register(localCliProbesRoutes);
   await app.register(governanceStatusRoute);
   await app.register(projectSetupRoute, {
     memoryBootstrapService: expeditionBootstrapService as { bootstrap: (p: string, o?: unknown) => Promise<unknown> },

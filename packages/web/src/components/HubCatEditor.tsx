@@ -27,7 +27,14 @@ import {
   toStrategyForm,
   withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
-import { AccountSection, AssetCardSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
+import {
+  AccountSection,
+  AssetCardSection,
+  IdentitySection,
+  LocalCliProbeSection,
+  type LocalCliProbeResult,
+  RoutingSection,
+} from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import type { CatStrategyEntry } from './hub-strategy-types';
@@ -49,6 +56,10 @@ type ModelOptionsByClient = Partial<Record<HubCatEditorFormState['clientId'], st
 
 interface CatModelOptionsResponse {
   clients?: Partial<Record<HubCatEditorFormState['clientId'], string[] | { models?: string[] }>>;
+}
+
+interface LocalCliProbesResponse {
+  clis?: LocalCliProbeResult[];
 }
 
 function parseModelOptionsResponse(body: CatModelOptionsResponse): ModelOptionsByClient {
@@ -107,6 +118,9 @@ export function HubCatEditor({
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
   const [modelOptionsByClient, setModelOptionsByClient] = useState<ModelOptionsByClient>({});
+  const [localCliProbes, setLocalCliProbes] = useState<LocalCliProbeResult[] | null>(null);
+  const [scanningLocalClis, setScanningLocalClis] = useState(false);
+  const [localCliProbeError, setLocalCliProbeError] = useState<string | null>(null);
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
@@ -139,6 +153,9 @@ export function HubCatEditor({
     setError(null);
     setStrategyError(null);
     setCodexSettingsError(null);
+    setLocalCliProbes(null);
+    setLocalCliProbeError(null);
+    setScanningLocalClis(false);
     setStrategyBaselineHasOverride(false);
     setCodexSettingsBaseline(null);
     setSelectedTemplateId('custom');
@@ -460,6 +477,42 @@ export function HubCatEditor({
     }
   };
 
+  const handleProbeLocalClis = async () => {
+    if (scanningLocalClis) return;
+    setScanningLocalClis(true);
+    setLocalCliProbeError(null);
+    try {
+      const res = await apiFetch('/api/local-cli-probes');
+      const payload = (await res.json().catch(() => ({}))) as LocalCliProbesResponse & { error?: string };
+      if (!res.ok) {
+        setLocalCliProbeError(payload.error ?? `CLI 探测失败 (${res.status})`);
+        return;
+      }
+      setLocalCliProbes(payload.clis ?? []);
+    } catch (err) {
+      setLocalCliProbeError(err instanceof Error ? err.message : 'CLI 探测失败');
+    } finally {
+      setScanningLocalClis(false);
+    }
+  };
+
+  const handleAdoptLocalCli = (probe: LocalCliProbeResult) => {
+    if (!probe.clientId) return;
+    const availableForClient = filterAccounts(probe.clientId, profiles);
+    const preferredBuiltin = builtinAccountIdForClient(probe.clientId);
+    const accountRef =
+      (preferredBuiltin ? availableForClient.find((profile) => profile.id === preferredBuiltin)?.id : undefined) ??
+      availableForClient[0]?.id ??
+      '';
+    patchForm({
+      clientId: probe.clientId,
+      accountRef,
+      defaultModel: probe.defaultModel ?? '',
+      provider: '',
+      cliEffort: '',
+    });
+  };
+
   const handleSave = async () => {
     const errors: Record<string, boolean> = {};
     const errorMessages: string[] = [];
@@ -760,6 +813,13 @@ export function HubCatEditor({
         availableProfiles={availableProfiles}
         loadingProfiles={loadingProfiles}
         onChange={patchForm}
+      />
+      <LocalCliProbeSection
+        probes={localCliProbes}
+        scanning={scanningLocalClis}
+        error={localCliProbeError}
+        onScan={handleProbeLocalClis}
+        onAdopt={handleAdoptLocalCli}
       />
       <RoutingSection
         form={form}

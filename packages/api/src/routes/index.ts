@@ -36,6 +36,7 @@ export { knowledgeRoutes } from './knowledge.js';
 export { leaderboardRoutes } from './leaderboard.js';
 export { leaderboardEventsRoutes } from './leaderboard-events.js';
 export { libraryRoutes } from './library.js';
+export { localCliProbesRoutes } from './local-cli-probes.js';
 export { memoryRoutes } from './memory.js';
 export { memoryPublishRoutes } from './memory-publish.js';
 export { messageActionsRoutes } from './message-actions.js';
