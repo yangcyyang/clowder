@@ -619,4 +619,70 @@ This opt-in trusts browsers from RFC 1918 private networks (`10.x.x.x`, `172.16-
 **Frontend can't connect to API?**
 - For local dev, `NEXT_PUBLIC_API_URL=http://localhost:3004` should be in `.env`
 - Behind a reverse proxy, the frontend auto-detects the API at the same origin — make sure Nginx proxies `/api/` and `/socket.io/` to port 3004
+
+## First-Run Special Notes
+
+The following 3 issues are the most common new-user pain points during a clean install, listed in order of appearance:
+
+### 1. Log shows "TELEMETRY_HMAC_SALT is required" after startup
+
+**Symptom**: After `pnpm start`, the API log shows `OTel SDK disabled: HMAC salt validation failed` or `TELEMETRY_HMAC_SALT is required in non-dev environments`.
+
+**Root cause**: The OpenTelemetry telemetry system needs an HMAC salt to pseudonymize system IDs. Development environments (`NODE_ENV=development`) automatically fall back to an insecure salt and continue running; if `NODE_ENV` is unset or set to production, the missing salt disables OTel.
+
+**Fix**:
+```bash
+# Option A (recommended): explicitly set a random salt in .env
+TELEMETRY_HMAC_SALT=$(openssl rand -hex 16)
+echo "TELEMETRY_HMAC_SALT=$TELEMETRY_HMAC_SALT" >> .env
+
+# Option B: if you don't need telemetry, disable OTel entirely (zero overhead)
+OTEL_SDK_DISABLED=true
+```
+
+**Pre-configure required?** Yes — recommended to add `TELEMETRY_HMAC_SALT` right after `cp .env.example .env`.
+
+---
+
+### 2. Feishu/WeChat images or voice messages fail to download
+
+**Symptom**: After configuring the Feishu or WeChat connector, images/voice messages show `ENOENT: no such file or directory` or connector logs show media download failures.
+
+**Root cause**: `ConnectorMediaService` automatically creates the `data/connector-media` directory on the **first download**, not at startup. Pre-creating the directory makes the first connector media download easier to verify and avoids permission surprises.
+
+**Fix**:
+```bash
+# Pre-create the directory once before startup
+mkdir -p data/connector-media
+
+# Or use a custom existing directory via .env
+CONNECTOR_MEDIA_DIR=/Users/you/clowder-media
+```
+
+**Pre-configure required?** Optional — the directory auto-creates on first download, but pre-creating is more reliable.
+
+---
+
+### 3. No cats (agents) visible on first Web UI launch
+
+**Symptom**: Opening `http://localhost:3003`, the sidebar or Hub → Members shows no cats; messages get no responses.
+
+**Root cause**: Clowder **does not ship with any member roster**. `cat-template.json` exists in the repo (as a breed definition template), but the runtime `.cat-cafe/cat-catalog.json` is excluded by `.gitignore` and not present in a clean clone. This is by design — no model credentials or member configs are pre-seeded for security.
+
+**Fix** (choose one):
+
+**Option A: Auto-detect local CLI (recommended, fastest)**
+1. Open Hub → System Settings → Account Configuration
+2. Add a provider account (Claude / GPT / Gemini, etc.)
+3. Go to Hub → Members → Overview, click "Add Member"
+4. Choose "Auto-detect" — the system scans locally authenticated CLI tools (`claude`, `codex`, `gemini`) and adds the corresponding cats in one click
+
+**Option B: Manual configuration**
+1. Hub → System Settings → Account Configuration → Add API Key account
+2. Hub → Members → Overview → Add Member → manually select breed and model
+
+> **This is not a bug, and they won't appear automatically** — you need to actively add your own AI team members. See the README "Adding Your AI Team Members" section for details.
+
+**Pre-configure required?** No — done via UI, no env changes needed.
+
 - API must be running before frontend loads

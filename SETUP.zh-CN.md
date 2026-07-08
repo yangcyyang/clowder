@@ -619,4 +619,70 @@ CORS_ALLOW_PRIVATE_NETWORK=true
 **前端连不上 API？**
 - 本地开发确认 `.env` 里有 `NEXT_PUBLIC_API_URL=http://localhost:3004`
 - 反向代理场景下前端会自动探测同源 API —— 确保 Nginx 把 `/api/` 和 `/socket.io/` 代理到 3004 端口
+
+## 首次启动特别注意事项
+
+以下 3 个问题是 clean install（全新克隆）时最常见的新人卡点，按出现顺序排列：
+
+### 1. 启动后日志出现 "TELEMETRY_HMAC_SALT is required"
+
+**现象**：`pnpm start` 后 API 日志出现 `OTel SDK disabled: HMAC salt validation failed` 或 `TELEMETRY_HMAC_SALT is required in non-dev environments`。
+
+**根因**：遥测系统（OpenTelemetry）需要 HMAC salt 对系统 ID 做伪名化。开发环境（`NODE_ENV=development`）会自动 fallback 到 insecure salt，不影响运行；但如果 `NODE_ENV` 未设置或被设为 production，salt 缺失会禁用 OTel。
+
+**解决**：
+```bash
+# 方案 A（推荐）：在 .env 里显式设置一个随机 salt
+TELEMETRY_HMAC_SALT=$(openssl rand -hex 16)
+echo "TELEMETRY_HMAC_SALT=$TELEMETRY_HMAC_SALT" >> .env
+
+# 方案 B：如果不需要遥测，直接禁用 OTel（零开销）
+OTEL_SDK_DISABLED=true
+```
+
+**是否需要提前配置**：是，建议在 `cp .env.example .env` 后顺手加上 `TELEMETRY_HMAC_SALT`。
+
+---
+
+### 2. 飞书/微信图片或语音消息下载失败
+
+**现象**：配置了飞书或微信 connector 后，收到图片/语音消息时 API 报错 `ENOENT: no such file or directory` 或 connector 日志显示媒体下载失败。
+
+**根因**：ConnectorMediaService 在**首次下载**时才会自动创建 `data/connector-media` 目录，不是在启动时创建。提前创建目录更方便验证 connector 媒体下载链路，也能避免权限配置带来的意外。
+
+**解决**：
+```bash
+# 启动前手动创建目录（一次性）
+mkdir -p data/connector-media
+
+# 或自定义到已有目录，在 .env 里设置
+CONNECTOR_MEDIA_DIR=/Users/you/clowder-media
+```
+
+**是否需要提前配置**：可选。如果不配，首次下载时也会自动创建；手动创建更稳、更容易排查权限问题。
+
+---
+
+### 3. 首次启动 Web UI 看不到任何猫（Agent 成员）
+
+**现象**：打开 `http://localhost:3003`，侧边栏或 Hub → 成员协作 里没有任何猫，发消息也无人响应。
+
+**根因**：Clowder **不内置任何成员名册**。`cat-template.json` 在仓库里存在（作为 breed 定义模板），但运行时需要的 `.cat-cafe/cat-catalog.json` 被 `.gitignore` 排除，clean clone 不会自带。这是安全设计——不替你预置任何模型凭证或成员配置。
+
+**解决**（二选一）：
+
+**方式 A：自动探测本机 CLI（推荐，最快）**
+1. 打开 Hub → 系统配置 → 账号配置
+2. 添加 provider 账号（Claude / GPT / Gemini 等）
+3. 进入 Hub → 成员协作 → 总览，点击 "添加成员"
+4. 选择 "自动探测"——系统会扫描本机已认证的 CLI 工具（`claude`、`codex`、`gemini`），一键添加对应猫
+
+**方式 B：手动配置**
+1. Hub → 系统配置 → 账号配置 → 添加 API Key 账号
+2. Hub → 成员协作 → 总览 → 添加成员 → 手动选择 breed 和模型
+
+> **不是 bug，也不是等它自动出现**——你需要主动添加自己的 AI 团队成员。详见 README 的「添加你的 AI 团队成员」章节。
+
+**是否需要提前配置**：否，通过 UI 操作，无需改 env。
+
 - API 必须在前端加载前启动
