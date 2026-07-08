@@ -447,6 +447,15 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 >
 > **Cats & U — 猫猫和你，一起创造，一起生活。**
 
+## 致谢
+
+Clowder AI 基于以下项目与实践演进：
+
+- **[Clowder AI](https://github.com/zts212653/clowder-ai)** — 原始项目与 Cat Cafe 实践基础
+- **[Slock](https://github.com/sst/slock)** — Web UI 基础框架
+- **[Claude Code](https://docs.anthropic.com/claude-code)** — Agent 基础设施
+- **[gstack](https://github.com/)** — Skills 框架参考
+
 ## 了解更多
 
 - **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
