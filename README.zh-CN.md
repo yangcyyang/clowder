@@ -447,6 +447,15 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 >
 > **Cats & U — 猫猫和你，一起创造，一起生活。**
 
+## 致谢
+
+本项目基于以下开源项目改造：
+
+- **[clowder-ai (zts212653)](https://github.com/zts212653/clowder-ai)** — 上游基础项目 / fork 源（Build AI teams, not just agents）
+- **[Slock](https://slock.ai)** — WebUI 布局与交互设计参考
+- **[Claude Code](https://docs.anthropic.com/claude-code)** — Agent 基础设施与工具调用模式
+- **[gstack](https://github.com/)** — Skills 框架参考
+
 ## 了解更多
 
 - **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
@@ -468,17 +477,6 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 [MIT](LICENSE) — 随便用，随便改，随便发。保留版权声明即可。
 
 "Clowder AI" 名称、logo 及猫猫角色设计为品牌资产 — 详见 [TRADEMARKS.md](TRADEMARKS.md)。
-
----
-
-## 致谢
-
-本项目基于以下开源项目改造：
-
-- **[clowder-ai (zts212653)](https://github.com/zts212653/clowder-ai)** — 上游基础项目 / fork 源（Build AI teams, not just agents）
-- **[Slock](https://slock.ai)** — WebUI 布局与交互设计参考
-- **[Claude Code](https://docs.anthropic.com/claude-code)** — Agent 基础设施与工具调用模式
-- **[gstack](https://github.com/)** — Skills 框架参考
 
 ---
 
