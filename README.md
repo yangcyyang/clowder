@@ -22,7 +22,7 @@
 | **跨模型 Review** | Claude 写代码，GPT review，内置流程不是拼接 |
 | **A2A 通信** | @mention 路由、thread 隔离、结构化交接（五件套） |
 | **共享记忆** | Evidence store、教训沉淀、决策日志 |
-| **Skills 框架** | 按需加载专业技能（TDD/debugging/review），支持 359+ skills |
+| **Skills 框架** | 按需加载专业技能（TDD/debugging/review），支持 520+ skills |
 | **MCP 集成** | Model Context Protocol 工具共享，回调桥接支持非 Claude 模型 |
 | **协作纪律** | 自动化 SOP：设计门禁、质量检查、愿景守护、合并协议 |
 
@@ -35,6 +35,8 @@
 | Gemini CLI | Gemini | stream-json | ✅ | 已集成 |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | Multi-model | cdp-bridge | ❌ | 已集成 |
 | [opencode](https://github.com/sst/opencode) | Multi-model | ndjson | ✅ | 已集成 |
+| [Kimi CLI](https://www.kimi.com) | Kimi | stream-json | ✅ | 已集成 |
+| [OpenCLI](https://github.com/opencli) | Multi-model | json | ✅ | 已集成 |
 
 ---
 
@@ -42,7 +44,7 @@
 
 ### 前置要求
 
-- **Node.js 20+**
+- **Node.js 20+**（推荐 22 LTS）
 - **pnpm 9+**
 - **Redis 7+** *(可选，使用 `--memory` 跳过)*
 - **Git**
@@ -64,12 +66,16 @@ pnpm build
 cp .env.example .env
 # 编辑 .env 配置 Redis、API 端口等
 
+> **环境变量说明**：`TELEMETRY_HMAC_SALT`（生产环境必填，开发环境自动 fallback）、`REDIS_URL`（默认 `redis://localhost:6399`）、`CONNECTOR_MEDIA_DIR`（媒体存储目录，首次启动自动创建）。详见 [SETUP.md](SETUP.md)。
+
 # 5. 启动服务
 pnpm start
 
 # 访问 Web UI
 open http://localhost:3003
 ```
+
+> **首次启动看不到猫？** 正常。Clowder 不内置模型凭证（安全考虑），你需要添加自己的 API Key 或本地 CLI。系统会自动探测本机已安装的 Agent CLI（Claude Code、Codex、Gemini 等），一键添加成员。详见下方 [添加 AI 团队成员](#添加你的-ai-团队成员)。
 
 ### 启动脚本
 
@@ -226,6 +232,29 @@ tail -f .cat-cafe-web-restart.log
 # 刷新 skills dashboard
 技能看板刷新
 ```
+
+---
+
+## 添加你的 AI 团队成员
+
+首次启动后，Web UI 中默认看不到任何猫。需要添加成员：
+
+### 方式 A：自动探测（推荐）
+
+1. 打开 Web UI → 进入 **Hub → 系统配置 → 账号配置**
+2. 点击"探测本地 CLI"——系统会自动检测你已安装的 Agent CLI（Claude Code、Codex、Gemini 等）
+3. 勾选要添加的猫，一键加入团队
+
+**安全承诺**：探测只检查已知 CLI 的退出码，不读取任何凭证文件，不执行未知二进制。
+
+### 方式 B：手动添加
+
+1. 进入 **Hub → 系统配置 → 账号配置**
+2. 选择 Provider（Claude / OpenAI / Google 等）
+3. 填写 API Key 和模型信息
+4. 保存后猫会出现在聊天界面
+
+> **为什么需要这一步？** Clowder 不内置模型凭证（安全考虑），你需要提供自己的 API Key 或本地 CLI 路径。装上即用≠不需要配置——而是配置过程被简化为"探测 + 勾选"。
 
 ---
 

@@ -45,7 +45,7 @@
 | **跨模型互审** | Claude 写的代码让 GPT 来 review。内建机制，不是临时拼装 |
 | **A2A 通信** | 异步 agent 间消息 — @mention 路由、线程隔离、结构化交接 |
 | **共享记忆** | 证据库、教训沉淀、决策日志 — 团队的知识持续积累和成长 |
-| **Skills 框架** | 按需加载 prompt 系统。agent 需要时才加载专门技能（TDD、调试、审查） |
+| **Skills 框架** | 按需加载 prompt 系统。agent 需要时才加载专门技能（TDD、调试、审查），支持 520+ skills |
 | **MCP 集成** | Model Context Protocol 跨 agent 工具共享，含非 Claude 模型的回调桥接 |
 | **协作纪律** | 自动化 SOP：设计门禁、质量检查、愿景守护、合并协议 |
 
@@ -59,7 +59,9 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 | [Codex CLI](https://github.com/openai/codex) | GPT / Codex | json | 是 | 已发布 |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Gemini | stream-json | 是 | 已发布 |
 | [Antigravity](https://github.com/nolanzandi/antigravity-cli) | 多模型 | cdp-bridge | 否 | 已发布 |
-| [opencode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 已发布 |
+| [OpenCode](https://github.com/sst/opencode) | 多模型 | ndjson | 是 | 已发布 |
+| [Kimi CLI](https://www.kimi.com) | Kimi | stream-json | 是 | 已发布 |
+| [OpenCLI](https://github.com/opencli) | 多模型 | json | 是 | 已发布 |
 
 > Clowder 不替代你的 Agent CLI — 它是 CLI *之上*的那一层，让 agent 们作为团队协作。
 
@@ -77,7 +79,7 @@ Clowder 不绑定模型。当前支持的 Agent CLI：
 
 ### 方式 B：源码安装
 
-**前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
+**前置要求：** [Node.js 20+](https://nodejs.org/)（推荐 22 LTS）· [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
 
 ```bash
 # 1. 克隆
@@ -93,6 +95,8 @@ pnpm build
 # 4. 配置基础设施（API key 在启动后通过前端 UI 添加）
 cp .env.example .env
 
+> **环境变量说明**：`TELEMETRY_HMAC_SALT`（生产环境必填，开发环境自动 fallback）、`REDIS_URL`（默认 `redis://localhost:6399`）、`CONNECTOR_MEDIA_DIR`（媒体存储目录，首次启动自动创建）。详见 [SETUP.zh-CN.md](SETUP.zh-CN.md)。
+
 # 5. 启动（自动创建运行时 worktree，启动 Redis + API + 前端）
 pnpm start
 
@@ -107,6 +111,8 @@ pnpm stop
 ```
 
 打开 `http://localhost:3003` → 进入 **Hub → 系统配置 → 账号配置** 添加模型 API key（Claude、GPT、Gemini，或第三方 provider 如 Kimi、GLM、MiniMax）。
+
+> **首次启动看不到猫？** 正常。Clowder 不内置模型凭证（安全考虑），你需要添加自己的 API Key 或本地 CLI。系统会自动探测本机已安装的 Agent CLI（Claude Code、Codex、Gemini 等），一键添加成员。详见下方 [添加 AI 团队成员](#添加你的-ai-团队成员)。
 
 > **一键替代方案（Linux）：** `bash scripts/install.sh` 一步搞定 Node、pnpm、Redis、依赖、`.env` 和首次启动。可选参数：`--start`（自动启动）、`--memory`（跳过 Redis）、`--registry=URL`（国内镜像）。**Windows** 用户请使用 `scripts/install.ps1`，然后 `scripts/start-windows.ps1`。
 
@@ -325,6 +331,27 @@ https://github.com/user-attachments/assets/f49700cb-d8eb-44d5-bbe8-1666f1be8ad0
 https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 
 </details>
+
+## 添加你的 AI 团队成员
+
+首次启动后，Web UI 中默认看不到任何猫。需要添加成员：
+
+### 方式 A：自动探测（推荐）
+
+1. 打开 Web UI → 进入 **Hub → 系统配置 → 账号配置**
+2. 点击"探测本地 CLI"——系统会自动检测你已安装的 Agent CLI（Claude Code、Codex、Gemini 等）
+3. 勾选要添加的猫，一键加入团队
+
+**安全承诺**：探测只检查已知 CLI 的退出码，不读取任何凭证文件，不执行未知二进制。
+
+### 方式 B：手动添加
+
+1. 进入 **Hub → 系统配置 → 账号配置**
+2. 选择 Provider（Claude / OpenAI / Google 等）
+3. 填写 API Key 和模型信息
+4. 保存后猫会出现在聊天界面
+
+> **为什么需要这一步？** Clowder 不内置模型凭证（安全考虑），你需要提供自己的 API Key 或本地 CLI 路径。装上即用≠不需要配置——而是配置过程被简化为"探测 + 勾选"。
 
 ## 路线图
 
