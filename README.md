@@ -116,11 +116,12 @@ clowder-ai-cy/
 
 ### Skills 框架
 
-**359 个 skill** 分类：
-- **Clowder 专用（36）**：feat-lifecycle、tdd、quality-gate、merge-gate...
-- **个人主力（323）**：gsap-skills、guizang-social-card-skill...
+**520+ skills**，分为两类：
 
-访问 Skills Dashboard：http://localhost:3003/api/skills/dashboard
+- **Clowder 专用（48）**：feat-lifecycle、tdd、quality-gate、merge-gate...
+- **外部技能（475）**：通过 symlink 接入的社区技能库
+
+> Skills 数量会随本地技能库动态变化。运行后访问 Skills Dashboard 查看完整列表。
 
 ### A2A 协作协议
 
