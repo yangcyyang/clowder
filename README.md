@@ -277,9 +277,9 @@ MIT License - 详见 [LICENSE](LICENSE)
 ## 致谢
 
 基于以下项目改造：
-- [Clowder AI](https://github.com/zts212653/clowder-ai) - 原始项目与 Cat Cafe 实践基础
-- [Slock](https://github.com/sst/slock) - Webui 基础框架
-- [Claude Code](https://docs.anthropic.com/claude-code) - Agent 基础设施
+- [clowder-ai (zts212653)](https://github.com/zts212653/clowder-ai) - 上游基础项目 / fork 源（Build AI teams, not just agents）
+- [Slock](https://slock.ai) - WebUI 布局与交互设计参考
+- [Claude Code](https://docs.anthropic.com/claude-code) - Agent 基础设施与工具调用模式
 - [gstack](https://github.com/) - Skills 框架参考
 
 ---
