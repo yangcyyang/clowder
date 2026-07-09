@@ -43,7 +43,7 @@ find ~/Documents -maxdepth 3 -type d \( -name "*Obsidian*" -o -name "400知识�
 ### Step 2：检查现有配置
 
 ```bash
-grep -n "OBSIDIAN_READONLY_ROOTS" /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui/.env
+grep -n "OBSIDIAN_READONLY_ROOTS" ~/.slock/worktrees/clowder-ai-slock-like-webui/.env
 ```
 
 ### Step 3：写入配置
@@ -57,7 +57,7 @@ OBSIDIAN_READONLY_ROOTS="domain:COLLECTION_ID=/path/to/vault"
 示例：
 
 ```bash
-OBSIDIAN_READONLY_ROOTS="domain:400知识库=/Users/cy/Documents/03 life/AI design/OrbitOS-CN/400知识库"
+OBSIDIAN_READONLY_ROOTS="domain:400知识库=~/Documents/03 life/AI design/OrbitOS-CN/400知识库"
 ```
 
 多个 vault 用逗号分隔：

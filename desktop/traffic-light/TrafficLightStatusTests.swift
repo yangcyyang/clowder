@@ -25,7 +25,7 @@ struct TrafficLightStatusTests {
     assertEqual(codexRuntime.busyRuntimeCount, 0, "Low CPU runtime is present but not CPU-busy")
 
     let codexAppServerBusy = """
-       12.5 /Users/cy/.npm-global/bin/codex app-server --listen stdio://
+       12.5 ~/.npm-global/bin/codex app-server --listen stdio://
     """
     let appServerBusy = codexRuntimeSnapshot(from: codexAppServerBusy)
     assertEqual(appServerBusy.runtimeProcessCount, 1, "Busy Codex app-server should count as Codex activity source")

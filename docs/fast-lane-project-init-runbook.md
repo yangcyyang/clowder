@@ -56,7 +56,7 @@ CAT_CAFE_FAST_LANE=1
 示例：
 
 ```text
-/project-init wechat-cli --root "/Users/cy/Documents/03 life/AI design/产品项目/微信CLI" --creator yangcyyang --security
+/project-init wechat-cli --root "~/Documents/03 life/AI design/产品项目/微信CLI" --creator yangcyyang --security
 ```
 
 以下输入不会触发快车道，会回到 slow lane：

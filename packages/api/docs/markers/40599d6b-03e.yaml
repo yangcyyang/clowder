@@ -3,4 +3,4 @@ status: captured
 source: callback:kimi:f40627c0-fe47-407d-89b2-5edab326c243
 created_at: 2026-07-06T17:59:49.780Z
 content: |
-  用户建议 Clowder 频道初始化时应自动创建项目事实源五件套（brief/progress/decisions/handoff-index/handoff-log），位于 .cat-cafe/projects/<频道名>/。同时建议将 ai-project-workflow 的 Layer 2（系统代码理解：system-map/module-map/api-index）和 Layer 3（Review 引擎：diff-based review/风险评分/结构化输出）吸收进 Clowder project-workflow，以增强代码理解阶段和 review 阶段。已关联 ai-project-workflow skill（/Users/cy/Downloads/ai-project-workflow-skill-main 2）到 Clowder 供参考。
+  用户建议 Clowder 频道初始化时应自动创建项目事实源五件套（brief/progress/decisions/handoff-index/handoff-log），位于 .cat-cafe/projects/<频道名>/。同时建议将 ai-project-workflow 的 Layer 2（系统代码理解：system-map/module-map/api-index）和 Layer 3（Review 引擎：diff-based review/风险评分/结构化输出）吸收进 Clowder project-workflow，以增强代码理解阶段和 review 阶段。已关联 ai-project-workflow skill（~/Downloads/ai-project-workflow-skill-main 2）到 Clowder 供参考。

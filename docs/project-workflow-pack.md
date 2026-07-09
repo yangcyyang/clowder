@@ -8,7 +8,7 @@ updated: "2026-07-03"
 # Project Workflow Pack
 
 > Last updated: 2026-07-03
-> Source inspiration: `/Users/cy/Downloads/ai-project-workflow-skill-main`
+> Source inspiration: `~/Downloads/ai-project-workflow-skill-main`
 
 ## Goal
 
@@ -185,7 +185,7 @@ See [Clowder 权限边界两层说明](./security-permission-boundaries.md) for 
 Configure:
 
 ```bash
-OBSIDIAN_READONLY_ROOTS=domain:orbitos-knowledge=/Users/cy/Documents/03 life/AI design/OrbitOS-CN/400知识库
+OBSIDIAN_READONLY_ROOTS=domain:orbitos-knowledge=~/Documents/03 life/AI design/OrbitOS-CN/400知识库
 ```
 
 Behavior:

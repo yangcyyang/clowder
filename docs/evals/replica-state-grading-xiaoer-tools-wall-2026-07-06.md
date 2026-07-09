@@ -17,9 +17,9 @@ This is the first narrow B2/B4 eval slice: **website clone + outcome/state gradi
 It does not cover generic coding assertions or review-style LLM judging.
 
 Target case:
-- Clone repo: `/Users/cy/Projects/website-clones/xiaoer-tools-wall-clone/app`
+- Clone repo: `~/Projects/website-clones/xiaoer-tools-wall-clone/app`
 - Live page: `http://localhost:4173/`
-- Reference HTML: `/Users/cy/Documents/03 life/AI design/产品项目/clowder/tmp/xiaoer-tools-wall-data/index.html`
+- Reference HTML: `~/Documents/03 life/AI design/产品项目/clowder/tmp/xiaoer-tools-wall-data/index.html`
 
 ## Grader
 
@@ -47,7 +47,7 @@ Verdict: **PASS**
 
 Evidence:
 - page reachable: `status=200`, `bytes=251179`
-- target bound to commit: `localhost:4173 listener cwd=/Users/cy/Projects/website-clones/xiaoer-tools-wall-clone/app; commit=b190adf`
+- target bound to commit: `localhost:4173 listener cwd=~/Projects/website-clones/xiaoer-tools-wall-clone/app; commit=b190adf`
 - reference name coverage: `496/496 = 100.0%`
 - required signals: all hit
 
@@ -83,7 +83,7 @@ Two issues found during expert review are now covered:
 
 2. Fake target with real repo:
    - target: original HTML file outside the clone repo
-   - repo: `/Users/cy/Projects/website-clones/xiaoer-tools-wall-clone/app`
+   - repo: `~/Projects/website-clones/xiaoer-tools-wall-clone/app`
    - result: **FAIL**
    - blocking check: `target_bound_to_commit`
    - reason: `target file is outside repo`

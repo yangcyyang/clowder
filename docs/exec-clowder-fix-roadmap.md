@@ -32,7 +32,7 @@ context: "Clowder 体验层修复总执行方案（优先级 + 分阶段 + 落�
 ## P0：运行稳定性止血（最优先）
 - **问题**：机器有多个 node（.uclaw v22 / homebrew 25.6.x），PM2 在不对的 node 重启 → better-sqlite3 `ERR_DLOPEN_FAILED` → 反复重启；node 升级后 FDA 授权失效 → ~/Documents EPERM。
 - **落点**：PM2 ecosystem/interpreter 配置、`pnpm rebuild better-sqlite3`、macOS FDA。
-- **步骤**：①锁定 interpreter 为 `/Users/cy/.uclaw/node/bin/node`（稳定路径）②用该 node rebuild better-sqlite3 ③`pm2 delete + start` 重拉 ④给该 node 授 FDA ⑤启动自检(native module + 权限)失败给明确提示。
+- **步骤**：①锁定 interpreter 为 `~/.uclaw/node/bin/node`（稳定路径）②用该 node rebuild better-sqlite3 ③`pm2 delete + start` 重拉 ④给该 node 授 FDA ⑤启动自检(native module + 权限)失败给明确提示。
 - **验收**：pm2 ↺ 计数长期不涨；`/api/ready` 稳定 ready；~/Documents 项目文件可读。
 - **门槛**：动运行时、会重启服务，**等 yangcyyang 一句确认再执行**。
 

@@ -43,7 +43,7 @@ const SKILL_SOURCES = [
   // 可扩展更多源
 ];
 
-const OUTPUT_PATH = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html';
+const OUTPUT_PATH = '~/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html';
 
 async function extractSkillMeta(skillPath: string, source: string): Promise<SkillMeta | null> {
   try {

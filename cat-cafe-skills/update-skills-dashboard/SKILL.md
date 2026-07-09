@@ -31,7 +31,7 @@ triggers:
 - 其他配置的 skill 源
 
 **输出**：
-- `/Users/cy/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html`
+- `~/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html`
 
 ## 执行流程
 
@@ -79,7 +79,7 @@ Skills Dashboard 更新完成
 - 删除: old-skill-1, ...
 - 分类变化: 工程开发 87 → 89
 
-文件: /Users/cy/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html
+文件: ~/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html
 访问: http://localhost:3003/api/skills/dashboard
 ```
 

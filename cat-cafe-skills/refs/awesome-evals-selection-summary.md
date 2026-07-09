@@ -2,7 +2,7 @@
 doc_kind: research-extract
 topics: [quality-gate, evaluation, scorecard]
 created: 2026-07-06
-source: https://github.com/benchflow-ai/awesome-evals (clone 于 /Users/cy/.slock/external-clones/awesome-evals，只读引用，不入 Clowder 代码库)
+source: https://github.com/benchflow-ai/awesome-evals (clone 于 ~/.slock/external-clones/awesome-evals，只读引用，不入 Clowder 代码库)
 ---
 
 # awesome-evals 评估方法选型摘要 · Epic B1 交付物

@@ -14,7 +14,7 @@
 - 统计窗口：2026-05-15 起
 - skill 根目录：`cat-cafe-skills`
 - 使用日志：`.cat-cafe/tool-usage-archive.jsonl`
-- manifest：`/Users/cy/Documents/03 life/AI design/产品项目/skill管理/skills-manifest.json`
+- manifest：`~/Documents/03 life/AI design/产品项目/skill管理/skills-manifest.json`
 
 ## 使用记录
 

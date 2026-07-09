@@ -73,7 +73,7 @@ describe('GovernanceBlockedCard', () => {
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
-          projectPath: '/Users/cy/Documents/demo',
+          projectPath: '~/Documents/demo',
           reasonKind: 'permission_denied',
         }),
       );

@@ -830,7 +830,7 @@
           "defaultModel": "mimo/mimo-v2.5-pro-ultraspeed",
           "mcpSupport": false,
           "cli": {
-            "command": "/Users/cy/.npm-global/bin/pi",
+            "command": "pi",
             "outputFormat": "json",
             "defaultArgs": ["--print", "--mode", "json", "--no-context-files"]
           },

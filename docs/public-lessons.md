@@ -1137,7 +1137,7 @@ created: 2026-02-26
   - `cat-config.json`
   - `.cat-cafe/cat-catalog.json`
   - `.cat-cafe/accounts.json`
-  - `/Users/cy/.config/opencode/opencode.json`
+  - `~/.config/opencode/opencode.json`
   - commit `5f0f5b9 chore: restore opencode mimo model config`
 - 原理（可选）：本地 agent 平台的模型配置是“运行契约”，不是展示文案。契约正确性的最低证据是实际 CLI 能跑通，而不是配置字段看起来合理。
 
