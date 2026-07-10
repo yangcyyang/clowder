@@ -579,6 +579,51 @@ describe('TaskRunnerV2 — self-echo suppression (AC-D2)', () => {
     runner.stop();
   });
 
+  it('selfEchoSuppression=false → thread workItem still executes and records no emission', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger, emissionStore });
+    const executed = [];
+    runner.register({
+      id: 'background-thread-task',
+      profile: 'awareness',
+      trigger: { type: 'interval', ms: 999999 },
+      admission: {
+        gate: async () => ({
+          run: true,
+          workItems: [{ signal: 'go', subjectKey: 'thread-abc123' }],
+        }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async (_signal, key) => {
+          executed.push(key);
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+      selfEchoSuppression: false,
+    });
+
+    emissionStore.record({
+      originTaskId: 'background-thread-task',
+      threadId: 'abc123',
+      messageId: 'msg-1',
+      suppressionMs: 60_000,
+    });
+
+    await runner.triggerNow('background-thread-task');
+
+    assert.deepEqual(executed, ['thread-abc123']);
+    const rows = ledger.query('background-thread-task', 10);
+    assert.equal(rows[0].outcome, 'RUN_DELIVERED');
+    const active = emissionStore.listActive();
+    assert.equal(active.length, 1, 'should not record a second emission for opt-out tasks');
+    assert.equal(active[0].messageId, 'msg-1');
+    runner.stop();
+  });
+
   it('P1-D2: failed execute does NOT record emission', async () => {
     const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
     const runner = new TaskRunnerV2({ logger: silentLogger, ledger, emissionStore });

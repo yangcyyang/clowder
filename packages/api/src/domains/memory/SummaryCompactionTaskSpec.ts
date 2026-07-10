@@ -172,5 +172,6 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
       description: '自动压缩过长的对话记忆',
       subjectKind: 'thread',
     },
+    selfEchoSuppression: false,
   };
 }

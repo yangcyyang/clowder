@@ -166,6 +166,11 @@ export interface TaskSpec_P1<Signal = unknown> {
   context?: ContextSpec;
   /** Phase 2.5: display metadata — label, category, description, subjectKind (AC-E1) */
   display?: TaskDisplayMeta;
+  /**
+   * Phase 3B (AC-D2): self-echo suppression is meant for tasks that emit
+   * thread-visible messages. Pure background processors should opt out.
+   */
+  selfEchoSuppression?: boolean;
 }
 
 /** Run ledger stats summary */
