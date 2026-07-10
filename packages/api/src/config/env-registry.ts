@@ -1500,7 +1500,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_SUMMARY_CODEX_MODEL',
-    defaultValue: 'gpt-5.3-codex',
+    defaultValue: 'gpt-5.5',
     description: 'CAT_CAFE_SUMMARY_PROVIDER=codex-cli 时的 Codex CLI 摘要模型',
     category: 'evidence',
     sensitive: false,
