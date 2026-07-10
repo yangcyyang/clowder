@@ -64,6 +64,32 @@ describe('SummaryCompactionTaskSpec', () => {
     assert.match(result.workItems[0].subjectKey, /^thread-/);
   });
 
+  it('gate only schedules allowlisted threads when a canary allowlist is configured', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+    ).run('canary-thread', 25, 2000, 0, 'concat', 'other-thread', 25, 2000, 0, 'concat');
+
+    const spec = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadAllowlist: () => new Set(['canary-thread']),
+      getThreadLastActivity: async (threadId) => ({ threadId, lastMessageAt: Date.now() - 20 * 60 * 1000 }),
+      getMessagesAfterWatermark: async () => [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      generateAbstractive: async () => null,
+      logger: { info: () => {}, error: () => {} },
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, true);
+    assert.deepEqual(
+      result.workItems.map((item) => item.subjectKey),
+      ['thread-canary-thread'],
+    );
+  });
+
   it('has correct id and profile', async () => {
     const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
     const spec = createSummaryCompactionTaskSpec({

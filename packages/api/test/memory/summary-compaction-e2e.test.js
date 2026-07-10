@@ -130,6 +130,61 @@ describe('SummaryCompaction e2e', () => {
     assert.ok(candidates[0].title.includes('YAML'));
   });
 
+  it('creates evidence_docs read model when the thread row is missing', async () => {
+    db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run('thread-test-thread');
+    const msgs = makeMsgs(25);
+
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getMessagesAfterWatermark: async () => msgs,
+      generateAbstractive: async () => ({
+        segments: [
+          {
+            summary: 'Thread summary created without an existing evidence row',
+            topicKey: 'missing-evidence-row',
+            topicLabel: 'Missing Evidence Row',
+            boundaryReason: 'single batch',
+            boundaryConfidence: 'high',
+            fromMessageId: msgs[0].id,
+            toMessageId: msgs[msgs.length - 1].id,
+            messageCount: msgs.length,
+          },
+        ],
+      }),
+      logger: { info: () => {}, error: () => {} },
+    };
+
+    const result = await processThread(
+      {
+        thread_id: 'test-thread',
+        last_summarized_message_id: null,
+        pending_message_count: 25,
+        pending_token_count: 2000,
+        pending_signal_flags: 0,
+        summary_type: 'concat',
+        last_abstractive_at: null,
+        abstractive_token_count: null,
+        carry_over: 0,
+      },
+      deps,
+      SUMMARY_CONFIG_OVERRIDE,
+    );
+
+    assert.equal(result, true);
+    const doc = db.prepare('SELECT kind, status, title, summary FROM evidence_docs WHERE anchor = ?').get(
+      'thread-test-thread',
+    );
+    assert.equal(doc.kind, 'thread');
+    assert.equal(doc.status, 'active');
+    assert.equal(doc.title, 'Thread test-thread');
+    assert.match(doc.summary, /without an existing evidence row/);
+  });
+
   it('sets carry_over=1 when messages remain after batch', async () => {
     const batch1 = makeMsgs(200, 1);
     const remaining = makeMsgs(50, 201);

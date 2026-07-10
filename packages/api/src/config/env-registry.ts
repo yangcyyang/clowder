@@ -1469,9 +1469,18 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'F102_ABSTRACTIVE',
     defaultValue: 'off',
-    description: 'Phase G 摘要调度器 (off/on)，on = 定时调用 Opus API 做 thread 摘要',
+    description: 'Phase G 摘要调度器 (off/on)，on = 定时调用摘要模型做 thread 摘要',
     category: 'evidence',
     sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_SUMMARY_COMPACTION_THREADS',
+    defaultValue: '(未设置)',
+    description:
+      'Phase G 摘要线程 allowlist，逗号分隔；未设置时复用 CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS，避免误开全量摘要',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
   },
   {
     name: 'F102_DURABLE_CANDIDATES',

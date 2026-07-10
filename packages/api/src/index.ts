@@ -819,6 +819,16 @@ async function main(): Promise<void> {
     try {
       const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
       const { createAbstractiveClient } = await import('./domains/memory/AbstractiveSummaryClient.js');
+      const parseThreadListEnv = (value: string | undefined): Set<string> | null => {
+        const ids = (value ?? '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
+        return ids.length > 0 ? new Set(ids) : null;
+      };
+      const getSummaryThreadAllowlist = (): Set<string> | null =>
+        parseThreadListEnv(process.env.CAT_CAFE_SUMMARY_COMPACTION_THREADS) ??
+        parseThreadListEnv(process.env.CAT_CAFE_HISTORY_GOVERNANCE_CANARY_THREADS);
 
       // Abstractive summary API config resolution (priority order):
       // 1. F102_API_BASE + F102_API_KEY (explicit override)
@@ -884,6 +894,7 @@ async function main(): Promise<void> {
           }));
         },
         generateAbstractive,
+        getThreadAllowlist: getSummaryThreadAllowlist,
         // Re-embed thread after abstractive summary update (semantic search uses vectors)
         reEmbed: memoryServices.embeddingService?.isReady()
           ? async (anchor: string, text: string) => {
@@ -919,8 +930,9 @@ async function main(): Promise<void> {
       taskRunnerV2.register(summarySpec);
       const candidatesOn = process.env.F102_DURABLE_CANDIDATES === 'on';
       const topicSegOn = process.env.F102_TOPIC_SEGMENTS === 'on';
+      const summaryAllowlist = getSummaryThreadAllowlist();
       app.log.info(
-        `[api] F139: summary-compact spec registered (candidates=${candidatesOn ? 'on' : 'off'}, topicSegments=${topicSegOn ? 'on' : 'off'})`,
+        `[api] F139: summary-compact spec registered (candidates=${candidatesOn ? 'on' : 'off'}, topicSegments=${topicSegOn ? 'on' : 'off'}, allowlist=${summaryAllowlist && summaryAllowlist.size > 0 ? summaryAllowlist.size : 'all'})`,
       );
 
       // H-3 backfill: replay lost candidates from summary_segments into MarkerQueue.

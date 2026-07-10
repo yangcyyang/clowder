@@ -55,8 +55,28 @@ function isEligible(
   return true;
 }
 
-function backfillSummaryState(db: Database.Database): void {
+function backfillSummaryState(db: Database.Database, allowlist: ReadonlySet<string> | null): void {
   try {
+    if (allowlist && allowlist.size > 0) {
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO summary_state
+         (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+         VALUES (?, 100, 5000, 7, 'concat')`,
+      );
+      const hasEvidence = db.prepare(
+        `SELECT 1 FROM evidence_docs WHERE kind = 'thread' AND anchor = ? LIMIT 1`,
+      );
+      const tx = db.transaction(() => {
+        for (const threadId of allowlist) {
+          // Backfill old indexed threads only. Threads without evidence_docs can
+          // still accumulate naturally from new appends.
+          if (hasEvidence.get(`thread-${threadId}`)) insert.run(threadId);
+        }
+      });
+      tx();
+      return;
+    }
+
     db.prepare(
       `INSERT OR IGNORE INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
        SELECT REPLACE(anchor, 'thread-', ''), 100, 5000, 7, 'concat'
@@ -78,14 +98,25 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
     trigger: { type: 'interval', ms: config.schedulerIntervalMs },
     admission: {
       async gate() {
-        backfillSummaryState(deps.db);
+        const allowlist = deps.getThreadAllowlist?.() ?? null;
+        backfillSummaryState(deps.db, allowlist);
 
-        const candidates = deps.db
+        let candidates = deps.db
           .prepare('SELECT * FROM summary_state WHERE pending_message_count > 0')
           .all() as SummaryStateRow[];
 
+        if (allowlist && allowlist.size > 0) {
+          candidates = candidates.filter((state) => allowlist.has(state.thread_id));
+        }
+
         if (candidates.length === 0) {
-          return { run: false, reason: 'no threads with pending work' };
+          return {
+            run: false,
+            reason:
+              allowlist && allowlist.size > 0
+                ? 'no allowlisted threads with pending work'
+                : 'no threads with pending work',
+          };
         }
 
         // Async eligibility check per-thread
@@ -98,7 +129,13 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
         }
 
         if (eligible.length === 0) {
-          return { run: false, reason: 'no eligible threads (quiet/volume/cooldown)' };
+          return {
+            run: false,
+            reason:
+              allowlist && allowlist.size > 0
+                ? 'no eligible allowlisted threads (quiet/volume/cooldown)'
+                : 'no eligible threads (quiet/volume/cooldown)',
+          };
         }
 
         // Budget: cold-start = all, normal = perTickBudget

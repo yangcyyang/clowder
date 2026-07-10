@@ -61,6 +61,11 @@ export interface SummaryCompactionDeps {
     confidence: string;
     threadId: string;
   }) => Promise<void>;
+  /**
+   * Optional thread allowlist for safe canary rollout.
+   * null/empty means all eligible threads.
+   */
+  getThreadAllowlist?: () => ReadonlySet<string> | null;
   /** Logger */
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
 }
@@ -174,13 +179,26 @@ export async function processThread(
       );
     }
 
-    // 2. UPDATE evidence_docs.summary (read model)
+    // 2. UPSERT evidence_docs.summary (read model)
+    // Some old/high-cost threads may not have an evidence_docs row yet. The
+    // summary segment is still useful for route context, so create the read
+    // model instead of letting UPDATE silently affect zero rows.
     deps.db
       .prepare(
-        `UPDATE evidence_docs SET summary = ?, source_hash = ?, updated_at = ?
-       WHERE anchor = ?`,
+        `INSERT INTO evidence_docs (anchor, kind, status, title, summary, source_hash, updated_at)
+       VALUES (?, 'thread', 'active', ?, ?, ?, ?)
+       ON CONFLICT(anchor) DO UPDATE SET
+         summary = excluded.summary,
+         source_hash = excluded.source_hash,
+         updated_at = excluded.updated_at`,
       )
-      .run(mergedSummary, `abstractive-${Date.now()}`, now, `thread-${state.thread_id}`);
+      .run(
+        `thread-${state.thread_id}`,
+        `Thread ${state.thread_id}`,
+        mergedSummary,
+        `abstractive-${Date.now()}`,
+        now,
+      );
 
     // 3. UPDATE summary_state watermark (carry_over = 0, will be set to 1 below if backlog remains)
     deps.db
