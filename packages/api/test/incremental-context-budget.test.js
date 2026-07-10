@@ -21,7 +21,7 @@ function structuredSummary(extra = '') {
     '当前状态：正在推进 Phase 3 历史治理。',
     '已确认决策/约束：summary-active 只允许 canary 线程启用。',
     '下一步：保留最近原文窗口并继续执行质量闸门。',
-    '风险锚点：如果需要精确文件路径或用户原话，必须回看原文范围。',
+    '风险锚点：如果需要精确文件路径或用户原话，必须用 cat_cafe_fetch_thread_history 拉取原文范围。',
     extra,
   ]
     .filter(Boolean)
@@ -297,7 +297,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.ok(result.contextText.includes('[Thread History Summary]'));
     assert.ok(result.contextText.includes('Scope: thread-1, messages msg-001..msg-010'));
     assert.ok(result.contextText.includes('This is a compressed, provenance-backed summary'));
-    assert.ok(result.contextText.includes('需要精确引用、文件路径、命令输出或敏感凭据细节时'));
+    assert.ok(result.contextText.includes('cat_cafe_fetch_thread_history'));
     assert.ok(result.contextText.includes('稳定事实：已经确认使用 summary_segments 做旧历史摘要。'));
     assert.ok(result.contextText.includes('[Recent Messages]'));
     assert.ok(result.contextText.includes('recent instruction stays verbatim'));

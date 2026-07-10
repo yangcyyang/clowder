@@ -18,6 +18,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  'cat_cafe_fetch_thread_history',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
@@ -101,6 +102,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  'cat_cafe_fetch_thread_history',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
@@ -258,16 +260,23 @@ describe('MCP Server Tool Registration', () => {
     );
   });
 
-  test('thread-context and list-threads expose agentKeyCatId for shared persistent MCP identity', async () => {
+  test('thread history tools and list-threads expose agentKeyCatId for shared persistent MCP identity', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
 
     const contextTool = server._registeredTools.cat_cafe_get_thread_context;
+    const historyTool = server._registeredTools.cat_cafe_fetch_thread_history;
     const listTool = server._registeredTools.cat_cafe_list_threads;
     assert.ok(contextTool, 'get_thread_context tool should exist');
+    assert.ok(historyTool, 'fetch_thread_history tool should exist');
     assert.ok(listTool, 'list_threads tool should exist');
     assert.ok(Object.keys(contextTool.inputSchema.shape).includes('agentKeyCatId'));
     assert.ok(contextTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(historyTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(historyTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(historyTool.inputSchema.shape).includes('fromMessageId'));
+    assert.ok(Object.keys(historyTool.inputSchema.shape).includes('toMessageId'));
+    assert.ok(Object.keys(historyTool.inputSchema.shape).includes('maxTokens'));
     assert.ok(Object.keys(listTool.inputSchema.shape).includes('agentKeyCatId'));
     assert.ok(listTool.inputSchema._def.shape().agentKeyCatId.isOptional());
   });

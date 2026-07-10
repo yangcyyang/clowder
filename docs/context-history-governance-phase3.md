@@ -129,6 +129,7 @@ budgetRatio = estimatedPromptTokens / promptBudget
 - 首选旧摘要 + 最近原文窗口。
 - 没有旧摘要时，本轮回退完整历史。
 - 不在用户当前请求里同步长摘要，避免慢上加慢。
+- 摘要模型必须可配置，默认使用便宜模型；当前运行时使用 `CAT_CAFE_SUMMARY_MODEL`（默认 `claude-3-5-haiku-latest`）和 `CAT_CAFE_SUMMARY_MAX_TOKENS` 控制。
 
 ### 4.2 摘要输入
 
@@ -184,7 +185,7 @@ ContextAssembler 注入时应清楚告诉模型这是摘要，不是完整原文
 [Thread History Summary]
 Scope: thread_xxx, messages A..B, generated_at=...
 This is a compressed, provenance-backed summary of older delivered messages.
-If a precise quote, file path, command output, or credential-sensitive detail is needed, ask to inspect the original range instead of guessing.
+If a precise quote, file path, command output, or decision evidence is needed, call `cat_cafe_fetch_thread_history` with a narrow segment range/query instead of guessing.
 
 ...
 
@@ -228,16 +229,27 @@ If a precise quote, file path, command output, or credential-sensitive detail is
 
 如果回答缺关键事实，判定为 `summary_recall_failed`，该 thread 回退 L0，并把失败写入观测日志。
 
-### 5.4 人工接管入口
+### 5.4 按需原文拉取工具
 
-模型遇到摘要不确定时，必须允许请求原文范围：
+模型遇到摘要不确定时，不再只输出“请人工回看”。必须优先使用只读 MCP 工具按需拉取原文：
 
 ```text
-需要回看原文范围：from_message_id..to_message_id
-原因：摘要缺少精确文件路径 / 决策细节 / 用户原话
+cat_cafe_fetch_thread_history({
+  threadId: "thread_xxx",
+  fromMessageId: "from_message_id",
+  toMessageId: "to_message_id",
+  limit: 24,
+  maxTokens: 8000
+})
 ```
 
-实现上可先只输出提示，不必第一阶段自动拉原文。这样至少避免模型在摘要缺口上编造。
+使用规则：
+
+- 摘要 segment 提供 `from_message_id..to_message_id` 时，优先按范围拉取。
+- 不知道范围但知道关键词时，使用 `query` 窄查，不允许整条 thread 拉满。
+- 单次返回必须受消息数和 token 上限约束，默认 24 条 / 8000 tokens，可通过 `CAT_CAFE_HISTORY_FETCH_MAX_MESSAGES`、`CAT_CAFE_HISTORY_FETCH_MAX_TOKENS` 调整。
+- 工具返回的原文 token 也算入本轮上下文预算；连续多次拉取要记录频率和 token 量。
+- prompt 必须明确：摘要缺细节就用工具取，不能猜。
 
 ## 6. 与 provider auto compact 的关系
 
@@ -283,7 +295,7 @@ Clowder history governance
 
 - 只给 1-2 个指定 cat/thread 开启摘要替换。
 - 保留 `CAT_CAFE_HISTORY_GOVERNANCE=0` 一键回退。
-- 验收：长 thread input token 不再线性增长，且 smoke 不失忆。
+- 验收：长 thread input token 不再线性增长，smoke 不失忆，按需工具调用频率/取回 token 量可观测且不过量。
 
 ### Phase 3D：默认长 thread 启用
 
@@ -306,9 +318,9 @@ Clowder history governance
 - observe-only 能显示历史 token 占比。
 - summary-active 后，长 thread 的 history token 不再随总消息数线性增长。
 - 当前用户消息、最近原文窗口、任务状态和项目决策不丢。
-- 摘要缺精确信息时，agent 能请求回看原文范围，而不是编造。
+- 摘要缺精确信息时，agent 能用 `cat_cafe_fetch_thread_history` 按需拉取原文范围，而不是编造。
 - provider compact boundary 出现时，有 continuity capsule 接班，并在下一轮重新注入身份和任务。
 
 ## 10. 费曼版
 
-长对话像背一本越来越厚的会议纪要。Phase 3 不是让 agent 忘掉旧内容，而是把旧会议纪要压成带页码的摘要；最近几页仍看原文，公司制度、当前任务和最终决定另放在白板上，每次都直接看白板。摘要不确定时，允许回到原页码查原文。
+长对话像背一本越来越厚的会议纪要。Phase 3 不是让 agent 忘掉旧内容，而是把旧会议纪要压成带页码的摘要；最近几页仍看原文，公司制度、当前任务和最终决定另放在白板上，每次都直接看白板。摘要不确定时，用工具回到原页码查原文。

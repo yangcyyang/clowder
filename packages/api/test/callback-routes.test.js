@@ -538,6 +538,71 @@ describe('Callback Routes', () => {
     assert.equal(body.messages.length, 3);
   });
 
+  test('GET fetch-thread-history returns a bounded original range', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const stored = [];
+
+    for (let i = 0; i < 6; i++) {
+      stored.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: i % 2 === 0 ? null : 'opus',
+          content: `Range message ${i}`,
+          mentions: [],
+          timestamp: i + 1,
+        }),
+      );
+    }
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/fetch-thread-history?fromMessageId=${stored[1].id}&toMessageId=${stored[4].id}&limit=10&maxTokens=1000`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.mode, 'range');
+    assert.equal(body.messages.length, 4);
+    assert.deepEqual(
+      body.messages.map((m) => m.content),
+      ['Range message 1', 'Range message 2', 'Range message 3', 'Range message 4'],
+    );
+    assert.ok(body.estimatedTokens > 0);
+    assert.equal(body.limits.messages, 10);
+  });
+
+  test('GET fetch-thread-history enforces server message/token caps', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    for (let i = 0; i < 30; i++) {
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `Long message ${i} ${'x'.repeat(1000)}`,
+        mentions: [],
+        timestamp: i + 1,
+      });
+    }
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/fetch-thread-history?limit=80&maxTokens=500`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.mode, 'recent');
+    assert.equal(body.limits.messages, 24);
+    assert.equal(body.limits.maxTokens, 500);
+    assert.ok(body.messages.length <= 24);
+    assert.equal(body.truncated.byMessages, true);
+    assert.equal(body.truncated.byTokens, true);
+  });
+
   test('GET thread-context supports catId filter (cat + user)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

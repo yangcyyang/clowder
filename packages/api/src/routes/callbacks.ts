@@ -71,6 +71,32 @@ import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
 const log = createModuleLogger('routes/callbacks');
 
+const DEFAULT_HISTORY_FETCH_MESSAGES = 24;
+const DEFAULT_HISTORY_FETCH_MAX_TOKENS = 8000;
+const DEFAULT_HISTORY_FETCH_SCAN_MESSAGES = 500;
+
+function readBoundedIntEnv(key: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(process.env[key] ?? '', 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function estimateHistoryFetchTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function redactCredentialLikeText(text: string): string {
+  return text
+    .replace(/\bsk_(agent|machine|proj|live|test)_[A-Za-z0-9_-]+/g, 'sk_$1_<redacted>')
+    .replace(/\b(?:ghp|gho|ghu|ghs|glpat)-[A-Za-z0-9_-]{20,}\b/g, '<redacted-token>')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, 'Bearer <redacted>')
+    .replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '<redacted-access-key>');
+}
+
+function sanitizeHistoryFetchContent(content: string): string {
+  return redactCredentialLikeText(sanitizeAgentVisibleOutput(content));
+}
+
 function buildPostMessageRoutingMessage(routedIds: string[], warnings: CatRoutingError[]): string {
   const parts: string[] = [];
   if (routedIds.length > 0) parts.push(`消息已路由给 ${routedIds.map((id) => `@${id}`).join('、')}。`);
@@ -177,6 +203,16 @@ const threadContextQuerySchema = z.object({
   threadId: z.string().min(1).optional(), // F-Swarm-6: optional cross-thread read
   catId: z.string().min(1).optional(),
   keyword: z.string().min(1).optional(),
+});
+
+const fetchThreadHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(80).optional(),
+  threadId: z.string().min(1).optional(),
+  fromMessageId: z.string().min(1).optional(),
+  toMessageId: z.string().min(1).optional(),
+  query: z.string().min(1).max(200).optional(),
+  catId: z.string().min(1).optional(),
+  maxTokens: z.coerce.number().int().min(500).max(20000).optional(),
 });
 
 const messageSearchQuerySchema = z.object({
@@ -1273,6 +1309,248 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
       })),
       ...(workflowSop ? { workflowSop } : {}),
+    };
+  });
+
+  app.get('/api/callbacks/fetch-thread-history', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = fetchThreadHistoryQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query parameters', details: parsed.error.issues };
+    }
+
+    const {
+      limit,
+      threadId: overrideThreadId,
+      fromMessageId,
+      toMessageId,
+      query,
+      catId: filterCatId,
+      maxTokens,
+    } = parsed.data;
+
+    if (filterCatId && filterCatId !== 'user' && !catRegistry.has(filterCatId)) {
+      reply.status(400);
+      return { error: `Unknown catId filter: ${filterCatId}` };
+    }
+
+    let effectiveThreadId: string;
+    if (principal.kind === 'agent_key') {
+      const threadResult = await resolvePrincipalThread(principal, overrideThreadId, { threadStore });
+      if (!threadResult.ok) {
+        reply.status(threadResult.statusCode);
+        return { error: threadResult.error };
+      }
+      effectiveThreadId = threadResult.threadId;
+    } else {
+      effectiveThreadId = overrideThreadId ?? principal.threadId;
+    }
+
+    const configuredMessageCap = readBoundedIntEnv(
+      'CAT_CAFE_HISTORY_FETCH_MAX_MESSAGES',
+      DEFAULT_HISTORY_FETCH_MESSAGES,
+      1,
+      80,
+    );
+    const configuredTokenCap = readBoundedIntEnv(
+      'CAT_CAFE_HISTORY_FETCH_MAX_TOKENS',
+      DEFAULT_HISTORY_FETCH_MAX_TOKENS,
+      500,
+      20000,
+    );
+    const scanCap = readBoundedIntEnv(
+      'CAT_CAFE_HISTORY_FETCH_MAX_SCAN_MESSAGES',
+      DEFAULT_HISTORY_FETCH_SCAN_MESSAGES,
+      50,
+      2000,
+    );
+    const requestedLimit = limit ?? configuredMessageCap;
+    const safeLimit = Math.min(requestedLimit, configuredMessageCap);
+    const safeMaxTokens = Math.min(maxTokens ?? configuredTokenCap, configuredTokenCap);
+    const principalCatId = principal.catId;
+    const principalUserId = principal.userId;
+
+    let needsPlayFilter = false;
+    if (threadStore) {
+      const thread = await threadStore.get(effectiveThreadId);
+      needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
+    }
+
+    const viewer = needsPlayFilter
+      ? { type: 'cat' as const, catId: createCatId(principalCatId) }
+      : { type: 'user' as const };
+    const queryTerms = query ? tokenizeKeyword(query) : [];
+    const isVisibleForFetch = (item: StoredMessage): boolean => {
+      if (item.origin === 'briefing') return false;
+      if (!canViewMessage(item, viewer)) return false;
+      const isOtherCat = item.catId && item.catId !== principalCatId;
+      if (needsPlayFilter && isOtherCat && item.origin === 'stream') return false;
+      if (filterCatId) {
+        if (filterCatId === 'user') {
+          if (item.catId !== null) return false;
+        } else if (item.catId !== filterCatId) {
+          return false;
+        }
+      }
+      if (queryTerms.length > 0 && scoreKeywordRelevance(item.content, queryTerms) === 0) return false;
+      return true;
+    };
+    const isOwnThreadMessage = (item: StoredMessage): boolean =>
+      item.threadId === effectiveThreadId && (item.userId === principalUserId || isSystemUserMessage(item));
+
+    const fetchMessageById = async (messageId: string): Promise<StoredMessage | null> => {
+      const msg = await messageStore.getById(messageId);
+      if (!msg || !isOwnThreadMessage(msg)) return null;
+      return msg;
+    };
+
+    let candidates: StoredMessage[] = [];
+    let scanCount = 0;
+    let mode: 'range' | 'query' | 'recent' = 'recent';
+
+    if (fromMessageId || toMessageId) {
+      mode = 'range';
+      const fromMsg = fromMessageId ? await fetchMessageById(fromMessageId) : null;
+      const toMsg = toMessageId ? await fetchMessageById(toMessageId) : null;
+      if (fromMessageId && !fromMsg) {
+        reply.status(404);
+        return { error: 'fromMessageId not found in this thread' };
+      }
+      if (toMessageId && !toMsg) {
+        reply.status(404);
+        return { error: 'toMessageId not found in this thread' };
+      }
+
+      if (fromMsg && isVisibleForFetch(fromMsg)) candidates.push(fromMsg);
+
+      const after = fromMessageId
+        ? await messageStore.getByThreadAfter(effectiveThreadId, fromMessageId, safeLimit + 1, principalUserId)
+        : toMsg
+          ? await messageStore.getByThreadBefore(
+              effectiveThreadId,
+              toMsg.timestamp + 1,
+              safeLimit,
+              undefined,
+              principalUserId,
+            )
+          : [];
+      for (const item of after) {
+        if (candidates.length >= safeLimit) break;
+        if (toMessageId && item.id > toMessageId) break;
+        if (!isVisibleForFetch(item)) continue;
+        if (fromMessageId && item.id === fromMessageId) continue;
+        candidates.push(item);
+      }
+    } else {
+      mode = queryTerms.length > 0 ? 'query' : 'recent';
+      const visible: StoredMessage[] = [];
+      const pageSize = Math.max(safeLimit * 2, 50);
+      let cursorTimestamp = Number.MAX_SAFE_INTEGER;
+      let cursorId: string | undefined;
+
+      while (visible.length < safeLimit && scanCount < scanCap) {
+        const remainingScan = Math.max(1, scanCap - scanCount);
+        const batch = await messageStore.getByThreadBefore(
+          effectiveThreadId,
+          cursorTimestamp,
+          Math.min(pageSize, remainingScan),
+          cursorId,
+          principalUserId,
+        );
+        if (batch.length === 0) break;
+        scanCount += batch.length;
+        for (const item of batch) {
+          if (!isVisibleForFetch(item)) continue;
+          visible.push(item);
+          if (visible.length >= safeLimit) break;
+        }
+        const oldest = batch[0]!;
+        cursorTimestamp = oldest.timestamp;
+        cursorId = oldest.id;
+      }
+
+      if (queryTerms.length > 0) {
+        visible.sort((a, b) => {
+          const sa = scoreKeywordRelevance(a.content, queryTerms);
+          const sb = scoreKeywordRelevance(b.content, queryTerms);
+          return sb - sa || b.timestamp - a.timestamp;
+        });
+        candidates = visible.slice(0, safeLimit);
+      } else {
+        visible.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        candidates = visible.slice(-safeLimit);
+      }
+    }
+
+    const messages: Array<{
+      id: string;
+      userId: string;
+      catId: string | null;
+      content: string;
+      timestamp: number;
+      estimatedTokens: number;
+      relevanceScore?: number;
+      contentTruncated?: boolean;
+    }> = [];
+    let estimatedTokens = 0;
+    let byTokens = false;
+    for (const item of candidates) {
+      const sanitized = sanitizeHistoryFetchContent(item.content);
+      const itemTokens = estimateHistoryFetchTokens(sanitized);
+      if (estimatedTokens + itemTokens > safeMaxTokens) {
+        byTokens = true;
+        if (messages.length === 0) {
+          const charBudget = Math.max(200, safeMaxTokens * 4);
+          const truncatedContent =
+            sanitized.length > charBudget ? `${sanitized.slice(0, charBudget)}\n[...truncated by maxTokens...]` : sanitized;
+          const truncatedTokens = estimateHistoryFetchTokens(truncatedContent);
+          messages.push({
+            id: item.id,
+            userId: item.userId,
+            catId: item.catId,
+            content: truncatedContent,
+            timestamp: item.timestamp,
+            estimatedTokens: truncatedTokens,
+            ...(queryTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, queryTerms) } : {}),
+            contentTruncated: true,
+          });
+          estimatedTokens += truncatedTokens;
+        }
+        break;
+      }
+      messages.push({
+        id: item.id,
+        userId: item.userId,
+        catId: item.catId,
+        content: sanitized,
+        timestamp: item.timestamp,
+        estimatedTokens: itemTokens,
+        ...(queryTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, queryTerms) } : {}),
+      });
+      estimatedTokens += itemTokens;
+    }
+
+    return {
+      threadId: effectiveThreadId,
+      mode,
+      messages,
+      messageCount: messages.length,
+      estimatedTokens,
+      limits: {
+        messages: safeLimit,
+        maxTokens: safeMaxTokens,
+        scanMessages: scanCap,
+      },
+      truncated: {
+        byMessages: candidates.length > messages.length || requestedLimit > safeLimit,
+        byTokens,
+        byScanCap: mode !== 'range' && scanCount >= scanCap && messages.length < safeLimit,
+      },
+      guidance:
+        'These original messages are on-demand history. Treat estimatedTokens as consumed context budget; narrow the range/query before fetching more.',
     };
   });
 

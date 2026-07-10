@@ -392,7 +392,7 @@ export function formatHistoryRecallSmoke(): string {
     '2. 当前任务是什么？验收标准是什么？',
     '3. 最近一个已确认决策是什么？',
     '4. 下一步应该做什么？有什么风险？',
-    'If any answer is missing or ambiguous, request the original message range instead of guessing.',
+    'If any answer is missing or ambiguous, call cat_cafe_fetch_thread_history with a narrow range/query instead of guessing.',
     '[/History Recall Smoke]',
   ].join('\n');
 }
@@ -521,7 +521,7 @@ export function formatThreadHistorySummary(
     '[Thread History Summary]',
     formatSummaryScope(usable),
     'This is a compressed, provenance-backed summary of older delivered messages.',
-    '需要精确引用、文件路径、命令输出或敏感凭据细节时，请申请回看原文范围，不要凭摘要猜测。',
+    '需要精确引用、文件路径、命令输出或具体决策证据时，使用 MCP 工具 cat_cafe_fetch_thread_history 按 segment range/query 拉取原文；不要凭摘要猜测。',
     '',
     segmentLines.join('\n\n'),
     '[/Thread History Summary]',

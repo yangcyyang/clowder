@@ -62,6 +62,7 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
   'cat_cafe_get_thread_context',
+  'cat_cafe_fetch_thread_history',
   'cat_cafe_list_threads',
 ]);
 

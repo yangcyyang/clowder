@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { getAbstractiveSummaryModelId } from './AbstractiveSummaryClient.js';
 import { hasHighValueSignal, SUMMARY_CONFIG } from './summary-config.js';
 
 interface SummaryStateRow {
@@ -139,6 +140,7 @@ export async function processThread(
   const now = new Date().toISOString();
   const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
   const totalTokens = mergedSummary.length / 4;
+  const modelId = getAbstractiveSummaryModelId();
 
   const insertSegment = deps.db.prepare(`
     INSERT INTO summary_segments
@@ -166,7 +168,7 @@ export async function processThread(
         seg.boundaryConfidence,
         seg.relatedSegmentIds ? JSON.stringify(seg.relatedSegmentIds) : null,
         seg.candidates ? JSON.stringify(seg.candidates) : null,
-        'claude-opus-4-6',
+        modelId,
         'g2-thread-abstract-v1',
         now,
       );

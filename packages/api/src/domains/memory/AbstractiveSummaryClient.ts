@@ -46,6 +46,16 @@ interface ProviderProfile {
   apiKey: string;
 }
 
+export function getAbstractiveSummaryModelId(env: NodeJS.ProcessEnv = process.env): string {
+  return env.CAT_CAFE_SUMMARY_MODEL?.trim() || 'claude-3-5-haiku-latest';
+}
+
+function getAbstractiveSummaryMaxTokens(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.CAT_CAFE_SUMMARY_MAX_TOKENS ?? '', 10);
+  if (!Number.isFinite(parsed)) return 4096;
+  return Math.min(8192, Math.max(1024, parsed));
+}
+
 // ─── System Prompt: natural language output ──────────────────────
 const SYSTEM_PROMPT = `You are a thread summarizer for Clowder AI, an AI-collaborative project management system.
 
@@ -297,8 +307,8 @@ export function createAbstractiveClient(
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          max_tokens: 8192,
+          model: getAbstractiveSummaryModelId(),
+          max_tokens: getAbstractiveSummaryMaxTokens(),
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userContent }],
         }),

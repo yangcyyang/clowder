@@ -298,6 +298,46 @@ export const getThreadContextInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
+export const fetchThreadHistoryInputSchema = {
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe('Max original messages to retrieve. Server also applies CAT_CAFE_HISTORY_FETCH_MAX_MESSAGES.'),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional: read a specific thread. Omit to read the current thread.'),
+  fromMessageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional start message id for a bounded original-history range.'),
+  toMessageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional end message id for a bounded original-history range.'),
+  query: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional query for finding relevant original messages in the thread. Prefer this over broad recent fetches.'),
+  catId: z.string().min(1).optional().describe("Optional: filter by speaker catId, or pass 'user' for human messages."),
+  maxTokens: z
+    .number()
+    .int()
+    .min(500)
+    .max(20000)
+    .optional()
+    .describe('Max estimated tokens to return. Server also applies CAT_CAFE_HISTORY_FETCH_MAX_TOKENS.'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
 export const listThreadsInputSchema = {
   limit: z.number().int().min(1).max(200).optional().default(20).describe('Max threads to return (default: 20).'),
   activeSince: z
@@ -483,6 +523,31 @@ export async function handleGetThreadContext(input: {
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.catId ? { catId: input.catId } : {}),
       ...(input.keyword ? { keyword: input.keyword } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleFetchThreadHistory(input: {
+  limit?: number | undefined;
+  threadId?: string | undefined;
+  fromMessageId?: string | undefined;
+  toMessageId?: string | undefined;
+  query?: string | undefined;
+  catId?: string | undefined;
+  maxTokens?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/fetch-thread-history',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.fromMessageId ? { fromMessageId: input.fromMessageId } : {}),
+      ...(input.toMessageId ? { toMessageId: input.toMessageId } : {}),
+      ...(input.query ? { query: input.query } : {}),
+      ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.maxTokens ? { maxTokens: String(input.maxTokens) } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
   );
@@ -1104,6 +1169,15 @@ export const callbackTools = [
       'BOUNDARY: This tool READS one thread. For FINDING information across all project knowledge (features, decisions, plans, lessons), use search_evidence instead.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
+  },
+  {
+    name: 'cat_cafe_fetch_thread_history',
+    description:
+      'READ bounded original thread history on demand when [Thread History Summary] lacks exact details. ' +
+      'Prefer fromMessageId/toMessageId from summary segment ranges, or query for a narrow lookup. ' +
+      'Server caps messages/tokens; returned estimatedTokens count against your context budget. Do NOT use this to reload a whole long thread.',
+    inputSchema: fetchThreadHistoryInputSchema,
+    handler: handleFetchThreadHistory,
   },
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
   {

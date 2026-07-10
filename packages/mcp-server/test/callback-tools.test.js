@@ -227,6 +227,39 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('keyword=redis+lock'));
   });
 
+  test('handleFetchThreadHistory forwards bounded range/query parameters', async () => {
+    const { handleFetchThreadHistory } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ messages: [], estimatedTokens: 0 }),
+      };
+    };
+
+    const result = await handleFetchThreadHistory({
+      threadId: 'thread-42',
+      fromMessageId: 'msg-a',
+      toMessageId: 'msg-b',
+      query: 'redis lock',
+      limit: 24,
+      maxTokens: 4000,
+      catId: 'user',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/fetch-thread-history'));
+    assert.ok(capturedUrl.includes('threadId=thread-42'));
+    assert.ok(capturedUrl.includes('fromMessageId=msg-a'));
+    assert.ok(capturedUrl.includes('toMessageId=msg-b'));
+    assert.ok(capturedUrl.includes('query=redis+lock'));
+    assert.ok(capturedUrl.includes('limit=24'));
+    assert.ok(capturedUrl.includes('maxTokens=4000'));
+    assert.ok(capturedUrl.includes('catId=user'));
+  });
+
   test('handleListThreads forwards limit/activeSince filters', async () => {
     const { handleListThreads } = await import('../dist/tools/callback-tools.js');
 
