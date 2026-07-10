@@ -41,6 +41,7 @@ export interface AbstractiveResult {
 }
 
 export type SummaryProviderId = 'anthropic-api' | 'codex-cli' | 'pi-cli';
+export const DEFAULT_PI_SUMMARY_MODEL = 'mimo/mimo-v2.5-pro-ultraspeed';
 
 interface ProviderProfile {
   mode: 'api_key' | 'subscription';
@@ -57,7 +58,7 @@ export function getAbstractiveSummaryModelId(env: NodeJS.ProcessEnv = process.en
   }
   if (providerId === 'pi-cli') {
     const catId = env.CAT_CAFE_SUMMARY_PI_CAT_ID?.trim() || 'pi';
-    const model = env.CAT_CAFE_SUMMARY_PI_MODEL?.trim() || 'cat-default';
+    const model = env.CAT_CAFE_SUMMARY_PI_MODEL?.trim() || DEFAULT_PI_SUMMARY_MODEL;
     return `pi-cli:${catId}:${model}`;
   }
   return env.CAT_CAFE_SUMMARY_MODEL?.trim() || 'claude-3-5-haiku-latest';

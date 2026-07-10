@@ -1524,8 +1524,8 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_SUMMARY_PI_MODEL',
-    defaultValue: '(cat default)',
-    description: 'CAT_CAFE_SUMMARY_PROVIDER=pi-cli 时的 Pi CLI 摘要模型；未设置时使用 Pi 成员默认模型',
+    defaultValue: 'mimo/mimo-v2.5-pro-ultraspeed',
+    description: 'CAT_CAFE_SUMMARY_PROVIDER=pi-cli 时的 Pi CLI 摘要模型；显式默认避免摘要调度器早于 CatRegistry 初始化时报错',
     category: 'evidence',
     sensitive: false,
     runtimeEditable: true,

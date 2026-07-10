@@ -818,7 +818,12 @@ async function main(): Promise<void> {
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
     try {
       const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
-      const { createAbstractiveClient, createAgentAbstractiveClient, getSummaryProviderId } = await import(
+      const {
+        DEFAULT_PI_SUMMARY_MODEL,
+        createAbstractiveClient,
+        createAgentAbstractiveClient,
+        getSummaryProviderId,
+      } = await import(
         './domains/memory/AbstractiveSummaryClient.js'
       );
       const parseThreadListEnv = (value: string | undefined): Set<string> | null => {
@@ -861,14 +866,14 @@ async function main(): Promise<void> {
           : summaryProvider === 'pi-cli'
             ? (() => {
                 const catId = createCatId(process.env.CAT_CAFE_SUMMARY_PI_CAT_ID?.trim() || 'pi');
-                const model = process.env.CAT_CAFE_SUMMARY_PI_MODEL?.trim();
-                const piSummaryService = new PiAgentService(model ? { catId, model } : { catId });
+                const model = process.env.CAT_CAFE_SUMMARY_PI_MODEL?.trim() || DEFAULT_PI_SUMMARY_MODEL;
+                const piSummaryService = new PiAgentService({ catId, model });
                 return createAgentAbstractiveClient(piSummaryService.invoke.bind(piSummaryService), summaryLogger, {
                   providerId: 'pi-cli',
                   workingDirectory: findMonorepoRoot(process.cwd()),
                   callbackEnv: {
                     CAT_CAFE_AGENT_OUTPUT_GATE: '1',
-                    ...(model ? { CAT_CAFE_PI_MODEL_OVERRIDE: model } : {}),
+                    CAT_CAFE_PI_MODEL_OVERRIDE: model,
                   },
                 });
               })()
