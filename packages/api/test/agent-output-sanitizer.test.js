@@ -195,4 +195,30 @@ describe('agent output sanitizer', () => {
 
     assert.equal(output, '结论：任务已经完成。');
   });
+
+  test('drops shared-state preflight warnings from final chat output', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '⚠️ Shared-state preflight: uncommitted shared-state files: cat-template.json, docs/ROADMAP.md. Please commit+push before continuing (shared-rules §14).',
+      '',
+      '结论：这是内部治理提醒，不应该进入主会话正文。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：这是内部治理提醒，不应该进入主会话正文。');
+  });
+
+  test('drops internal handoff runtime JSON from final chat output', async () => {
+    const sanitize = await getSanitizer();
+    const input = [
+      '{"type":"handoff_draft_window","catId":"gpt52","sessionId":"session_1","threadId":"default","healthSnapshot":{"usedTokens":277596,"windowTokens":353400,"fillRatio":0.7855,"source":"exact","measuredAt":1783658472680},"trust":"trusted"}',
+      '',
+      '结论：上下文压力信息只能留在内部运行态。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：上下文压力信息只能留在内部运行态。');
+  });
 });

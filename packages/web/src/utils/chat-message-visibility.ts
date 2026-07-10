@@ -5,8 +5,27 @@ const MODEL_SIGNATURE_LINE_RE = /^\s*\[[^\]]*(?:gpt|opus|claude|codex|gemini|kim
 const MODEL_METADATA_LINE_RE = /\bmodel\s*=\s*[a-z0-9._/-]+/i;
 const IDENTITY_PREAMBLE_RE = /当前会话身份标注|身份标注为/i;
 const SKILLS_BUDGET_WARNING_RE = /Exceeded\s+skills\s+context\s+budget|model-visible\s+skills\s+list/i;
+const SHARED_STATE_PREFLIGHT_LINE_RE =
+  /Shared-state\s+(?:preflight|files\s+committed)|uncommitted\s+shared-state\s+files|shared-rules\s*§14|Please\s+commit\+push\s+before\s+continuing/i;
 const TOOL_TELEMETRY_LINE_RE =
   /(?:执行已完成，但没有返回文本|记录到\s*\d+\s*个工具事件|最后进度：.*(?:command_execution|file_change|mcp:|exit_code))/i;
+const INTERNAL_RUNTIME_JSON_TYPES = new Set([
+  'handoff_draft_window',
+  'session_handoff_write_failed',
+  'session_seal_requested',
+]);
+
+function isInternalRuntimeJsonLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: unknown };
+    return typeof parsed?.type === 'string' && INTERNAL_RUNTIME_JSON_TYPES.has(parsed.type);
+  } catch {
+    return false;
+  }
+}
 
 export function sanitizeAgentVisibleContent(content: string): string {
   const lines = content.split(/\r?\n/);
@@ -17,7 +36,9 @@ export function sanitizeAgentVisibleContent(content: string): string {
     if (MODEL_METADATA_LINE_RE.test(line)) continue;
     if (IDENTITY_PREAMBLE_RE.test(line)) continue;
     if (SKILLS_BUDGET_WARNING_RE.test(line)) continue;
+    if (SHARED_STATE_PREFLIGHT_LINE_RE.test(line)) continue;
     if (TOOL_TELEMETRY_LINE_RE.test(line)) continue;
+    if (isInternalRuntimeJsonLine(line)) continue;
     cleaned.push(line);
   }
 

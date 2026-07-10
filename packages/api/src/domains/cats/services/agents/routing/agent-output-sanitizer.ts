@@ -12,9 +12,19 @@ const INTERNAL_PROTOCOL_PATTERNS = [
   /\bin_review\b/i,
   /\bclowder\s+task\b/i,
   /\bclowder\s+message\b/i,
+  /Shared-state\s+(?:preflight|files\s+committed)/i,
+  /uncommitted\s+shared-state\s+files/i,
+  /shared-rules\s*§14/i,
+  /Please\s+commit\+push\s+before\s+continuing/i,
   /Exceeded\s+skills\s+context\s+budget/i,
   /model-visible\s+skills\s+list/i,
 ];
+
+const INTERNAL_RUNTIME_JSON_TYPES = new Set([
+  'handoff_draft_window',
+  'session_handoff_write_failed',
+  'session_seal_requested',
+]);
 
 const INTERNAL_PROGRESS_LINE_PATTERNS = [
   /接续检查/,
@@ -77,6 +87,18 @@ function isInternalProtocolBlock(block: string): boolean {
   return INTERNAL_PROTOCOL_PATTERNS.some((pattern) => pattern.test(block));
 }
 
+function isInternalRuntimeJsonBlock(block: string): boolean {
+  const trimmed = block.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: unknown };
+    return typeof parsed?.type === 'string' && INTERNAL_RUNTIME_JSON_TYPES.has(parsed.type);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeSignalLine(line: string): string {
   return line
     .trim()
@@ -112,6 +134,7 @@ export function sanitizeAgentVisibleOutput(content: string): string {
 
   for (const block of blocks) {
     if (!block.trim()) continue;
+    if (isInternalRuntimeJsonBlock(block)) continue;
     if (isInternalProtocolBlock(block)) continue;
 
     const rawLines = block
