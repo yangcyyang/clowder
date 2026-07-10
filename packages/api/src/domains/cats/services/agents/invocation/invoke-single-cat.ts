@@ -56,6 +56,7 @@ import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../util
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
+import { estimateTokens } from '../../../../../utils/token-counter.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
@@ -63,6 +64,7 @@ import { estimatePromptSourceBreakdown } from '../../context/prompt-source-break
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { autoUpdateAgentMemory } from '../memory/AgentMemoryAutoWriter.js';
+import { evaluateClaudeBudgetGate } from './claude-budget-gate.js';
 import {
   inferResumeTrustForSessionHandoff,
   writeContextHandoffForPromptProjects,
@@ -673,6 +675,39 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    // Claude budget gate: high-history threads must not resume a huge hidden CLI session.
+    const preResumeCatConfig = catRegistry.tryGet(catId as string)?.config;
+    const preResumeBudgetGate = evaluateClaudeBudgetGate({
+      provider: preResumeCatConfig?.clientId,
+      contextBudget: params.contextBudget,
+      hasResumeSession: Boolean(sessionId),
+    });
+    if (preResumeBudgetGate.action === 'drop-resume') {
+      log.warn(
+        {
+          threadId,
+          catId,
+          userId,
+          invocationId,
+          sessionId,
+          reason: preResumeBudgetGate.reason,
+          historyFullTokens: preResumeBudgetGate.historyFullTokens,
+          historyBudgetRatio: preResumeBudgetGate.historyBudgetRatio,
+          thresholdTokens: preResumeBudgetGate.thresholdTokens,
+          thresholdRatio: preResumeBudgetGate.thresholdRatio,
+        },
+        'Claude budget gate dropped resume session before subprocess launch',
+      );
+      yield {
+        type: 'system_info' as const,
+        catId,
+        content:
+          '⚠️ Claude 预算闸门：该线程历史过大，本次改用新会话 + 已裁剪上下文，避免继续复用旧 Claude session 烧大上下文。',
+        timestamp: Date.now(),
+      };
+      sessionId = undefined;
+    }
+
     // F118: Acquire per-cliSessionId mutex to prevent concurrent resume
     if (sessionId) {
       try {
@@ -1220,6 +1255,62 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       systemPrompt: injectSystemPrompt ? params.systemPrompt : undefined,
       userPrompt: promptWithMission,
     });
+
+    const visiblePromptBudgetGate = evaluateClaudeBudgetGate({
+      provider,
+      contextBudget: {
+        ...(params.contextBudget ?? {
+          surface: 'thread',
+          threadId,
+          toolPolicy: params.toolPolicy ?? 'standard',
+          toolPolicySource: params.toolPolicySource ?? 'agent-default',
+          mode: 'serial',
+          estimatedTokens: 0,
+          historyMessages: 0,
+          loadedBlocks: [],
+          skippedBlocks: [],
+          governanceTier: 'core',
+          governanceEstimatedTokens: 0,
+          governanceSourceInjected: false,
+          usesFullHistory: false,
+          maxPromptTokens: 0,
+          maxContextTokens: 0,
+        }),
+        estimatedTokens: Math.max(params.contextBudget?.estimatedTokens ?? 0, estimateTokens(effectivePrompt)),
+      },
+      hasResumeSession: Boolean(sessionId),
+    });
+    if (visiblePromptBudgetGate.action === 'block') {
+      log.warn(
+        {
+          threadId,
+          catId,
+          userId,
+          invocationId,
+          reason: visiblePromptBudgetGate.reason,
+          estimatedTokens: visiblePromptBudgetGate.estimatedTokens,
+          thresholdTokens: visiblePromptBudgetGate.thresholdTokens,
+        },
+        'Claude budget gate blocked oversized visible prompt before subprocess launch',
+      );
+      yield {
+        type: 'error' as const,
+        catId,
+        error:
+          `Claude 预算闸门已拦截：本次可见 prompt 预计 ${visiblePromptBudgetGate.estimatedTokens} tokens，` +
+          `超过上限 ${visiblePromptBudgetGate.thresholdTokens} tokens。请先压缩线程、改用摘要，或改派 Codex/Sonnet。`,
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'done' as const,
+        catId,
+        isFinal: params.isLastCat,
+        errorCode: 'CLAUDE_PROMPT_BUDGET_EXCEEDED',
+        timestamp: Date.now(),
+      };
+      didComplete = true;
+      return;
+    }
 
     capturePromptIfEnabled({
       catId: catId as string,
