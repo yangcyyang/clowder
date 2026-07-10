@@ -848,6 +848,7 @@ async function main(): Promise<void> {
                 codexSummaryService.invoke.bind(codexSummaryService),
                 summaryLogger,
                 {
+                  providerId: 'codex-cli',
                   workingDirectory: findMonorepoRoot(process.cwd()),
                   callbackEnv: {
                     CAT_CAFE_AGENT_OUTPUT_GATE: '1',
@@ -857,7 +858,21 @@ async function main(): Promise<void> {
                 },
               );
             })()
-          : createAbstractiveClient(
+          : summaryProvider === 'pi-cli'
+            ? (() => {
+                const catId = createCatId(process.env.CAT_CAFE_SUMMARY_PI_CAT_ID?.trim() || 'pi');
+                const model = process.env.CAT_CAFE_SUMMARY_PI_MODEL?.trim();
+                const piSummaryService = new PiAgentService(model ? { catId, model } : { catId });
+                return createAgentAbstractiveClient(piSummaryService.invoke.bind(piSummaryService), summaryLogger, {
+                  providerId: 'pi-cli',
+                  workingDirectory: findMonorepoRoot(process.cwd()),
+                  callbackEnv: {
+                    CAT_CAFE_AGENT_OUTPUT_GATE: '1',
+                    ...(model ? { CAT_CAFE_PI_MODEL_OVERRIDE: model } : {}),
+                  },
+                });
+              })()
+            : createAbstractiveClient(
               async () => {
                 // Priority 1: explicit F102 config
                 if (process.env.F102_API_BASE && process.env.F102_API_KEY) {

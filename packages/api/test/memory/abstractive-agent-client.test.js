@@ -21,7 +21,7 @@ describe('Agent-backed abstractive summary client', () => {
     ],
   };
 
-  it('parses Codex CLI text output into summary segments', async () => {
+  it('parses agent CLI text output into summary segments', async () => {
     const { createAgentAbstractiveClient } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
     const calls = [];
 
@@ -35,10 +35,14 @@ describe('Agent-backed abstractive summary client', () => {
       yield { type: 'done' };
     }
 
-    const client = createAgentAbstractiveClient(invokeAgent, {
-      info() {},
-      error() {},
-    });
+    const client = createAgentAbstractiveClient(
+      invokeAgent,
+      {
+        info() {},
+        error() {},
+      },
+      { providerId: 'pi-cli' },
+    );
 
     const result = await client(input);
 
@@ -74,8 +78,10 @@ describe('Agent-backed abstractive summary client', () => {
     assert.match(errors.join('\n'), /agent error/);
   });
 
-  it('labels codex-cli provider model ids explicitly', async () => {
-    const { getAbstractiveSummaryModelId } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+  it('labels CLI provider model ids explicitly', async () => {
+    const { getAbstractiveSummaryModelId, getSummaryProviderId } = await import(
+      '../../dist/domains/memory/AbstractiveSummaryClient.js'
+    );
 
     assert.equal(
       getAbstractiveSummaryModelId({
@@ -85,5 +91,15 @@ describe('Agent-backed abstractive summary client', () => {
       }),
       'codex-cli:gpt52:gpt-5.5',
     );
+    assert.equal(
+      getAbstractiveSummaryModelId({
+        CAT_CAFE_SUMMARY_PROVIDER: 'pi-cli',
+        CAT_CAFE_SUMMARY_PI_CAT_ID: 'pi',
+        CAT_CAFE_SUMMARY_PI_MODEL: 'mimo/mimo-v2.5-pro',
+      }),
+      'pi-cli:pi:mimo/mimo-v2.5-pro',
+    );
+    assert.equal(getSummaryProviderId({ CAT_CAFE_SUMMARY_PROVIDER: 'pi' }), 'pi-cli');
+    assert.equal(getSummaryProviderId({ CAT_CAFE_SUMMARY_PROVIDER: 'pi-cli' }), 'pi-cli');
   });
 });

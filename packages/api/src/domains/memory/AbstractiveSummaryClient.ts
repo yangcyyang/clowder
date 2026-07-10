@@ -40,7 +40,7 @@ export interface AbstractiveResult {
   segments: TopicSegment[];
 }
 
-export type SummaryProviderId = 'anthropic-api' | 'codex-cli';
+export type SummaryProviderId = 'anthropic-api' | 'codex-cli' | 'pi-cli';
 
 interface ProviderProfile {
   mode: 'api_key' | 'subscription';
@@ -49,10 +49,16 @@ interface ProviderProfile {
 }
 
 export function getAbstractiveSummaryModelId(env: NodeJS.ProcessEnv = process.env): string {
-  if (getSummaryProviderId(env) === 'codex-cli') {
+  const providerId = getSummaryProviderId(env);
+  if (providerId === 'codex-cli') {
     const catId = env.CAT_CAFE_SUMMARY_CODEX_CAT_ID?.trim() || 'gpt52';
     const model = env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || 'gpt-5.5';
     return `codex-cli:${catId}:${model}`;
+  }
+  if (providerId === 'pi-cli') {
+    const catId = env.CAT_CAFE_SUMMARY_PI_CAT_ID?.trim() || 'pi';
+    const model = env.CAT_CAFE_SUMMARY_PI_MODEL?.trim() || 'cat-default';
+    return `pi-cli:${catId}:${model}`;
   }
   return env.CAT_CAFE_SUMMARY_MODEL?.trim() || 'claude-3-5-haiku-latest';
 }
@@ -66,11 +72,13 @@ function getAbstractiveSummaryMaxTokens(env: NodeJS.ProcessEnv = process.env): n
 export function getSummaryProviderId(env: NodeJS.ProcessEnv = process.env): SummaryProviderId {
   const raw = env.CAT_CAFE_SUMMARY_PROVIDER?.trim().toLowerCase();
   if (raw === 'codex-cli') return 'codex-cli';
+  if (raw === 'pi' || raw === 'pi-cli') return 'pi-cli';
   return 'anthropic-api';
 }
 
-function getCodexSummaryTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const parsed = Number.parseInt(env.CAT_CAFE_SUMMARY_CODEX_TIMEOUT_MS ?? '', 10);
+function getAgentSummaryTimeoutMs(providerId: string, env: NodeJS.ProcessEnv = process.env): number {
+  const envKey = providerId === 'pi-cli' ? 'CAT_CAFE_SUMMARY_PI_TIMEOUT_MS' : 'CAT_CAFE_SUMMARY_CODEX_TIMEOUT_MS';
+  const parsed = Number.parseInt(env[envKey] ?? '', 10);
   if (!Number.isFinite(parsed)) return 90_000;
   return Math.min(300_000, Math.max(15_000, parsed));
 }
@@ -382,6 +390,7 @@ type SummaryAgentInvoke = (
 ) => AsyncIterable<SummaryAgentMessage>;
 
 interface AgentSummaryClientOptions {
+  providerId?: string;
   workingDirectory?: string;
   callbackEnv?: Record<string, string>;
   cliConfigArgs?: readonly string[];
@@ -395,7 +404,8 @@ export function createAgentAbstractiveClient(
 ): (input: AbstractiveInput) => Promise<AbstractiveResult | null> {
   return async (input: AbstractiveInput): Promise<AbstractiveResult | null> => {
     const userContent = buildUserPrompt(input);
-    const timeoutMs = options.timeoutMs ?? getCodexSummaryTimeoutMs();
+    const providerId = options.providerId ?? 'agent-cli';
+    const timeoutMs = options.timeoutMs ?? getAgentSummaryTimeoutMs(providerId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const chunks: string[] = [];
@@ -411,34 +421,34 @@ export function createAgentAbstractiveClient(
         if (event.type === 'text' && event.content) {
           chunks.push(event.content);
         } else if (event.type === 'error') {
-          logger.error(`[abstractive-client:codex-cli] agent error: ${event.error ?? 'unknown error'}`);
+          logger.error(`[abstractive-client:${providerId}] agent error: ${event.error ?? 'unknown error'}`);
           return null;
         }
       }
 
       const text = chunks.join('\n').trim();
       if (!text) {
-        logger.error('[abstractive-client:codex-cli] no text in response');
+        logger.error(`[abstractive-client:${providerId}] no text in response`);
         return null;
       }
 
       const result = parseNaturalLanguageOutput(text, input);
       if (!result) {
-        logger.error(`[abstractive-client:codex-cli] failed to parse output: ${text.slice(0, 150)}`);
+        logger.error(`[abstractive-client:${providerId}] failed to parse output: ${text.slice(0, 150)}`);
         return null;
       }
 
       logger.info(
-        `[abstractive-client:codex-cli] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
+        `[abstractive-client:${providerId}] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
       );
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (controller.signal.aborted) {
-        logger.error(`[abstractive-client:codex-cli] timed out after ${timeoutMs}ms`);
+        logger.error(`[abstractive-client:${providerId}] timed out after ${timeoutMs}ms`);
         return null;
       }
-      logger.error(`[abstractive-client:codex-cli] invoke/parse error: ${msg}`);
+      logger.error(`[abstractive-client:${providerId}] invoke/parse error: ${msg}`);
       return null;
     } finally {
       clearTimeout(timeout);
