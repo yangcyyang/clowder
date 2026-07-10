@@ -62,4 +62,19 @@ describe('chat-message-visibility', () => {
     expect(isUserVisibleChatMessage(internalOnlyMessage)).toBe(false);
     expect(isUnreadCountableChatMessage(internalOnlyMessage)).toBe(false);
   });
+
+  it('hides system messages that only contain internal runtime notices', () => {
+    const internalSystemMessage: ChatMessage = {
+      id: 'internal-system-1',
+      threadId: 'thread-1',
+      type: 'system',
+      variant: 'info',
+      content:
+        '{"type":"handoff_draft_window","catId":"gpt52","sessionId":"session_1","threadId":"default"}',
+      timestamp: Date.now(),
+    } as Partial<ChatMessage> as ChatMessage;
+
+    expect(isUserVisibleChatMessage(internalSystemMessage)).toBe(false);
+    expect(isUnreadCountableChatMessage(internalSystemMessage)).toBe(false);
+  });
 });

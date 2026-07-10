@@ -5,8 +5,15 @@ export interface VisibleSystemInfoResult {
   variant: VisibleSystemInfoVariant;
 }
 
+const SILENT_SYSTEM_INFO_TYPES = new Set([
+  'provider_capability',
+  'handoff_draft_window',
+  'session_handoff_write_failed',
+  'session_seal_requested',
+]);
+
 export function isSilentSystemInfo(parsed: Record<string, unknown> | null | undefined): boolean {
-  return parsed?.type === 'provider_capability';
+  return typeof parsed?.type === 'string' && SILENT_SYSTEM_INFO_TYPES.has(parsed.type);
 }
 
 function formatPingpongTerminated(parsed: Record<string, unknown>): VisibleSystemInfoResult {

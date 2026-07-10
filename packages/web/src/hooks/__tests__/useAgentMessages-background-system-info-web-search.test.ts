@@ -60,6 +60,28 @@ describe('consumeBackgroundSystemInfo web_search', () => {
     expect(result.consumed).toBe(true);
   });
 
+  it('consumes handoff_draft_window JSON without rendering raw runtime JSON', () => {
+    const options = createMockOptions();
+
+    const msg = {
+      type: 'system_info',
+      catId: 'gpt52',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'handoff_draft_window',
+        catId: 'gpt52',
+        sessionId: 'session_1',
+        threadId: 'thread-1',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+  });
+
   it('consumes invocation_created and resets stale taskProgress for that cat', () => {
     const options = createMockOptions({
       getThreadState: vi.fn(() => ({

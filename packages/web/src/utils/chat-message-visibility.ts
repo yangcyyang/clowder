@@ -67,8 +67,15 @@ export function isUserVisibleChatMessage(message: ChatMessage): boolean {
     return false;
   }
 
-  if (message.type === 'summary' || message.type === 'system' || message.type === 'connector') {
+  if (message.type === 'summary' || message.type === 'connector') {
     return true;
+  }
+
+  if (message.type === 'system') {
+    if (message.variant === 'evidence' || message.variant === 'governance_blocked') return true;
+    if (sanitizeAgentVisibleContent(message.content).trim().length > 0) return true;
+    if (message.extra?.rich?.blocks?.length) return true;
+    return false;
   }
 
   if (message.type === 'user' && !message.catId) {

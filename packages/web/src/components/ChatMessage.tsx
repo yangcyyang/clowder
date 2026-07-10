@@ -317,7 +317,8 @@ export function ChatMessage({
 
     // F045: variant='thinking' is deprecated — thinking is now embedded in assistant bubbles.
 
-    const isLegacyError = !message.variant && message.content.trim().startsWith('Error:');
+    const systemDisplayContent = visibleContent;
+    const isLegacyError = !message.variant && systemDisplayContent.trim().startsWith('Error:');
     const isError = message.variant === 'error' || isLegacyError;
     const isTool = message.variant === 'tool';
     const isFollowup = message.variant === 'a2a_followup';
@@ -327,7 +328,7 @@ export function ChatMessage({
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">
           <div className="max-w-[85%] w-full">
-            <TimeoutDiagnosticsPanel errorMessage={message.content} diagnostics={message.extra.timeoutDiagnostics} />
+            <TimeoutDiagnosticsPanel errorMessage={systemDisplayContent} diagnostics={message.extra.timeoutDiagnostics} />
           </div>
         </div>
       );
@@ -344,7 +345,7 @@ export function ChatMessage({
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div className={`px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${toneClass}`}>
           {isFollowup && <span className="mr-1">🔗</span>}
-          {message.content}
+          {systemDisplayContent}
           {isFollowup && (
             <span className="block mt-1 text-xs text-conn-purple-text">输入 @猫名 跟进 来发起 follow-up</span>
           )}
