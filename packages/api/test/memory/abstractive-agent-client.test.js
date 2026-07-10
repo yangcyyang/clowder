@@ -73,4 +73,17 @@ describe('Agent-backed abstractive summary client', () => {
     assert.equal(result, null);
     assert.match(errors.join('\n'), /agent error/);
   });
+
+  it('labels codex-cli provider model ids explicitly', async () => {
+    const { getAbstractiveSummaryModelId } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+
+    assert.equal(
+      getAbstractiveSummaryModelId({
+        CAT_CAFE_SUMMARY_PROVIDER: 'codex-cli',
+        CAT_CAFE_SUMMARY_CODEX_CAT_ID: 'gpt52',
+        CAT_CAFE_SUMMARY_CODEX_MODEL: 'gpt-5.5',
+      }),
+      'codex-cli:gpt52:gpt-5.5',
+    );
+  });
 });

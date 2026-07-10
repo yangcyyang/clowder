@@ -49,6 +49,11 @@ interface ProviderProfile {
 }
 
 export function getAbstractiveSummaryModelId(env: NodeJS.ProcessEnv = process.env): string {
+  if (getSummaryProviderId(env) === 'codex-cli') {
+    const catId = env.CAT_CAFE_SUMMARY_CODEX_CAT_ID?.trim() || 'gpt52';
+    const model = env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || 'gpt-5.5';
+    return `codex-cli:${catId}:${model}`;
+  }
   return env.CAT_CAFE_SUMMARY_MODEL?.trim() || 'claude-3-5-haiku-latest';
 }
 
