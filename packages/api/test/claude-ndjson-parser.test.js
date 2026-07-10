@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformClaudeEvent } = await import('../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js');
+const { isDiagnosticOnlyEdeResult, transformClaudeEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js'
+);
 
 const CAT = 'opus';
 
@@ -264,6 +266,34 @@ test('error_during_execution with errors → error.error uses errors array (not 
   assert.ok(result !== null);
   assert.ok(!Array.isArray(result));
   assert.equal(result.error, 'execution failed', 'errors array should take precedence over subtype label');
+});
+
+test('detects diagnostic-only EDE result with null stop_reason', () => {
+  const event = {
+    type: 'result',
+    subtype: 'error_during_execution',
+    result: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null',
+  };
+  assert.equal(isDiagnosticOnlyEdeResult(event), true);
+});
+
+test('does not classify normal execution errors as diagnostic-only EDE', () => {
+  assert.equal(
+    isDiagnosticOnlyEdeResult({
+      type: 'result',
+      subtype: 'error_during_execution',
+      errors: ['rate limited'],
+    }),
+    false,
+  );
+  assert.equal(
+    isDiagnosticOnlyEdeResult({
+      type: 'result',
+      subtype: 'error_during_execution',
+      result: '[ede_diagnostic] result_type=user stop_reason=tool_use',
+    }),
+    false,
+  );
 });
 
 test('unknown subtype with empty errors → error.error includes subtype string', () => {

@@ -251,6 +251,29 @@ export function isResultErrorEvent(event: unknown): boolean {
   return e.type === 'result' && e.subtype !== 'success';
 }
 
+function collectResultErrorText(e: Record<string, unknown>): string {
+  const errors = Array.isArray(e.errors) ? e.errors : [];
+  const errorText = errors.filter((item): item is string => typeof item === 'string').join('\n');
+  const scalarText = [e.result, e.message, e.error]
+    .filter((item): item is string => typeof item === 'string')
+    .join('\n');
+  return [errorText, scalarText].filter(Boolean).join('\n');
+}
+
+/**
+ * Claude CLI sometimes emits a `result/error_during_execution` frame that only
+ * contains an internal EDE diagnostic for a non-terminal Anthropic turn. This is
+ * not a user-actionable model/tool failure and should not become a red chat
+ * error; the service logs it and finishes the invocation gracefully.
+ */
+export function isDiagnosticOnlyEdeResult(event: unknown): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const e = event as Record<string, unknown>;
+  if (e.type !== 'result' || e.subtype !== 'error_during_execution') return false;
+  const text = collectResultErrorText(e);
+  return text.includes('[ede_diagnostic]') && /stop_reason\s*=\s*null/.test(text);
+}
+
 /** F8: Extract token usage from Claude result/success event.
  *  Normalises inputTokens to total input (new + cache_read + cache_creation)
  *  so that the semantics match Codex/OpenAI where inputTokens = total. */

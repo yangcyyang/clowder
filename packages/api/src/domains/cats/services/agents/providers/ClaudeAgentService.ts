@@ -35,7 +35,12 @@ import {
   isClaudeRuntimeSteerEnabled,
   registerClaudeRuntimeSteerChannel,
 } from './claude-runtime-steer.js';
-import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+import {
+  extractClaudeUsage,
+  isDiagnosticOnlyEdeResult,
+  isResultErrorEvent,
+  transformClaudeEvent,
+} from './claude-ndjson-parser.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -511,6 +516,18 @@ export class ClaudeAgentService implements AgentService {
           }
         }
         if (rawEvt.type === 'result') completeRuntimeSteerTurn();
+
+        if (isDiagnosticOnlyEdeResult(event)) {
+          log.warn(
+            {
+              catId: this.catId,
+              invocationId: options?.invocationId,
+              eventIndex: eventCount,
+            },
+            'Claude CLI emitted diagnostic-only EDE result; suppressing visible chat error',
+          );
+          continue;
+        }
 
         const fromResultError = isResultErrorEvent(event);
         let result = transformClaudeEvent(event, this.catId, streamState);

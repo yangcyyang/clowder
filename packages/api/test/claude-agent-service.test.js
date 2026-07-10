@@ -673,6 +673,27 @@ test('does not duplicate error when result/error is followed by non-zero exit', 
   assert.equal(errors[0].error, 'rate limited');
 });
 
+test('suppresses diagnostic-only EDE result without exposing raw runtime error', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('budget gate first turn'));
+
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'sess-ede' },
+    {
+      type: 'result',
+      subtype: 'error_during_execution',
+      result: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null',
+    },
+  ]);
+
+  const msgs = await promise;
+  assert.equal(msgs.some((m) => m.type === 'error'), false);
+  assert.equal(msgs.some((m) => m.type === 'done'), true);
+});
+
 test('includes exit signal in CLI error message when no exit code (stderr sanitized)', async () => {
   const proc = createMockProcess();
   proc.kill = mock.fn(() => true);
