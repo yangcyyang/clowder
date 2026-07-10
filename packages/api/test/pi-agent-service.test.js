@@ -134,4 +134,30 @@ describe('PiAgentService', () => {
     assert.equal(messages.find((message) => message.type === 'text')?.content, 'fallback text');
     assert.equal(messages.at(-1)?.type, 'done');
   });
+
+  test('surfaces assistant stopReason errors from pi json events', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new PiAgentService({ catId: 'pi', spawnFn, model: 'mimo-v2.5-pro' });
+    const promise = collect(service.invoke('hello'));
+
+    emitPiEvents(proc, [
+      { type: 'session', id: 'pi-session-3' },
+      {
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          provider: 'mimo',
+          model: 'mimo-v2.5-pro',
+          content: [],
+          stopReason: 'error',
+          errorMessage: '402: insufficient_balance',
+        },
+      },
+    ]);
+
+    const messages = await promise;
+    assert.equal(messages.find((message) => message.type === 'error')?.error, '402: insufficient_balance');
+    assert.equal(messages.at(-1)?.type, 'done');
+  });
 });

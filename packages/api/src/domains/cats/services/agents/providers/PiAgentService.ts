@@ -40,6 +40,8 @@ interface PiMessage {
   model?: unknown;
   usage?: PiUsage;
   content?: unknown;
+  stopReason?: unknown;
+  errorMessage?: unknown;
 }
 
 interface PiAssistantEvent {
@@ -93,6 +95,15 @@ function extractAssistantText(rawMessage: unknown): string {
     if (item?.type === 'text' && typeof item.text === 'string') parts.push(item.text);
   }
   return parts.join('');
+}
+
+function extractAssistantError(rawMessage: unknown): string | null {
+  const message = asRecord(rawMessage) as PiMessage | null;
+  if (!message || message.role !== 'assistant') return null;
+  if (message.stopReason !== 'error') return null;
+  return typeof message.errorMessage === 'string' && message.errorMessage.trim()
+    ? message.errorMessage.trim()
+    : 'Pi CLI assistant message ended with stopReason=error';
 }
 
 function extractSessionId(rawEvent: unknown): string | undefined {
@@ -268,6 +279,16 @@ export class PiAgentService implements AgentService {
         }
 
         if (eventRecord?.type === 'message_end') {
+          const assistantError = extractAssistantError(eventRecord.message);
+          if (assistantError) {
+            yield {
+              type: 'error',
+              catId: this.catId,
+              error: assistantError,
+              metadata,
+              timestamp: Date.now(),
+            };
+          }
           fallbackFinalText = extractAssistantText(eventRecord.message);
         }
       }
