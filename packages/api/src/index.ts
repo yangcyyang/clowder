@@ -841,7 +841,7 @@ async function main(): Promise<void> {
             return { mode: 'api_key' as const, baseUrl: process.env.F102_API_BASE, apiKey: process.env.F102_API_KEY };
           }
           // Priority 2: deterministic binding with installer-only fallback (502 regression)
-          const runtimeProfile = resolveAnthropicRuntimeProfile(process.cwd());
+          const runtimeProfile = resolveAnthropicRuntimeProfile(findMonorepoRoot(process.cwd()));
           const apiKey = runtimeProfile.apiKey;
           if (!apiKey) return null;
           const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
