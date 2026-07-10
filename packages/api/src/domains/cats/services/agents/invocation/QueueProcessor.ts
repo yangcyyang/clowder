@@ -184,7 +184,8 @@ function isMeaningfulTokenUsage(usage: TokenUsage): boolean {
     (usage.totalTokens ?? 0) > 0 ||
     (usage.cacheReadTokens ?? 0) > 0 ||
     (usage.cacheCreationTokens ?? 0) > 0 ||
-    Number.isFinite(usage.costUsd)
+    Number.isFinite(usage.costUsd) ||
+    usage.budgetGateTriggered === true
   );
 }
 
@@ -786,6 +787,12 @@ export class QueueProcessor {
                 ...(aggregate.usage.summarySegmentId ? { summarySegmentId: aggregate.usage.summarySegmentId } : {}),
                 ...(aggregate.usage.historyGovernanceDegraded != null
                   ? { historyGovernanceDegraded: aggregate.usage.historyGovernanceDegraded }
+                  : {}),
+                ...(aggregate.usage.budgetGateTriggered != null
+                  ? { budgetGateTriggered: aggregate.usage.budgetGateTriggered }
+                  : {}),
+                ...(aggregate.usage.historyFullTokensBeforeGate != null
+                  ? { historyFullTokensBeforeGate: aggregate.usage.historyFullTokensBeforeGate }
                   : {}),
               },
             },

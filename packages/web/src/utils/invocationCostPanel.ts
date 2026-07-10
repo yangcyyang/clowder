@@ -28,6 +28,8 @@ export interface InvocationUsageSummary {
   historyBudgetRatio?: number;
   summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
+  budgetGateTriggered?: boolean;
+  historyFullTokensBeforeGate?: number;
 }
 
 export function isInvocationCostPanelEnabled(): boolean {
@@ -126,6 +128,13 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
   if (typeof data.historyGovernanceDegraded === 'boolean') {
     summary.historyGovernanceDegraded = data.historyGovernanceDegraded;
   }
+  if (typeof data.budgetGateTriggered === 'boolean') {
+    summary.budgetGateTriggered = data.budgetGateTriggered;
+  }
+  const historyFullTokensBeforeGate = asNumber(data.historyFullTokensBeforeGate);
+  if (historyFullTokensBeforeGate != null) {
+    summary.historyFullTokensBeforeGate = historyFullTokensBeforeGate;
+  }
   const hasSignal =
     summary.inputTokens != null ||
     summary.outputTokens != null ||
@@ -141,7 +150,9 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     summary.historySummaryTokens != null ||
     summary.historyBudgetRatio != null ||
     summary.summarySegmentId != null ||
-    summary.historyGovernanceDegraded != null;
+    summary.historyGovernanceDegraded != null ||
+    summary.budgetGateTriggered != null ||
+    summary.historyFullTokensBeforeGate != null;
   return hasSignal ? summary : null;
 }
 
@@ -169,6 +180,13 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
     if (event.summarySegmentId != null) total.summarySegmentId = event.summarySegmentId;
     if (event.historyGovernanceDegraded != null) {
       total.historyGovernanceDegraded = event.historyGovernanceDegraded;
+    }
+    if (event.budgetGateTriggered != null) {
+      total.budgetGateTriggered = total.budgetGateTriggered === true || event.budgetGateTriggered;
+    }
+    if (event.historyFullTokensBeforeGate != null) {
+      total.historyFullTokensBeforeGate =
+        (total.historyFullTokensBeforeGate ?? 0) + event.historyFullTokensBeforeGate;
     }
   }
   return total;

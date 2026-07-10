@@ -121,4 +121,31 @@ describe('invocationCostPanel', () => {
       historyGovernanceDegraded: true,
     });
   });
+
+  it('reads and summarizes Claude budget gate usage fields', () => {
+    const summaries = readTaskUsageSummaries(
+      task([
+        {
+          ts: new Date().toISOString(),
+          catId: 'opus',
+          type: 'usage',
+          data: {
+            budgetGateTriggered: true,
+            historyFullTokensBeforeGate: 180000,
+          },
+        },
+      ]),
+    );
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      budgetGateTriggered: true,
+      historyFullTokensBeforeGate: 180000,
+    });
+
+    expect(summarizeTaskUsage(summaries)).toMatchObject({
+      budgetGateTriggered: true,
+      historyFullTokensBeforeGate: 180000,
+    });
+  });
 });

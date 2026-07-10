@@ -677,6 +677,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // Claude budget gate: high-history threads must not resume a huge hidden CLI session.
     const preResumeCatConfig = catRegistry.tryGet(catId as string)?.config;
+    let budgetGateUsage:
+      | {
+          budgetGateTriggered: true;
+          historyFullTokensBeforeGate?: number;
+        }
+      | undefined;
     const preResumeBudgetGate = evaluateClaudeBudgetGate({
       provider: preResumeCatConfig?.clientId,
       contextBudget: params.contextBudget,
@@ -698,12 +704,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         },
         'Claude budget gate dropped resume session before subprocess launch',
       );
-      yield {
-        type: 'system_info' as const,
-        catId,
-        content:
-          '⚠️ Claude 预算闸门：该线程历史过大，本次改用新会话 + 已裁剪上下文，避免继续复用旧 Claude session 烧大上下文。',
-        timestamp: Date.now(),
+      budgetGateUsage = {
+        budgetGateTriggered: true,
+        ...(preResumeBudgetGate.historyFullTokens != null
+          ? { historyFullTokensBeforeGate: preResumeBudgetGate.historyFullTokens }
+          : {}),
       };
       sessionId = undefined;
     }
@@ -1611,6 +1616,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               ...(params.contextBudget.historyGovernanceDegraded !== undefined
                 ? { historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded }
                 : {}),
+            };
+          }
+          if (budgetGateUsage) {
+            msg.metadata.usage = {
+              ...msg.metadata.usage,
+              ...budgetGateUsage,
             };
           }
           // F152: Record OTel token usage + LLM call duration

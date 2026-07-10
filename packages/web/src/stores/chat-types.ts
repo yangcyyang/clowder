@@ -66,6 +66,10 @@ export interface TokenUsage {
   /** Primary summary segment used for history summary injection. */
   summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
+  /** True when the Claude resume budget gate dropped a large prior CLI session. */
+  budgetGateTriggered?: boolean;
+  /** Full history estimate before the gate forced a fresh/cropped invocation. */
+  historyFullTokensBeforeGate?: number;
 }
 
 export interface ChatMessageMetadata {

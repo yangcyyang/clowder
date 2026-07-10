@@ -110,6 +110,14 @@ function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
           {formatDuration(usage.durationMs)}
         </span>
       )}
+      {usage.budgetGateTriggered && (
+        <span className="rounded-full border border-conn-amber-text/40 bg-conn-amber-bg/40 px-1.5 py-0.5 text-conn-amber-text">
+          预算闸门
+          {usage.historyFullTokensBeforeGate != null
+            ? ` · 裁剪前 ${formatTokenCount(usage.historyFullTokensBeforeGate)}`
+            : ''}
+        </span>
+      )}
       {usageRisk && (
         <span
           className="rounded-full border border-conn-red-text/40 bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
@@ -147,6 +155,14 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
           <span className="text-conn-amber-text">
             history {formatTokenCount(usage.historyFullTokens)}
             {usage.historyBudgetRatio != null ? ` · ${Math.round(usage.historyBudgetRatio * 100)}%` : ''}
+          </span>
+        )}
+        {usage.budgetGateTriggered && (
+          <span className="text-conn-amber-text">
+            预算闸门已触发
+            {usage.historyFullTokensBeforeGate != null
+              ? ` · 裁剪前历史约 ${formatTokenCount(usage.historyFullTokensBeforeGate)}`
+              : ''}
           </span>
         )}
       </div>

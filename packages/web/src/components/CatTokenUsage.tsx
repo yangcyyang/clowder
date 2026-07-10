@@ -138,6 +138,21 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
             {usageRisk.label}
           </span>
         )}
+        {showCostPanel && usage.budgetGateTriggered && (
+          <span
+            className="rounded-full border border-conn-amber-text/40 bg-conn-amber-bg/40 px-1.5 py-0.5 font-semibold text-conn-amber-text"
+            title={
+              usage.historyFullTokensBeforeGate != null
+                ? `裁剪前历史约 ${usage.historyFullTokensBeforeGate.toLocaleString()} tokens`
+                : '本轮触发 Claude 预算闸门，已丢弃旧 resume session'
+            }
+          >
+            预算闸门
+            {usage.historyFullTokensBeforeGate != null
+              ? ` · 裁剪前 ${formatTokenCount(usage.historyFullTokensBeforeGate)}`
+              : ''}
+          </span>
+        )}
       </div>
 
       {contextSummary && (

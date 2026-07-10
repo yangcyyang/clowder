@@ -83,6 +83,8 @@ export interface RunLedgerSummary {
     | 'historyBudgetRatio'
     | 'summarySegmentId'
     | 'historyGovernanceDegraded'
+    | 'budgetGateTriggered'
+    | 'historyFullTokensBeforeGate'
   >;
   artifactCount?: number;
   toolCallCount?: number;
@@ -545,6 +547,10 @@ function summarizeUsage(usageByCat: InvocationRecord['usageByCat']): RunLedgerSu
     if (item.historyGovernanceDegraded != null) {
       usage.historyGovernanceDegraded = item.historyGovernanceDegraded;
     }
+    if (item.budgetGateTriggered != null) usage.budgetGateTriggered = item.budgetGateTriggered;
+    if (item.historyFullTokensBeforeGate != null) {
+      usage.historyFullTokensBeforeGate = item.historyFullTokensBeforeGate;
+    }
   }
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
@@ -605,6 +611,8 @@ function pickUsageEventData(data: Record<string, unknown>): Record<string, unkno
     'historyBudgetRatio',
     'summarySegmentId',
     'historyGovernanceDegraded',
+    'budgetGateTriggered',
+    'historyFullTokensBeforeGate',
   ];
   return pickKeys(data, keys);
 }

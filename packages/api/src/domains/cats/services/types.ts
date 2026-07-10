@@ -57,6 +57,10 @@ export interface TokenUsage {
   summarySegmentId?: string;
   /** True when the history governance observation had to fall back/degrade. */
   historyGovernanceDegraded?: boolean;
+  /** True when the Claude resume budget gate dropped a large prior CLI session. */
+  budgetGateTriggered?: boolean;
+  /** Full history estimate before the gate forced a fresh/cropped invocation. */
+  historyFullTokensBeforeGate?: number;
 }
 
 type NumericTokenUsageKey =
@@ -108,6 +112,12 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
   if (incoming.summarySegmentId != null) result.summarySegmentId = incoming.summarySegmentId;
   if (incoming.historyGovernanceDegraded != null) {
     result.historyGovernanceDegraded = incoming.historyGovernanceDegraded;
+  }
+  if (incoming.budgetGateTriggered != null) {
+    result.budgetGateTriggered = incoming.budgetGateTriggered;
+  }
+  if (incoming.historyFullTokensBeforeGate != null) {
+    result.historyFullTokensBeforeGate = incoming.historyFullTokensBeforeGate;
   }
   if (incoming.sourceBreakdown) {
     result.sourceBreakdown = incoming.sourceBreakdown;
