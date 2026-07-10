@@ -40,6 +40,8 @@ export interface AbstractiveResult {
   segments: TopicSegment[];
 }
 
+export type SummaryProviderId = 'anthropic-api' | 'codex-cli';
+
 interface ProviderProfile {
   mode: 'api_key' | 'subscription';
   baseUrl: string;
@@ -54,6 +56,18 @@ function getAbstractiveSummaryMaxTokens(env: NodeJS.ProcessEnv = process.env): n
   const parsed = Number.parseInt(env.CAT_CAFE_SUMMARY_MAX_TOKENS ?? '', 10);
   if (!Number.isFinite(parsed)) return 4096;
   return Math.min(8192, Math.max(1024, parsed));
+}
+
+export function getSummaryProviderId(env: NodeJS.ProcessEnv = process.env): SummaryProviderId {
+  const raw = env.CAT_CAFE_SUMMARY_PROVIDER?.trim().toLowerCase();
+  if (raw === 'codex-cli') return 'codex-cli';
+  return 'anthropic-api';
+}
+
+function getCodexSummaryTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.CAT_CAFE_SUMMARY_CODEX_TIMEOUT_MS ?? '', 10);
+  if (!Number.isFinite(parsed)) return 90_000;
+  return Math.min(300_000, Math.max(15_000, parsed));
 }
 
 // ─── System Prompt: natural language output ──────────────────────
@@ -341,6 +355,88 @@ export function createAbstractiveClient(
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[abstractive-client] fetch/parse error: ${msg}`);
       return null;
+    }
+  };
+}
+
+type SummaryAgentMessage = {
+  type: string;
+  content?: string;
+  error?: string;
+};
+
+type SummaryAgentInvoke = (
+  prompt: string,
+  options?: {
+    systemPrompt?: string;
+    signal?: AbortSignal;
+    workingDirectory?: string;
+    callbackEnv?: Record<string, string>;
+    cliConfigArgs?: readonly string[];
+  },
+) => AsyncIterable<SummaryAgentMessage>;
+
+interface AgentSummaryClientOptions {
+  workingDirectory?: string;
+  callbackEnv?: Record<string, string>;
+  cliConfigArgs?: readonly string[];
+  timeoutMs?: number;
+}
+
+export function createAgentAbstractiveClient(
+  invokeAgent: SummaryAgentInvoke,
+  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
+  options: AgentSummaryClientOptions = {},
+): (input: AbstractiveInput) => Promise<AbstractiveResult | null> {
+  return async (input: AbstractiveInput): Promise<AbstractiveResult | null> => {
+    const userContent = buildUserPrompt(input);
+    const timeoutMs = options.timeoutMs ?? getCodexSummaryTimeoutMs();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const chunks: string[] = [];
+
+    try {
+      for await (const event of invokeAgent(userContent, {
+        systemPrompt: SYSTEM_PROMPT,
+        signal: controller.signal,
+        workingDirectory: options.workingDirectory,
+        callbackEnv: options.callbackEnv,
+        cliConfigArgs: options.cliConfigArgs,
+      })) {
+        if (event.type === 'text' && event.content) {
+          chunks.push(event.content);
+        } else if (event.type === 'error') {
+          logger.error(`[abstractive-client:codex-cli] agent error: ${event.error ?? 'unknown error'}`);
+          return null;
+        }
+      }
+
+      const text = chunks.join('\n').trim();
+      if (!text) {
+        logger.error('[abstractive-client:codex-cli] no text in response');
+        return null;
+      }
+
+      const result = parseNaturalLanguageOutput(text, input);
+      if (!result) {
+        logger.error(`[abstractive-client:codex-cli] failed to parse output: ${text.slice(0, 150)}`);
+        return null;
+      }
+
+      logger.info(
+        `[abstractive-client:codex-cli] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (controller.signal.aborted) {
+        logger.error(`[abstractive-client:codex-cli] timed out after ${timeoutMs}ms`);
+        return null;
+      }
+      logger.error(`[abstractive-client:codex-cli] invoke/parse error: ${msg}`);
+      return null;
+    } finally {
+      clearTimeout(timeout);
     }
   };
 }

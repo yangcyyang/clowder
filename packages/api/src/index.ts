@@ -5,7 +5,7 @@
 
 import './config/load-project-env.js';
 import { join } from 'node:path';
-import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, createCatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -818,7 +818,9 @@ async function main(): Promise<void> {
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
     try {
       const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
-      const { createAbstractiveClient } = await import('./domains/memory/AbstractiveSummaryClient.js');
+      const { createAbstractiveClient, createAgentAbstractiveClient, getSummaryProviderId } = await import(
+        './domains/memory/AbstractiveSummaryClient.js'
+      );
       const parseThreadListEnv = (value: string | undefined): Set<string> | null => {
         const ids = (value ?? '')
           .split(',')
@@ -834,39 +836,65 @@ async function main(): Promise<void> {
       // 1. F102_API_BASE + F102_API_KEY (explicit override)
       // 2. Unified accounts system (credentials.json) + local proxy
       // 3. null → skip abstractive
-      const generateAbstractive = createAbstractiveClient(
-        async () => {
-          // Priority 1: explicit F102 config
-          if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
-            return { mode: 'api_key' as const, baseUrl: process.env.F102_API_BASE, apiKey: process.env.F102_API_KEY };
-          }
-          // Priority 2: deterministic binding with installer-only fallback (502 regression)
-          const runtimeProfile = resolveAnthropicRuntimeProfile(findMonorepoRoot(process.cwd()));
-          const apiKey = runtimeProfile.apiKey;
-          if (!apiKey) return null;
-          const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
-          // Read first upstream slug from proxy-upstreams.json
-          try {
-            const { readFileSync } = await import('fs');
-            const { resolve: resolvePath } = await import('path');
-            const upstreamsPath =
-              process.env.ANTHROPIC_PROXY_UPSTREAMS_PATH ||
-              resolvePath(process.cwd(), '.cat-cafe', 'proxy-upstreams.json');
-            const upstreams = JSON.parse(readFileSync(upstreamsPath, 'utf-8'));
-            const firstSlug = Object.keys(upstreams)[0];
-            if (!firstSlug) return null;
-            return {
-              mode: 'api_key' as const,
-              baseUrl: `http://127.0.0.1:${proxyPort}/${firstSlug}`,
-              apiKey,
-            };
-          } catch {
-            // No proxy config → try direct with API key
-            return { mode: 'api_key' as const, baseUrl: 'https://api.anthropic.com', apiKey };
-          }
-        },
-        { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) },
-      );
+      const summaryProvider = getSummaryProviderId();
+      const summaryLogger = { info: app.log.info.bind(app.log), error: app.log.error.bind(app.log) };
+      const generateAbstractive =
+        summaryProvider === 'codex-cli'
+          ? (() => {
+              const catId = createCatId(process.env.CAT_CAFE_SUMMARY_CODEX_CAT_ID?.trim() || 'gpt52');
+              const model = process.env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || undefined;
+              const codexSummaryService = new CodexAgentService({ catId, ...(model ? { model } : {}) });
+              return createAgentAbstractiveClient(
+                codexSummaryService.invoke.bind(codexSummaryService),
+                summaryLogger,
+                {
+                  workingDirectory: findMonorepoRoot(process.cwd()),
+                  callbackEnv: {
+                    CAT_CAFE_AGENT_OUTPUT_GATE: '1',
+                    CAT_CAFE_CODEX_OUTPUT_GATE: '1',
+                  },
+                  cliConfigArgs: ['--config', 'model_reasoning_effort="low"'],
+                },
+              );
+            })()
+          : createAbstractiveClient(
+              async () => {
+                // Priority 1: explicit F102 config
+                if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
+                  return {
+                    mode: 'api_key' as const,
+                    baseUrl: process.env.F102_API_BASE,
+                    apiKey: process.env.F102_API_KEY,
+                  };
+                }
+                // Priority 2: deterministic binding with installer-only fallback (502 regression)
+                const runtimeProfile = resolveAnthropicRuntimeProfile(findMonorepoRoot(process.cwd()));
+                const apiKey = runtimeProfile.apiKey;
+                if (!apiKey) return null;
+                const proxyPort = process.env.ANTHROPIC_PROXY_PORT || '9877';
+                // Read first upstream slug from proxy-upstreams.json
+                try {
+                  const { readFileSync } = await import('fs');
+                  const { resolve: resolvePath } = await import('path');
+                  const upstreamsPath =
+                    process.env.ANTHROPIC_PROXY_UPSTREAMS_PATH ||
+                    resolvePath(process.cwd(), '.cat-cafe', 'proxy-upstreams.json');
+                  const upstreams = JSON.parse(readFileSync(upstreamsPath, 'utf-8'));
+                  const firstSlug = Object.keys(upstreams)[0];
+                  if (!firstSlug) return null;
+                  return {
+                    mode: 'api_key' as const,
+                    baseUrl: `http://127.0.0.1:${proxyPort}/${firstSlug}`,
+                    apiKey,
+                  };
+                } catch {
+                  // No proxy config → try direct with API key
+                  return { mode: 'api_key' as const, baseUrl: 'https://api.anthropic.com', apiKey };
+                }
+              },
+              summaryLogger,
+            );
+      app.log.info(`[api] summary provider: ${summaryProvider}`);
 
       const db = memoryServices.store.getDb();
       const summarySpec = createSummaryCompactionTaskSpec({
