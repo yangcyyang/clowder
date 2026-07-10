@@ -842,8 +842,8 @@ async function main(): Promise<void> {
         summaryProvider === 'codex-cli'
           ? (() => {
               const catId = createCatId(process.env.CAT_CAFE_SUMMARY_CODEX_CAT_ID?.trim() || 'gpt52');
-              const model = process.env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || undefined;
-              const codexSummaryService = new CodexAgentService({ catId, ...(model ? { model } : {}) });
+              const model = process.env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || 'gpt-5.3-codex';
+              const codexSummaryService = new CodexAgentService({ catId, model });
               return createAgentAbstractiveClient(
                 codexSummaryService.invoke.bind(codexSummaryService),
                 summaryLogger,
