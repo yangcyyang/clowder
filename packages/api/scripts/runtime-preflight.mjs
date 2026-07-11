@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -8,7 +10,7 @@ function printNativeModuleFailure(err) {
   console.error('[runtime-preflight] better-sqlite3 native module failed to load.');
   console.error('[runtime-preflight] This usually means Node changed and native modules need rebuild.');
   console.error(`[runtime-preflight] Node: ${process.execPath} ${process.version} modules=${process.versions.modules}`);
-  console.error('[runtime-preflight] Fix: PATH="/Users/cy/.uclaw/node/bin:$PATH" pnpm rebuild better-sqlite3');
+  console.error('[runtime-preflight] Fix: PATH="$HOME/.uclaw/node/bin:$PATH" pnpm rebuild better-sqlite3');
   console.error(err);
 }
 
@@ -25,7 +27,7 @@ try {
 }
 
 const permissionProbePath =
-  process.env.CAT_CAFE_PERMISSION_PROBE_PATH ?? '/Users/cy/Documents/03 life/AI design/产品项目';
+  process.env.CAT_CAFE_PERMISSION_PROBE_PATH ?? join(homedir(), 'Documents/03 life/AI design/产品项目');
 
 try {
   await access(permissionProbePath, constants.R_OK);
@@ -33,7 +35,7 @@ try {
 } catch (err) {
   console.warn(`[runtime-preflight] permission probe warning: cannot read ${permissionProbePath}`);
   console.warn(
-    '[runtime-preflight] If project files under Documents fail with EPERM, grant Full Disk Access to /Users/cy/.uclaw/node/bin/node.',
+    '[runtime-preflight] If project files under Documents fail with EPERM, grant Full Disk Access to $HOME/.uclaw/node/bin/node.',
   );
   console.warn(err);
 }

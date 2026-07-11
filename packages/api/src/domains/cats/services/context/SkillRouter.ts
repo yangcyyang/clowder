@@ -12,7 +12,7 @@ import {
 } from '../../../../config/skills/personal-skill-scanner.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
-const DEFAULT_SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理';
+const DEFAULT_SKILL_MANAGEMENT_DIR = resolve(homedir(), 'Documents/03 life/AI design/产品项目/skill管理');
 const DEFAULT_SKILL_MANIFEST_PATH = `${DEFAULT_SKILL_MANAGEMENT_DIR}/skills-manifest.json`;
 const MAX_TRIGGERS_PER_SKILL = 5;
 const MAX_MATCHED_SKILLS = 2;

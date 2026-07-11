@@ -7,13 +7,13 @@
 当前本机统一从这个目录启动：
 
 ```bash
-cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+cd ~/.slock/worktrees/clowder-ai-slock-like-webui
 ```
 
 不要再从旧目录启动：
 
 ```bash
-/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai-slock-like-webui
+~/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai-slock-like-webui
 ```
 
 原因：两个目录是独立 worktree/clone。代码修复在一个目录，服务从另一个目录启动，就会出现“代码修了但页面没变化”“Agent 不见了”“头像丢了”。
@@ -24,7 +24,7 @@ cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
 
 ```bash
 tmux new-session -d -s clowder-runtime \
-  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
+  'cd ~/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 ```
 
 如果只是当前手动调试，也可以分别启动，但不要把它当成稳定运行方式：
@@ -66,13 +66,13 @@ pnpm runtime:doctor
 
 ```text
 代码目录:
-  /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+  ~/.slock/worktrees/clowder-ai-slock-like-webui
 
 Agent 配置:
-  /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui/.cat-cafe/cat-catalog.json
+  ~/.slock/worktrees/clowder-ai-slock-like-webui/.cat-cafe/cat-catalog.json
 
 本机环境配置:
-  /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui/.env
+  ~/.slock/worktrees/clowder-ai-slock-like-webui/.env
 
 头像/附件/上传资源:
   ~/.cat-cafe/uploads
@@ -108,7 +108,7 @@ lsof -p <PID> | grep ' cwd '
 `cwd` 应该指向：
 
 ```text
-/Users/cy/.slock/worktrees/clowder-ai-slock-like-webui/packages/web
+~/.slock/worktrees/clowder-ai-slock-like-webui/packages/web
 ```
 
 ### 头像消失
@@ -129,11 +129,11 @@ ls -ld packages/api/uploads
 如果状态乱了，按这个顺序恢复：
 
 ```bash
-cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+cd ~/.slock/worktrees/clowder-ai-slock-like-webui
 pnpm --filter @cat-cafe/api run build
 tmux kill-session -t clowder-runtime 2>/dev/null || true
 tmux new-session -d -s clowder-runtime \
-  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
+  'cd ~/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 pnpm runtime:doctor
 ```
 

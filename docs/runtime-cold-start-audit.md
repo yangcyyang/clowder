@@ -40,7 +40,7 @@
 
 ```bash
 tmux new-session -d -s clowder-runtime \
-  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
+  'cd ~/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 ```
 
 这样 3003 Web 和 3004 API 都由同一个持久会话管理，不会因为 Codex/Claude 的一次性执行会话结束而只剩前端、API 消失。
@@ -69,8 +69,8 @@ pnpm runtime:doctor
 
 ## 当前本机运行约定
 
-- 当前稳定开发/运行目录：`/Users/cy/.slock/worktrees/clowder-ai-slock-like-webui`
-- 不建议从旧目录启动 Web：`/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai-slock-like-webui`
+- 当前稳定开发/运行目录：`~/.slock/worktrees/clowder-ai-slock-like-webui`
+- 不建议从旧目录启动 Web：`~/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai-slock-like-webui`
 
 原因：这两个目录是独立 worktree/clone。此前主题修复提交到了 `~/.slock/worktrees/...`，但 3003 仍从旧 Documents 目录启动，导致浏览器一直加载旧代码。
 
@@ -104,10 +104,10 @@ curl http://localhost:3004/api/cats
 当前本机手动恢复方式：
 
 ```bash
-cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+cd ~/.slock/worktrees/clowder-ai-slock-like-webui
 tmux kill-session -t clowder-runtime 2>/dev/null || true
 tmux new-session -d -s clowder-runtime \
-  'cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
+  'cd ~/.slock/worktrees/clowder-ai-slock-like-webui && pnpm start:direct'
 pnpm runtime:doctor
 ```
 

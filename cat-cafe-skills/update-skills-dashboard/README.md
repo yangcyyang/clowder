@@ -49,7 +49,7 @@ cd cat-cafe-skills/update-skills-dashboard
    - 覆盖写入文件
 
 4. **输出**：
-   - 文件：`/Users/cy/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html`
+   - 文件：`~/Documents/03 life/AI design/产品项目/skill管理/skills-dashboard.html`
    - 访问：http://localhost:3003/api/skills/dashboard
 
 ## 配置

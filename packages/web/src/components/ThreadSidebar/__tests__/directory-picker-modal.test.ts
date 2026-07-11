@@ -273,7 +273,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('selects the directory returned by the native system picker before confirmation', async () => {
-    const pickedPath = '/Users/cy/Documents/new-system-picked-project';
+    const pickedPath = '~/Documents/new-system-picked-project';
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
       if (path === '/api/backlog/items') return jsonOk({ items: [] });

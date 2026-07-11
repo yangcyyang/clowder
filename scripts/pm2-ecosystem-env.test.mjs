@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-const stableNodeBin = '/Users/cy/.uclaw/node/bin';
-const stableNode = `${stableNodeBin}/node`;
+const stableNodeBin = join(homedir(), '.uclaw/node/bin');
+const stableNode = join(stableNodeBin, 'node');
 const pollutedPath = [
   '/opt/homebrew/bin',
   '/opt/homebrew/sbin',

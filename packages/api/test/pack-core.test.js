@@ -4,7 +4,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
@@ -359,7 +359,11 @@ describe('PackLoader', () => {
     const guard = new PackSecurityGuard();
     const loader = new PackLoader(store, guard);
 
-    await assert.rejects(async () => loader.add(MALICIOUS_GROWTH), /Growth.*boundary|Growth.*violation/i);
+    const maliciousGrowth = await createTmpDir();
+    await cp(MALICIOUS_GROWTH, maliciousGrowth, { recursive: true });
+    await writeFile(join(maliciousGrowth, 'evidence.sqlite'), 'fake sqlite data');
+
+    await assert.rejects(async () => loader.add(maliciousGrowth), /Growth.*boundary|Growth.*violation/i);
     // Must NOT be installed
     assert.ok(!(await store.has('growth-leak')));
   });

@@ -74,7 +74,7 @@ find ~/.agents/skills ~/.claude/skills ~/.claude/skills/gstack ~/.skillstar/hub/
 目标目录：`cat-cafe-skills/external/{skill-name}`
 
 ```bash
-cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+cd ~/.slock/worktrees/clowder-ai-slock-like-webui
 ln -s "SOURCE_PATH" "cat-cafe-skills/external/{skill-name}"
 ```
 

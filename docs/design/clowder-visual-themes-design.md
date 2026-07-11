@@ -5,10 +5,10 @@ feature_ids: []
 source:
   - awesome-claude-design/design-md/claude.DESIGN.md
   - awesome-claude-design/design-md/slack.DESIGN.md
-  - /Users/cy/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v1/SLOCK_DESIGN_HARNESS.md
-  - /Users/cy/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v2/SLOCK_DESIGN_HARNESS.md
-  - /Users/cy/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v2/SLOCK_TOKEN_LOCK.md
-  - /Users/cy/Documents/03 life/AI design/产品项目/design harness/KAMI/KAMI_DESIGN_HARNESS.md
+  - ~/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v1/SLOCK_DESIGN_HARNESS.md
+  - ~/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v2/SLOCK_DESIGN_HARNESS.md
+  - ~/Documents/03 life/AI design/产品项目/design harness/slock/Design Harness v2/SLOCK_TOKEN_LOCK.md
+  - ~/Documents/03 life/AI design/产品项目/design harness/KAMI/KAMI_DESIGN_HARNESS.md
 ---
 
 # Clowder Visual Themes Design
