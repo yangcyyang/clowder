@@ -19,6 +19,15 @@ export const MessageKeys = {
   /** Per-thread timeline sorted set: msg:thread:{threadId} */
   thread: (threadId: string) => `msg:thread:${threadId}`,
 
+  /** Monotonic per-thread freshness revision allocator. */
+  freshnessSequence: (threadId: string) => `msg:freshness:seq:${threadId}`,
+
+  /** Active substantive public messages, scored by append revision. */
+  freshnessPublic: (threadId: string) => `msg:freshness:public:${threadId}`,
+
+  /** Active substantive whispers visible to one cat, scored by append revision. */
+  freshnessWhisper: (threadId: string, catId: string) => `msg:freshness:whisper:${threadId}:${catId}`,
+
   /** Idempotency index: msg:idem:{userId}:{threadId}:{key} -> messageId */
   idempotency: (userId: string, threadId: string, key: string) => `msg:idem:${userId}:${threadId}:${key}`,
 } as const;

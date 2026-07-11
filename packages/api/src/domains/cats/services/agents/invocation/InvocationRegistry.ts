@@ -28,6 +28,8 @@ export interface InvocationRecord {
   parentInvocationId?: string;
   /** F121: The A2A trigger message ID — the @mention message that caused this cat to be invoked */
   a2aTriggerMessageId?: string;
+  /** Opaque per-thread append watermark captured before this invocation reads context. */
+  freshnessBaseline?: string;
   traceContext?: CallerTraceContext;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
@@ -78,6 +80,11 @@ export type AuthFailureReason = 'expired' | 'invalid_token' | 'unknown_invocatio
 
 export type VerifyResult = { ok: true; record: InvocationRecord } | { ok: false; reason: AuthFailureReason };
 
+export interface InvocationCreateOptions {
+  /** Keep this value opaque; callers and backends must not coerce it to number. */
+  freshnessBaseline?: string;
+}
+
 /**
  * Registry for managing invocation auth tokens.
  *
@@ -103,6 +110,7 @@ export class InvocationRegistry {
     threadId: string = 'default',
     parentInvocationId?: string,
     a2aTriggerMessageId?: string,
+    options?: InvocationCreateOptions,
   ): Promise<{ invocationId: string; callbackToken: string }> {
     const invocationId = randomUUID();
     const callbackToken = randomUUID();
@@ -117,6 +125,7 @@ export class InvocationRegistry {
         threadId,
         ...(parentInvocationId ? { parentInvocationId } : {}),
         ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
+        ...(options?.freshnessBaseline !== undefined ? { freshnessBaseline: options.freshnessBaseline } : {}),
         clientMessageIds: new Set<string>(),
         createdAt: now,
       },

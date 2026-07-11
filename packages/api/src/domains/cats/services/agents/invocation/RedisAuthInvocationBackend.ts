@@ -163,6 +163,7 @@ function recordFromHash(fields: Record<string, string>, msgs: Set<string>): Invo
   };
   if (fields.parentInvocationId) record.parentInvocationId = fields.parentInvocationId;
   if (fields.a2aTriggerMessageId) record.a2aTriggerMessageId = fields.a2aTriggerMessageId;
+  if (fields.freshnessBaseline !== undefined) record.freshnessBaseline = fields.freshnessBaseline;
   if (fields.traceId && fields.spanId) {
     record.traceContext = {
       traceId: fields.traceId,
@@ -196,6 +197,7 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     ];
     if (input.parentInvocationId) fields.push('parentInvocationId', input.parentInvocationId);
     if (input.a2aTriggerMessageId) fields.push('a2aTriggerMessageId', input.a2aTriggerMessageId);
+    if (input.freshnessBaseline !== undefined) fields.push('freshnessBaseline', input.freshnessBaseline);
 
     await this.redis.eval(
       CREATE_LUA,

@@ -46,6 +46,7 @@ export { AuditEventTypes, EventAuditLog, getEventAuditLog } from './orchestratio
 export { createAuthorizationAuditStore } from './stores/factories/AuthorizationAuditStoreFactory.js';
 export { createAuthorizationRuleStore } from './stores/factories/AuthorizationRuleStoreFactory.js';
 export { createDraftStore } from './stores/factories/DraftStoreFactory.js';
+export { createFreshnessHoldStore } from './stores/factories/FreshnessHoldStoreFactory.js';
 export type { AnyInvocationRecordStore } from './stores/factories/InvocationRecordStoreFactory.js';
 export { createInvocationRecordStore } from './stores/factories/InvocationRecordStoreFactory.js';
 export type { AnyMessageStore } from './stores/factories/MessageStoreFactory.js';
@@ -59,6 +60,20 @@ export { createThreadStore } from './stores/factories/ThreadStoreFactory.js';
 export { DeliveryCursorStore } from './stores/ports/DeliveryCursorStore.js';
 export type { DraftRecord, IDraftStore } from './stores/ports/DraftStore.js';
 export { DraftStore } from './stores/ports/DraftStore.js';
+export type {
+  ClaimFreshnessReviewInput,
+  CreateFreshnessHoldInput,
+  CreateOrGetFreshnessHoldResult,
+  FreshnessAttentionReason,
+  FreshnessHeldDraft,
+  FreshnessHoldRecord,
+  FreshnessHoldStatus,
+  FreshnessHoldStoreOptions,
+  IFreshnessHoldStore,
+  ReholdFreshnessInput,
+  ReleaseFreshnessHoldInput,
+} from './stores/ports/FreshnessHoldStore.js';
+export { FreshnessHoldStore } from './stores/ports/FreshnessHoldStore.js';
 export type { IGameStore } from './stores/ports/GameStore.js';
 export type {
   CreateInvocationInput,
@@ -99,6 +114,7 @@ export { DEFAULT_THREAD_ID, ThreadStore } from './stores/ports/ThreadStore.js';
 export { RedisAuthorizationAuditStore } from './stores/redis/RedisAuthorizationAuditStore.js';
 export { RedisAuthorizationRuleStore } from './stores/redis/RedisAuthorizationRuleStore.js';
 export { RedisDraftStore } from './stores/redis/RedisDraftStore.js';
+export { RedisFreshnessHoldStore } from './stores/redis/RedisFreshnessHoldStore.js';
 export { RedisGameStore } from './stores/redis/RedisGameStore.js';
 export { RedisInvocationRecordStore } from './stores/redis/RedisInvocationRecordStore.js';
 export { RedisMessageStore } from './stores/redis/RedisMessageStore.js';

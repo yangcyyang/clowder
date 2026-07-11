@@ -15,12 +15,21 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { AppendMessageInput, StoredMessage, StreamMetadataAugmentInput } from '../ports/MessageStore.js';
+import type {
+  AppendMessageInput,
+  ConditionalAppendResult,
+  FreshnessAudience,
+  FreshnessDelta,
+  StoredMessage,
+  StreamMetadataAugmentInput,
+  ThreadAppendWatermark,
+} from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
+  isFreshnessRelevantMessage,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
@@ -38,6 +47,149 @@ const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+
+/**
+ * One linearization point for both ordinary and conditional appends.
+ *
+ * KEYS:
+ *   1 detail hash, 2 global timeline, 3 user timeline, 4 thread timeline,
+ *   5 idempotency key (or detail key as an ignored placeholder),
+ *   6 freshness sequence, 7 public freshness zset, 8 gate audience whisper zset,
+ *   9.. mention zsets followed by whisper-recipient freshness zsets.
+ *
+ * ARGV:
+ *   1 mode, 2 baseline, 3 id, 4 timeline score, 5 hash-fields JSON,
+ *   6 freshness-relevant flag, 7 visibility, 8 ttl seconds,
+ *   9 idempotency flag, 10 mention-key count, 11 whisper-key count.
+ */
+const APPEND_MESSAGE_LUA = `
+local mode = ARGV[1]
+local baseline = ARGV[2]
+local messageId = ARGV[3]
+local timelineScore = ARGV[4]
+local relevant = ARGV[6] == '1'
+local visibility = ARGV[7]
+local ttl = tonumber(ARGV[8]) or 0
+local hasIdempotency = ARGV[9] == '1'
+local mentionCount = tonumber(ARGV[10]) or 0
+local whisperCount = tonumber(ARGV[11]) or 0
+
+-- Idempotency replay wins over staleness: an already-published retry returns
+-- the canonical message instead of becoming held on a newer watermark.
+if hasIdempotency then
+  local existingId = redis.call('GET', KEYS[5])
+  if existingId then
+    return {'existing', existingId, ''}
+  end
+end
+
+local function latestScore(key)
+  local row = redis.call('ZREVRANGE', key, 0, 0, 'WITHSCORES')
+  if #row >= 2 then return tonumber(row[2]) or 0 end
+  return 0
+end
+
+local observed = 0
+if mode == 'conditional' then
+  local publicScore = latestScore(KEYS[7])
+  local whisperScore = latestScore(KEYS[8])
+  if publicScore > whisperScore then observed = publicScore else observed = whisperScore end
+  if relevant and observed > (tonumber(baseline) or 0) then
+    return {'stale', baseline, tostring(observed)}
+  end
+end
+
+local appendWatermark = ''
+if relevant then
+  appendWatermark = tostring(redis.call('INCR', KEYS[6]))
+end
+
+local decoded = cjson.decode(ARGV[5])
+local fields = {}
+for field, value in pairs(decoded) do
+  fields[#fields + 1] = field
+  fields[#fields + 1] = value
+end
+if appendWatermark ~= '' then
+  fields[#fields + 1] = 'appendWatermark'
+  fields[#fields + 1] = appendWatermark
+end
+redis.call('HSET', KEYS[1], unpack(fields))
+redis.call('ZADD', KEYS[2], timelineScore, messageId)
+redis.call('ZADD', KEYS[3], timelineScore, messageId)
+redis.call('ZADD', KEYS[4], timelineScore, messageId)
+
+local keyIndex = 9
+for _ = 1, mentionCount do
+  redis.call('ZADD', KEYS[keyIndex], timelineScore, messageId)
+  keyIndex = keyIndex + 1
+end
+
+if relevant then
+  if visibility == 'whisper' then
+    for i = 0, whisperCount - 1 do
+      redis.call('ZADD', KEYS[keyIndex + i], appendWatermark, messageId)
+    end
+  else
+    redis.call('ZADD', KEYS[7], appendWatermark, messageId)
+  end
+end
+
+if hasIdempotency then
+  redis.call('SET', KEYS[5], messageId)
+end
+
+if ttl > 0 then
+  redis.call('EXPIRE', KEYS[1], ttl)
+  -- Timeline scores are caller-supplied timestamps, not insertion time. They
+  -- therefore cannot safely drive TTL pruning: a historical timestamp would
+  -- delete a message immediately (or delete a prior concurrent append). Hash
+  -- and index-key expiry retain the configured inactive-key cleanup semantics.
+  redis.call('EXPIRE', KEYS[2], ttl)
+  redis.call('EXPIRE', KEYS[3], ttl)
+  redis.call('EXPIRE', KEYS[4], ttl)
+  if hasIdempotency then redis.call('EXPIRE', KEYS[5], ttl) end
+
+  keyIndex = 9
+  for _ = 1, mentionCount do
+    redis.call('EXPIRE', KEYS[keyIndex], ttl)
+    keyIndex = keyIndex + 1
+  end
+  if relevant then
+    if visibility == 'whisper' then
+      for i = 0, whisperCount - 1 do redis.call('EXPIRE', KEYS[keyIndex + i], ttl) end
+    else
+      redis.call('EXPIRE', KEYS[7], ttl)
+    end
+  end
+end
+
+if appendWatermark == '' then appendWatermark = tostring(observed) end
+return {'appended', messageId, appendWatermark}
+`;
+
+function parseWatermark(value: string): ThreadAppendWatermark {
+  if (!/^\d+$/.test(value)) throw new Error(`Invalid freshness watermark: ${value}`);
+  return value as ThreadAppendWatermark;
+}
+
+function maxWatermark(...values: string[]): ThreadAppendWatermark {
+  let latest = 0n;
+  for (const value of values) {
+    if (!value) continue;
+    const parsed = BigInt(value);
+    if (parsed > latest) latest = parsed;
+  }
+  return latest.toString(10) as ThreadAppendWatermark;
+}
+
+function rowsWithScores(rows: string[]): Array<{ id: string; watermark: ThreadAppendWatermark }> {
+  const result: Array<{ id: string; watermark: ThreadAppendWatermark }> = [];
+  for (let index = 0; index + 1 < rows.length; index += 2) {
+    result.push({ id: rows[index]!, watermark: parseWatermark(rows[index + 1]!) });
+  }
+  return result;
+}
 
 export class RedisMessageStore {
   private readonly redis: RedisClient;
@@ -74,134 +226,218 @@ export class RedisMessageStore {
     return p && rawKey.startsWith(p) ? rawKey.slice(p.length) : rawKey;
   }
 
+  async captureFreshnessWatermark(threadId: string, audience: FreshnessAudience): Promise<ThreadAppendWatermark> {
+    const [publicRows, whisperRows] = await Promise.all([
+      this.redis.zrevrange(MessageKeys.freshnessPublic(threadId), 0, 0, 'WITHSCORES'),
+      this.redis.zrevrange(MessageKeys.freshnessWhisper(threadId, audience.catId), 0, 0, 'WITHSCORES'),
+    ]);
+    return maxWatermark(publicRows[1] ?? '0', whisperRows[1] ?? '0');
+  }
+
+  async getFreshnessDelta(
+    threadId: string,
+    audience: FreshnessAudience,
+    after: ThreadAppendWatermark,
+    through?: ThreadAppendWatermark,
+    limit: number = DEFAULT_LIMIT,
+  ): Promise<FreshnessDelta> {
+    parseWatermark(after);
+    const observedWatermark = through
+      ? parseWatermark(through)
+      : await this.captureFreshnessWatermark(threadId, audience);
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT;
+    const fetchLimit = safeLimit + 1;
+    const min = `(${after}`;
+
+    const [publicRows, whisperRows] = await Promise.all([
+      this.redis.zrangebyscore(
+        MessageKeys.freshnessPublic(threadId),
+        min,
+        observedWatermark,
+        'WITHSCORES',
+        'LIMIT',
+        0,
+        fetchLimit,
+      ),
+      this.redis.zrangebyscore(
+        MessageKeys.freshnessWhisper(threadId, audience.catId),
+        min,
+        observedWatermark,
+        'WITHSCORES',
+        'LIMIT',
+        0,
+        fetchLimit,
+      ),
+    ]);
+
+    const byId = new Map<string, ThreadAppendWatermark>();
+    for (const row of [...rowsWithScores(publicRows), ...rowsWithScores(whisperRows)]) {
+      const existing = byId.get(row.id);
+      if (!existing || BigInt(row.watermark) > BigInt(existing)) byId.set(row.id, row.watermark);
+    }
+    const candidates = [...byId.entries()].sort((left, right) => {
+      const a = BigInt(left[1]);
+      const b = BigInt(right[1]);
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    const ids = candidates.slice(0, safeLimit).map(([id]) => id);
+    const messages = (await this.hydrateMessages(ids)).filter(isFreshnessRelevantMessage);
+    return {
+      observedWatermark,
+      messages,
+      truncated: candidates.length > safeLimit,
+    };
+  }
+
+  async appendIfFresh(
+    msg: AppendMessageInput,
+    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+  ): Promise<ConditionalAppendResult> {
+    parseWatermark(gate.baseline);
+    return this.appendAtomically(msg, gate);
+  }
+
   async append(msg: AppendMessageInput): Promise<StoredMessage> {
+    const result = await this.appendAtomically(msg);
+    if (result.outcome === 'stale') {
+      throw new Error('ordinary append unexpectedly evaluated as stale');
+    }
+    return result.message;
+  }
+
+  private async appendAtomically(
+    msg: AppendMessageInput,
+    gate?: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+  ): Promise<ConditionalAppendResult> {
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
       : null;
-
-    if (idempotencyIndexKey) {
-      const existingId = await this.redis.get(idempotencyIndexKey);
-      if (existingId) {
-        const existingMessage = await this.getById(existingId);
-        if (existingMessage) {
-          return existingMessage;
-        }
-        await this.redis.del(idempotencyIndexKey);
-      }
-
-      const claimed =
-        this.ttlSeconds === null
-          ? await this.redis.set(idempotencyIndexKey, id, 'NX')
-          : await this.redis.set(idempotencyIndexKey, id, 'EX', this.ttlSeconds, 'NX');
-
-      if (claimed !== 'OK') {
-        const claimedId = await this.redis.get(idempotencyIndexKey);
-        if (claimedId) {
-          const existingMessage = await this.getById(claimedId);
-          if (existingMessage) {
-            return existingMessage;
-          }
-        }
-        throw new Error('message idempotency key contention');
-      }
-    }
-
-    const { idempotencyKey, ...payload } = msg;
-    void idempotencyKey;
+    const { idempotencyKey: _idempotencyKey, appendWatermark: _appendWatermark, ...payload } = msg;
+    void _idempotencyKey;
+    void _appendWatermark;
     const stored: StoredMessage = { ...payload, id, threadId };
-    const score = msg.timestamp;
-
+    const relevant = isFreshnessRelevantMessage(stored);
+    const effectiveVisibility = stored.visibility === 'whisper' && !stored.revealedAt ? 'whisper' : 'public';
+    const mentionKeys = [...new Set(stored.mentions.map((catId) => MessageKeys.mentions(catId)))];
+    const whisperKeys =
+      effectiveVisibility === 'whisper'
+        ? [...new Set((stored.whisperTo ?? []).map((catId) => MessageKeys.freshnessWhisper(threadId, catId)))]
+        : [];
     const hashKey = MessageKeys.detail(id);
-    const pipeline = this.redis.multi();
-
-    // Store message hash (including threadId, contentBlocks, toolEvents, metadata)
-    pipeline.hset(hashKey, {
+    const gateWhisperKey = gate
+      ? MessageKeys.freshnessWhisper(threadId, gate.audience.catId)
+      : MessageKeys.freshnessPublic(threadId);
+    const keys = [
+      hashKey,
+      MessageKeys.TIMELINE,
+      MessageKeys.user(stored.userId),
+      MessageKeys.thread(threadId),
+      idempotencyIndexKey ?? hashKey,
+      MessageKeys.freshnessSequence(threadId),
+      MessageKeys.freshnessPublic(threadId),
+      gateWhisperKey,
+      ...mentionKeys,
+      ...whisperKeys,
+    ];
+    const hashFields: Record<string, string> = {
       id,
       threadId,
-      userId: msg.userId,
-      catId: msg.catId ?? '',
-      content: msg.content,
-      contentBlocks: msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
-      toolEvents: msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
-      metadata: msg.metadata ? JSON.stringify(msg.metadata) : '',
-      extra: msg.extra ? serializeExtra(msg.extra) : '',
-      mentions: JSON.stringify(msg.mentions),
-      timestamp: String(msg.timestamp),
-      ...(msg.editedAt ? { editedAt: String(msg.editedAt) } : {}),
-      ...(msg.thinking ? { thinking: msg.thinking } : {}),
-      ...(msg.origin ? { origin: msg.origin } : {}),
-      ...(msg.visibility ? { visibility: msg.visibility } : {}),
-      ...(msg.whisperTo ? { whisperTo: JSON.stringify(msg.whisperTo) } : {}),
-      ...(msg.source ? { source: JSON.stringify(msg.source) } : {}),
-      ...(msg.mentionsUser ? { mentionsUser: '1' } : {}),
-      ...(msg.deliveryStatus ? { deliveryStatus: msg.deliveryStatus } : {}),
-      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
-    });
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(hashKey, this.ttlSeconds);
-    }
+      userId: stored.userId,
+      catId: stored.catId ?? '',
+      content: stored.content,
+      contentBlocks: stored.contentBlocks ? JSON.stringify(stored.contentBlocks) : '',
+      toolEvents: stored.toolEvents ? JSON.stringify(stored.toolEvents) : '',
+      metadata: stored.metadata ? JSON.stringify(stored.metadata) : '',
+      extra: stored.extra ? serializeExtra(stored.extra) : '',
+      mentions: JSON.stringify(stored.mentions),
+      timestamp: String(stored.timestamp),
+      ...(stored.messageClass ? { messageClass: stored.messageClass } : {}),
+      ...(stored.editedAt ? { editedAt: String(stored.editedAt) } : {}),
+      ...(stored.thinking ? { thinking: stored.thinking } : {}),
+      ...(stored.origin ? { origin: stored.origin } : {}),
+      ...(stored.visibility ? { visibility: stored.visibility } : {}),
+      ...(stored.whisperTo ? { whisperTo: JSON.stringify(stored.whisperTo) } : {}),
+      ...(stored.revealedAt ? { revealedAt: String(stored.revealedAt) } : {}),
+      ...(stored.source ? { source: JSON.stringify(stored.source) } : {}),
+      ...(stored.mentionsUser ? { mentionsUser: '1' } : {}),
+      ...(stored.deliveredAt ? { deliveredAt: String(stored.deliveredAt) } : {}),
+      ...(stored.deliveryStatus ? { deliveryStatus: stored.deliveryStatus } : {}),
+      ...(stored.replyTo ? { replyTo: stored.replyTo } : {}),
+    };
+    const ttl = this.ttlSeconds ?? 0;
 
-    // Add to global timeline
-    pipeline.zadd(MessageKeys.TIMELINE, String(score), id);
+    // A stale legacy idempotency pointer may predate the atomic script. Retry
+    // once after removing it; new pointers cannot dangle because Lua writes the
+    // pointer and message in the same transaction.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = (await this.redis.eval(
+        APPEND_MESSAGE_LUA,
+        keys.length,
+        ...keys,
+        gate ? 'conditional' : 'append',
+        gate?.baseline ?? ('0' as ThreadAppendWatermark),
+        id,
+        String(stored.timestamp),
+        JSON.stringify(hashFields),
+        relevant ? '1' : '0',
+        effectiveVisibility,
+        String(ttl),
+        idempotencyIndexKey ? '1' : '0',
+        String(mentionKeys.length),
+        String(whisperKeys.length),
+      )) as unknown;
+      if (!Array.isArray(raw) || raw.length < 3) throw new Error('invalid Redis append result');
+      const [kind, resultId, rawWatermark] = raw.map((value) => String(value));
 
-    // Add to user timeline
-    pipeline.zadd(MessageKeys.user(msg.userId), String(score), id);
-
-    // Add to thread timeline
-    pipeline.zadd(MessageKeys.thread(threadId), String(score), id);
-
-    // Add to per-cat mention sets
-    for (const catId of msg.mentions) {
-      pipeline.zadd(MessageKeys.mentions(catId), String(score), id);
-    }
-
-    if (this.ttlSeconds !== null) {
-      // Prune expired entries from sorted sets (score < now - TTL).
-      const cutoff = String(Date.now() - this.ttlSeconds * 1000);
-      pipeline.zremrangebyscore(MessageKeys.TIMELINE, '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.user(msg.userId), '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.thread(threadId), '-inf', cutoff);
-      for (const catId of msg.mentions) {
-        pipeline.zremrangebyscore(MessageKeys.mentions(catId), '-inf', cutoff);
+      if (kind === 'stale') {
+        return {
+          outcome: 'stale',
+          baseline: gate!.baseline,
+          observedWatermark: parseWatermark(rawWatermark!),
+        };
       }
-
-      // Set EXPIRE on index zsets so "silent" keys eventually disappear
-      pipeline.expire(MessageKeys.TIMELINE, this.ttlSeconds);
-      pipeline.expire(MessageKeys.user(msg.userId), this.ttlSeconds);
-      pipeline.expire(MessageKeys.thread(threadId), this.ttlSeconds);
-      if (idempotencyIndexKey) {
-        pipeline.expire(idempotencyIndexKey, this.ttlSeconds);
-      }
-      for (const catId of msg.mentions) {
-        pipeline.expire(MessageKeys.mentions(catId), this.ttlSeconds);
-      }
-    }
-
-    try {
-      await pipeline.exec();
-    } catch (error) {
-      if (idempotencyIndexKey) {
-        const existingId = await this.redis.get(idempotencyIndexKey);
-        if (existingId === id) {
+      if (kind === 'existing') {
+        const existing = await this.getById(resultId!);
+        if (existing) {
+          const committedWatermark =
+            existing.appendWatermark ??
+            (gate ? await this.captureFreshnessWatermark(threadId, gate.audience) : ('0' as ThreadAppendWatermark));
+          return { outcome: 'appended', message: existing, committedWatermark };
+        }
+        if (idempotencyIndexKey && attempt === 0) {
           await this.redis.del(idempotencyIndexKey);
+          continue;
+        }
+        throw new Error('message idempotency key points to a missing message');
+      }
+      if (kind !== 'appended') throw new Error(`unknown Redis append result: ${kind}`);
+
+      if (rawWatermark) stored.appendWatermark = parseWatermark(rawWatermark);
+      const committedWatermark =
+        stored.appendWatermark ??
+        (gate ? await this.captureFreshnessWatermark(threadId, gate.audience) : ('0' as ThreadAppendWatermark));
+
+      if (this.onAppend) {
+        try {
+          void Promise.resolve(this.onAppend(stored)).catch(() => {});
+        } catch {
+          /* best-effort */
         }
       }
-      throw error;
+      return { outcome: 'appended', message: stored, committedWatermark };
     }
 
-    // F102 KD-34: fire-and-forget append listener for thread index updates
-    // P2 fix: wrap in try-catch to handle sync throws (Promise.resolve only catches async rejections)
-    if (this.onAppend) {
-      try {
-        void Promise.resolve(this.onAppend(stored)).catch(() => {});
-      } catch {
-        /* best-effort */
-      }
-    }
+    throw new Error('message idempotency retry exhausted');
+  }
 
-    return stored;
+  private freshnessIndexKeysForMessage(msg: StoredMessage): string[] {
+    if (!msg.appendWatermark) return [];
+    if (msg.visibility === 'whisper' && !msg.revealedAt) {
+      return [...new Set((msg.whisperTo ?? []).map((catId) => MessageKeys.freshnessWhisper(msg.threadId, catId)))];
+    }
+    return [MessageKeys.freshnessPublic(msg.threadId)];
   }
 
   async getById(id: string): Promise<StoredMessage | null> {
@@ -221,6 +457,12 @@ export class RedisMessageStore {
       userId: data.userId ?? 'unknown',
       catId: (data.catId || null) as CatId | null,
       content: data.content ?? '',
+      ...(data.messageClass === 'status' || data.messageClass === 'substantive'
+        ? { messageClass: data.messageClass }
+        : {}),
+      ...(data.appendWatermark && /^\d+$/.test(data.appendWatermark)
+        ? { appendWatermark: data.appendWatermark as ThreadAppendWatermark }
+        : {}),
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(toolEvents ? { toolEvents } : {}),
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
@@ -824,7 +1066,10 @@ export class RedisMessageStore {
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
+    for (const key of this.freshnessIndexKeysForMessage(msg)) pipeline.zrem(key, id);
+    await pipeline.exec();
     msg.deliveryStatus = 'canceled';
     return msg;
   }
@@ -861,6 +1106,10 @@ export class RedisMessageStore {
         userId: d.userId ?? 'unknown',
         catId: (d.catId || null) as CatId | null,
         content: d.content ?? '',
+        ...(d.messageClass === 'status' || d.messageClass === 'substantive' ? { messageClass: d.messageClass } : {}),
+        ...(d.appendWatermark && /^\d+$/.test(d.appendWatermark)
+          ? { appendWatermark: d.appendWatermark as ThreadAppendWatermark }
+          : {}),
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(toolEvents ? { toolEvents } : {}),
         ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
