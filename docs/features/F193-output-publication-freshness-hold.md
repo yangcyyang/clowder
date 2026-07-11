@@ -134,3 +134,164 @@ in_context_observability:
 | 2026-07-11 | 用户批准执行方案；完成 Message watermark、持久 Hold Store 与 baseline 持久化的第一阶段实现 |
 | 2026-07-11 | 完成统一出口门、callback/stdout review、续跑恢复、过期扫描、灰度开关与状态 UI |
 | 2026-07-11 | 完成私有性审计与回归验证：工具参数、Rich/audio、task event、transcript、memory、终态草稿均 fail closed |
+
+## Close Gate Report
+
+```yaml
+close_gate_report:
+  feature_id: F193
+  spec_path: docs/features/F193-output-publication-freshness-hold.md
+  head_sha: 4a66378
+  report_date: 2026-07-11
+
+  ac_matrix:
+    - ac_id: AC-A1
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/message-freshness-watermark.test.js
+          description: audience 水位、结构豁免、whisper 与 queued/delivered 语义
+      resolution: null
+    - ac_id: AC-A2
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/redis-message-store-freshness.test.js
+          description: 隔离 Redis 上验证并发线性化与幂等修复
+      resolution: null
+    - ac_id: AC-A3
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/redis-freshness-hold-store.test.js
+          description: Redis 重建、submission 去重、CAS 单赢家与 active index
+      resolution: null
+    - ac_id: AC-A4
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/invocation-freshness-baseline.test.js
+          description: memory/Redis registry baseline 往返与 TTL 滑动
+      resolution: null
+    - ac_id: AC-B1
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-egress-gate.test.js
+          description: current 单次发布、stale 单一 Hold 与重试幂等
+      resolution: null
+    - ac_id: AC-B2
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-hold-store.test.js
+          description: replace/send_draft 再检查、两次上限、deadline 与 discard
+      resolution: null
+    - ac_id: AC-B3
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/route-serial-freshness-hold.test.js
+          description: text、Rich 与 TTS 在裁决前均保持私有
+        - kind: test
+          ref: packages/api/test/web-outbound-delivery.test.js
+          description: Web、Push/Connector 消费统一 per-cat verdict
+      resolution: null
+    - ac_id: AC-B4
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-hold-rollout.test.js
+          description: 未受保护路线保持整体 legacy，灰度边界不混用
+        - kind: doc
+          ref: docs/agent-runtime/slock-agent-protocol.md
+          description: agent-key/cross-thread 的可信 baseline 边界与观测语义
+      resolution: null
+    - ac_id: AC-C1
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-holds-route.test.js
+          description: current-user/thread 过滤且只返回安全元数据
+        - kind: test
+          ref: packages/web/src/components/__tests__/freshness-hold-bar.test.ts
+          description: UI 状态文本不含草稿正文
+      resolution: null
+    - ac_id: AC-C2
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-hold-callback.test.js
+          description: callback 原位 delta review
+        - kind: test
+          ref: packages/api/test/freshness-review-continuation.test.js
+          description: stdout 有界 successor、去重与 latest ownership
+      resolution: null
+    - ac_id: AC-C3
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-hold-expiry-scheduler.test.js
+          description: 启动扫描、60 秒周期与 clean stop
+        - kind: test
+          ref: packages/api/test/freshness-delta-paging.test.js
+          description: bounded delta 与 review limit 收敛
+      resolution: null
+    - ac_id: AC-C4
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/freshness-invocation-private-sinks.test.js
+          description: transcript、history import 与 agent memory 零泄漏
+        - kind: test
+          ref: packages/api/test/fast-lane-freshness-hold.test.js
+          description: QueueEntry、task event 与 socket 仅携带安全元数据
+      resolution: null
+    - ac_id: AC-D1
+      status: met
+      evidence:
+        - kind: screenshot
+          ref: Hub Browser preview on 3013/thread/preview with isolated mock API 3014
+          description: reviewing 状态条、私有性说明与 reviewCount 实际渲染
+        - kind: test
+          ref: packages/api/test/connector-invoke-trigger.test.js
+          description: Connector 占位符进入 review 状态且不交付草稿
+      resolution: null
+    - ac_id: AC-D2
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/route-parallel-freshness-hold.test.js
+          description: callback/stdout/Rich/PersistenceContext 使用同一 per-cat verdict
+        - kind: test
+          ref: packages/api/test/streaming-outbound-hook.test.js
+          description: Connector streaming placeholder 只接收 Hold 状态
+      resolution: null
+    - ac_id: AC-D3
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/integration/freshness-hold-two-agent.test.js
+          description: Opus A 与 Codex B 独立 invocation 交错，A 旧稿零正式出口
+      resolution: null
+    - ac_id: AC-D4
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/route-serial-callback-dedup.test.js
+          description: held/discarded/failed callback 不恢复旧 stream fallback
+        - kind: doc
+          ref: docs/agent-runtime/slock-governance-runtime.md
+          description: protected 异常 fail closed、legacy 观测与回滚边界
+      resolution: null
+```
+
+## Quality Gate Evidence
+
+- 原始需求：`2026-07-11-Raft借鉴-Clowder优化点与执行方案.md` 的 P0-1 Freshness Hold；16 条 AC 均已覆盖，不扩张到 ACK 或发布协调器。
+- 设计稿检查：仓库只命中 `docs/design/f190-console-layout.pen`，与 F193 无关；状态 UI 已在当前 worktree 的 3013 页面配合隔离 mock API 3014 实际预览。
+- F193 API 矩阵：202 项中 201 项通过；唯一失败为目标分支同样存在的 Connector 静默回复旧语义，Freshness Connector 子集 3/3 通过。
+- Redis：`127.0.0.1:6398/15` 串行 11/11 通过；MCP server 173/173 通过；Web 新增状态条 1/1 通过。
+- 全仓构建与 lint 均 exit 0；本次 54 个变更文件 Biome 全通过；`git diff --check` 与 artifact hygiene 通过。
+- Web 全量差分：功能分支 81 个既有失败、2916 通过；目标分支相同 81 个失败、2915 通过，新增的 1 项为 F193 通过项。
+- 全仓 `pnpm check` 被外部 `~/.claude/skills/gstack` 的 1534 个既有格式错误阻断；changed-scope Biome 为 0 error。env registry 的 6 个既有缺口已在目标分支同命令复现，本次新增的三个 F193 变量已登记。
