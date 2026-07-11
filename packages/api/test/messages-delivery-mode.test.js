@@ -662,6 +662,57 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.capsule.seal.sessionId, 'sess-1');
   });
 
+  it('immediate execution does not enqueue a second continuation for a replayed publication', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-replayed-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-replayed', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.router.routeExecution.mock.mockImplementation(
+      async function* (_userId, _content, _threadId, _messageId, _targets, _intent, options) {
+        options.persistenceContext.egressByCat = {
+          opus: {
+            disposition: 'published',
+            messageId: 'already-published',
+            replayed: true,
+          },
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '重试同一次 seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(
+      deps.queueProcessor.enqueueContinuation.mock.calls.length,
+      0,
+      'replay must not enqueue a duplicate continuation',
+    );
+  });
+
   it('immediate multi-cat execution schedules continuation for the capsule owner cat', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({

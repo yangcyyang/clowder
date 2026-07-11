@@ -1316,11 +1316,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             });
             finalStatus = 'succeeded';
 
-            const freshnessHeld = hasFreshnessHold(persistenceContext);
             enqueueFreshnessReviewsFromPersistence(persistenceContext, opts.queueProcessor);
 
-            if (!freshnessHeld) {
-              for (const continuationCapsule of continuationCapsules.values()) {
+            for (const continuationCapsule of continuationCapsules.values()) {
+              if (isNewFreshnessPublicationForCat(persistenceContext, continuationCapsule.catId)) {
                 opts.queueProcessor?.enqueueContinuation({
                   threadId: resolvedThreadId,
                   userId,
@@ -1332,7 +1331,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
             // Push notification: cat(s) finished responding
             const pushSvc = getPushNotificationService();
-            if (pushSvc && !freshnessHeld) {
+            if (pushSvc && hasNewFreshnessPublication(persistenceContext)) {
               const catNames = targetCats.join(', ');
               const assistantText = (
                 outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts)
@@ -1947,6 +1946,21 @@ export function hasFreshnessHold(persistenceContext: Pick<PersistenceContext, 'e
     entries.some((entry) => entry.disposition === 'held') &&
     !entries.some((entry) => entry.disposition === 'published' && !entry.replayed)
   );
+}
+
+/** Allow invocation-wide fanout only for legacy output or at least one newly published turn. */
+export function hasNewFreshnessPublication(persistenceContext: Pick<PersistenceContext, 'egressByCat'>): boolean {
+  const entries = Object.values(persistenceContext.egressByCat ?? {});
+  return entries.length === 0 || entries.some((entry) => entry.disposition === 'published' && !entry.replayed);
+}
+
+/** Allow per-cat side effects only when that cat is legacy or produced a new publication. */
+export function isNewFreshnessPublicationForCat(
+  persistenceContext: Pick<PersistenceContext, 'egressByCat'>,
+  catId: string,
+): boolean {
+  const verdict = persistenceContext.egressByCat?.[catId];
+  return !verdict || (verdict.disposition === 'published' && !verdict.replayed);
 }
 
 /** Schedule only actionable stdout reviews; terminal holds remain visible for manual attention. */

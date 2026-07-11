@@ -152,4 +152,31 @@ describe('POST /api/messages decision notification route policy', () => {
     );
     assert.equal(payload.data?.requiresDecision, undefined);
   });
+
+  it('does not send a second push when freshness publication is a successful replay', async () => {
+    deps.router.routeExecution.mock.mockImplementation(
+      async function* (_userId, _content, _threadId, _messageId, _targets, _intent, options) {
+        options.persistenceContext.egressByCat = {
+          opus: {
+            disposition: 'published',
+            messageId: 'already-published',
+            replayed: true,
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '重试同一次提交', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.equal(notifyUserMock.mock.calls.length, 0, 'replay must not fan out a duplicate push');
+  });
 });
