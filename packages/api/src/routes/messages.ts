@@ -52,7 +52,11 @@ import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  type IMessageStore,
+  isDelivered,
+  type StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
@@ -1054,6 +1058,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                       targetCats: CatId[];
                       content: string;
                       triggerMessageId?: string;
+                      freshnessProtected?: true;
                     }) => {
                       const enqueued: CatId[] = [];
                       for (const targetCat of handoff.targetCats) {
@@ -1078,6 +1083,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                           autoExecute: true,
                           callerCatId: handoff.callerCatId,
                           a2aTriggerMessageId: handoff.triggerMessageId,
+                          freshnessProtected: handoff.freshnessProtected,
                         });
                         if (result?.outcome !== 'enqueued' || !result.entry) continue;
                         if (handoff.triggerMessageId) {
@@ -1627,7 +1633,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     if (around && beforeTs == null) {
       const target = await opts.messageStore.getById(around);
-      if (target?.threadId === resolvedThreadId && isMessageVisibleToUser(target, userId)) {
+      if (target?.threadId === resolvedThreadId && isDelivered(target) && isMessageVisibleToUser(target, userId)) {
         const beforeLimit = Math.max(1, Math.floor((limit - 1) / 2));
         const afterLimit = Math.max(0, limit - beforeLimit - 1);
         const beforePage = await opts.messageStore.getByThreadBefore(

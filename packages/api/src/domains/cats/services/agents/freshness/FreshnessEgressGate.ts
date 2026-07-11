@@ -385,10 +385,10 @@ export class FreshnessEgressGate {
 
   private async deliverReleasedMessage(hold: FreshnessHoldRecord, now: number): Promise<StoredMessage> {
     if (!hold.releasedMessageId) throw new Error('Freshness hold released message id not found');
-    let message = await this.messageStore.getById(hold.releasedMessageId);
+    let message = await this.messageStore.getByIdForFreshnessRelease(hold.releasedMessageId);
     if (!message) throw new Error('Freshness hold released message not found');
     if (message.deliveryStatus === 'queued') {
-      message = await this.messageStore.markDelivered(message.id, now);
+      message = await this.messageStore.releaseFreshnessReviewPublication(message.id, now);
     }
     if (!message || message.deliveryStatus === 'queued' || message.deliveryStatus === 'canceled') {
       throw new Error('Freshness hold released message could not be delivered');

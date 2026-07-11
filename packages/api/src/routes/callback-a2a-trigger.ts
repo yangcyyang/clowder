@@ -15,9 +15,9 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
+import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import {
   getWorklist,
   hasWorklist,
@@ -73,6 +73,8 @@ export async function enqueueA2ATargets(
     parentInvocationId?: string;
     /** F153: caller trace context for cross-route A2A propagation */
     callerTraceContext?: CallerTraceContext;
+    /** Preserve Freshness protection when the callback handoff becomes a queued route. */
+    freshnessProtected?: true;
   },
 ): Promise<{ enqueued: CatId[]; fallback: boolean }> {
   const { log } = deps;
@@ -174,6 +176,7 @@ export async function enqueueA2ATargets(
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
         callerTraceContext: dispatchTraceContext,
+        freshnessProtected: opts.freshnessProtected,
       });
       queueDiagnostics.push({
         catId,

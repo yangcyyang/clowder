@@ -67,6 +67,8 @@ export interface QueueEntry {
   callerCatId?: string;
   /** The persisted agent message that triggered this A2A work item. */
   a2aTriggerMessageId?: string;
+  /** Immutable lineage marker: this work descends from a Freshness-protected route. */
+  readonly freshnessProtected?: true;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
@@ -229,6 +231,7 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       a2aTriggerMessageId: input.a2aTriggerMessageId,
+      freshnessProtected: input.freshnessProtected === true ? true : undefined,
       senderMeta: input.senderMeta,
       priority:
         input.source === 'agent' &&

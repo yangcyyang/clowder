@@ -345,17 +345,17 @@ describe('FreshnessEgressGate', () => {
     );
   });
 
-  it('finishes delivery after crashing between hold release and markDelivered', async () => {
+  it('finishes delivery after crashing between hold release and publication delivery', async () => {
     const messageStore = new MessageStore();
     const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
-    const markDelivered = messageStore.markDelivered.bind(messageStore);
+    const releasePublication = messageStore.releaseFreshnessReviewPublication.bind(messageStore);
     let crashBeforeDelivery = true;
-    messageStore.markDelivered = async (...args) => {
+    messageStore.releaseFreshnessReviewPublication = async (...args) => {
       if (crashBeforeDelivery) {
         crashBeforeDelivery = false;
         throw new Error('simulated crash before delivery');
       }
-      return markDelivered(...args);
+      return releasePublication(...args);
     };
     const gate = new FreshnessEgressGate({ messageStore, holdStore });
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
@@ -373,7 +373,8 @@ describe('FreshnessEgressGate', () => {
     await assert.rejects(gate.review(input), /simulated crash before delivery/);
     const released = await holdStore.get(held.hold.id);
     assert.equal(released.status, 'released');
-    assert.equal((await messageStore.getById(released.releasedMessageId)).deliveryStatus, 'queued');
+    assert.equal(await messageStore.getById(released.releasedMessageId), null);
+    assert.equal((await messageStore.getByIdForFreshnessRelease(released.releasedMessageId)).deliveryStatus, 'queued');
     assert.equal((await formalCatMessages(messageStore)).length, 0);
 
     const recovered = await gate.review(input);

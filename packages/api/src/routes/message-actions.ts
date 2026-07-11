@@ -6,14 +6,11 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import {
-  auditDangerousActionBestEffort,
-  readDangerousActionConfirmation,
-} from '../utils/dangerous-action-guard.js';
+import { auditDangerousActionBestEffort, readDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
 
 export interface MessageActionsRoutesOptions {
   messageStore: IMessageStore;
@@ -99,7 +96,7 @@ export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOption
   app.get<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
     const { id } = request.params;
     const msg = await opts.messageStore.getById(id);
-    if (!msg) {
+    if (!msg || !isDelivered(msg)) {
       reply.status(404);
       return { error: '消息不存在', code: 'MESSAGE_NOT_FOUND' };
     }

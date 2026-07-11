@@ -116,6 +116,31 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text', 
 }
 
 describe('routeSerial Freshness Hold', () => {
+  test('marks queue-backed A2A handoffs as part of the protected route lineage', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-a2a-lineage';
+    const { deps } = await createHarness({
+      injectNewMessage: false,
+      threadId,
+      outputContent: '@gemini 请继续处理',
+    });
+    const handoffs = [];
+
+    for await (const _message of routeSerial(deps, ['opus'], '开始回答', 'user-1', threadId, {
+      parentInvocationId: 'parent-a2a-lineage',
+      enqueueA2ATargets: async (handoff) => {
+        handoffs.push(handoff);
+        return handoff.targetCats;
+      },
+    })) {
+      // drain
+    }
+
+    assert.equal(handoffs.length, 1, JSON.stringify(handoffs));
+    assert.equal(handoffs[0].freshnessProtected, true);
+    assert.deepEqual(handoffs[0].targetCats, ['gemini']);
+  });
+
   test('holds a stale stdout draft before text yield and formal append', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const threadId = 'thread-freshness-stale';

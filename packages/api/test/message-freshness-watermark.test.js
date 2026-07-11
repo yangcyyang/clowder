@@ -136,6 +136,31 @@ describe('MessageStore freshness watermark', () => {
     assert.deepEqual(appended, [queued.id], 'delivery replay must not notify twice');
   });
 
+  test('requires the dedicated hold-release transition for queued review publications', async () => {
+    const appended = [];
+    const store = new MessageStore({ onAppend: (message) => appended.push(message.id) });
+    const queued = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      threadId: 'freshness-private-review-release',
+      content: 'PRIVATE_REVIEW_RELEASE_SENTINEL',
+      mentions: [],
+      timestamp: 104,
+      deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
+    });
+
+    assert.equal(await store.getById(queued.id), null);
+    assert.equal((await store.getByIdForFreshnessRelease(queued.id)).content, 'PRIVATE_REVIEW_RELEASE_SENTINEL');
+    const ordinaryDelivery = await store.markDelivered(queued.id, 105);
+    assert.equal(ordinaryDelivery.deliveryStatus, 'queued');
+    assert.deepEqual(appended, []);
+
+    const released = await store.releaseFreshnessReviewPublication(queued.id, 106);
+    assert.equal(released.deliveryStatus, 'delivered');
+    assert.deepEqual(appended, [queued.id]);
+  });
+
   test('status, system, and briefing messages are structurally exempt', async () => {
     const store = new MessageStore();
     const threadId = 'freshness-structural-exemptions';

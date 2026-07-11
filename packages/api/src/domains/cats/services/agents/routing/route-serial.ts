@@ -1825,6 +1825,7 @@ export async function* routeSerial(
                   targetCats: queueTargets,
                   content: storedContent,
                   triggerMessageId: storedMsgId,
+                  ...(deps.freshnessGate ? { freshnessProtected: true as const } : {}),
                 });
                 const enqueuedSet = new Set(enqueued.map((pendingCat) => pendingCat as string));
                 const droppedTargets = queueTargets.filter((targetCat) => !enqueuedSet.has(targetCat as string));

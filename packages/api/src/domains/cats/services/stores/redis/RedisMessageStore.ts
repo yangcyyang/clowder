@@ -54,6 +54,11 @@ const MARK_DELIVERED_LUA = `
 if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
   return 0
 end
+local isReviewPublication = redis.call('HGET', KEYS[1], 'freshnessReviewPublication') == '1'
+local isReviewRelease = ARGV[3] == '1'
+if isReviewPublication ~= isReviewRelease then
+  return 0
+end
 redis.call('HSET', KEYS[1],
   'deliveredAt', ARGV[1],
   'deliveryStatus', 'delivered')
@@ -253,28 +258,146 @@ for i = 3, #KEYS do redis.call('ZADD', KEYS[i], revision, ARGV[2]) end
 return revision
 `;
 
-const REVEAL_WHISPER_LUA = `
-if redis.call('HGET', KEYS[1], 'visibility') ~= 'whisper' then return 0 end
-if redis.call('HGET', KEYS[1], 'revealedAt') then return 0 end
-if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] then return 0 end
-if ARGV[4] == '1' then
-  local maxWatermark = '9007199254740991'
-  local current = redis.call('GET', KEYS[2]) or '0'
-  if not string.match(current, '^%d+$') or
-     string.len(current) > string.len(maxWatermark) or
-     (string.len(current) == string.len(maxWatermark) and current >= maxWatermark) then
-    return redis.error_reply('freshness watermark exhausted')
+/**
+ * Reveal every matching whisper at one Redis linearization point.
+ *
+ * KEYS:
+ *   1 thread timeline, 2 freshness sequence, 3 public freshness zset,
+ *   4 message-detail key prefix, 5 whisper freshness key prefix.
+ * ARGV:
+ *   1 user id, 2 reveal timestamp.
+ */
+const REVEAL_WHISPERS_LUA = `
+local maxWatermark = '9007199254740991'
+
+local function redisType(key)
+  local reply = redis.call('TYPE', key)
+  if type(reply) == 'table' then return reply.ok end
+  return reply
+end
+
+local function isZsetOrMissing(key)
+  local keyType = redisType(key)
+  return keyType == 'none' or keyType == 'zset'
+end
+
+local function isFreshnessRelevant(detailKey)
+  if redis.call('HGET', detailKey, 'messageClass') == 'status' then return false end
+  if redis.call('HGET', detailKey, 'deliveryStatus') == 'canceled' then return false end
+  if redis.call('HGET', detailKey, 'deletedAt') then return false end
+  if redis.call('HGET', detailKey, '_tombstone') == '1' then return false end
+
+  local messageUserId = redis.call('HGET', detailKey, 'userId') or ''
+  local catId = redis.call('HGET', detailKey, 'catId')
+  if (messageUserId == 'scheduler' or messageUserId == 'system') and
+     (not catId or catId == '' or catId == 'system') then
+    return false
+  end
+  if redis.call('HGET', detailKey, 'origin') == 'briefing' then return false end
+
+  local rawExtra = redis.call('HGET', detailKey, 'extra')
+  if rawExtra and rawExtra ~= '' then
+    local decodedOk, decoded = pcall(cjson.decode, rawExtra)
+    if decodedOk and type(decoded) == 'table' and decoded.systemKind ~= nil then
+      return false
+    end
+  end
+  return true
+end
+
+local function collectWhisperIndexes(detailKey)
+  local result = {}
+  local seen = {}
+  local rawRecipients = redis.call('HGET', detailKey, 'whisperTo')
+  if not rawRecipients or rawRecipients == '' then return result end
+
+  local decodedOk, recipients = pcall(cjson.decode, rawRecipients)
+  if not decodedOk or type(recipients) ~= 'table' then return result end
+  for _, catId in ipairs(recipients) do
+    if type(catId) == 'string' and not seen[catId] then
+      seen[catId] = true
+      result[#result + 1] = KEYS[5] .. catId
+    end
+  end
+  return result
+end
+
+local function incrementDecimal(value)
+  local digits = {}
+  local carry = 1
+  for index = string.len(value), 1, -1 do
+    local digit = string.byte(value, index) - 48 + carry
+    if digit >= 10 then
+      digit = digit - 10
+      carry = 1
+    else
+      carry = 0
+    end
+    table.insert(digits, 1, string.char(48 + digit))
+  end
+  if carry == 1 then table.insert(digits, 1, '1') end
+  return table.concat(digits)
+end
+
+local ids = redis.call('ZRANGE', KEYS[1], 0, -1)
+local candidates = {}
+local relevantCount = 0
+
+-- Discover and re-check every candidate inside the script. No reveal write is
+-- allowed until the whole batch and its required watermark capacity are known.
+for _, id in ipairs(ids) do
+  local detailKey = KEYS[4] .. id
+  if redis.call('HGET', detailKey, 'visibility') == 'whisper' and
+     not redis.call('HGET', detailKey, 'revealedAt') and
+     redis.call('HGET', detailKey, 'userId') == ARGV[1] then
+    local relevant = isFreshnessRelevant(detailKey)
+    local whisperIndexes = collectWhisperIndexes(detailKey)
+    for _, whisperKey in ipairs(whisperIndexes) do
+      if not isZsetOrMissing(whisperKey) then
+        return redis.error_reply('freshness index has wrong type')
+      end
+    end
+    candidates[#candidates + 1] = {
+      id = id,
+      detailKey = detailKey,
+      relevant = relevant,
+      whisperIndexes = whisperIndexes,
+    }
+    if relevant then relevantCount = relevantCount + 1 end
   end
 end
-redis.call('HSET', KEYS[1], 'revealedAt', ARGV[2])
-for i = 4, #KEYS do redis.call('ZREM', KEYS[i], ARGV[3]) end
-if ARGV[4] == '1' then
-  redis.call('INCR', KEYS[2])
-  local revision = redis.call('GET', KEYS[2])
-  redis.call('HSET', KEYS[1], 'appendWatermark', revision)
-  redis.call('ZADD', KEYS[3], revision, ARGV[3])
+
+if relevantCount > 0 then
+  if not isZsetOrMissing(KEYS[3]) then
+    return redis.error_reply('freshness index has wrong type')
+  end
+  local current = redis.call('GET', KEYS[2]) or '0'
+  if not string.match(current, '^%d+$') or string.len(current) > string.len(maxWatermark) then
+    return redis.error_reply('freshness watermark exhausted')
+  end
+
+  local planned = current
+  for _ = 1, relevantCount do
+    if string.len(planned) == string.len(maxWatermark) and planned >= maxWatermark then
+      return redis.error_reply('freshness watermark exhausted')
+    end
+    planned = incrementDecimal(planned)
+  end
 end
-return 1
+
+for _, candidate in ipairs(candidates) do
+  redis.call('HSET', candidate.detailKey, 'revealedAt', ARGV[2])
+  for _, whisperKey in ipairs(candidate.whisperIndexes) do
+    redis.call('ZREM', whisperKey, candidate.id)
+  end
+  if candidate.relevant then
+    redis.call('INCR', KEYS[2])
+    local revision = redis.call('GET', KEYS[2])
+    redis.call('HSET', candidate.detailKey, 'appendWatermark', revision)
+    redis.call('ZADD', KEYS[3], revision, candidate.id)
+  end
+end
+return #candidates
 `;
 
 function parseWatermark(value: string): ThreadAppendWatermark {
@@ -556,7 +679,7 @@ export class RedisMessageStore {
         };
       }
       if (kind === 'existing') {
-        const existing = await this.getById(resultId!);
+        const existing = await this.getByIdRaw(resultId!);
         if (existing) {
           const committedWatermark =
             existing.appendWatermark ??
@@ -598,8 +721,25 @@ export class RedisMessageStore {
   }
 
   async getById(id: string): Promise<StoredMessage | null> {
+    return this.getByIdWithMode(id, 'public');
+  }
+
+  async getByIdForFreshnessRelease(id: string): Promise<StoredMessage | null> {
+    return this.getByIdRaw(id);
+  }
+
+  private async getByIdRaw(id: string): Promise<StoredMessage | null> {
+    return this.getByIdWithMode(id, 'raw');
+  }
+
+  private async getByIdWithMode(id: string, mode: 'public' | 'raw'): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     if (!data || !data.id) return null;
+    const pendingReviewPublication = isPendingFreshnessReviewPublication(
+      data.deliveryStatus as StoredMessage['deliveryStatus'],
+      data.freshnessReviewPublication === '1',
+    );
+    if (mode === 'public' && pendingReviewPublication) return null;
 
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
     const toolEvents = safeParseToolEvents(data.toolEvents);
@@ -1174,35 +1314,19 @@ export class RedisMessageStore {
    * F35: Reveal all unrevealed whispers in a thread. Returns count of revealed messages.
    */
   async revealWhispers(threadId: string, userId: string): Promise<number> {
-    const key = MessageKeys.thread(threadId);
-    const ids = await this.redis.zrange(key, 0, -1);
-    if (ids.length === 0) return 0;
-
-    const now = String(Date.now());
-    let count = 0;
-    for (const id of ids) {
-      const msg = await this.getById(id);
-      if (!msg || msg.visibility !== 'whisper' || msg.revealedAt || msg.userId !== userId) continue;
-      const whisperKeys = [
-        ...new Set((msg.whisperTo ?? []).map((catId) => MessageKeys.freshnessWhisper(threadId, catId))),
-      ];
-      const changed = Number(
-        await this.redis.eval(
-          REVEAL_WHISPER_LUA,
-          3 + whisperKeys.length,
-          MessageKeys.detail(id),
-          MessageKeys.freshnessSequence(threadId),
-          MessageKeys.freshnessPublic(threadId),
-          ...whisperKeys,
-          userId,
-          now,
-          id,
-          isFreshnessRelevantMessage(msg) ? '1' : '0',
-        ),
-      );
-      if (changed === 1) count++;
-    }
-    return count;
+    return Number(
+      await this.redis.eval(
+        REVEAL_WHISPERS_LUA,
+        5,
+        MessageKeys.thread(threadId),
+        MessageKeys.freshnessSequence(threadId),
+        MessageKeys.freshnessPublic(threadId),
+        MessageKeys.detail(''),
+        MessageKeys.freshnessWhisper(threadId, ''),
+        userId,
+        String(Date.now()),
+      ),
+    );
   }
 
   /** F096: Update message extra data (merge semantics — preserves existing fields). */
@@ -1246,7 +1370,19 @@ export class RedisMessageStore {
 
   /** F098-D: Mark a queued message as delivered (set deliveredAt timestamp). */
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
+    return this.deliverQueuedMessage(id, deliveredAt, false);
+  }
+
+  async releaseFreshnessReviewPublication(id: string, deliveredAt: number): Promise<StoredMessage | null> {
+    return this.deliverQueuedMessage(id, deliveredAt, true);
+  }
+
+  private async deliverQueuedMessage(
+    id: string,
+    deliveredAt: number,
+    freshnessReviewRelease: boolean,
+  ): Promise<StoredMessage | null> {
+    const msg = await this.getByIdRaw(id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
     const changed = (await this.redis.eval(
@@ -1258,8 +1394,9 @@ export class RedisMessageStore {
       MessageKeys.user(msg.userId),
       String(deliveredAt),
       id,
+      freshnessReviewRelease ? '1' : '0',
     )) as number;
-    if (changed !== 1) return this.getById(id);
+    if (changed !== 1) return this.getByIdRaw(id);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     this.notifyAppend(msg);
@@ -1268,7 +1405,7 @@ export class RedisMessageStore {
 
   /** F117: Mark a queued message as canceled (withdraw/clear). */
   async markCanceled(id: string): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
+    const msg = await this.getByIdRaw(id);
     if (!msg) return null;
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
@@ -1293,6 +1430,15 @@ export class RedisMessageStore {
       if (err || !data || typeof data !== 'object') continue;
       const d = data as Record<string, string>;
       if (!d.id) continue;
+
+      if (
+        isPendingFreshnessReviewPublication(
+          d.deliveryStatus as StoredMessage['deliveryStatus'],
+          d.freshnessReviewPublication === '1',
+        )
+      ) {
+        continue;
+      }
 
       const deletedAt = d.deletedAt ? parseInt(d.deletedAt, 10) : undefined;
 

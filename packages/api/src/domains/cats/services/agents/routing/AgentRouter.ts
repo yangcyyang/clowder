@@ -61,8 +61,10 @@ export function selectRouteFreshnessGate(
   gate: FreshnessEgressGate | undefined,
   threadId: string | undefined,
   targetCats: readonly CatId[] | undefined,
+  freshnessProtected = false,
 ): FreshnessEgressGate | undefined {
   if (!gate || !threadId || !targetCats?.length) return undefined;
+  if (freshnessProtected) return gate.forProtectedRoute();
   // Mixed routes stay entirely legacy until every target is in rollout. This
   // avoids one shared route buffering non-allowlisted initial cats as a side
   // effect. Once selected, freeze protected semantics for the whole route so
@@ -689,9 +691,9 @@ export class AgentRouter {
   }
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */
-  getStrategyDeps(threadId?: string, targetCats?: readonly CatId[]): RouteStrategyDeps {
+  getStrategyDeps(threadId?: string, targetCats?: readonly CatId[], freshnessProtected = false): RouteStrategyDeps {
     const apiPort = process.env.API_SERVER_PORT ?? '3004';
-    const routeFreshnessGate = selectRouteFreshnessGate(this.freshnessGate, threadId, targetCats);
+    const routeFreshnessGate = selectRouteFreshnessGate(this.freshnessGate, threadId, targetCats, freshnessProtected);
     return {
       services: this.services,
       invocationDeps: {
@@ -858,6 +860,8 @@ export class AgentRouter {
       replyToMessageId?: string;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
+      /** Internal queue lineage: force this descendant route to remain Freshness-protected. */
+      freshnessProtected?: true;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -897,7 +901,7 @@ export class AgentRouter {
       await this.threadStore.updateLastActive(threadId);
     }
 
-    const strategyDeps = this.getStrategyDeps(threadId, targetCats);
+    const strategyDeps = this.getStrategyDeps(threadId, targetCats, options?.freshnessProtected === true);
     const routeOptions = {
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,

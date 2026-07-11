@@ -274,6 +274,8 @@ export interface IMessageStore {
   ): ConditionalAppendResult | Promise<ConditionalAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Internal capability: raw lookup reserved for recovering a hold's released publication. */
+  getByIdForFreshnessRelease(id: string): StoredMessage | null | Promise<StoredMessage | null>;
   getRecent(limit?: number, userId?: string): StoredMessage[] | Promise<StoredMessage[]>;
   getMentionsFor(
     catId: CatId,
@@ -333,6 +335,11 @@ export interface IMessageStore {
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F098-D: Mark a queued message as delivered (set deliveredAt). Returns null if not found. */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Deliver the private queued half of a freshness hold only after the hold release CAS succeeds. */
+  releaseFreshnessReviewPublication(
+    id: string,
+    deliveredAt: number,
+  ): StoredMessage | null | Promise<StoredMessage | null>;
   /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
   markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
 }
@@ -520,7 +527,7 @@ export class MessageStore {
     const messages: StoredMessage[] = [];
     let privateBarrier = false;
     for (const [id] of candidates) {
-      const message = this.getById(id);
+      const message = this.getByIdRaw(id);
       if (!message || !isFreshnessRelevantMessage(message)) continue;
       if (isPendingFreshnessReviewPublication(message.deliveryStatus, this.freshnessReviewPublicationIds.has(id))) {
         privateBarrier = true;
@@ -546,7 +553,7 @@ export class MessageStore {
     const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
     if (idempotencyIndexKey) {
       const existingId = this.idempotencyIndex.get(idempotencyIndexKey);
-      const existing = existingId ? this.getById(existingId) : null;
+      const existing = existingId ? this.getByIdRaw(existingId) : null;
       if (existing) {
         return {
           outcome: 'appended',
@@ -564,7 +571,7 @@ export class MessageStore {
         const hasIndependentAppend = [...this.freshnessEntries(threadId, gate.audience).entries()].some(
           ([id, revision]) => {
             if (revision <= baseline) return false;
-            const existing = this.getById(id);
+            const existing = this.getByIdRaw(id);
             return !gate.groupId || !existing || freshnessGroupId(existing) !== gate.groupId;
           },
         );
@@ -595,7 +602,7 @@ export class MessageStore {
     if (idempotencyIndexKey) {
       const existingId = this.idempotencyIndex.get(idempotencyIndexKey);
       if (existingId) {
-        const existing = this.getById(existingId);
+        const existing = this.getByIdRaw(existingId);
         if (existing) {
           return existing;
         }
@@ -642,7 +649,22 @@ export class MessageStore {
    * Get a single message by its ID. Returns null if not found.
    */
   getById(id: string): StoredMessage | null {
-    return this.messages.find((m) => m.id === id) ?? null;
+    const message = this.getByIdRaw(id);
+    if (
+      message &&
+      isPendingFreshnessReviewPublication(message.deliveryStatus, this.freshnessReviewPublicationIds.has(message.id))
+    ) {
+      return null;
+    }
+    return message;
+  }
+
+  getByIdForFreshnessRelease(id: string): StoredMessage | null {
+    return this.getByIdRaw(id);
+  }
+
+  private getByIdRaw(id: string): StoredMessage | null {
+    return this.messages.find((message) => message.id === id) ?? null;
   }
 
   /**
@@ -931,9 +953,22 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
+    if (this.freshnessReviewPublicationIds.has(id)) return msg;
+    return this.deliverQueuedMessage(msg, deliveredAt);
+  }
+
+  releaseFreshnessReviewPublication(id: string, deliveredAt: number): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    if (msg.deliveryStatus !== 'queued') return msg;
+    if (!this.freshnessReviewPublicationIds.has(id)) return msg;
+    return this.deliverQueuedMessage(msg, deliveredAt);
+  }
+
+  private deliverQueuedMessage(msg: StoredMessage, deliveredAt: number): StoredMessage {
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
-    this.freshnessReviewPublicationIds.delete(id);
+    this.freshnessReviewPublicationIds.delete(msg.id);
     this.notifyAppend(msg);
     return msg;
   }
@@ -965,7 +1000,7 @@ const PREVIEW_MAX_LENGTH = 80;
  */
 export async function hydrateReplyPreview(store: IMessageStore, replyToId: string): Promise<ReplyPreview | null> {
   const parent = await store.getById(replyToId);
-  if (!parent) return null;
+  if (!parent || !isDelivered(parent)) return null;
 
   if (parent.deletedAt || parent._tombstone) {
     return { senderCatId: parent.catId, content: '', deleted: true };

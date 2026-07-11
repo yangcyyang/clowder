@@ -69,6 +69,39 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('does not expose a queued freshness review publication through around lookup', async () => {
+    const publicMessage = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      threadId: 'thread-private-around',
+      content: 'visible context',
+      mentions: ['opus'],
+      timestamp: 1000,
+    });
+    const privateDraft = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      threadId: 'thread-private-around',
+      content: 'PRIVATE_AROUND_SENTINEL',
+      mentions: [],
+      timestamp: 2000,
+      deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=thread-private-around&around=${privateDraft.id}`,
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(
+      body.messages.map((message) => message.id),
+      [publicMessage.id],
+    );
+    assert.doesNotMatch(res.body, /PRIVATE_AROUND_SENTINEL/);
+  });
+
   it('searches message content across threads newest first', async () => {
     messageStore.append({
       userId: 'default-user',

@@ -137,6 +137,27 @@ describe('replyTo threading', () => {
     assert.equal(preview, null);
   });
 
+  test('hydrateReplyPreview does not expose a queued freshness review publication', async () => {
+    const { MessageStore, hydrateReplyPreview } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    const store = new MessageStore();
+    const privateDraft = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'PRIVATE_REPLY_PREVIEW_SENTINEL',
+      mentions: [],
+      timestamp: 1001,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
+    });
+
+    const preview = await hydrateReplyPreview(store, privateDraft.id);
+
+    assert.equal(preview, null);
+  });
+
   test('hydrateReplyPreview returns null senderCatId for user messages', async () => {
     const { MessageStore, hydrateReplyPreview } = await import(
       '../dist/domains/cats/services/stores/ports/MessageStore.js'

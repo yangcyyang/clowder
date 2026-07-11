@@ -2181,6 +2181,7 @@ export class QueueProcessor {
             targetCats: import('@cat-cafe/shared').CatId[];
             content: string;
             triggerMessageId?: string;
+            freshnessProtected?: true;
           }) => {
             const enqueued: import('@cat-cafe/shared').CatId[] = [];
             for (const targetCat of handoff.targetCats) {
@@ -2205,6 +2206,7 @@ export class QueueProcessor {
                 autoExecute: true,
                 callerCatId: handoff.callerCatId,
                 a2aTriggerMessageId: handoff.triggerMessageId,
+                freshnessProtected: handoff.freshnessProtected,
               });
               if (result.outcome !== 'enqueued' || !result.entry) continue;
               if (handoff.triggerMessageId) {
@@ -2244,6 +2246,7 @@ export class QueueProcessor {
           ...(entry.a2aTriggerMessageId
             ? { a2aTriggerMessageId: entry.a2aTriggerMessageId, replyToMessageId: entry.a2aTriggerMessageId }
             : {}),
+          ...(entry.freshnessProtected ? { freshnessProtected: true as const } : {}),
           callerTraceContext: entry.callerTraceContext,
         },
       )) {

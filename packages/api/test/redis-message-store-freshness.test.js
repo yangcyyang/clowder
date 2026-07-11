@@ -214,13 +214,21 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     });
 
     assert.equal(await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE), queued.appendWatermark);
+    assert.equal(await store.getById(queued.id), null);
+    assert.equal((await store.getByIdForFreshnessRelease(queued.id)).content, sentinel);
+    assert.equal(JSON.stringify(await store.scanAll()).includes(sentinel), false);
     const privateDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, baseline);
     assert.deepEqual(privateDelta.messages, []);
     assert.equal(privateDelta.observedWatermark, baseline);
     assert.equal(privateDelta.truncated, true);
     assert.equal(JSON.stringify(privateDelta).includes(sentinel), false);
 
-    await store.markDelivered(queued.id, 331);
+    const ordinaryDelivery = await store.markDelivered(queued.id, 331);
+    assert.equal(ordinaryDelivery.deliveryStatus, 'queued');
+    const stillPrivateDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, baseline);
+    assert.deepEqual(stillPrivateDelta.messages, []);
+
+    await store.releaseFreshnessReviewPublication(queued.id, 332);
     const deliveredDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, baseline);
     assert.deepEqual(
       deliveredDelta.messages.map((message) => [message.id, message.content]),
@@ -487,5 +495,37 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     assert.equal(stillPrivate.revealedAt, undefined);
     assert.equal(await store.captureFreshnessWatermark(revealThreadId, OPUS_AUDIENCE), privateMessage.appendWatermark);
     assert.equal(await store.captureFreshnessWatermark(revealThreadId, CODEX_AUDIENCE), '0');
+  });
+
+  test('rejects a multi-whisper reveal before any partial mutation at the watermark limit', async () => {
+    const threadId = 'freshness-redis-multi-reveal-watermark-limit';
+    const first = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'first private message',
+      mentions: [],
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+      timestamp: 630,
+    });
+    const second = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'second private message',
+      mentions: [],
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+      timestamp: 631,
+    });
+    await redis.set(MessageKeys.freshnessSequence(threadId), '9007199254740990');
+
+    await assert.rejects(store.revealWhispers(threadId, 'user-1'), /freshness watermark exhausted/);
+
+    assert.equal((await store.getById(first.id)).revealedAt, undefined);
+    assert.equal((await store.getById(second.id)).revealedAt, undefined);
+    assert.equal(await redis.get(MessageKeys.freshnessSequence(threadId)), '9007199254740990');
+    assert.equal(await store.captureFreshnessWatermark(threadId, CODEX_AUDIENCE), '0');
   });
 });

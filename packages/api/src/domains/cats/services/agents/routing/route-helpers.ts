@@ -1100,6 +1100,8 @@ export interface RouteOptions {
         targetCats: CatId[];
         content: string;
         triggerMessageId?: string;
+        /** Preserve Freshness protection when this handoff becomes a new queued route. */
+        freshnessProtected?: true;
       }) => Promise<readonly CatId[]>)
     | undefined;
   /** Queue-backed A2A caller identity for a single-cat dispatch. */

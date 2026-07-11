@@ -220,6 +220,32 @@ describe('GET /api/messages/:id', () => {
 
     await app.close();
   });
+
+  it('does not expose a queued freshness review publication by id', async () => {
+    const messageStore = new MessageStore();
+    const socketManager = createMockSocketManager();
+    const privateDraft = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      threadId: 'thread-private-review',
+      content: 'PRIVATE_DRAFT_SENTINEL',
+      mentions: [],
+      timestamp: Date.now(),
+      deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
+    });
+
+    const app = Fastify();
+    await app.register(messageActionsRoutes, { messageStore, socketManager });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: `/api/messages/${privateDraft.id}` });
+
+    assert.equal(res.statusCode, 404);
+    assert.doesNotMatch(res.body, /PRIVATE_DRAFT_SENTINEL/);
+
+    await app.close();
+  });
 });
 
 describe('DELETE /api/messages/:id (soft delete)', () => {
