@@ -65,11 +65,9 @@ export function registerCallbackGameRoutes(
       payload: { round, phase, seat, action, target, text, nonce },
     });
 
-    // The downstream route guarantees 4xx before mutation; allow a corrected
-    // retry instead of turning a validation error into a false duplicate.
-    if (response.statusCode >= 400 && response.statusCode < 500 && freshness.outcome === 'authorized') {
-      await freshness.abort();
-    }
+    // Do not abort on downstream 4xx: the game orchestrator can append speech
+    // before a later state write throws and is translated to 400. Keeping the
+    // claim is the only fail-closed choice when mutation status is ambiguous.
 
     reply.status(response.statusCode);
     return response.json();

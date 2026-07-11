@@ -56,7 +56,7 @@ describe('Callback Game Action', () => {
     };
   });
 
-  async function createApp() {
+  async function createApp(overrides = {}) {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { gameActionRoutes } = await import('../dist/routes/game-actions.js');
     const app = Fastify();
@@ -65,6 +65,7 @@ describe('Callback Game Action', () => {
       messageStore,
       socketManager,
       threadStore,
+      ...overrides,
     });
     await app.register(gameActionRoutes, {
       gameStore,
@@ -232,5 +233,45 @@ describe('Callback Game Action', () => {
     const body = JSON.parse(response.body);
     assert.ok(body.error.includes('thread'), 'error should mention thread mismatch');
     assert.equal(orchestrator._lastAction, null, 'action should NOT have been submitted');
+  });
+
+  test('keeps the claim after an orchestrator writes and then returns a translated 400', async () => {
+    const { FreshnessEgressGate } = await import(
+      '../dist/domains/cats/services/agents/freshness/FreshnessEgressGate.js'
+    );
+    const { FreshnessHoldStore } = await import('../dist/domains/cats/services/stores/ports/FreshnessHoldStore.js');
+    const freshnessGate = new FreshnessEgressGate({
+      messageStore,
+      holdStore: new FreshnessHoldStore({ maxReviews: 2 }),
+    });
+    const thread = await threadStore.create('user-1', 'partial game action');
+    const baseline = await messageStore.captureFreshnessWatermark(thread.id, { kind: 'cat', catId: 'codex' });
+    const auth = await registry.create('user-1', 'codex', thread.id, undefined, undefined, {
+      freshnessBaseline: baseline,
+    });
+    gameStore._set('game-partial', makeRuntime('game-partial', thread.id, 'user-1', 'codex'));
+    let externalWrites = 0;
+    orchestrator.handlePlayerAction = async () => {
+      externalWrites += 1;
+      throw new Error('state write failed after speech append');
+    };
+    const app = await createApp({ freshnessGate });
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/submit-game-action',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: {
+        gameId: 'game-partial',
+        round: 1,
+        phase: 'night_wolf',
+        seat: 1,
+        action: 'kill',
+        target: 2,
+        nonce: 'nonce-partial',
+      },
+    };
+    assert.equal((await app.inject(request)).statusCode, 400);
+    assert.equal((await app.inject(request)).json().status, 'duplicate');
+    assert.equal(externalWrites, 1);
   });
 });
