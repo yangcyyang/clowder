@@ -278,8 +278,10 @@ Callback 的写副作用同样属于发布边界。带 baseline 的 same-thread 
 - baseline 仍为 current 时原子认领稳定的 `route + request digest`，当前请求执行一次；同请求重放返回 `duplicate`，不得再次写状态、文件、socket、timer、A2A 或外部 API。
 - baseline 已 stale 时返回 `freshness_retry_required`，只暴露水位和 thread 等安全元数据，零业务副作用；Agent 读取新上下文后以新 invocation 重试。
 - 无 baseline 的 legacy invocation 保持原行为；只读/状态查询与凭据保活不认领副作用。
+- 调用顺序固定为 `auth → schema/ownership/existence/latest/只读前置校验 → claim → 首次业务写`；禁止用全局 preHandler 在业务校验前抢先认领。只有调用方能证明本次没有产生业务写时，才可 `abortSideEffect` 释放认领，让同请求修正后重试。
+- `guide-resolve` 等 discovery/read callback 永远返回查询数据，即使 baseline stale 或请求重放也不得改写成 `duplicate`。
 
-该认领是副作用的线性化提交点：它先于实际业务写，因此认领后到达的新消息与已提交副作用有明确顺序。首版不把任意业务动作序列化为可重放 Hold 草稿；进程在认领后、业务写前崩溃时会 fail closed，不自动重放这次动作。
+该认领是副作用的线性化提交点：它先于实际业务写，因此认领后到达的新消息与已提交副作用有明确顺序。首版不把任意业务动作序列化为可重放 Hold 草稿；进程在认领后、业务写前崩溃时会 fail closed，不自动重放这次动作。内存与 Redis 认领均保留 24 小时；内存实现会机会式清理过期项。
 
 Redis 当前用 ZSET score 维护 audience 顺序，因此水位上限固定为 `9007199254740991`。到达上限后 append / restore / whisper reveal 都在任何状态写入前 fail closed；批量 reveal 必须在单个 Lua 内先核完整批容量，再统一更新 hash/index，禁止部分提交，也禁止让 Lua double 把水位转为科学计数法或发生相邻 score 碰撞。
 

@@ -10,7 +10,7 @@ created: 2026-07-11
 Review-Target-ID: freshness-hold
 Branch: codex/freshness-hold
 Range: b1a1683..HEAD
-Review-Fix-Head: d2034a4
+Review-Fix-Head: 27a8265
 
 ## What
 
@@ -47,7 +47,7 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 
 ## Next Action
 
-请同一独立 reviewer 对照原始需求、F193 AC、前三次 review findings、状态机/安全边界和 `d2034a4` 修复差异进行只读复审；重点确认 callback side-effect 原子认领、stale/current/replay、legacy 边界和剩余写路由覆盖。无阻塞项时明确给出 APPROVE。
+请同一独立 reviewer 对照原始需求、F193 AC、前四次 review findings、状态机/安全边界和 `27a8265` 修复差异进行只读复审；重点确认 claim 已下沉到业务前置校验之后、protected latest、read-only 分类、失败后可重试以及剩余写路由覆盖。无阻塞项时明确给出 APPROVE。
 
 ## Re-review Fix Map
 
@@ -68,6 +68,7 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 | 二审 P1：动态 A2A 跨 Queue 恢复 legacy | QueueEntry immutable lineage；Web/Queue/callback 传播；child 强制 protected Gate | freshness-protected-a2a-lineage + route handoff tests |
 | 二审 P2：多 whisper reveal 部分提交 | 单 Lua 发现候选、精确容量预检、整批 hash/index 更新 | Redis multi-whisper MAX_SAFE test |
 | 三审 P0：callback 写副作用绕过 Gate | MessageStore 原子 side-effect claim；统一 route adapter；高风险路由校验后认领；写路由共享边界 | callback-side-effect-freshness 4/4；Gate 13/13；Redis Message freshness 12/12 |
+| 四审 P1/P2：preHandler 过早认领、protected 跳 latest、query 误分类 | 删除共享 preHandler；各写 route 校验后 claim；helper 统一 protected latest；可证明零写入时 abort；guide-resolve 不 claim | 4xx→retry、protected non-latest、protected stale/replay guide query；Gate/Redis abort |
 
 ## Review Sandbox（必填）
 

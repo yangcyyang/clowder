@@ -308,6 +308,7 @@ close_gate_report:
 - 最新 F193 + consumer 矩阵 229 项中 228 项通过；唯一失败仍为目标分支 45 项中同样失败的 Connector 静默回复旧语义，新增私稿边界、replay 与 A2A lineage 用例全部通过。
 - Redis：`127.0.0.1:6398/15` 串行 17/17 通过（Message 11、Hold 5、delta paging 1）；MCP server 173/173 通过；Web 状态条 2/2 通过。
 - 第三轮 P0 callback side-effect remediation：投票、建任务、生成文档 stale/current/replay 及共享写路由边界 4/4；核心/权限定向 38/38；Redis Message freshness 更新后 12/12。
+- 第四轮时序/分类修复：删除过早共享 preHandler，写路由下沉至前置校验后 claim；protected non-latest、4xx retry、guide-resolve read-only 回归均转绿。写路由定向矩阵首跑 204/205，唯一 legacy limb 状态码回归修复后专项 27/27；核心/Guide 34/34，Redis Message freshness 12/12。
 - 全仓递归 build 与 lint 均通过（lint 只有既有 warning）；变更范围 Biome 61 文件 0 error；`git diff --check` 与 artifact hygiene 通过。
 - 路由大基线仍为 72/98，与目标分支完全一致；Web 全量为 81 个既有失败、2917 通过，目标分支为相同 81 个失败、2915 通过，新增 2 项均为 F193 通过项。
 - 全仓 `pnpm check` 被外部 `~/.claude/skills/gstack` 的 1534 个既有格式错误阻断；changed-scope Biome 为 0 error。env registry 的 6 个既有缺口已在目标分支同命令复现，本次新增的三个 F193 变量已登记。
