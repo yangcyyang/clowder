@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 
@@ -27,28 +27,38 @@ export function freshnessHoldLabel(hold: Pick<FreshnessHoldSummary, 'status' | '
 
 export function FreshnessHoldBar({ threadId }: { threadId: string }) {
   const [holds, setHolds] = useState<FreshnessHoldSummary[]>([]);
+  const requestGenerationRef = useRef(0);
   const { getCatById } = useCatData();
 
-  const refresh = useCallback(async () => {
-    try {
-      const response = await apiFetch(`/api/freshness-holds?threadId=${encodeURIComponent(threadId)}`);
-      if (!response.ok) return;
-      const payload = (await response.json()) as { holds?: FreshnessHoldSummary[] };
-      setHolds(Array.isArray(payload.holds) ? payload.holds : []);
-    } catch {
-      // Recovery metadata is best-effort; never replace chat with an error state.
-    }
-  }, [threadId]);
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      const requestGeneration = ++requestGenerationRef.current;
+      try {
+        const response = await apiFetch(`/api/freshness-holds?threadId=${encodeURIComponent(threadId)}`, { signal });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { holds?: FreshnessHoldSummary[] };
+        if (signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        setHolds(Array.isArray(payload.holds) ? payload.holds : []);
+      } catch {
+        // Recovery metadata is best-effort; never replace chat with an error state.
+      }
+    },
+    [threadId],
+  );
 
   useEffect(() => {
+    const controller = new AbortController();
+    requestGenerationRef.current += 1;
     setHolds([]);
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
+    void refresh(controller.signal);
+    const interval = window.setInterval(() => void refresh(controller.signal), 5000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') void refresh(controller.signal);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
+      requestGenerationRef.current += 1;
+      controller.abort();
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
     };

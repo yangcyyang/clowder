@@ -19,6 +19,36 @@ function createServiceWithPostMessage(catId, toolName = 'cat_cafe_post_message')
   };
 }
 
+function createServiceWithDuplicatePostMessage(catId) {
+  const privateDraftSentinel = 'DUPLICATE-CALLBACK-MUST-NOT-FANOUT';
+  return {
+    privateDraftSentinel,
+    async *invoke() {
+      yield { type: 'text', catId, content: 'retry stdout must stay suppressed', timestamp: Date.now() };
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        toolInput: { threadId: 'thread1', content: privateDraftSentinel },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_result',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        content: JSON.stringify({
+          status: 'duplicate',
+          disposition: 'published',
+          threadId: 'thread1',
+          messageId: 'callback-msg-existing',
+        }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createServiceWithPostMessageAndStreamMetadata(catId) {
   const richBlock = {
     id: 'stream-card-1',
@@ -155,6 +185,56 @@ function createServiceWithFreshnessHold(catId, includeFailedReview = false) {
   };
 }
 
+function createServiceWithHeldThenPublishedReview(catId) {
+  const oldSentinel = 'OLD-CALLBACK-DRAFT-MUST-NOT-AUGMENT';
+  return {
+    oldSentinel,
+    async *invoke() {
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        toolInput: { threadId: 'thread1', content: oldSentinel },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_result',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        content: JSON.stringify({
+          status: 'freshness_held',
+          disposition: 'held',
+          threadId: 'thread1',
+          holdId: 'hold-old',
+        }),
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName: 'cat_cafe_review_held_message',
+        toolInput: { holdId: 'hold-old', action: 'replace', replacement: { content: 'NEW' } },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_result',
+        catId,
+        toolName: 'cat_cafe_review_held_message',
+        content: JSON.stringify({
+          status: 'ok',
+          disposition: 'published',
+          threadId: 'thread1',
+          messageId: 'callback-msg-new',
+          holdId: 'hold-old',
+        }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'text', catId, content: 'NEW replacement stream metadata', timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls, augmentCalls = []) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -210,6 +290,30 @@ function createMockDeps(services, appendCalls, augmentCalls = []) {
 }
 
 describe('#573: stream store dedup when cat_cafe_post_message used', () => {
+  it('marks duplicate callback publication as replayed and suppresses its content fanout', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const augmentCalls = [];
+    const service = createServiceWithDuplicatePostMessage('opus');
+    const deps = createMockDeps({ opus: service }, appendCalls, augmentCalls);
+    deps.messageStore.captureFreshnessWatermark = async () => '0';
+    deps.freshnessGate = {};
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
+      persistenceContext,
+    })) {
+      yielded.push(message);
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+    assert.equal(persistenceContext.egressByCat.opus.replayed, true);
+    assert.equal(augmentCalls.length, 0);
+    assert.doesNotMatch(JSON.stringify(yielded), new RegExp(service.privateDraftSentinel));
+    assert.equal(yielded.filter((message) => message.type === 'text').length, 0);
+  });
+
   it('treats freshness_held as terminal and suppresses stream fallback and metadata augment', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -291,6 +395,22 @@ describe('#573: stream store dedup when cat_cafe_post_message used', () => {
       0,
       'once held, a later review error must remain fail-closed',
     );
+  });
+
+  it('does not augment a published replacement with tool detail from the held callback epoch', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const augmentCalls = [];
+    const service = createServiceWithHeldThenPublishedReview('opus');
+    const deps = createMockDeps({ opus: service }, appendCalls, augmentCalls);
+
+    for await (const _message of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    assert.equal(augmentCalls.length, 1);
+    assert.equal(augmentCalls[0].id, 'callback-msg-new');
+    assert.doesNotMatch(JSON.stringify(augmentCalls[0].patch.toolEvents), new RegExp(service.oldSentinel));
   });
 
   it('skips stream messageStore.append when cat_cafe_post_message was called', async () => {

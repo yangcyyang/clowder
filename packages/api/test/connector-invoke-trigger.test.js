@@ -717,6 +717,53 @@ describe('ConnectorInvokeTrigger', () => {
     assert.equal(reviewEnqueues[0].holdId, 'hold-1');
   });
 
+  it('successful freshness replay performs no second connector or streaming fanout', async () => {
+    const replayRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, targetCats, _intent, options) {
+        options.persistenceContext.egressByCat = {
+          [targetCats[0]]: {
+            disposition: 'published',
+            messageId: 'already-published',
+            replayed: true,
+          },
+        };
+        // Defensive consumer test: even if an upstream retry accidentally
+        // yields content, a replay verdict must suppress every external sink.
+        yield { type: 'text', catId: targetCats[0], content: 'REPLAY-MUST-NOT-FANOUT', timestamp: Date.now() };
+        yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const deliverCalls = [];
+    const streamEndCalls = [];
+    const cleanupCalls = [];
+    const trigger = createTrigger({
+      router: replayRouter,
+      outboundHook: {
+        async deliver(...args) {
+          deliverCalls.push(args);
+        },
+      },
+      streamingHook: {
+        async onStreamStart() {},
+        async onStreamChunk() {},
+        async onStreamEnd(...args) {
+          streamEndCalls.push(args);
+        },
+        async cleanupPlaceholders(...args) {
+          cleanupCalls.push(args);
+        },
+      },
+    });
+
+    trigger.trigger('thread-replay', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-replay');
+    await waitForTrigger();
+
+    assert.equal(deliverCalls.length, 0);
+    assert.equal(streamEndCalls.length, 0);
+    assert.deepEqual(cleanupCalls, [['thread-replay', 'inv-1']]);
+  });
+
   it('discarded rich-only payload is rejected before connector delivery', async () => {
     const privateRichSentinel = { id: 'PRIVATE-DISCARDED-CONNECTOR-RICH' };
     const discardedRouter = /** @type {any} */ ({

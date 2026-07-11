@@ -85,6 +85,21 @@ export class FreshnessEgressGate {
     return this.enabledForPolicy(threadId, catId);
   }
 
+  /**
+   * Create an invocation-scoped gate after the router has already selected a
+   * protected route. Stores and limits remain shared; rollout checks no longer
+   * change underneath that route while it is running.
+   */
+  forProtectedRoute(): FreshnessEgressGate {
+    return new FreshnessEgressGate({
+      messageStore: this.messageStore,
+      holdStore: this.holdStore,
+      maxDeltaMessages: this.maxDeltaMessages,
+      reviewWindowMs: this.reviewWindowMs,
+      isEnabledFor: () => true,
+    });
+  }
+
   async submit(input: FreshnessSubmitInput): Promise<FreshnessSubmitResult> {
     if (!this.isEnabledFor(input.threadId, input.catId)) {
       return {
@@ -107,13 +122,23 @@ export class FreshnessEgressGate {
       catId: input.catId,
       threadId: input.threadId,
     };
-    const appendResult = await this.messageStore.appendIfFresh(draft, {
-      baseline: input.baselineWatermark,
-      audience,
-      groupId: draft.extra?.stream?.invocationId ?? input.invocationId,
-    });
+    const appendResult = await this.messageStore.appendIfFresh(
+      {
+        ...draft,
+        idempotencyKey: this.submitIdempotencyKey(input.invocationId, input.submissionKey),
+      },
+      {
+        baseline: input.baselineWatermark,
+        audience,
+        groupId: draft.extra?.stream?.invocationId ?? input.invocationId,
+      },
+    );
     if (appendResult.outcome === 'appended') {
-      return { outcome: 'published', message: appendResult.message };
+      return {
+        outcome: 'published',
+        message: appendResult.message,
+        ...(appendResult.replayed ? { replayed: true as const } : {}),
+      };
     }
 
     const delta = await this.messageStore.getFreshnessDelta(
@@ -241,6 +266,7 @@ export class FreshnessEgressGate {
       // Review publication is a two-store transition. Keep the message out of
       // history/fanout until the hold CAS succeeds.
       deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
     };
     const audience = { kind: 'cat' as const, catId: claimed.catId };
     const appendResult = await this.messageStore.appendIfFresh(publishDraft, {
@@ -386,5 +412,9 @@ export class FreshnessEgressGate {
 
   private positiveInteger(value: number | undefined, fallback: number): number {
     return Number.isInteger(value) && (value ?? 0) > 0 ? value! : fallback;
+  }
+
+  private submitIdempotencyKey(invocationId: string, submissionKey: string): string {
+    return `freshness-submit:${invocationId.length}:${invocationId}:${submissionKey}`;
   }
 }

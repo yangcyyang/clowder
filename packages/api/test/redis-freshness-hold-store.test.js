@@ -299,11 +299,15 @@ describe('RedisFreshnessHoldStore', { skip: redisIsolationSkipReason(REDIS_URL) 
       committedWatermark: '26',
       now: NOW + 8,
     });
+    assert.equal(await redis.zscore(FreshnessHoldKeys.userThread('user-1', 'thread-1'), released.hold.id), null);
+    assert.equal(await redis.zcard(FreshnessHoldKeys.userThread('user-1', 'thread-1')), 3);
 
     const discarded = await store.createOrGet(
       createInput({ invocationId: 'resolved-discard', submissionKey: 'resolved-discard', createdAt: NOW + 9 }),
     );
     await store.discard(discarded.hold.id, { expectedVersion: discarded.hold.version, now: NOW + 10 });
+    assert.equal(await redis.zscore(FreshnessHoldKeys.userThread('user-1', 'thread-1'), discarded.hold.id), null);
+    assert.equal(await redis.zcard(FreshnessHoldKeys.userThread('user-1', 'thread-1')), 3);
 
     await store.createOrGet(
       createInput({
@@ -324,6 +328,7 @@ describe('RedisFreshnessHoldStore', { skip: redisIsolationSkipReason(REDIS_URL) 
 
     const recovered = new RedisFreshnessHoldStore(redis, { maxReviews: 2 });
     const active = await recovered.listActive('user-1', 'thread-1');
+    assert.equal(await redis.zcard(FreshnessHoldKeys.userThread('user-1', 'thread-1')), 3);
     assert.deepEqual(
       active.map((record) => [record.id, record.status]),
       [

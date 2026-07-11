@@ -16,6 +16,7 @@ async function createHarness(injectNewMessage, outputMode = 'text') {
     title: '并行旧上下文卡片',
     bodyMarkdown: '这个卡片必须经过 Freshness Gate',
   };
+  const privateToolSentinel = 'PARALLEL-PRIVATE-TOOL-INPUT';
   const service = {
     async *invoke() {
       yield {
@@ -24,7 +25,25 @@ async function createHarness(injectNewMessage, outputMode = 'text') {
         content: JSON.stringify({ type: 'invocation_created', invocationId: 'parallel-inner-1' }),
         timestamp: Date.now(),
       };
-      if (outputMode === 'rich') {
+      if (outputMode === 'tool' || outputMode === 'error-tool') {
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'Write',
+          toolInput: { content: privateToolSentinel },
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          toolName: 'Write',
+          content: `result:${privateToolSentinel}`,
+          timestamp: Date.now(),
+        };
+      }
+      if (outputMode === 'error-tool') {
+        yield { type: 'error', catId: 'opus', error: 'provider failed after tool use', timestamp: Date.now() };
+      } else if (outputMode === 'rich') {
         yield {
           type: 'system_info',
           catId: 'opus',
@@ -52,6 +71,7 @@ async function createHarness(injectNewMessage, outputMode = 'text') {
     messageStore,
     holdStore,
     richBlock,
+    privateToolSentinel,
     deps: {
       services: { opus: service },
       freshnessGate,
@@ -96,7 +116,7 @@ async function createCallbackHarness(disposition) {
         timestamp: Date.now(),
       };
 
-      if (disposition === 'published') {
+      if (disposition === 'published' || disposition === 'replayed') {
         const callbackMessage = await messageStore.append({
           userId: 'user-1',
           catId: 'opus',
@@ -111,7 +131,7 @@ async function createCallbackHarness(disposition) {
           type: 'tool_result',
           catId: 'opus',
           content: JSON.stringify({
-            status: 'ok',
+            status: disposition === 'replayed' ? 'duplicate' : 'ok',
             disposition: 'published',
             threadId: 'thread-1',
             messageId: callbackMessage.id,
@@ -162,7 +182,7 @@ async function createCallbackHarness(disposition) {
 }
 
 describe('routeParallel Freshness Hold', () => {
-  for (const callbackDisposition of ['published', 'held', 'discarded', 'failed']) {
+  for (const callbackDisposition of ['published', 'replayed', 'held', 'discarded', 'failed']) {
     test(`treats callback ${callbackDisposition} with serial-compatible stdout fallback semantics`, async () => {
       const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
       const harness = await createCallbackHarness(callbackDisposition);
@@ -194,6 +214,12 @@ describe('routeParallel Freshness Hold', () => {
           yielded.some((message) => message.type === 'tool_use' && message.toolInput?.content === privateDraftSentinel),
           'published callback keeps tool detail after verdict',
         );
+      } else if (callbackDisposition === 'replayed') {
+        assert.equal(formal.length, 1, 'replay must keep the canonical callback publication only');
+        assert.equal(stdoutText.length, 0);
+        assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+        assert.equal(persistenceContext.egressByCat.opus.replayed, true);
+        assert.doesNotMatch(JSON.stringify(yielded), new RegExp(privateDraftSentinel));
       } else if (callbackDisposition === 'held') {
         assert.equal(formal.length, 0, 'held callback must not fall back to stdout publication');
         assert.equal(stdoutText.length, 0, 'held callback must not leak buffered stdout');
@@ -251,6 +277,94 @@ describe('routeParallel Freshness Hold', () => {
     assert.equal(text[0].textMode, 'replace');
     assert.equal(messageStore.getRecent(20).filter((message) => message.catId === 'opus').length, 1);
     assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+  });
+
+  test('does not release or fan out a successful parallel submission replay', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { deps, messageStore } = await createHarness(false);
+    const firstContext = { failed: false, errors: [], egressByCat: {} };
+    const replayContext = { failed: false, errors: [], egressByCat: {} };
+
+    for await (const _message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext: firstContext,
+      parentInvocationId: 'parallel-parent-replay',
+    })) {
+      // drain first publication
+    }
+    const replayed = [];
+    for await (const message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext: replayContext,
+      parentInvocationId: 'parallel-parent-replay',
+    })) {
+      replayed.push(message);
+    }
+
+    assert.equal(messageStore.getRecent(20).filter((message) => message.catId === 'opus').length, 1);
+    assert.equal(replayContext.egressByCat.opus.disposition, 'published');
+    assert.equal(replayContext.egressByCat.opus.replayed, true);
+    assert.equal(replayed.filter((message) => message.type === 'text').length, 0);
+  });
+
+  test('buffers ordinary parallel tool detail until a fresh verdict is published', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { deps, messageStore, privateToolSentinel } = await createHarness(false, 'tool');
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext,
+      parentInvocationId: 'parallel-parent-tool-current',
+    })) {
+      if (JSON.stringify(message).includes(privateToolSentinel)) {
+        assert.equal(
+          messageStore.getRecent(20).some((stored) => stored.catId === 'opus'),
+          true,
+          'tool detail may surface only after the published message exists',
+        );
+      }
+      yielded.push(message);
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+    assert.match(JSON.stringify(yielded), new RegExp(privateToolSentinel));
+  });
+
+  test('drops ordinary parallel tool detail when the final verdict is held', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { deps, privateToolSentinel } = await createHarness(true, 'tool');
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext,
+      parentInvocationId: 'parallel-parent-tool-stale',
+    })) {
+      yielded.push(message);
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'held');
+    assert.doesNotMatch(JSON.stringify(yielded), new RegExp(privateToolSentinel));
+  });
+
+  test('protected parallel provider error never persists or exposes tool-only detail', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { deps, messageStore, privateToolSentinel } = await createHarness(false, 'error-tool');
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext,
+      parentInvocationId: 'parallel-parent-tool-error',
+    })) {
+      yielded.push(message);
+    }
+
+    assert.equal(
+      messageStore.getRecent(20).some((stored) => stored.catId === 'opus'),
+      false,
+    );
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'discarded');
+    assert.doesNotMatch(JSON.stringify(yielded), new RegExp(privateToolSentinel));
   });
 
   test('holds stale rich-block-only parallel output before append and outbound handoff', async () => {

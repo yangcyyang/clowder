@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 
-async function createHarness({ injectNewMessage, threadId, outputMode = 'text' }) {
+async function createHarness({ injectNewMessage, threadId, outputMode = 'text', outputContent, fixedInvocationId }) {
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
   const { FreshnessHoldStore } = await import('../dist/domains/cats/services/stores/ports/FreshnessHoldStore.js');
   const { FreshnessEgressGate } = await import('../dist/domains/cats/services/agents/freshness/FreshnessEgressGate.js');
@@ -25,17 +25,37 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text' }
           bodyMarkdown: '这个卡片必须经过 Freshness Gate',
         }),
   };
+  const privateToolSentinel = 'SERIAL-PRIVATE-TOOL-INPUT';
+  const socketBroadcasts = [];
   let invocationSequence = 0;
   const service = {
     async *invoke() {
-      const invocationId = `inner-${++invocationSequence}`;
+      const invocationId = fixedInvocationId ?? `inner-${++invocationSequence}`;
       yield {
         type: 'system_info',
         catId: 'opus',
         content: JSON.stringify({ type: 'invocation_created', invocationId }),
         timestamp: Date.now(),
       };
-      if (outputMode === 'rich' || outputMode === 'audio') {
+      if (outputMode === 'tool' || outputMode === 'error-tool') {
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'Write',
+          toolInput: { content: privateToolSentinel },
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          toolName: 'Write',
+          content: `result:${privateToolSentinel}`,
+          timestamp: Date.now(),
+        };
+      }
+      if (outputMode === 'error-tool') {
+        yield { type: 'error', catId: 'opus', error: 'provider failed after tool use', timestamp: Date.now() };
+      } else if (outputMode === 'rich' || outputMode === 'audio') {
         yield {
           type: 'system_info',
           catId: 'opus',
@@ -46,7 +66,12 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text' }
           yield { type: 'text', catId: 'opus', content: '携带语音块的旧回答', timestamp: Date.now() };
         }
       } else {
-        yield { type: 'text', catId: 'opus', content: '基于旧上下文形成的回答', timestamp: Date.now() };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: outputContent ?? '基于旧上下文形成的回答',
+          timestamp: Date.now(),
+        };
       }
       if (injectNewMessage) {
         messageStore.append({
@@ -81,8 +106,13 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text' }
     },
     messageStore,
     freshnessGate,
+    socketManager: {
+      broadcastToRoom(room, event, data) {
+        socketBroadcasts.push({ room, event, data });
+      },
+    },
   };
-  return { deps, messageStore, holdStore, richBlock };
+  return { deps, messageStore, holdStore, richBlock, privateToolSentinel, socketBroadcasts };
 }
 
 describe('routeSerial Freshness Hold', () => {
@@ -140,6 +170,139 @@ describe('routeSerial Freshness Hold', () => {
     assert.equal(text[0].content, '基于旧上下文形成的回答');
     assert.equal(messageStore.getRecent(20).filter((message) => message.catId === 'opus').length, 1);
     assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+  });
+
+  test('does not release or fan out a successful stdout submission replay', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-submit-replay';
+    const { deps, messageStore } = await createHarness({
+      injectNewMessage: false,
+      threadId,
+      fixedInvocationId: 'fixed-inner-replay',
+    });
+    const firstContext = { failed: false, errors: [], egressByCat: {} };
+    const replayContext = { failed: false, errors: [], egressByCat: {} };
+
+    for await (const _message of routeSerial(deps, ['opus'], '开始回答', 'user-1', threadId, {
+      persistenceContext: firstContext,
+      parentInvocationId: 'fixed-parent-replay',
+    })) {
+      // drain first publication
+    }
+    const replayed = [];
+    for await (const message of routeSerial(deps, ['opus'], '开始回答', 'user-1', threadId, {
+      persistenceContext: replayContext,
+      parentInvocationId: 'fixed-parent-replay',
+    })) {
+      replayed.push(message);
+    }
+
+    assert.equal(messageStore.getRecent(20).filter((message) => message.catId === 'opus').length, 1);
+    assert.equal(replayContext.egressByCat.opus.disposition, 'published');
+    assert.equal(replayContext.egressByCat.opus.replayed, true);
+    assert.equal(replayed.filter((message) => message.type === 'text').length, 0);
+  });
+
+  test('buffers ordinary tool detail until a fresh stdout verdict is published', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-tool-current';
+    const { deps, messageStore, privateToolSentinel } = await createHarness({
+      injectNewMessage: false,
+      threadId,
+      outputMode: 'tool',
+    });
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeSerial(deps, ['opus'], '调用工具', 'user-1', threadId, {
+      persistenceContext,
+      parentInvocationId: 'parent-tool-current',
+    })) {
+      if (JSON.stringify(message).includes(privateToolSentinel)) {
+        assert.equal(
+          messageStore.getRecent(20).some((stored) => stored.catId === 'opus'),
+          true,
+          'tool detail may surface only after the published message exists',
+        );
+      }
+      yielded.push(message);
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+    assert.match(JSON.stringify(yielded), new RegExp(privateToolSentinel));
+  });
+
+  test('drops ordinary tool detail when the final stdout verdict is held', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-tool-stale';
+    const { deps, privateToolSentinel } = await createHarness({
+      injectNewMessage: true,
+      threadId,
+      outputMode: 'tool',
+    });
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeSerial(deps, ['opus'], '调用工具', 'user-1', threadId, {
+      persistenceContext,
+      parentInvocationId: 'parent-tool-stale',
+    })) {
+      yielded.push(message);
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'held');
+    assert.doesNotMatch(JSON.stringify(yielded), new RegExp(privateToolSentinel));
+  });
+
+  test('protected provider error never persists or exposes tool-only detail', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-tool-error';
+    const { deps, messageStore, privateToolSentinel } = await createHarness({
+      injectNewMessage: false,
+      threadId,
+      outputMode: 'error-tool',
+    });
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+    const yielded = [];
+
+    for await (const message of routeSerial(deps, ['opus'], '调用工具', 'user-1', threadId, {
+      persistenceContext,
+      parentInvocationId: 'parent-tool-error',
+    })) {
+      yielded.push(message);
+    }
+
+    assert.equal(
+      messageStore.getRecent(20).some((stored) => stored.catId === 'opus'),
+      false,
+    );
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'discarded');
+    assert.doesNotMatch(JSON.stringify(yielded), new RegExp(privateToolSentinel));
+  });
+
+  test('does not publish routing hints derived from a held private draft', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const threadId = 'thread-freshness-inline-hint';
+    const { deps, messageStore, socketBroadcasts } = await createHarness({
+      injectNewMessage: true,
+      threadId,
+      outputContent: '旧稿中间请 @codex 继续处理，但这段内容会被 Hold',
+    });
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+
+    for await (const _message of routeSerial(deps, ['opus'], '开始回答', 'user-1', threadId, {
+      persistenceContext,
+      parentInvocationId: 'parent-inline-hint',
+    })) {
+      // drain
+    }
+
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'held');
+    assert.equal(
+      messageStore.getRecent(20).some((stored) => stored.userId === 'system' && stored.content.includes('@codex')),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(socketBroadcasts), /@codex/);
   });
 
   test('holds stale rich-block-only output before formal append and outbound handoff', async () => {

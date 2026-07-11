@@ -100,6 +100,41 @@ describe('FreshnessEgressGate', () => {
     );
   });
 
+  it('derives one protected publication key and reports a successful submit retry as replayed', async () => {
+    const { messageStore, gate } = createHarness();
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    const input = submission(baseline, { submissionKey: 'successful-submit-retry' });
+
+    const first = await gate.submit(input);
+    const retry = await gate.submit(input);
+
+    assert.equal(first.outcome, 'published');
+    assert.equal(retry.outcome, 'published');
+    assert.equal(retry.replayed, true);
+    assert.equal(retry.message.id, first.message.id);
+    assert.deepEqual(
+      (await formalCatMessages(messageStore)).map((message) => message.id),
+      [first.message.id],
+    );
+  });
+
+  it('creates a route-protected view that shares stores but always enables the freshness gate', async () => {
+    const messageStore = new MessageStore();
+    const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
+    const rolloutGate = new FreshnessEgressGate({ messageStore, holdStore, isEnabledFor: () => false });
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    await appendQueuedUserMessage(messageStore, '动态路由选中后到达的新消息');
+
+    const protectedGate = rolloutGate.forProtectedRoute();
+    const result = await protectedGate.submit(submission(baseline, { submissionKey: 'route-protected-view' }));
+
+    assert.notEqual(protectedGate, rolloutGate);
+    assert.equal(rolloutGate.isEnabledFor(THREAD_ID, CAT_ID), false);
+    assert.equal(protectedGate.isEnabledFor(THREAD_ID, CAT_ID), true);
+    assert.equal(result.outcome, 'held');
+    assert.equal((await formalCatMessages(messageStore)).length, 0);
+  });
+
   it('holds a stale draft with its bounded delta and appends no formal cat message', async () => {
     const { messageStore, holdStore, gate } = createHarness({ maxDeltaMessages: 1 });
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
@@ -277,7 +312,7 @@ describe('FreshnessEgressGate', () => {
     };
     const gate = new FreshnessEgressGate({ messageStore, holdStore });
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
-    await appendQueuedUserMessage(messageStore, '触发 orphan recovery', NOW + 60);
+    const trigger = await appendQueuedUserMessage(messageStore, '触发 orphan recovery', NOW + 60);
     const held = await gate.submit(submission(baseline, { submissionKey: 'orphan-before-release' }));
     assert.equal(held.outcome, 'held');
     const input = {
@@ -292,10 +327,22 @@ describe('FreshnessEgressGate', () => {
     assert.equal((await holdStore.get(held.hold.id)).status, 'reviewing');
     assert.equal((await formalCatMessages(messageStore)).length, 0);
 
+    const privateDelta = await messageStore.getFreshnessDelta(THREAD_ID, audience(), trigger.appendWatermark);
+    assert.deepEqual(privateDelta.messages, []);
+    assert.equal(privateDelta.observedWatermark, trigger.appendWatermark);
+    assert.equal(privateDelta.truncated, true);
+    assert.equal(JSON.stringify(privateDelta).includes(draft().content), false);
+
     const recovered = await gate.review(input);
     assert.equal(recovered.outcome, 'published');
     assert.equal(recovered.message.deliveryStatus, 'delivered');
     assert.equal((await formalCatMessages(messageStore)).length, 1);
+
+    const deliveredDelta = await messageStore.getFreshnessDelta(THREAD_ID, audience(), trigger.appendWatermark);
+    assert.deepEqual(
+      deliveredDelta.messages.map((message) => message.id),
+      [recovered.message.id],
+    );
   });
 
   it('finishes delivery after crashing between hold release and markDelivered', async () => {

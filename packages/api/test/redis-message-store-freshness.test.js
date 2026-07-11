@@ -16,6 +16,7 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 const OPUS_AUDIENCE = { kind: 'cat', catId: 'opus' };
 const CODEX_AUDIENCE = { kind: 'cat', catId: 'codex' };
+const MAX_WATERMARK = '9007199254740991';
 
 function revision(value, label) {
   assert.equal(typeof value, 'string', `${label} must be an opaque decimal string`);
@@ -25,6 +26,9 @@ function revision(value, label) {
 
 describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
+  let MessageKeys;
+  let FreshnessEgressGate;
+  let FreshnessHoldStore;
   let createRedisClient;
   let redis;
   let store;
@@ -34,6 +38,9 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisMessageStore freshness linearization');
 
     ({ RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'));
+    ({ MessageKeys } = await import('../dist/domains/cats/services/stores/redis-keys/message-keys.js'));
+    ({ FreshnessEgressGate } = await import('../dist/domains/cats/services/agents/freshness/FreshnessEgressGate.js'));
+    ({ FreshnessHoldStore } = await import('../dist/domains/cats/services/stores/ports/FreshnessHoldStore.js'));
     ({ createRedisClient } = await import('@cat-cafe/shared/utils'));
     redis = createRedisClient({ url: REDIS_URL });
     try {
@@ -191,6 +198,132 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     assert.deepEqual(appended, [queued.id]);
   });
 
+  test('keeps a queued review publication on the watermark but behind a private delta barrier', async () => {
+    const threadId = 'freshness-redis-private-review-delta';
+    const sentinel = 'QUEUED-REVIEW-DRAFT-MUST-NOT-HYDRATE';
+    const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);
+    const queued = await store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      threadId,
+      content: sentinel,
+      mentions: [],
+      timestamp: 330,
+      deliveryStatus: 'queued',
+      freshnessReviewPublication: true,
+    });
+
+    assert.equal(await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE), queued.appendWatermark);
+    const privateDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, baseline);
+    assert.deepEqual(privateDelta.messages, []);
+    assert.equal(privateDelta.observedWatermark, baseline);
+    assert.equal(privateDelta.truncated, true);
+    assert.equal(JSON.stringify(privateDelta).includes(sentinel), false);
+
+    await store.markDelivered(queued.id, 331);
+    const deliveredDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, baseline);
+    assert.deepEqual(
+      deliveredDelta.messages.map((message) => [message.id, message.content]),
+      [[queued.id, sentinel]],
+    );
+  });
+
+  test('keeps a Redis-backed review draft private when hold release throws, then reveals it after delivery', async () => {
+    const threadId = 'freshness-redis-review-release-crash';
+    const invocationId = 'freshness-redis-review-release-crash-invocation';
+    const sentinel = 'REDIS-RELEASE-CRASH-PRIVATE-DRAFT';
+    const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
+    const release = holdStore.release.bind(holdStore);
+    let crashBeforeRelease = true;
+    holdStore.release = async (...args) => {
+      if (crashBeforeRelease) {
+        crashBeforeRelease = false;
+        throw new Error('simulated Redis-backed release crash');
+      }
+      return release(...args);
+    };
+    const gate = new FreshnessEgressGate({ messageStore: store, holdStore });
+    const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);
+    const trigger = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'trigger hold before Redis-backed review',
+      mentions: ['opus'],
+      timestamp: 335,
+      deliveryStatus: 'queued',
+    });
+    const submitInput = {
+      invocationId,
+      submissionKey: 'redis-release-crash-submit',
+      userId: 'user-1',
+      catId: 'opus',
+      threadId,
+      baselineWatermark: baseline,
+      draft: {
+        userId: 'user-1',
+        catId: 'opus',
+        threadId,
+        content: sentinel,
+        mentions: [],
+        timestamp: 336,
+        extra: { stream: { invocationId } },
+      },
+    };
+    const held = await gate.submit(submitInput);
+    assert.equal(held.outcome, 'held');
+    const reviewInput = {
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'send_draft',
+      invocationId,
+      userId: 'user-1',
+      catId: 'opus',
+      threadId,
+      now: 337,
+    };
+
+    await assert.rejects(gate.review(reviewInput), /simulated Redis-backed release crash/);
+    const privateDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, trigger.appendWatermark);
+    assert.deepEqual(privateDelta.messages, []);
+    assert.equal(privateDelta.observedWatermark, trigger.appendWatermark);
+    assert.equal(privateDelta.truncated, true);
+    assert.equal(JSON.stringify(privateDelta).includes(sentinel), false);
+
+    const recovered = await gate.review(reviewInput);
+    assert.equal(recovered.outcome, 'published');
+    assert.equal(recovered.message.deliveryStatus, 'delivered');
+    const deliveredDelta = await store.getFreshnessDelta(threadId, OPUS_AUDIENCE, trigger.appendWatermark);
+    assert.deepEqual(
+      deliveredDelta.messages.map((message) => [message.id, message.content]),
+      [[recovered.message.id, sentinel]],
+    );
+  });
+
+  test('marks a conditional idempotency replay without appending a second message', async () => {
+    const threadId = 'freshness-redis-conditional-replay';
+    const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);
+    const input = {
+      userId: 'user-1',
+      catId: 'opus',
+      threadId,
+      content: 'protected publication retry',
+      mentions: [],
+      timestamp: 340,
+      idempotencyKey: 'protected-submit:invocation:submission',
+    };
+
+    const first = await store.appendIfFresh(input, { baseline, audience: OPUS_AUDIENCE });
+    const retry = await store.appendIfFresh(input, { baseline, audience: OPUS_AUDIENCE });
+
+    assert.equal(first.outcome, 'appended');
+    assert.equal(first.replayed, undefined);
+    assert.equal(retry.outcome, 'appended');
+    assert.equal(retry.replayed, true);
+    assert.equal(retry.message.id, first.message.id);
+    assert.equal((await store.getByThread(threadId, 10)).length, 1);
+  });
+
   test('allows only same parent-group siblings past a shared baseline', async () => {
     const threadId = 'freshness-redis-sibling-group';
     const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);
@@ -280,5 +413,79 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
         revision(restored.appendWatermark, 'pre-delete appendWatermark'),
       'thread reuse must retain a monotonic ABA tombstone',
     );
+  });
+
+  test('uses exact max-safe watermark text and rejects the next append before any write', async () => {
+    const threadId = 'freshness-redis-watermark-limit';
+    await redis.set(MessageKeys.freshnessSequence(threadId), '9007199254740990');
+
+    const final = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'last exactly representable freshness append',
+      mentions: ['opus'],
+      timestamp: 600,
+    });
+    assert.equal(final.appendWatermark, MAX_WATERMARK);
+
+    const rejectedIdempotencyKey = 'must-not-be-written-at-watermark-limit';
+    await assert.rejects(
+      store.append({
+        userId: 'user-1',
+        catId: null,
+        threadId,
+        content: 'must fail before hash and indexes',
+        mentions: ['opus'],
+        timestamp: 601,
+        idempotencyKey: rejectedIdempotencyKey,
+      }),
+      /freshness watermark exhausted/,
+    );
+
+    assert.equal(await redis.get(MessageKeys.freshnessSequence(threadId)), MAX_WATERMARK);
+    assert.equal(await redis.get(MessageKeys.idempotency('user-1', threadId, rejectedIdempotencyKey)), null);
+    assert.deepEqual(
+      (await store.getByThread(threadId, 10)).map((message) => message.id),
+      [final.id],
+    );
+  });
+
+  test('fails closed before restore or reveal can partially mutate at the watermark limit', async () => {
+    const restoreThreadId = 'freshness-redis-restore-watermark-limit';
+    const restorable = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId: restoreThreadId,
+      content: 'soft deleted before restore limit',
+      mentions: ['opus'],
+      timestamp: 610,
+    });
+    await store.softDelete(restorable.id, 'user-1');
+    await redis.set(MessageKeys.freshnessSequence(restoreThreadId), MAX_WATERMARK);
+
+    await assert.rejects(store.restore(restorable.id), /freshness watermark exhausted/);
+    const stillDeleted = await store.getById(restorable.id);
+    assert.ok(stillDeleted.deletedAt);
+    assert.equal(await store.captureFreshnessWatermark(restoreThreadId, OPUS_AUDIENCE), '0');
+
+    const revealThreadId = 'freshness-redis-reveal-watermark-limit';
+    const privateMessage = await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId: revealThreadId,
+      content: 'whisper before reveal limit',
+      mentions: [],
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+      timestamp: 620,
+    });
+    await redis.set(MessageKeys.freshnessSequence(revealThreadId), MAX_WATERMARK);
+
+    await assert.rejects(store.revealWhispers(revealThreadId, 'user-1'), /freshness watermark exhausted/);
+    const stillPrivate = await store.getById(privateMessage.id);
+    assert.equal(stillPrivate.revealedAt, undefined);
+    assert.equal(await store.captureFreshnessWatermark(revealThreadId, OPUS_AUDIENCE), privateMessage.appendWatermark);
+    assert.equal(await store.captureFreshnessWatermark(revealThreadId, CODEX_AUDIENCE), '0');
   });
 });

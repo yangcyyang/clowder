@@ -904,6 +904,8 @@ export interface PersistenceContext {
 export interface FreshnessPersistenceEgress {
   disposition: 'published' | 'held' | 'discarded';
   messageId?: string;
+  /** Existing terminal publication was replayed; consumers must not fan it out again. */
+  replayed?: true;
   holdId?: string;
   /** Current hold CAS version. Required before scheduling a successor review. */
   version?: number;
@@ -1005,7 +1007,11 @@ export async function publishFreshnessDraft(input: {
 
 export function freshnessPersistenceEgress(result: FreshnessGateResult): FreshnessPersistenceEgress {
   if (result.outcome === 'published') {
-    return { disposition: 'published', messageId: result.message.id };
+    return {
+      disposition: 'published',
+      messageId: result.message.id,
+      ...(result.replayed ? { replayed: true as const } : {}),
+    };
   }
   if (result.outcome === 'discarded') {
     return { disposition: 'discarded', holdId: result.hold.id };

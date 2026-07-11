@@ -64,8 +64,10 @@ export function selectRouteFreshnessGate(
 ): FreshnessEgressGate | undefined {
   if (!gate || !threadId || !targetCats?.length) return undefined;
   // Mixed routes stay entirely legacy until every target is in rollout. This
-  // avoids one shared route buffering non-allowlisted cats as a side effect.
-  return targetCats.every((catId) => gate.isEnabledFor(threadId, catId)) ? gate : undefined;
+  // avoids one shared route buffering non-allowlisted initial cats as a side
+  // effect. Once selected, freeze protected semantics for the whole route so
+  // dynamically discovered A2A descendants cannot fall back to legacy mode.
+  return targetCats.every((catId) => gate.isEnabledFor(threadId, catId)) ? gate.forProtectedRoute() : undefined;
 }
 
 /** Parsed mention with position for ordering */

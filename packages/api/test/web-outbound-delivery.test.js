@@ -222,6 +222,36 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(deliverCalls.length, 0);
   });
 
+  it('successful freshness replay cleans its placeholder without a second stream end or outbound delivery', async () => {
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const ctx = {
+      failed: false,
+      errors: [],
+      egressByCat: {
+        opus: { disposition: 'published', messageId: 'already-published', replayed: true },
+      },
+    };
+
+    await deliverOutboundFromWeb(
+      't-replay',
+      'opus',
+      'inv-replay',
+      ['must not fan out twice'],
+      [{ catId: 'opus', textParts: ['must not fan out twice'] }],
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(deliverCalls.length, 0);
+    assert.equal(streamCalls.end.length, 0);
+    assert.deepEqual(streamCalls.cleanup, [{ threadId: 't-replay', invocationId: 'inv-replay' }]);
+  });
+
   it('discarded rich-only payload is rejected even if a route leaves it in consumer state', async () => {
     const privateRichSentinel = { id: 'PRIVATE-DISCARDED-WEB-RICH' };
     const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });

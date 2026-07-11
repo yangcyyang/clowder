@@ -1944,7 +1944,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 export function hasFreshnessHold(persistenceContext: Pick<PersistenceContext, 'egressByCat'>): boolean {
   const entries = Object.values(persistenceContext.egressByCat ?? {});
   return (
-    entries.some((entry) => entry.disposition === 'held') && !entries.some((entry) => entry.disposition === 'published')
+    entries.some((entry) => entry.disposition === 'held') &&
+    !entries.some((entry) => entry.disposition === 'published' && !entry.replayed)
   );
 }
 
@@ -2002,12 +2003,17 @@ export async function deliverOutboundFromWeb(
   logger: typeof log,
 ): Promise<void> {
   const egressEntries = Object.values(persistenceContext.egressByCat ?? {});
+  const hasNewPublication = egressEntries.some((entry) => entry.disposition === 'published' && !entry.replayed);
   const fullySuppressed =
     egressEntries.length > 0 &&
-    !egressEntries.some((entry) => entry.disposition === 'published') &&
-    egressEntries.some((entry) => entry.disposition === 'held' || entry.disposition === 'discarded');
+    !hasNewPublication &&
+    egressEntries.some((entry) => entry.disposition === 'held' || entry.disposition === 'discarded' || entry.replayed);
+  const deliverableTurns = outboundTurns.filter((turn) => {
+    const verdict = persistenceContext.egressByCat?.[turn.catId];
+    return !verdict || (verdict.disposition === 'published' && !verdict.replayed);
+  });
   const finalContent =
-    outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
+    outboundTurns.length > 0 ? flattenTurnTextParts(deliverableTurns) : flattenTextParts(collectedTextParts);
 
   if (opts.streamingHook) {
     if (streamStartPromise) {
@@ -2024,7 +2030,12 @@ export async function deliverOutboundFromWeb(
     });
     return;
   }
-  if (fullySuppressed) return;
+  if (fullySuppressed) {
+    await opts.streamingHook?.cleanupPlaceholders?.(threadId, invocationId).catch((err) => {
+      logger.warn({ err, threadId }, '[messages] StreamingHook.cleanupPlaceholders failed (suppressed)');
+    });
+    return;
+  }
 
   if (opts.streamingHook) {
     await opts.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
@@ -2032,7 +2043,7 @@ export async function deliverOutboundFromWeb(
     });
   }
 
-  const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+  const hasContent = collectedTextParts.length > 0 || deliverableTurns.length > 0;
   if (!opts.outboundHook || !hasContent) {
     if (opts.streamingHook?.cleanupPlaceholders) {
       await opts.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
@@ -2064,7 +2075,7 @@ export async function deliverOutboundFromWeb(
   }
 
   const DELIVER_TIMEOUT_MS = 10_000;
-  const nonEmptyTurns = outboundTurns.filter(
+  const nonEmptyTurns = deliverableTurns.filter(
     (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
   );
 

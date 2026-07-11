@@ -31,6 +31,7 @@ import {
   isDelivered,
   isFreshnessProtectedPublication,
   isFreshnessRelevantMessage,
+  isPendingFreshnessReviewPublication,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
@@ -56,6 +57,7 @@ end
 redis.call('HSET', KEYS[1],
   'deliveredAt', ARGV[1],
   'deliveryStatus', 'delivered')
+redis.call('HDEL', KEYS[1], 'freshnessReviewPublication')
 redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
 redis.call('ZADD', KEYS[3], ARGV[1], ARGV[2])
 redis.call('ZADD', KEYS[4], ARGV[1], ARGV[2])
@@ -90,6 +92,7 @@ local mentionCount = tonumber(ARGV[10]) or 0
 local whisperCount = tonumber(ARGV[11]) or 0
 local gateCheck = ARGV[12] == '1'
 local gateGroup = ARGV[13] or ''
+local danglingIdempotency = false
 
 -- Idempotency replay wins over staleness: an already-published retry returns
 -- the canonical message instead of becoming held on a newer watermark.
@@ -102,22 +105,29 @@ if hasIdempotency then
     end
     -- Repair a legacy dangling pointer inside this same linearization point.
     -- A concurrent retry can no longer delete a newly rebuilt pointer.
-    redis.call('DEL', KEYS[5])
+    danglingIdempotency = true
   end
 end
 
 local function latestScore(key)
   local row = redis.call('ZREVRANGE', key, 0, 0, 'WITHSCORES')
-  if #row >= 2 then return tonumber(row[2]) or 0 end
-  return 0
+  if #row >= 2 then return row[2] end
+  return '0'
 end
 
-local observed = 0
+local function decimalGreater(left, right)
+  if string.len(left) ~= string.len(right) then
+    return string.len(left) > string.len(right)
+  end
+  return left > right
+end
+
+local observed = '0'
 if mode == 'conditional' then
   local publicScore = latestScore(KEYS[7])
   local whisperScore = latestScore(KEYS[8])
-  if publicScore > whisperScore then observed = publicScore else observed = whisperScore end
-  if gateCheck and observed > (tonumber(baseline) or 0) then
+  if decimalGreater(publicScore, whisperScore) then observed = publicScore else observed = whisperScore end
+  if gateCheck and decimalGreater(observed, baseline) then
     local independent = gateGroup == ''
     if not independent then
       local detailPrefix = string.sub(KEYS[1], 1, string.len(KEYS[1]) - string.len(messageId))
@@ -131,14 +141,24 @@ if mode == 'conditional' then
       end
       independent = containsIndependent(KEYS[7]) or containsIndependent(KEYS[8])
     end
-    if independent then return {'stale', baseline, tostring(observed)} end
+    if independent then return {'stale', baseline, observed} end
   end
 end
 
 local appendWatermark = ''
 if relevant then
-  appendWatermark = tostring(redis.call('INCR', KEYS[6]))
+  local maxWatermark = '9007199254740991'
+  local current = redis.call('GET', KEYS[6]) or '0'
+  if not string.match(current, '^%d+$') or
+     string.len(current) > string.len(maxWatermark) or
+     (string.len(current) == string.len(maxWatermark) and current >= maxWatermark) then
+    return redis.error_reply('freshness watermark exhausted')
+  end
+  redis.call('INCR', KEYS[6])
+  appendWatermark = redis.call('GET', KEYS[6])
 end
+
+if danglingIdempotency then redis.call('DEL', KEYS[5]) end
 
 local decoded = cjson.decode(ARGV[5])
 local fields = {}
@@ -200,7 +220,7 @@ if ttl > 0 then
   end
 end
 
-if appendWatermark == '' then appendWatermark = tostring(observed) end
+if appendWatermark == '' then appendWatermark = observed end
 return {'appended', messageId, appendWatermark}
 `;
 
@@ -215,9 +235,19 @@ const RESTORE_MESSAGE_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return '' end
 if redis.call('HGET', KEYS[1], '_tombstone') == '1' then return '' end
 if not redis.call('HGET', KEYS[1], 'deletedAt') then return '' end
+if ARGV[1] == '1' then
+  local maxWatermark = '9007199254740991'
+  local current = redis.call('GET', KEYS[2]) or '0'
+  if not string.match(current, '^%d+$') or
+     string.len(current) > string.len(maxWatermark) or
+     (string.len(current) == string.len(maxWatermark) and current >= maxWatermark) then
+    return redis.error_reply('freshness watermark exhausted')
+  end
+end
 redis.call('HDEL', KEYS[1], 'deletedAt', 'deletedBy')
 if ARGV[1] ~= '1' then return '0' end
-local revision = tostring(redis.call('INCR', KEYS[2]))
+redis.call('INCR', KEYS[2])
+local revision = redis.call('GET', KEYS[2])
 redis.call('HSET', KEYS[1], 'appendWatermark', revision)
 for i = 3, #KEYS do redis.call('ZADD', KEYS[i], revision, ARGV[2]) end
 return revision
@@ -227,10 +257,20 @@ const REVEAL_WHISPER_LUA = `
 if redis.call('HGET', KEYS[1], 'visibility') ~= 'whisper' then return 0 end
 if redis.call('HGET', KEYS[1], 'revealedAt') then return 0 end
 if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] then return 0 end
+if ARGV[4] == '1' then
+  local maxWatermark = '9007199254740991'
+  local current = redis.call('GET', KEYS[2]) or '0'
+  if not string.match(current, '^%d+$') or
+     string.len(current) > string.len(maxWatermark) or
+     (string.len(current) == string.len(maxWatermark) and current >= maxWatermark) then
+    return redis.error_reply('freshness watermark exhausted')
+  end
+end
 redis.call('HSET', KEYS[1], 'revealedAt', ARGV[2])
 for i = 4, #KEYS do redis.call('ZREM', KEYS[i], ARGV[3]) end
 if ARGV[4] == '1' then
-  local revision = tostring(redis.call('INCR', KEYS[2]))
+  redis.call('INCR', KEYS[2])
+  local revision = redis.call('GET', KEYS[2])
   redis.call('HSET', KEYS[1], 'appendWatermark', revision)
   redis.call('ZADD', KEYS[3], revision, ARGV[3])
 end
@@ -358,15 +398,43 @@ export class RedisMessageStore {
       const b = BigInt(right[1]);
       return a < b ? -1 : a > b ? 1 : 0;
     });
-    const ids = candidates.slice(0, safeLimit).map(([id]) => id);
+    const { ids, privateBarrier } = await this.selectFreshnessDeltaIds(candidates, safeLimit);
     const messages = (await this.hydrateMessages(ids)).filter(isFreshnessRelevantMessage);
     const lastReturned = messages[messages.length - 1];
     return {
       // The review cursor may only cover messages materialized in this page.
       observedWatermark: lastReturned?.appendWatermark ?? after,
       messages,
-      truncated: candidates.length > safeLimit,
+      truncated: privateBarrier || candidates.length > messages.length,
     };
+  }
+
+  private async selectFreshnessDeltaIds(
+    candidates: Array<[string, ThreadAppendWatermark]>,
+    limit: number,
+  ): Promise<{ ids: string[]; privateBarrier: boolean }> {
+    const structuralReads = this.redis.multi();
+    for (const [id] of candidates) {
+      structuralReads.hmget(MessageKeys.detail(id), 'deliveryStatus', 'freshnessReviewPublication');
+    }
+    const results = (await structuralReads.exec()) as Array<[Error | null, [string | null, string | null]]> | null;
+    const ids: string[] = [];
+    for (const [index, [id]] of candidates.entries()) {
+      const result = results?.[index];
+      if (!result || result[0] || !Array.isArray(result[1])) {
+        // Structural metadata must be readable before any private draft hash is hydrated.
+        return { ids, privateBarrier: true };
+      }
+      const [deliveryStatus, marker] = result[1];
+      const isPrivate = isPendingFreshnessReviewPublication(
+        deliveryStatus as StoredMessage['deliveryStatus'],
+        marker === '1',
+      );
+      if (isPrivate) return { ids, privateBarrier: true };
+      ids.push(id);
+      if (ids.length >= limit) break;
+    }
+    return { ids, privateBarrier: false };
   }
 
   async appendIfFresh(
@@ -394,7 +462,12 @@ export class RedisMessageStore {
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
       : null;
-    const { idempotencyKey: _idempotencyKey, appendWatermark: _appendWatermark, ...payload } = msg;
+    const {
+      idempotencyKey: _idempotencyKey,
+      appendWatermark: _appendWatermark,
+      freshnessReviewPublication,
+      ...payload
+    } = msg;
     void _idempotencyKey;
     void _appendWatermark;
     const stored: StoredMessage = { ...payload, id, threadId };
@@ -444,6 +517,7 @@ export class RedisMessageStore {
       ...(stored.mentionsUser ? { mentionsUser: '1' } : {}),
       ...(stored.deliveredAt ? { deliveredAt: String(stored.deliveredAt) } : {}),
       ...(stored.deliveryStatus ? { deliveryStatus: stored.deliveryStatus } : {}),
+      ...(freshnessReviewPublication ? { freshnessReviewPublication: '1' } : {}),
       ...(stored.replyTo ? { replyTo: stored.replyTo } : {}),
       ...(stored.extra?.stream?.invocationId ? { freshnessGroupId: stored.extra.stream.invocationId } : {}),
     };
@@ -487,7 +561,7 @@ export class RedisMessageStore {
           const committedWatermark =
             existing.appendWatermark ??
             (gate ? await this.captureFreshnessWatermark(threadId, gate.audience) : ('0' as ThreadAppendWatermark));
-          return { outcome: 'appended', message: existing, committedWatermark };
+          return { outcome: 'appended', message: existing, committedWatermark, replayed: true };
         }
         if (idempotencyIndexKey && attempt === 0) {
           await this.redis.eval(
@@ -1198,6 +1272,7 @@ export class RedisMessageStore {
     if (!msg) return null;
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
+    pipeline.hdel(MessageKeys.detail(id), 'freshnessReviewPublication');
     for (const key of this.freshnessIndexKeysForMessage(msg)) pipeline.zrem(key, id);
     await pipeline.exec();
     msg.deliveryStatus = 'canceled';

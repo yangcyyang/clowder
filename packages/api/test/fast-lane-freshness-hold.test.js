@@ -87,6 +87,56 @@ function createHarness() {
 }
 
 describe('fast-lane Freshness Hold', () => {
+  test('a successful submission replay does not fan out text or raw completion payload twice', async () => {
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    const harness = createHarness();
+    const sentinel = 'FAST-LANE-REPLAY-SENTINEL';
+    harness.processor.fastLaneExecutor = {
+      async executeProjectInit() {
+        return {
+          status: 'succeeded',
+          stdout: sentinel,
+          stderr: '',
+          durationMs: 1,
+          files: [],
+        };
+      },
+    };
+
+    const runOnce = async (timestamp) => {
+      const current = harness.messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId: 'fast-thread',
+        content: '/project-init demo --root /tmp',
+        mentions: ['opus'],
+        timestamp,
+      });
+      const enqueued = harness.queue.enqueue({
+        threadId: 'fast-thread',
+        userId: 'user-1',
+        content: '/project-init demo --root /tmp',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+      });
+      harness.queue.backfillMessageId('fast-thread', 'user-1', enqueued.entry.id, current.id);
+      const started = await harness.processor.processNext('fast-thread', 'user-1');
+      assert.equal(started.started, true);
+      await waitFor(() => !harness.processor.isThreadBusy('fast-thread'));
+    };
+
+    await runOnce(800);
+    await runOnce(801);
+
+    assert.equal(
+      harness.broadcasts.filter((message) => message.type === 'text' && message.origin === 'fast_lane').length,
+      1,
+    );
+    assert.equal(harness.messageStore.getRecent(20).filter((message) => message.catId === 'opus').length, 1);
+    assert.equal(JSON.stringify(harness.taskEvents).split(sentinel).length - 1, 1);
+  });
+
   test('a message appended while the fast lane runs holds its completion before socket publication', async () => {
     process.env.CAT_CAFE_FAST_LANE = '1';
     const harness = createHarness();

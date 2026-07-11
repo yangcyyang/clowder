@@ -91,6 +91,7 @@ type CallbackDisposition = 'none' | 'published' | 'held' | 'discarded';
 type CallbackPostResult = {
   confirmed: boolean;
   disposition: CallbackDisposition;
+  replayed?: true;
   messageId?: string;
   threadId?: string;
   holdId?: string;
@@ -138,6 +139,7 @@ function callbackPostResultFromCandidate(candidate: string): CallbackPostResult 
     return {
       confirmed: true,
       disposition,
+      ...(parsed.status === 'duplicate' ? { replayed: true as const } : {}),
       ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
       ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
       ...(typeof parsed.holdId === 'string' && parsed.holdId.length > 0 ? { holdId: parsed.holdId } : {}),
@@ -711,7 +713,11 @@ export async function* routeParallel(
   const catCallbackDisposition = new Map<string, CallbackDisposition>();
   const catCallbackMessageId = new Map<string, string>();
   const catCallbackHoldId = new Map<string, string>();
+  const catCallbackReplayed = new Set<string>();
   const catCallbackExposureEvents = new Map<string, AgentMessage[]>();
+  // Full ordinary tool payloads remain private until that cat receives a
+  // published verdict. This mirrors the serial route's publication epoch.
+  const catFreshnessToolExposureEvents = new Map<string, AgentMessage[]>();
   let completedCount = 0;
   let yieldedFinalDone = false;
   // F153: Accumulate total tokens across all parallel streams for route aggregate
@@ -908,7 +914,16 @@ export async function* routeParallel(
             exposureEvents.push(effectiveMsg);
             suppressCallbackExposureEvent = true;
             if (callbackResult.confirmed) {
-              if (callbackResult.disposition === 'published') releaseCallbackExposureEvents = exposureEvents;
+              if (callbackResult.disposition === 'published' && !callbackResult.replayed) {
+                releaseCallbackExposureEvents = exposureEvents;
+              } else {
+                // A held/discarded callback closes the prior publication
+                // epoch. Do not let its ordinary or callback tool details
+                // attach to a later replacement publication.
+                catFreshnessToolExposureEvents.delete(effectiveMsg.catId);
+                catToolEvents.set(effectiveMsg.catId, []);
+                catFlushToolLen.set(effectiveMsg.catId, 0);
+              }
               catCallbackExposureEvents.delete(effectiveMsg.catId);
             } else {
               catCallbackExposureEvents.set(effectiveMsg.catId, exposureEvents);
@@ -922,6 +937,8 @@ export async function* routeParallel(
             catAwaitingCallbackResult.delete(effectiveMsg.catId);
             if (callbackResult.confirmed) {
               catCallbackDisposition.set(effectiveMsg.catId, callbackResult.disposition);
+              if (callbackResult.replayed) catCallbackReplayed.add(effectiveMsg.catId);
+              else catCallbackReplayed.delete(effectiveMsg.catId);
               if (callbackResult.messageId) catCallbackMessageId.set(effectiveMsg.catId, callbackResult.messageId);
               if (callbackResult.holdId) catCallbackHoldId.set(effectiveMsg.catId, callbackResult.holdId);
             }
@@ -1011,6 +1028,15 @@ export async function* routeParallel(
           }
         }
 
+        if (releaseCallbackExposureEvents) {
+          const releasable = [
+            ...(catFreshnessToolExposureEvents.get(effectiveMsg.catId) ?? []),
+            ...releaseCallbackExposureEvents,
+          ].sort((left, right) => left.timestamp - right.timestamp);
+          catFreshnessToolExposureEvents.delete(effectiveMsg.catId);
+          for (const event of releasable) yield event;
+        }
+        if (suppressCallbackExposureEvent) continue;
         if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
         if (deps.freshnessGate && effectiveMsg.type === 'text') continue;
         if (deps.freshnessGate && effectiveMsg.type === 'system_info' && effectiveMsg.content) {
@@ -1020,10 +1046,17 @@ export async function* routeParallel(
             /* non-JSON system_info remains realtime */
           }
         }
-        if (releaseCallbackExposureEvents) {
-          for (const callbackEvent of releaseCallbackExposureEvents) yield callbackEvent;
+        if (
+          deps.freshnessGate &&
+          effectiveMsg.catId &&
+          (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result')
+        ) {
+          const exposureEvents = catFreshnessToolExposureEvents.get(effectiveMsg.catId) ?? [];
+          exposureEvents.push(effectiveMsg);
+          catFreshnessToolExposureEvents.set(effectiveMsg.catId, exposureEvents);
+          continue;
         }
-        if (!suppressCallbackExposureEvent) yield effectiveMsg;
+        yield effectiveMsg;
       }
 
       if (msg.type === 'done' && msg.catId) {
@@ -1078,6 +1111,7 @@ export async function* routeParallel(
             disposition: callbackDisposition,
             ...(callbackMessageId ? { messageId: callbackMessageId } : {}),
             ...(callbackHoldId ? { holdId: callbackHoldId } : {}),
+            ...(catCallbackReplayed.has(msg.catId) ? { replayed: true } : {}),
           };
           if (deps.draftStore && ownInvId) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -1185,42 +1219,51 @@ export async function* routeParallel(
               options.persistenceContext.egressByCat ??= {};
               if (egress.outcome === 'published') {
                 options.persistenceContext.egressByCat[msg.catId] = egressRecord;
-                if (!voiceMode) {
+                if (!egress.replayed && !voiceMode) {
                   allRichBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, allRichBlocks, catId);
                 }
                 // Sibling messages from this parallel parent are known outputs,
                 // not new inbound intent. Advancing sibling baselines exactly to
                 // this committed revision ignores only this publication; any
                 // subsequently appended user/independent-agent message still holds.
-                if (egress.message.appendWatermark) {
+                if (!egress.replayed && egress.message.appendWatermark) {
                   for (const sibling of targetCats) freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
                 }
-                for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
+                if (!egress.replayed) {
+                  const releasableToolEvents = [
+                    ...(catFreshnessToolExposureEvents.get(msg.catId) ?? []),
+                    ...(catCallbackExposureEvents.get(msg.catId) ?? []),
+                  ].sort((left, right) => left.timestamp - right.timestamp);
+                  for (const event of releasableToolEvents) yield event;
+                }
+                catFreshnessToolExposureEvents.delete(msg.catId);
                 catCallbackExposureEvents.delete(msg.catId);
-                yield {
-                  type: 'text',
-                  catId,
-                  content: storedContent,
-                  textMode: 'replace',
-                  origin: 'stream',
-                  messageId: egress.message.id,
-                  ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
-                  timestamp: publishTimestamp,
-                } as AgentMessage;
-                for (const block of allRichBlocks) {
+                if (!egress.replayed) {
                   yield {
-                    type: 'system_info',
+                    type: 'text',
                     catId,
-                    content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
-                    invocationId: ownInvId,
+                    content: storedContent,
+                    textMode: 'replace',
+                    origin: 'stream',
+                    messageId: egress.message.id,
+                    ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
                     timestamp: publishTimestamp,
                   } as AgentMessage;
-                }
-                if (allRichBlocks.length > 0) {
-                  options.persistenceContext.richBlocks = [
-                    ...(options.persistenceContext.richBlocks ?? []),
-                    ...allRichBlocks,
-                  ];
+                  for (const block of allRichBlocks) {
+                    yield {
+                      type: 'system_info',
+                      catId,
+                      content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
+                      invocationId: ownInvId,
+                      timestamp: publishTimestamp,
+                    } as AgentMessage;
+                  }
+                  if (allRichBlocks.length > 0) {
+                    options.persistenceContext.richBlocks = [
+                      ...(options.persistenceContext.richBlocks ?? []),
+                      ...allRichBlocks,
+                    ];
+                  }
                 }
               } else if (egress.outcome === 'discarded') {
                 options.persistenceContext.egressByCat[msg.catId] = egressRecord;
@@ -1343,28 +1386,37 @@ export async function* routeParallel(
                 options.persistenceContext.egressByCat ??= {};
                 if (egress.outcome === 'published') {
                   options.persistenceContext.egressByCat[msg.catId] = egressRecord;
-                  if (!voiceMode) {
+                  if (!egress.replayed && !voiceMode) {
                     noTextBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, noTextBlocks, catId);
                   }
-                  if (egress.message.appendWatermark) {
+                  if (!egress.replayed && egress.message.appendWatermark) {
                     for (const sibling of targetCats)
                       freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
                   }
-                  for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
-                  catCallbackExposureEvents.delete(msg.catId);
-                  for (const block of noTextBlocks) {
-                    yield {
-                      type: 'system_info',
-                      catId,
-                      content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
-                      invocationId: ownInvId,
-                      timestamp: publishTimestamp,
-                    } as AgentMessage;
+                  if (!egress.replayed) {
+                    const releasableToolEvents = [
+                      ...(catFreshnessToolExposureEvents.get(msg.catId) ?? []),
+                      ...(catCallbackExposureEvents.get(msg.catId) ?? []),
+                    ].sort((left, right) => left.timestamp - right.timestamp);
+                    for (const event of releasableToolEvents) yield event;
                   }
-                  options.persistenceContext.richBlocks = [
-                    ...(options.persistenceContext.richBlocks ?? []),
-                    ...noTextBlocks,
-                  ];
+                  catFreshnessToolExposureEvents.delete(msg.catId);
+                  catCallbackExposureEvents.delete(msg.catId);
+                  if (!egress.replayed) {
+                    for (const block of noTextBlocks) {
+                      yield {
+                        type: 'system_info',
+                        catId,
+                        content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
+                        invocationId: ownInvId,
+                        timestamp: publishTimestamp,
+                      } as AgentMessage;
+                    }
+                    options.persistenceContext.richBlocks = [
+                      ...(options.persistenceContext.richBlocks ?? []),
+                      ...noTextBlocks,
+                    ];
+                  }
                 } else if (egress.outcome === 'discarded') {
                   options.persistenceContext.egressByCat[msg.catId] = egressRecord;
                 } else {
@@ -1480,55 +1532,68 @@ export async function* routeParallel(
           // hadError but toolEvents exist — persist tool record so refresh shows what was attempted
           const catTools = catToolEvents.get(msg.catId);
           if (catTools && catTools.length > 0) {
-            const meta = catMeta.get(msg.catId);
-            const thinking = catThinking.get(msg.catId);
-            try {
-              await deps.messageStore.append({
-                userId,
-                catId: msg.catId as CatId,
-                content: '',
-                mentions: [],
-                origin: 'stream',
-                timestamp: invocationStartedAt,
-                threadId,
-                ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
-                ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
-                ...(meta ? { metadata: meta } : {}),
-                toolEvents: catTools,
-                ...(persistedInvocationId || msg.tracing
-                  ? {
-                      extra: {
-                        ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
-                        ...(msg.tracing ? { tracing: msg.tracing } : {}),
-                      },
-                    }
-                  : {}),
-              });
-              // #80: Clean up draft only after successful append
+            if (deps.freshnessGate) {
+              // A provider error produced no publishable envelope. Fail closed:
+              // keep raw tool details out of history and downstream consumers.
+              options.persistenceContext ??= { failed: false, errors: [] };
+              options.persistenceContext.egressByCat ??= {};
+              options.persistenceContext.egressByCat[msg.catId] = { disposition: 'discarded' };
+              catFreshnessToolExposureEvents.delete(msg.catId);
+              catCallbackExposureEvents.delete(msg.catId);
               if (deps.draftStore && ownInvId) {
                 deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
               }
-              // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
-              if (deps.invocationDeps.threadStore) {
-                try {
-                  await deps.invocationDeps.threadStore.updateParticipantActivity(
-                    threadId,
-                    msg.catId as CatId,
-                    // #267: only errors before abort are provider failures
-                    !catHadProviderError.has(msg.catId),
-                  );
-                } catch (activityErr) {
-                  log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
-                }
-              }
-            } catch (err) {
-              log.error({ catId: msg.catId, err }, 'messageStore.append (error+tools) failed, degrading');
-              if (options.persistenceContext) {
-                options.persistenceContext.failed = true;
-                options.persistenceContext.errors.push({
-                  catId: msg.catId,
-                  error: err instanceof Error ? err.message : String(err),
+            } else {
+              const meta = catMeta.get(msg.catId);
+              const thinking = catThinking.get(msg.catId);
+              try {
+                await deps.messageStore.append({
+                  userId,
+                  catId: msg.catId as CatId,
+                  content: '',
+                  mentions: [],
+                  origin: 'stream',
+                  timestamp: invocationStartedAt,
+                  threadId,
+                  ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
+                  ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
+                  ...(meta ? { metadata: meta } : {}),
+                  toolEvents: catTools,
+                  ...(persistedInvocationId || msg.tracing
+                    ? {
+                        extra: {
+                          ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                          ...(msg.tracing ? { tracing: msg.tracing } : {}),
+                        },
+                      }
+                    : {}),
                 });
+                // #80: Clean up draft only after successful append
+                if (deps.draftStore && ownInvId) {
+                  deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+                }
+                // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
+                if (deps.invocationDeps.threadStore) {
+                  try {
+                    await deps.invocationDeps.threadStore.updateParticipantActivity(
+                      threadId,
+                      msg.catId as CatId,
+                      // #267: only errors before abort are provider failures
+                      !catHadProviderError.has(msg.catId),
+                    );
+                  } catch (activityErr) {
+                    log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+                  }
+                }
+              } catch (err) {
+                log.error({ catId: msg.catId, err }, 'messageStore.append (error+tools) failed, degrading');
+                if (options.persistenceContext) {
+                  options.persistenceContext.failed = true;
+                  options.persistenceContext.errors.push({
+                    catId: msg.catId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                }
               }
             }
           }

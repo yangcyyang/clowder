@@ -387,8 +387,9 @@ export class ConnectorInvokeTrigger {
           }
           // ISSUE-9: snapshot richBlocks for current turn before next cat overwrites
           // Cloud-P1-5 fix: only reuse turn if still open (currentTurnCatId matches)
-          const egressDisposition = persistenceContext.egressByCat?.[msg.catId]?.disposition;
-          const suppressCatOutput = egressDisposition === 'held' || egressDisposition === 'discarded';
+          const egress = persistenceContext.egressByCat?.[msg.catId];
+          const suppressCatOutput =
+            egress?.disposition === 'held' || egress?.disposition === 'discarded' || egress?.replayed === true;
           if (suppressCatOutput) {
             persistenceContext.richBlocks = undefined;
           } else if (persistenceContext.richBlocks) {
@@ -444,28 +445,41 @@ export class ConnectorInvokeTrigger {
         }
         // Collect text content for outbound delivery (final-only)
         if (msg.type === 'text' && typeof msg.content === 'string') {
-          collectedTextParts.push(msg.content);
-          // ISSUE-9: per-turn text collection (new turn on catId change or after done)
-          if (msg.catId) {
-            if (msg.catId !== currentTurnCatId) {
-              outboundTurns.push({ catId: msg.catId, textParts: [] });
-              currentTurnCatId = msg.catId;
+          const egress = msg.catId ? persistenceContext.egressByCat?.[msg.catId] : undefined;
+          const suppressText =
+            egress?.disposition === 'held' || egress?.disposition === 'discarded' || egress?.replayed === true;
+          if (!suppressText) {
+            collectedTextParts.push(msg.content);
+            // ISSUE-9: per-turn text collection (new turn on catId change or after done)
+            if (msg.catId) {
+              if (msg.catId !== currentTurnCatId) {
+                outboundTurns.push({ catId: msg.catId, textParts: [] });
+                currentTurnCatId = msg.catId;
+              }
+              outboundTurns[outboundTurns.length - 1].textParts.push(msg.content);
             }
-            outboundTurns[outboundTurns.length - 1].textParts.push(msg.content);
-          }
-          // Phase 4: Stream accumulated text to external platforms
-          if (this.opts.streamingHook) {
-            const accumulated = collectedTextParts.join('');
-            this.opts.streamingHook.onStreamChunk(threadId, accumulated, createResult.invocationId).catch((err) => {
-              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamChunk failed');
-            });
+            // Phase 4: Stream accumulated text to external platforms
+            if (this.opts.streamingHook) {
+              const accumulated = collectedTextParts.join('');
+              this.opts.streamingHook.onStreamChunk(threadId, accumulated, createResult.invocationId).catch((err) => {
+                log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamChunk failed');
+              });
+            }
           }
         }
         if (msg.type === 'system_info' && typeof msg.content === 'string') {
           const noticeText = extractConnectorVisibleSystemNotice(msg.content);
           if (noticeText) collectedSystemNoticeParts.push(noticeText);
         }
-        socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
+        const messageEgress = msg.catId ? persistenceContext.egressByCat?.[msg.catId] : undefined;
+        const suppressContentReplay =
+          (msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result') &&
+          (messageEgress?.disposition === 'held' ||
+            messageEgress?.disposition === 'discarded' ||
+            messageEgress?.replayed === true);
+        if (!suppressContentReplay) {
+          socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
+        }
       }
 
       // ⑤ Finalize: abort guard → persistence check → ack + succeeded
@@ -534,7 +548,7 @@ export class ConnectorInvokeTrigger {
             await freshnessStreamingHook.onStreamHold?.(threadId, createResult.invocationId).catch((err) => {
               log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamHold failed');
             });
-          } else {
+          } else if (!freshnessSuppressed) {
             await this.opts.streamingHook
               .onStreamEnd(threadId, finalContent, createResult.invocationId)
               .catch((err) => {
@@ -840,7 +854,7 @@ function hasFreshnessHold(context: PersistenceContext): boolean {
   const entries = Object.values(context.egressByCat ?? {});
   return (
     entries.some((egress) => egress.disposition === 'held') &&
-    !entries.some((egress) => egress.disposition === 'published')
+    !entries.some((egress) => egress.disposition === 'published' && !egress.replayed)
   );
 }
 
@@ -848,8 +862,8 @@ function hasFreshnessSuppressedOutput(context: PersistenceContext): boolean {
   const entries = Object.values(context.egressByCat ?? {});
   return (
     entries.length > 0 &&
-    !entries.some((egress) => egress.disposition === 'published') &&
-    entries.some((egress) => egress.disposition === 'held' || egress.disposition === 'discarded')
+    !entries.some((egress) => egress.disposition === 'published' && !egress.replayed) &&
+    entries.some((egress) => egress.disposition === 'held' || egress.disposition === 'discarded' || egress.replayed)
   );
 }
 

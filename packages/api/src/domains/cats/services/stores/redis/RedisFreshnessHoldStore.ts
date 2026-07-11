@@ -148,6 +148,7 @@ redis.call('HSET', KEYS[1],
   'version', tostring(currentVersion + 1))
 redis.call('HDEL', KEYS[1], 'draft', 'deltaMessageIds')
 redis.call('ZREM', KEYS[2], ARGV[5])
+redis.call('ZREM', KEYS[3], ARGV[5])
 return 1
 `;
 
@@ -168,6 +169,7 @@ redis.call('HSET', KEYS[1],
   'version', tostring(currentVersion + 1))
 redis.call('HDEL', KEYS[1], 'draft', 'deltaMessageIds')
 redis.call('ZREM', KEYS[2], ARGV[3])
+redis.call('ZREM', KEYS[3], ARGV[3])
 return 1
 `;
 
@@ -317,11 +319,14 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
   }
 
   async release(id: string, input: ReleaseFreshnessHoldInput): Promise<FreshnessHoldRecord | null> {
+    const existing = await this.get(id);
+    if (!existing) return null;
     const changed = (await this.redis.eval(
       RELEASE_LUA,
-      2,
+      3,
       FreshnessHoldKeys.detail(id),
       FreshnessHoldKeys.DEADLINES,
+      FreshnessHoldKeys.userThread(existing.userId, existing.threadId),
       String(input.expectedVersion),
       input.messageId,
       input.committedWatermark,
@@ -332,11 +337,14 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
   }
 
   async discard(id: string, input: ClaimFreshnessReviewInput): Promise<FreshnessHoldRecord | null> {
+    const existing = await this.get(id);
+    if (!existing) return null;
     const changed = (await this.redis.eval(
       DISCARD_LUA,
-      2,
+      3,
       FreshnessHoldKeys.detail(id),
       FreshnessHoldKeys.DEADLINES,
+      FreshnessHoldKeys.userThread(existing.userId, existing.threadId),
       String(input.expectedVersion),
       String(input.now),
       id,

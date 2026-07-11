@@ -182,6 +182,7 @@ type CallbackDisposition = 'none' | 'published' | 'held' | 'discarded';
 type CallbackPostResult = {
   confirmed: boolean;
   disposition: CallbackDisposition;
+  replayed?: true;
   messageId?: string;
   threadId?: string;
   holdId?: string;
@@ -224,19 +225,14 @@ function callbackPostResultFromPayload(parsed: {
   return {
     confirmed: disposition !== 'none',
     disposition,
+    ...(parsed.status === 'duplicate' ? { replayed: true as const } : {}),
     ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
     ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
     ...(typeof parsed.holdId === 'string' && parsed.holdId.length > 0 ? { holdId: parsed.holdId } : {}),
   };
 }
 
-function parseCallbackPostResult(content: string | undefined): {
-  confirmed: boolean;
-  disposition: CallbackDisposition;
-  messageId?: string;
-  threadId?: string;
-  holdId?: string;
-} {
+function parseCallbackPostResult(content: string | undefined): CallbackPostResult {
   if (!content) return { confirmed: false, disposition: 'none' };
   for (const candidate of collectCallbackPostResultCandidates(content)) {
     try {
@@ -257,6 +253,7 @@ function parseCallbackPostResult(content: string | undefined): {
   return {
     confirmed: /"status"\s*:\s*"(ok|duplicate)"/.test(content),
     disposition: /"status"\s*:\s*"(ok|duplicate)"/.test(content) ? 'published' : 'none',
+    ...(/"status"\s*:\s*"duplicate"/.test(content) ? { replayed: true as const } : {}),
   };
 }
 
@@ -903,9 +900,22 @@ export async function* routeSerial(
       let callbackDisposition: CallbackDisposition = 'none';
       let callbackPostMessageId: string | undefined;
       let callbackHoldId: string | undefined;
+      let callbackReplayed = false;
       let awaitingCallbackResult = false;
       const pendingToolResults: string[] = [];
       const pendingCallbackExposureEvents: AgentMessage[] = [];
+      // Full ordinary tool payloads are private until the final publication verdict.
+      const pendingFreshnessToolExposureEvents: AgentMessage[] = [];
+      // Hints and routing feedback derived from the draft are private too. In
+      // protected routes they may become user-visible only after publication.
+      const pendingPublishedRoutingEffects: Array<() => Promise<void>> = [];
+      const runOrDeferPublishedRoutingEffect = async (effect: () => Promise<void>): Promise<void> => {
+        if (deps.freshnessGate) {
+          pendingPublishedRoutingEffects.push(effect);
+          return;
+        }
+        await effect();
+      };
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -1097,10 +1107,15 @@ export async function* routeSerial(
                 pendingCallbackExposureEvents.push(effectiveMsg);
                 suppressCallbackExposureEvent = true;
                 if (callbackResult.confirmed) {
-                  if (callbackResult.disposition === 'published') {
+                  if (callbackResult.disposition === 'published' && !callbackResult.replayed) {
                     releaseCallbackExposureEvents = pendingCallbackExposureEvents.splice(0);
                   } else {
                     pendingCallbackExposureEvents.length = 0;
+                    // A held/discarded callback closes the prior publication
+                    // epoch. None of its tool detail may attach to a later
+                    // replacement or stdout publication.
+                    pendingFreshnessToolExposureEvents.length = 0;
+                    collectedToolEvents.length = 0;
                   }
                 }
               }
@@ -1111,6 +1126,7 @@ export async function* routeSerial(
                 callbackResult.confirmed
               ) {
                 callbackDisposition = callbackResult.disposition;
+                callbackReplayed = callbackResult.replayed === true;
                 awaitingCallbackResult = false;
                 if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
                 if (callbackResult.holdId) callbackHoldId = callbackResult.holdId;
@@ -1203,10 +1219,18 @@ export async function* routeSerial(
               doneMsg = effectiveMsg; // Buffer — yield after A2A detection
             } else {
               if (releaseCallbackExposureEvents) {
-                for (const callbackEvent of releaseCallbackExposureEvents) yield callbackEvent;
+                const releasable = [
+                  ...pendingFreshnessToolExposureEvents.splice(0),
+                  ...releaseCallbackExposureEvents,
+                ].sort((left, right) => left.timestamp - right.timestamp);
+                for (const event of releasable) yield event;
               }
               if (suppressCallbackExposureEvent) continue;
               if (effectiveMsg.type === 'text' && !effectiveMsg.content) {
+                continue;
+              }
+              if (deps.freshnessGate && (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result')) {
+                pendingFreshnessToolExposureEvents.push(effectiveMsg);
                 continue;
               }
               if (deps.freshnessGate && effectiveMsg.type === 'text') {
@@ -1264,6 +1288,7 @@ export async function* routeSerial(
       let freshnessEgressDisposition: 'published' | 'held' | 'discarded' | undefined;
       let freshnessEgressHoldId: string | undefined;
       let freshnessHoldStatus: 'held' | 'needs_attention' | undefined;
+      let freshnessEgressReplayed = false;
       let releaseBufferedText = false;
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
@@ -1335,38 +1360,40 @@ export async function* routeSerial(
         });
         const phaseHHit = phaseHResult.kind === 'invalid_route_syntax';
         if (phaseHHit && phaseHResult.kind === 'invalid_route_syntax') {
-          try {
-            const inlineList = phaseHResult.inlineMentions.map((h) => `@${h}`).join(' ');
-            const hintSource = {
-              connector: 'routing-syntax-hint',
-              label: '路由语法提醒',
-              icon: '⚠️',
-              meta: { presentation: 'system_notice', noticeTone: 'warning' },
-            };
-            const stored = await deps.messageStore.append({
-              userId: 'system',
-              catId: null,
-              threadId,
-              content: `[路由语法]: ${inlineList} 写在行中不会触发路由 — 把 @句柄 移到最后一行行首独立一行即可。`,
-              mentions: [],
-              timestamp: Date.now(),
-              source: hintSource,
-            });
-            if (deps.socketManager) {
-              deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+          await runOrDeferPublishedRoutingEffect(async () => {
+            try {
+              const inlineList = phaseHResult.inlineMentions.map((h) => `@${h}`).join(' ');
+              const hintSource = {
+                connector: 'routing-syntax-hint',
+                label: '路由语法提醒',
+                icon: '⚠️',
+                meta: { presentation: 'system_notice', noticeTone: 'warning' },
+              };
+              const stored = await deps.messageStore.append({
+                userId: 'system',
+                catId: null,
                 threadId,
-                message: {
-                  id: stored.id,
-                  type: 'connector',
-                  content: stored.content,
-                  source: hintSource,
-                  timestamp: stored.timestamp,
-                },
+                content: `[路由语法]: ${inlineList} 写在行中不会触发路由 — 把 @句柄 移到最后一行行首独立一行即可。`,
+                mentions: [],
+                timestamp: Date.now(),
+                source: hintSource,
               });
+              if (deps.socketManager) {
+                deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                  threadId,
+                  message: {
+                    id: stored.id,
+                    type: 'connector',
+                    content: stored.content,
+                    source: hintSource,
+                    timestamp: stored.timestamp,
+                  },
+                });
+              }
+            } catch {
+              /* non-blocking hint */
             }
-          } catch {
-            /* non-blocking hint */
-          }
+          });
         }
 
         // #417 / F064 AC-B3: Write-side feedback for explicit inline action-like @mentions.
@@ -1377,59 +1404,61 @@ export async function* routeSerial(
           if (inlineHits.length > 0) inlineActionDetected.add(inlineHits.length, agentAttr);
 
           if (inlineHits.length > 0) {
-            try {
-              await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
-                sourceTimestamp: Date.now(),
-                items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
-              });
-              inlineActionFeedbackWritten.add(1, agentAttr);
-              log.info(
-                { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
-                'Inline action @mention detected — wrote routing feedback',
-              );
-            } catch {
-              inlineActionFeedbackWriteFailed.add(1, agentAttr);
-            }
-            // #1062: User-visible system message when chain would break
-            // (inline action detected but no line-start @ = no routing will happen)
-            // F167 Phase H AC-H5: suppress this legacy hint when Phase H already emitted
-            // routing-syntax-hint for the same turn (dedupe, single authoritative message).
-            if (a2aMentions.length === 0 && !phaseHHit) {
+            await runOrDeferPublishedRoutingEffect(async () => {
               try {
-                const targets = inlineHits.map((h) => `@${h.catId}`).join(', ');
-                const hintSource = {
-                  connector: 'inline-mention-hint',
-                  label: '路由提示',
-                  icon: '💡',
-                  meta: { presentation: 'system_notice', noticeTone: 'info' },
-                };
-                const stored = await deps.messageStore.append({
-                  userId: 'system',
-                  catId: null,
-                  threadId,
-                  content: `想交接给 ${targets}？把它单独放到新起一行开头，才能触发交接。`,
-                  mentions: [],
-                  timestamp: Date.now(),
-                  source: hintSource,
+                await deps.invocationDeps.threadStore?.setMentionRoutingFeedback(threadId, catId, {
+                  sourceTimestamp: Date.now(),
+                  items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
                 });
-                inlineActionHintEmitted.add(1, agentAttr);
-                // Broadcast so frontend sees it in real-time (same pattern as vote result)
-                if (deps.socketManager) {
-                  deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-                    threadId,
-                    message: {
-                      id: stored.id,
-                      type: 'connector',
-                      content: stored.content,
-                      source: hintSource,
-                      timestamp: stored.timestamp,
-                    },
-                  });
-                }
+                inlineActionFeedbackWritten.add(1, agentAttr);
+                log.info(
+                  { catId: catId as string, threadId, targets: inlineHits.map((h) => h.catId) },
+                  'Inline action @mention detected — wrote routing feedback',
+                );
               } catch {
-                inlineActionHintEmitFailed.add(1, agentAttr);
+                inlineActionFeedbackWriteFailed.add(1, agentAttr);
               }
-            }
+              // #1062: User-visible system message when chain would break
+              // (inline action detected but no line-start @ = no routing will happen)
+              // F167 Phase H AC-H5: suppress this legacy hint when Phase H already emitted
+              // routing-syntax-hint for the same turn (dedupe, single authoritative message).
+              if (a2aMentions.length === 0 && !phaseHHit) {
+                try {
+                  const targets = inlineHits.map((h) => `@${h.catId}`).join(', ');
+                  const hintSource = {
+                    connector: 'inline-mention-hint',
+                    label: '路由提示',
+                    icon: '💡',
+                    meta: { presentation: 'system_notice', noticeTone: 'info' },
+                  };
+                  const stored = await deps.messageStore.append({
+                    userId: 'system',
+                    catId: null,
+                    threadId,
+                    content: `想交接给 ${targets}？把它单独放到新起一行开头，才能触发交接。`,
+                    mentions: [],
+                    timestamp: Date.now(),
+                    source: hintSource,
+                  });
+                  inlineActionHintEmitted.add(1, agentAttr);
+                  // Broadcast so frontend sees it in real-time (same pattern as vote result)
+                  if (deps.socketManager) {
+                    deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                      threadId,
+                      message: {
+                        id: stored.id,
+                        type: 'connector',
+                        content: stored.content,
+                        source: hintSource,
+                        timestamp: stored.timestamp,
+                      },
+                    });
+                  }
+                } catch {
+                  inlineActionHintEmitFailed.add(1, agentAttr);
+                }
+              }
+            });
           }
         }
 
@@ -1487,8 +1516,10 @@ export async function* routeSerial(
               if (result.outcome === 'published') {
                 storedMsgId = result.message.id;
                 freshnessEgressDisposition = 'published';
-                releaseBufferedText = true;
-                if (!voiceMode) {
+                freshnessEgressReplayed = result.replayed === true;
+                releaseBufferedText = !freshnessEgressReplayed;
+                if (freshnessEgressReplayed) a2aMentions = [];
+                if (!freshnessEgressReplayed && !voiceMode) {
                   allRichBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, allRichBlocks, catId);
                 }
                 if (options.persistenceContext) {
@@ -1521,6 +1552,7 @@ export async function* routeSerial(
             if (
               options.persistenceContext &&
               allRichBlocks.length > 0 &&
+              !freshnessEgressReplayed &&
               freshnessEgressDisposition !== 'held' &&
               freshnessEgressDisposition !== 'discarded'
             ) {
@@ -1528,21 +1560,25 @@ export async function* routeSerial(
             }
           } else {
             freshnessEgressDisposition = callbackDisposition === 'none' ? undefined : callbackDisposition;
+            freshnessEgressReplayed = callbackReplayed;
             freshnessEgressHoldId = callbackHoldId;
-            if (callbackDisposition === 'held' || callbackDisposition === 'discarded') a2aMentions = [];
+            if (callbackDisposition === 'held' || callbackDisposition === 'discarded' || callbackReplayed) {
+              a2aMentions = [];
+            }
             if (options.persistenceContext && callbackDisposition !== 'none') {
               options.persistenceContext.egressByCat ??= {};
               options.persistenceContext.egressByCat[catId as string] = {
                 disposition: callbackDisposition,
                 ...(callbackPostMessageId ? { messageId: callbackPostMessageId } : {}),
                 ...(callbackHoldId ? { holdId: callbackHoldId } : {}),
+                ...(callbackReplayed ? { replayed: true } : {}),
               };
             }
             log.info(
               { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
               'Stream store skipped — cat_cafe_post_message callback already persisted',
             );
-            if (callbackPostMessageId) {
+            if (callbackPostMessageId && !callbackReplayed) {
               const metadataPatch: StreamMetadataAugmentInput = {
                 ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                 ...(firstMetadata ? { metadata: firstMetadata } : {}),
@@ -1603,17 +1639,40 @@ export async function* routeSerial(
           }
         }
 
+        if (deps.freshnessGate && freshnessEgressDisposition === 'published' && !freshnessEgressReplayed) {
+          for (const effect of pendingPublishedRoutingEffects.splice(0)) await effect();
+        } else if (deps.freshnessGate) {
+          pendingPublishedRoutingEffects.length = 0;
+        }
+
         if (
           !incrementalMode &&
           thinkingMode === 'debug' &&
+          !freshnessEgressReplayed &&
           freshnessEgressDisposition !== 'held' &&
           freshnessEgressDisposition !== 'discarded'
         ) {
           previousResponses.push({ catId, content: storedContent });
         }
 
-        if (deps.freshnessGate && releaseBufferedText && storedMsgId) {
-          for (const callbackEvent of pendingCallbackExposureEvents.splice(0)) yield callbackEvent;
+        if (
+          deps.freshnessGate &&
+          freshnessEgressDisposition === 'published' &&
+          !freshnessEgressReplayed &&
+          !releaseBufferedText &&
+          pendingFreshnessToolExposureEvents.length > 0
+        ) {
+          for (const event of pendingFreshnessToolExposureEvents.splice(0).sort((a, b) => a.timestamp - b.timestamp)) {
+            yield event;
+          }
+        }
+
+        if (deps.freshnessGate && releaseBufferedText && !freshnessEgressReplayed && storedMsgId) {
+          const releasableToolEvents = [
+            ...pendingFreshnessToolExposureEvents.splice(0),
+            ...pendingCallbackExposureEvents.splice(0),
+          ].sort((left, right) => left.timestamp - right.timestamp);
+          for (const event of releasableToolEvents) yield event;
           yield {
             type: 'text',
             catId,
@@ -1982,7 +2041,8 @@ export async function* routeSerial(
               if (result.outcome === 'published') {
                 storedRichMessageId = result.message.id;
                 freshnessEgressDisposition = 'published';
-                if (!voiceMode) {
+                freshnessEgressReplayed = result.replayed === true;
+                if (!freshnessEgressReplayed && !voiceMode) {
                   noTextBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, noTextBlocks, catId);
                 }
                 if (options.persistenceContext) {
@@ -2014,6 +2074,7 @@ export async function* routeSerial(
             if (
               options.persistenceContext &&
               noTextBlocks.length > 0 &&
+              !freshnessEgressReplayed &&
               freshnessEgressDisposition !== 'held' &&
               freshnessEgressDisposition !== 'discarded'
             ) {
@@ -2050,7 +2111,12 @@ export async function* routeSerial(
             }
           }
 
-          if (deps.freshnessGate && freshnessEgressDisposition === 'published' && storedRichMessageId) {
+          if (
+            deps.freshnessGate &&
+            freshnessEgressDisposition === 'published' &&
+            !freshnessEgressReplayed &&
+            storedRichMessageId
+          ) {
             for (const callbackEvent of pendingCallbackExposureEvents.splice(0)) yield callbackEvent;
             for (const block of noTextBlocks) {
               yield {
@@ -2077,6 +2143,10 @@ export async function* routeSerial(
               invocationId: ownInvocationId,
               timestamp: Date.now(),
             } as AgentMessage;
+          }
+          if (freshnessEgressReplayed) {
+            pendingFreshnessToolExposureEvents.length = 0;
+            pendingCallbackExposureEvents.length = 0;
           }
         }
 
@@ -2127,6 +2197,17 @@ export async function* routeSerial(
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
         } else if (deps.draftStore && ownInvocationId) {
+          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
+        }
+      } else if (collectedToolEvents.length > 0 && deps.freshnessGate) {
+        // Tool-only provider failures have no publishable envelope. Treat the
+        // private attempt as fail-closed control flow; never persist or expose
+        // the tool input/result through history or downstream consumers.
+        if (options.persistenceContext) {
+          options.persistenceContext.egressByCat ??= {};
+          options.persistenceContext.egressByCat[catId as string] = { disposition: 'discarded' };
+        }
+        if (deps.draftStore && ownInvocationId) {
           deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
       } else if (collectedToolEvents.length > 0) {

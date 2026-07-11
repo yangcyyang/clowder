@@ -75,7 +75,16 @@ function shouldHoldWholeInvocation(context: Pick<PersistenceContext, 'egressByCa
   const verdicts = Object.values(context.egressByCat ?? {});
   return (
     verdicts.some((entry) => entry.disposition === 'held') &&
-    !verdicts.some((entry) => entry.disposition === 'published')
+    !verdicts.some((entry) => entry.disposition === 'published' && !entry.replayed)
+  );
+}
+
+function shouldSuppressWholeInvocation(context: Pick<PersistenceContext, 'egressByCat'>): boolean {
+  const verdicts = Object.values(context.egressByCat ?? {});
+  return (
+    verdicts.length > 0 &&
+    !verdicts.some((entry) => entry.disposition === 'published' && !entry.replayed) &&
+    verdicts.some((entry) => entry.disposition === 'held' || entry.disposition === 'discarded' || entry.replayed)
   );
 }
 
@@ -1984,7 +1993,7 @@ export class QueueProcessor {
               fastLaneEgress = egress;
               persistenceContext.egressByCat ??= {};
               persistenceContext.egressByCat[primaryCat] = egress;
-              if (egress.disposition === 'published') {
+              if (egress.disposition === 'published' && !egress.replayed) {
                 responseText = fastLaneResponseText;
                 socketManager.broadcastAgentMessage(
                   {
@@ -2050,9 +2059,11 @@ export class QueueProcessor {
                 workflowId: fastLaneDecision.workflowId,
                 workflowVersion: '1',
                 durationMs: result.durationMs,
-                ...(fastLaneEgress && fastLaneEgress.disposition !== 'published'
+                ...(fastLaneEgress && (fastLaneEgress.disposition !== 'published' || fastLaneEgress.replayed)
                   ? {
                       disposition: fastLaneEgress.disposition,
+                      ...(fastLaneEgress.messageId ? { messageId: fastLaneEgress.messageId } : {}),
+                      ...(fastLaneEgress.replayed ? { replayed: true } : {}),
                       ...(fastLaneEgress.holdId ? { holdId: fastLaneEgress.holdId } : {}),
                       ...(fastLaneEgress.version != null ? { version: fastLaneEgress.version } : {}),
                       ...(fastLaneEgress.reviewCount != null ? { reviewCount: fastLaneEgress.reviewCount } : {}),
@@ -2305,7 +2316,8 @@ export class QueueProcessor {
           if (
             this.deps.outboundHook &&
             (!persistenceContext.egressByCat?.[msg.catId] ||
-              persistenceContext.egressByCat[msg.catId]?.disposition === 'published')
+              (persistenceContext.egressByCat[msg.catId]?.disposition === 'published' &&
+                !persistenceContext.egressByCat[msg.catId]?.replayed))
           ) {
             if (threadMetaPromise) {
               threadMeta = await threadMetaPromise;
@@ -2423,7 +2435,7 @@ export class QueueProcessor {
       finalStatus = 'succeeded';
 
       for (const [catId, egress] of Object.entries(persistenceContext.egressByCat ?? {})) {
-        if (egress.disposition !== 'published') {
+        if (egress.disposition !== 'published' || egress.replayed) {
           nonPublishedCatIds.add(catId);
         }
       }
@@ -2590,7 +2602,7 @@ export class QueueProcessor {
   ): Promise<void> {
     const deliverableTurns = outboundTurns.filter((turn) => {
       const verdict = persistenceContext.egressByCat?.[turn.catId];
-      return !verdict || verdict.disposition === 'published';
+      return !verdict || (verdict.disposition === 'published' && !verdict.replayed);
     });
     const finalContent =
       outboundTurns.length > 0 ? flattenTurnTextParts(deliverableTurns) : flattenTextParts(collectedTextParts);
@@ -2609,6 +2621,13 @@ export class QueueProcessor {
     if (shouldHoldWholeInvocation(persistenceContext)) {
       await this.deps.streamingHook?.onStreamHold?.(threadId, invocationId).catch((err) => {
         log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamHold failed');
+      });
+      return;
+    }
+
+    if (shouldSuppressWholeInvocation(persistenceContext)) {
+      await this.deps.streamingHook?.cleanupPlaceholders?.(threadId, invocationId).catch((err) => {
+        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.cleanupPlaceholders failed (suppressed)');
       });
       return;
     }
@@ -2648,7 +2667,8 @@ export class QueueProcessor {
         (t, i) =>
           !(deliveredTurnIndices && deliveredTurnIndices.has(i)) &&
           (!persistenceContext.egressByCat?.[t.catId] ||
-            persistenceContext.egressByCat[t.catId]?.disposition === 'published') &&
+            (persistenceContext.egressByCat[t.catId]?.disposition === 'published' &&
+              !persistenceContext.egressByCat[t.catId]?.replayed)) &&
           (t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0)),
       );
 

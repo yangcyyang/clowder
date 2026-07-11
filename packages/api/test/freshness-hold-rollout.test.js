@@ -23,13 +23,22 @@ describe('Freshness Hold rollout policy', () => {
   });
 
   test('keeps the whole route legacy unless every target is allowlisted', () => {
+    const protectedRouteGate = {
+      isEnabledFor() {
+        return true;
+      },
+    };
     const gate = {
       isEnabledFor(threadId, catId) {
         return threadId === 'thread-a' && (catId === 'opus' || catId === 'codex');
       },
+      forProtectedRoute() {
+        return protectedRouteGate;
+      },
     };
 
-    assert.equal(selectRouteFreshnessGate(gate, 'thread-a', ['opus', 'codex']), gate);
+    assert.equal(selectRouteFreshnessGate(gate, 'thread-a', ['opus', 'codex']), protectedRouteGate);
+    assert.equal(protectedRouteGate.isEnabledFor('thread-a', 'gemini'), true);
     assert.equal(selectRouteFreshnessGate(gate, 'thread-a', ['opus', 'gemini']), undefined);
     assert.equal(selectRouteFreshnessGate(gate, 'thread-b', ['opus']), undefined);
   });

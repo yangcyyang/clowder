@@ -66,6 +66,8 @@ export type ConditionalAppendResult =
       readonly outcome: 'appended';
       readonly message: StoredMessage;
       readonly committedWatermark: ThreadAppendWatermark;
+      /** The idempotency index returned a previously committed message. */
+      readonly replayed?: true;
     }
   | {
       readonly outcome: 'stale';
@@ -151,6 +153,8 @@ export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
    * Reusing the same token returns the original stored message.
    */
   idempotencyKey?: string;
+  /** Internal append-only marker for the private queued half of a hold-release transition. */
+  freshnessReviewPublication?: true;
 };
 
 /**
@@ -375,6 +379,14 @@ export function isFreshnessRelevantMessage(
   return isFreshnessProtectedPublication(msg);
 }
 
+/** A review publication remains a delta barrier until its hold release CAS delivers it. */
+export function isPendingFreshnessReviewPublication(
+  deliveryStatus: StoredMessage['deliveryStatus'],
+  freshnessReviewPublication: boolean,
+): boolean {
+  return deliveryStatus === 'queued' && freshnessReviewPublication;
+}
+
 function freshnessGroupId(msg: Pick<StoredMessage, 'extra'>): string | undefined {
   const groupId = msg.extra?.stream?.invocationId?.trim();
   return groupId || undefined;
@@ -402,6 +414,7 @@ export class MessageStore {
   private readonly freshnessSequenceByThread = new Map<string, bigint>();
   private readonly freshnessPublicByThread = new Map<string, Map<string, bigint>>();
   private readonly freshnessWhisperByThread = new Map<string, Map<string, Map<string, bigint>>>();
+  private readonly freshnessReviewPublicationIds = new Set<string>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
@@ -504,16 +517,24 @@ export class MessageStore {
       .filter(([, revision]) => revision > afterRevision && revision <= throughRevision)
       .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT;
-    const messages = candidates
-      .slice(0, safeLimit)
-      .map(([id]) => this.getById(id))
-      .filter((msg): msg is StoredMessage => Boolean(msg && isFreshnessRelevantMessage(msg)));
+    const messages: StoredMessage[] = [];
+    let privateBarrier = false;
+    for (const [id] of candidates) {
+      const message = this.getById(id);
+      if (!message || !isFreshnessRelevantMessage(message)) continue;
+      if (isPendingFreshnessReviewPublication(message.deliveryStatus, this.freshnessReviewPublicationIds.has(id))) {
+        privateBarrier = true;
+        break;
+      }
+      messages.push(message);
+      if (messages.length >= safeLimit) break;
+    }
     const lastReturned = messages[messages.length - 1];
     return {
       // Never advance a review cursor past a message that was not returned.
       observedWatermark: lastReturned?.appendWatermark ?? after,
       messages,
-      truncated: candidates.length > safeLimit,
+      truncated: privateBarrier || candidates.length > messages.length,
     };
   }
 
@@ -531,6 +552,7 @@ export class MessageStore {
           outcome: 'appended',
           message: existing,
           committedWatermark: existing.appendWatermark ?? this.captureFreshnessWatermark(threadId, gate.audience),
+          replayed: true,
         };
       }
     }
@@ -581,7 +603,7 @@ export class MessageStore {
       }
     }
 
-    const { idempotencyKey, appendWatermark: _ignoredAppendWatermark, ...payload } = msg;
+    const { idempotencyKey, appendWatermark: _ignoredAppendWatermark, freshnessReviewPublication, ...payload } = msg;
     void idempotencyKey;
     void _ignoredAppendWatermark;
     const stored: StoredMessage = {
@@ -593,6 +615,7 @@ export class MessageStore {
       stored.appendWatermark = this.nextFreshnessWatermark(threadId);
     }
     this.messages.push(stored);
+    if (freshnessReviewPublication) this.freshnessReviewPublicationIds.add(stored.id);
     this.indexFreshnessMessage(stored);
     if (idempotencyIndexKey) {
       this.idempotencyIndex.set(idempotencyIndexKey, stored.id);
@@ -602,7 +625,10 @@ export class MessageStore {
     if (this.messages.length > this.maxMessages) {
       const removed = this.messages.slice(0, this.messages.length - this.maxMessages);
       this.messages = this.messages.slice(-this.maxMessages);
-      for (const entry of removed) this.removeFreshnessMessage(entry);
+      for (const entry of removed) {
+        this.removeFreshnessMessage(entry);
+        this.freshnessReviewPublicationIds.delete(entry.id);
+      }
       this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
     }
 
@@ -791,6 +817,7 @@ export class MessageStore {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => m.threadId !== threadId);
     this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
+    for (const entry of removed) this.freshnessReviewPublicationIds.delete(entry.id);
     // Keep the monotonic sequence as an ABA tombstone. A still-running old
     // invocation must not become fresh again if the same thread id is reused.
     this.freshnessPublicByThread.delete(threadId);
@@ -830,6 +857,7 @@ export class MessageStore {
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
     this.removeFreshnessMessage(msg);
+    this.freshnessReviewPublicationIds.delete(id);
     this.pruneIdempotencyIndexForMessageIds([id]);
     return msg;
   }
@@ -905,6 +933,7 @@ export class MessageStore {
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
+    this.freshnessReviewPublicationIds.delete(id);
     this.notifyAppend(msg);
     return msg;
   }
@@ -914,6 +943,7 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     msg.deliveryStatus = 'canceled';
+    this.freshnessReviewPublicationIds.delete(id);
     this.removeFreshnessMessage(msg);
     return msg;
   }
