@@ -45,6 +45,7 @@ import type { IThreadStore, ThreadRoutingPolicyV1, ThreadRoutingScope } from '..
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
 import type { AgentMessage, AgentService } from '../../types.js';
+import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
@@ -55,6 +56,17 @@ import { resolveCatTarget } from './cat-target-resolver.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
+
+export function selectRouteFreshnessGate(
+  gate: FreshnessEgressGate | undefined,
+  threadId: string | undefined,
+  targetCats: readonly CatId[] | undefined,
+): FreshnessEgressGate | undefined {
+  if (!gate || !threadId || !targetCats?.length) return undefined;
+  // Mixed routes stay entirely legacy until every target is in rollout. This
+  // avoids one shared route buffering non-allowlisted cats as a side effect.
+  return targetCats.every((catId) => gate.isEnabledFor(threadId, catId)) ? gate : undefined;
+}
 
 /** Parsed mention with position for ordering */
 interface ParsedMention {
@@ -132,6 +144,8 @@ export interface AgentRouterOptions {
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
+  /** Atomic Freshness Hold gate for final user-visible output. */
+  freshnessGate?: import('../freshness/FreshnessEgressGate.js').FreshnessEgressGate;
   /** F045 Gap #4: Redis-backed task progress snapshots */
   taskProgressStore?: TaskProgressStore;
   sessionStore?: SessionStore;
@@ -196,6 +210,7 @@ export class AgentRouter {
   private services: Record<string, AgentService>;
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
+  private freshnessGate: import('../freshness/FreshnessEgressGate.js').FreshnessEgressGate | undefined;
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
@@ -256,6 +271,7 @@ export class AgentRouter {
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
+    this.freshnessGate = options.freshnessGate;
     this.sessionManager = new SessionManager(options.sessionStore);
     this.deliveryCursorStore = options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore);
     this.threadStore = options.threadStore ?? null;
@@ -671,8 +687,9 @@ export class AgentRouter {
   }
 
   /** Build shared strategy dependencies (public for ModeOrchestrator) */
-  getStrategyDeps(): RouteStrategyDeps {
+  getStrategyDeps(threadId?: string, targetCats?: readonly CatId[]): RouteStrategyDeps {
     const apiPort = process.env.API_SERVER_PORT ?? '3004';
+    const routeFreshnessGate = selectRouteFreshnessGate(this.freshnessGate, threadId, targetCats);
     return {
       services: this.services,
       invocationDeps: {
@@ -695,6 +712,7 @@ export class AgentRouter {
         ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
       },
       messageStore: this.messageStore,
+      ...(routeFreshnessGate ? { freshnessGate: routeFreshnessGate } : {}),
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
@@ -774,7 +792,7 @@ export class AgentRouter {
       ...(contentBlocks ? { contentBlocks } : {}),
     });
 
-    const strategyDeps = this.getStrategyDeps();
+    const strategyDeps = this.getStrategyDeps(resolvedThreadId, targetCats);
     const routeOptions = {
       contentBlocks,
       uploadDir,
@@ -877,7 +895,7 @@ export class AgentRouter {
       await this.threadStore.updateLastActive(threadId);
     }
 
-    const strategyDeps = this.getStrategyDeps();
+    const strategyDeps = this.getStrategyDeps(threadId, targetCats);
     const routeOptions = {
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,

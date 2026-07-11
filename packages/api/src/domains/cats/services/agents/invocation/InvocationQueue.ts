@@ -14,6 +14,37 @@ import { randomUUID } from 'node:crypto';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 
+export interface FreshnessReviewDeltaMessage {
+  id: string;
+  userId: string;
+  catId: string | null;
+  content: string;
+  timestamp: number;
+}
+
+/**
+ * Public queue metadata for one held-draft review. QueueEntry is emitted via
+ * queue_updated, so it must never contain the private draft or message bodies.
+ */
+export interface FreshnessReviewQueueMetadata {
+  holdId: string;
+  expectedVersion: number;
+  originalInvocationId: string;
+  userId: string;
+  catId: string;
+  threadId: string;
+  reviewCount: number;
+  status: 'held' | 'needs_attention';
+}
+
+/** Private, process-local continuation envelope kept by QueueProcessor. */
+export interface FreshnessReviewPayload extends FreshnessReviewQueueMetadata {
+  draftContent: string;
+  deltaMessageIds: readonly string[];
+  /** Hydrated immediately before dispatch; never trusted as an ownership claim. */
+  deltaMessages?: readonly FreshnessReviewDeltaMessage[];
+}
+
 export interface QueueEntry {
   id: string;
   threadId: string;
@@ -41,9 +72,11 @@ export interface QueueEntry {
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
   priority: 'urgent' | 'normal';
   /** F175: origin category for visual grouping */
-  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation';
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'freshness_review';
   /** Queue-internal dedup key for agent control-flow work. */
   continuationKey?: string;
+  /** Bounded successor review for a Freshness Hold. */
+  freshnessReview?: FreshnessReviewQueueMetadata;
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
@@ -63,7 +96,9 @@ export interface EnqueueResult {
 const MAX_QUEUE_DEPTH = 5;
 
 export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sourceCategory'>): boolean {
-  return entry.source === 'agent' && entry.sourceCategory === 'continuation';
+  return (
+    entry.source === 'agent' && (entry.sourceCategory === 'continuation' || entry.sourceCategory === 'freshness_review')
+  );
 }
 
 export class InvocationQueue {
@@ -196,9 +231,14 @@ export class InvocationQueue {
       a2aTriggerMessageId: input.a2aTriggerMessageId,
       senderMeta: input.senderMeta,
       priority:
-        input.source === 'agent' && input.sourceCategory !== 'continuation' ? 'normal' : (input.priority ?? 'normal'),
+        input.source === 'agent' &&
+        input.sourceCategory !== 'continuation' &&
+        input.sourceCategory !== 'freshness_review'
+          ? 'normal'
+          : (input.priority ?? 'normal'),
       sourceCategory: input.sourceCategory,
       continuationKey: input.continuationKey,
+      freshnessReview: input.freshnessReview ? structuredClone(input.freshnessReview) : undefined,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
       position: undefined,

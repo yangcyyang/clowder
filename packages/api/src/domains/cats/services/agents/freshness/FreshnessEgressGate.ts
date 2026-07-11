@@ -35,23 +35,25 @@ export interface FreshnessSubmitInput {
 }
 
 export type FreshnessSubmitResult =
-  | { outcome: 'published'; message: StoredMessage }
-  | { outcome: 'held'; hold: FreshnessHoldRecord; delta: FreshnessDelta };
+  | { outcome: 'published'; message: StoredMessage; replayed?: true }
+  | { outcome: 'held'; hold: FreshnessHoldRecord; delta: FreshnessDelta }
+  | { outcome: 'needs_attention'; hold: FreshnessHoldRecord; delta: FreshnessDelta }
+  | { outcome: 'discarded'; hold: FreshnessHoldRecord };
 
 export interface FreshnessReviewInput {
   holdId: string;
   expectedVersion: number;
   action: 'send_draft' | 'replace' | 'discard';
   replacementDraft?: AppendMessageInput;
-  invocationId?: string;
-  userId?: string;
-  catId?: CatId;
-  threadId?: string;
+  invocationId: string;
+  userId: string;
+  catId: CatId;
+  threadId: string;
   now?: number;
 }
 
 export type FreshnessReviewResult =
-  | { outcome: 'published'; message: StoredMessage; hold: FreshnessHoldRecord }
+  | { outcome: 'published'; message: StoredMessage; hold: FreshnessHoldRecord; replayed?: true }
   | { outcome: 'held'; hold: FreshnessHoldRecord; delta: FreshnessDelta }
   | { outcome: 'needs_attention'; hold: FreshnessHoldRecord; delta: FreshnessDelta }
   | { outcome: 'discarded'; hold: FreshnessHoldRecord };
@@ -61,6 +63,7 @@ export interface FreshnessEgressGateOptions {
   holdStore: IFreshnessHoldStore;
   maxDeltaMessages?: number;
   reviewWindowMs?: number;
+  isEnabledFor?: (threadId: string, catId: CatId) => boolean;
 }
 
 export class FreshnessEgressGate {
@@ -68,16 +71,36 @@ export class FreshnessEgressGate {
   private readonly holdStore: IFreshnessHoldStore;
   private readonly maxDeltaMessages: number;
   private readonly reviewWindowMs: number;
+  private readonly enabledForPolicy: (threadId: string, catId: CatId) => boolean;
 
   constructor(options: FreshnessEgressGateOptions) {
     this.messageStore = options.messageStore;
     this.holdStore = options.holdStore;
     this.maxDeltaMessages = this.positiveInteger(options.maxDeltaMessages, DEFAULT_MAX_DELTA_MESSAGES);
     this.reviewWindowMs = this.positiveInteger(options.reviewWindowMs, DEFAULT_REVIEW_WINDOW_MS);
+    this.enabledForPolicy = options.isEnabledFor ?? (() => true);
+  }
+
+  isEnabledFor(threadId: string, catId: CatId): boolean {
+    return this.enabledForPolicy(threadId, catId);
   }
 
   async submit(input: FreshnessSubmitInput): Promise<FreshnessSubmitResult> {
+    if (!this.isEnabledFor(input.threadId, input.catId)) {
+      return {
+        outcome: 'published',
+        message: await this.messageStore.append({
+          ...input.draft,
+          userId: input.userId,
+          catId: input.catId,
+          threadId: input.threadId,
+        }),
+      };
+    }
     const audience = { kind: 'cat' as const, catId: input.catId };
+    const existingHold = await this.holdStore.getBySubmission(input.invocationId, input.submissionKey);
+    if (existingHold) return this.replaySubmission(existingHold);
+
     const draft: AppendMessageInput = {
       ...input.draft,
       userId: input.userId,
@@ -87,6 +110,7 @@ export class FreshnessEgressGate {
     const appendResult = await this.messageStore.appendIfFresh(draft, {
       baseline: input.baselineWatermark,
       audience,
+      groupId: draft.extra?.stream?.invocationId ?? input.invocationId,
     });
     if (appendResult.outcome === 'appended') {
       return { outcome: 'published', message: appendResult.message };
@@ -107,7 +131,7 @@ export class FreshnessEgressGate {
       catId: input.catId,
       threadId: input.threadId,
       baselineWatermark: input.baselineWatermark,
-      observedWatermark: appendResult.observedWatermark,
+      observedWatermark: delta.observedWatermark,
       deltaMessageIds: delta.messages.map((message) => message.id),
       draft: structuredClone(draft) as FreshnessHeldDraft,
       createdAt: now,
@@ -118,30 +142,21 @@ export class FreshnessEgressGate {
       return { outcome: 'held', hold: created.hold, delta };
     }
 
-    // A transport retry must replay the original hold context, not reinterpret
-    // the same submission against messages that arrived later.
-    const replayDelta = await this.messageStore.getFreshnessDelta(
-      created.hold.threadId,
-      { kind: 'cat', catId: created.hold.catId },
-      created.hold.baselineWatermark as ThreadAppendWatermark,
-      created.hold.observedWatermark as ThreadAppendWatermark,
-      this.maxDeltaMessages,
-    );
-    return { outcome: 'held', hold: created.hold, delta: replayDelta };
+    return this.replaySubmission(created.hold);
+  }
+
+  async getHold(holdId: string): Promise<FreshnessHoldRecord | null> {
+    return this.holdStore.get(holdId);
   }
 
   async review(input: FreshnessReviewInput): Promise<FreshnessReviewResult> {
     const existing = await this.holdStore.get(input.holdId);
     if (!existing) throw new Error(`Freshness hold not found: ${input.holdId}`);
-    if (
-      (input.invocationId && existing.invocationId !== input.invocationId) ||
-      (input.userId && existing.userId !== input.userId) ||
-      (input.catId && existing.catId !== input.catId) ||
-      (input.threadId && existing.threadId !== input.threadId)
-    ) {
-      throw new Error('Freshness hold ownership mismatch');
-    }
+    this.assertReviewOwnership(existing, input);
     const now = input.now ?? Date.now();
+
+    const terminalReplay = await this.replayTerminalReview(existing, now);
+    if (terminalReplay) return terminalReplay;
 
     if (input.action === 'discard') {
       const discarded = await this.holdStore.discard(input.holdId, {
@@ -152,56 +167,132 @@ export class FreshnessEgressGate {
       return { outcome: 'discarded', hold: discarded };
     }
 
-    const claimed = await this.holdStore.claimReview(input.holdId, {
-      expectedVersion: input.expectedVersion,
-      now,
-    });
-    if (!claimed) {
-      const latest = await this.holdStore.get(input.holdId);
-      if (latest?.status === 'needs_attention') {
-        const delta = await this.deltaForHold(latest);
-        return { outcome: 'needs_attention', hold: latest, delta };
-      }
-      throw new Error('Freshness hold version conflict');
-    }
-
-    if (input.action === 'replace' && !input.replacementDraft) {
-      throw new Error('replacementDraft is required for replace');
-    }
-    const selectedDraft =
-      input.action === 'replace' ? input.replacementDraft! : (claimed.draft as unknown as AppendMessageInput);
+    const claim = await this.claimOrRecoverReview(existing, input, now);
+    if (claim.outcome === 'replayed') return claim.result;
+    const claimed = claim.hold;
+    const selectedDraft = this.selectReviewDraft(claimed, input);
     const heldDraft: AppendMessageInput = {
       ...selectedDraft,
       userId: claimed.userId,
       catId: claimed.catId,
       threadId: claimed.threadId,
     };
+    return this.publishOrRehold(claimed, heldDraft, now);
+  }
+
+  private assertReviewOwnership(existing: FreshnessHoldRecord, input: FreshnessReviewInput): void {
+    if (
+      existing.invocationId !== input.invocationId ||
+      existing.userId !== input.userId ||
+      existing.catId !== input.catId ||
+      existing.threadId !== input.threadId
+    ) {
+      throw new Error('Freshness hold ownership mismatch');
+    }
+  }
+
+  private async claimOrRecoverReview(
+    existing: FreshnessHoldRecord,
+    input: FreshnessReviewInput,
+    now: number,
+  ): Promise<
+    { outcome: 'claimed'; hold: FreshnessHoldRecord } | { outcome: 'replayed'; result: FreshnessReviewResult }
+  > {
+    if (existing.status === 'reviewing') {
+      this.assertRecoverableReviewVersion(existing, input.expectedVersion);
+      return { outcome: 'claimed', hold: existing };
+    }
+
+    const claimed = await this.holdStore.claimReview(input.holdId, {
+      expectedVersion: input.expectedVersion,
+      now,
+    });
+    if (claimed) return { outcome: 'claimed', hold: claimed };
+
+    const latest = await this.holdStore.get(input.holdId);
+    if (!latest) throw new Error(`Freshness hold not found: ${input.holdId}`);
+    const terminalReplay = await this.replayTerminalReview(latest, now);
+    if (terminalReplay) return { outcome: 'replayed', result: terminalReplay };
+    this.assertRecoverableReviewVersion(latest, input.expectedVersion);
+    return { outcome: 'claimed', hold: latest };
+  }
+
+  private assertRecoverableReviewVersion(hold: FreshnessHoldRecord, expectedVersion: number): void {
+    if (hold.status !== 'reviewing' || (expectedVersion !== hold.version && expectedVersion !== hold.version - 1)) {
+      throw new Error('Freshness hold version conflict');
+    }
+  }
+
+  private selectReviewDraft(claimed: FreshnessHoldRecord, input: FreshnessReviewInput): AppendMessageInput {
+    if (input.action !== 'replace') return claimed.draft as unknown as AppendMessageInput;
+    if (!input.replacementDraft) throw new Error('replacementDraft is required for replace');
+    return input.replacementDraft;
+  }
+
+  private async publishOrRehold(
+    claimed: FreshnessHoldRecord,
+    heldDraft: AppendMessageInput,
+    now: number,
+  ): Promise<FreshnessReviewResult> {
     const publishDraft: AppendMessageInput = {
       ...heldDraft,
       timestamp: now,
       idempotencyKey: `freshness-hold:${claimed.id}`,
+      // Review publication is a two-store transition. Keep the message out of
+      // history/fanout until the hold CAS succeeds.
+      deliveryStatus: 'queued',
     };
     const audience = { kind: 'cat' as const, catId: claimed.catId };
     const appendResult = await this.messageStore.appendIfFresh(publishDraft, {
       baseline: claimed.observedWatermark as ThreadAppendWatermark,
       audience,
+      groupId: publishDraft.extra?.stream?.invocationId ?? claimed.invocationId,
     });
 
     if (appendResult.outcome === 'appended') {
-      const released = await this.holdStore.release(claimed.id, {
-        expectedVersion: claimed.version,
-        messageId: appendResult.message.id,
-        committedWatermark: appendResult.committedWatermark,
-        now,
-      });
-      if (!released) {
-        // The message append is idempotent. A retry will recover the same
-        // message and finish this CAS transition rather than double-publish.
-        throw new Error('Freshness hold release version conflict');
-      }
-      return { outcome: 'published', message: appendResult.message, hold: released };
+      return this.releaseQueuedPublication(claimed, appendResult, now);
     }
 
+    return this.reholdStalePublication(claimed, heldDraft, appendResult, audience, now);
+  }
+
+  private async releaseQueuedPublication(
+    claimed: FreshnessHoldRecord,
+    appendResult: Extract<Awaited<ReturnType<IMessageStore['appendIfFresh']>>, { outcome: 'appended' }>,
+    now: number,
+  ): Promise<FreshnessReviewResult> {
+    const released = await this.holdStore.release(claimed.id, {
+      expectedVersion: claimed.version,
+      messageId: appendResult.message.id,
+      committedWatermark: appendResult.committedWatermark,
+      now,
+    });
+    if (released) {
+      const delivered = await this.deliverReleasedMessage(released, now);
+      return { outcome: 'published', message: delivered, hold: released };
+    }
+
+    const latest = await this.holdStore.get(claimed.id);
+    if (latest?.status === 'released' && latest.releasedMessageId === appendResult.message.id) {
+      const delivered = await this.deliverReleasedMessage(latest, now);
+      return { outcome: 'published', message: delivered, hold: latest, replayed: true };
+    }
+    // Only a terminal state that cannot subsequently release this message
+    // makes cancellation safe. A still-reviewing record may belong to the
+    // concurrent winner using this same idempotent message.
+    if (latest?.status === 'discarded' || latest?.status === 'needs_attention') {
+      await this.messageStore.markCanceled(appendResult.message.id);
+    }
+    throw new Error('Freshness hold release version conflict');
+  }
+
+  private async reholdStalePublication(
+    claimed: FreshnessHoldRecord,
+    heldDraft: AppendMessageInput,
+    appendResult: Extract<Awaited<ReturnType<IMessageStore['appendIfFresh']>>, { outcome: 'stale' }>,
+    audience: { kind: 'cat'; catId: CatId },
+    now: number,
+  ): Promise<FreshnessReviewResult> {
     const delta = await this.messageStore.getFreshnessDelta(
       claimed.threadId,
       audience,
@@ -211,12 +302,21 @@ export class FreshnessEgressGate {
     );
     const reheld = await this.holdStore.rehold(claimed.id, {
       expectedVersion: claimed.version,
-      observedWatermark: appendResult.observedWatermark,
+      observedWatermark: delta.observedWatermark,
       deltaMessageIds: delta.messages.map((message) => message.id),
       draft: structuredClone(heldDraft) as FreshnessHeldDraft,
       now,
     });
-    if (!reheld) throw new Error('Freshness hold rehold version conflict');
+    if (!reheld) {
+      const latest = await this.holdStore.get(claimed.id);
+      if (!latest) throw new Error(`Freshness hold not found: ${claimed.id}`);
+      const latestTerminal = await this.replayTerminalReview(latest, now);
+      if (latestTerminal) return latestTerminal;
+      if (latest.status === 'held' || latest.status === 'reviewing') {
+        return { outcome: 'held', hold: latest, delta: await this.deltaForHold(latest) };
+      }
+      throw new Error('Freshness hold rehold version conflict');
+    }
     return {
       outcome: reheld.status === 'needs_attention' ? 'needs_attention' : 'held',
       hold: reheld,
@@ -224,14 +324,64 @@ export class FreshnessEgressGate {
     };
   }
 
+  private async replaySubmission(hold: FreshnessHoldRecord): Promise<FreshnessSubmitResult> {
+    if (hold.status === 'released') {
+      return {
+        outcome: 'published',
+        message: await this.deliverReleasedMessage(hold, Date.now()),
+        replayed: true,
+      };
+    }
+    if (hold.status === 'discarded') return { outcome: 'discarded', hold };
+    const delta = await this.deltaForHold(hold);
+    return {
+      outcome: hold.status === 'needs_attention' ? 'needs_attention' : 'held',
+      hold,
+      delta,
+    };
+  }
+
+  private async replayTerminalReview(hold: FreshnessHoldRecord, now: number): Promise<FreshnessReviewResult | null> {
+    if (hold.status === 'released') {
+      return {
+        outcome: 'published',
+        message: await this.deliverReleasedMessage(hold, now),
+        hold,
+        replayed: true,
+      };
+    }
+    if (hold.status === 'discarded') return { outcome: 'discarded', hold };
+    if (hold.status === 'needs_attention') {
+      return { outcome: 'needs_attention', hold, delta: await this.deltaForHold(hold) };
+    }
+    return null;
+  }
+
+  private async deliverReleasedMessage(hold: FreshnessHoldRecord, now: number): Promise<StoredMessage> {
+    if (!hold.releasedMessageId) throw new Error('Freshness hold released message id not found');
+    let message = await this.messageStore.getById(hold.releasedMessageId);
+    if (!message) throw new Error('Freshness hold released message not found');
+    if (message.deliveryStatus === 'queued') {
+      message = await this.messageStore.markDelivered(message.id, now);
+    }
+    if (!message || message.deliveryStatus === 'queued' || message.deliveryStatus === 'canceled') {
+      throw new Error('Freshness hold released message could not be delivered');
+    }
+    if (message.deletedAt || message._tombstone) {
+      throw new Error('Freshness hold released message is not publishable');
+    }
+    return message;
+  }
+
   private async deltaForHold(hold: FreshnessHoldRecord): Promise<FreshnessDelta> {
-    return this.messageStore.getFreshnessDelta(
-      hold.threadId,
-      { kind: 'cat', catId: hold.catId },
-      hold.baselineWatermark as ThreadAppendWatermark,
-      hold.observedWatermark as ThreadAppendWatermark,
-      this.maxDeltaMessages,
-    );
+    const messages = (
+      await Promise.all(hold.deltaMessageIds.map((messageId) => this.messageStore.getById(messageId)))
+    ).filter((message): message is StoredMessage => message !== null);
+    return {
+      observedWatermark: hold.observedWatermark as ThreadAppendWatermark,
+      messages,
+      truncated: false,
+    };
   }
 
   private positiveInteger(value: number | undefined, fallback: number): number {

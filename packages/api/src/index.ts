@@ -27,9 +27,13 @@ import {
   isCatAvailable,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
+import { isFreshnessHoldEnabledFor, loadFreshnessHoldRollout } from './config/freshness-hold-rollout.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
+import { FreshnessEgressGate } from './domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import { FreshnessHoldExpiryScheduler } from './domains/cats/services/agents/freshness/FreshnessHoldExpiryScheduler.js';
+import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
@@ -37,7 +41,6 @@ import {
   selectInvocationBackendKind,
 } from './domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
-import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
@@ -80,6 +83,7 @@ import { createAuthorizationAuditStore } from './domains/cats/services/stores/fa
 import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
+import { createFreshnessHoldStore } from './domains/cats/services/stores/factories/FreshnessHoldStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createPendingRequestStore } from './domains/cats/services/stores/factories/PendingRequestStoreFactory.js';
@@ -129,6 +133,7 @@ import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
+import { freshnessHoldsRoutes } from './routes/freshness-holds.js';
 import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
@@ -467,6 +472,28 @@ async function main(): Promise<void> {
     onAppend: (msg) => {
       appendListener?.(msg);
     },
+  });
+  const holdStore = createFreshnessHoldStore(redis, { maxReviews: 2 });
+  const freshnessRollout = loadFreshnessHoldRollout(process.env);
+  const freshnessGate = freshnessRollout.enabled
+    ? new FreshnessEgressGate({
+        messageStore,
+        holdStore,
+        isEnabledFor: (threadId, catId) => isFreshnessHoldEnabledFor(freshnessRollout, threadId, catId),
+      })
+    : undefined;
+  app.log.info(
+    {
+      enabled: freshnessRollout.enabled,
+      cats: [...freshnessRollout.cats],
+      threads: [...freshnessRollout.threads],
+    },
+    '[freshness-hold] rollout policy loaded',
+  );
+  const freshnessHoldExpiryScheduler = new FreshnessHoldExpiryScheduler({ holdStore, log: app.log });
+  await freshnessHoldExpiryScheduler.start();
+  app.addHook('onClose', async () => {
+    freshnessHoldExpiryScheduler.stop();
   });
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
@@ -818,14 +845,8 @@ async function main(): Promise<void> {
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
     try {
       const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
-      const {
-        DEFAULT_PI_SUMMARY_MODEL,
-        createAbstractiveClient,
-        createAgentAbstractiveClient,
-        getSummaryProviderId,
-      } = await import(
-        './domains/memory/AbstractiveSummaryClient.js'
-      );
+      const { DEFAULT_PI_SUMMARY_MODEL, createAbstractiveClient, createAgentAbstractiveClient, getSummaryProviderId } =
+        await import('./domains/memory/AbstractiveSummaryClient.js');
       const parseThreadListEnv = (value: string | undefined): Set<string> | null => {
         const ids = (value ?? '')
           .split(',')
@@ -849,19 +870,15 @@ async function main(): Promise<void> {
               const catId = createCatId(process.env.CAT_CAFE_SUMMARY_CODEX_CAT_ID?.trim() || 'gpt52');
               const model = process.env.CAT_CAFE_SUMMARY_CODEX_MODEL?.trim() || 'gpt-5.5';
               const codexSummaryService = new CodexAgentService({ catId, model });
-              return createAgentAbstractiveClient(
-                codexSummaryService.invoke.bind(codexSummaryService),
-                summaryLogger,
-                {
-                  providerId: 'codex-cli',
-                  workingDirectory: findMonorepoRoot(process.cwd()),
-                  callbackEnv: {
-                    CAT_CAFE_AGENT_OUTPUT_GATE: '1',
-                    CAT_CAFE_CODEX_OUTPUT_GATE: '1',
-                  },
-                  cliConfigArgs: ['--config', 'model_reasoning_effort="low"'],
+              return createAgentAbstractiveClient(codexSummaryService.invoke.bind(codexSummaryService), summaryLogger, {
+                providerId: 'codex-cli',
+                workingDirectory: findMonorepoRoot(process.cwd()),
+                callbackEnv: {
+                  CAT_CAFE_AGENT_OUTPUT_GATE: '1',
+                  CAT_CAFE_CODEX_OUTPUT_GATE: '1',
                 },
-              );
+                cliConfigArgs: ['--config', 'model_reasoning_effort="low"'],
+              });
             })()
           : summaryProvider === 'pi-cli'
             ? (() => {
@@ -877,8 +894,7 @@ async function main(): Promise<void> {
                   },
                 });
               })()
-            : createAbstractiveClient(
-              async () => {
+            : createAbstractiveClient(async () => {
                 // Priority 1: explicit F102 config
                 if (process.env.F102_API_BASE && process.env.F102_API_KEY) {
                   return {
@@ -911,9 +927,7 @@ async function main(): Promise<void> {
                   // No proxy config → try direct with API key
                   return { mode: 'api_key' as const, baseUrl: 'https://api.anthropic.com', apiKey };
                 }
-              },
-              summaryLogger,
-            );
+              }, summaryLogger);
       app.log.info(`[api] summary provider: ${summaryProvider}`);
 
       const db = memoryServices.store.getDb();
@@ -1299,6 +1313,7 @@ async function main(): Promise<void> {
     agentRegistry,
     registry,
     messageStore,
+    ...(freshnessGate ? { freshnessGate } : {}),
     taskProgressStore,
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
     ...(sessionStore ? { sessionStore } : {}),
@@ -1349,6 +1364,7 @@ async function main(): Promise<void> {
     router: router as unknown as RouterLike,
     socketManager,
     messageStore,
+    ...(freshnessGate ? { freshnessGate } : {}),
     taskStore,
     log: app.log,
     catSupervisor,
@@ -1436,6 +1452,7 @@ async function main(): Promise<void> {
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
   };
   await app.register(messagesRoutes, messagesOpts);
+  await app.register(freshnessHoldsRoutes, { holdStore });
   await app.register(queueRoutes, {
     threadStore,
     invocationQueue,
@@ -1606,6 +1623,7 @@ async function main(): Promise<void> {
     registry,
     agentKeyRegistry,
     messageStore,
+    ...(freshnessGate ? { freshnessGate } : {}),
     socketManager,
     callbackAuthNotifier,
     taskStore,

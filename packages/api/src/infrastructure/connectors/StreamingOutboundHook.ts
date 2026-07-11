@@ -6,6 +6,7 @@ import type { IStreamableOutboundAdapter } from './OutboundDeliveryHook.js';
 
 const DEFAULT_UPDATE_INTERVAL_MS = 2000;
 const DEFAULT_MIN_DELTA_CHARS = 200;
+const FRESHNESS_HOLD_PLACEHOLDER_TEXT = '📝 收到新消息，正在重新审阅…';
 
 interface StreamingSession {
   readonly connectorId: string;
@@ -38,6 +39,8 @@ export class StreamingOutboundHook {
   private readonly pendingChunks = new Map<string, string>();
   private readonly endedBeforeStart = new Map<string, EndedBeforeStart>();
   private readonly lateStartedCleanup = new Map<string, StreamingSession[]>();
+  /** Hold can win before the asynchronous placeholder creation completes. */
+  private readonly heldBeforeStart = new Set<string>();
   private readonly updateIntervalMs: number;
   private readonly minDeltaChars: number;
 
@@ -113,6 +116,20 @@ export class StreamingOutboundHook {
     }
   }
 
+  private async markSessionsHeld(sessions: StreamingSession[]): Promise<void> {
+    for (const session of sessions) {
+      const adapter = this.opts.adapters.get(session.connectorId);
+      if (!adapter || !session.platformMessageId) continue;
+      try {
+        // An inline placeholder must no longer be eligible for a later normal delivery.
+        await adapter.clearInlinePlaceholder?.(session.externalChatId, session.platformMessageId);
+        await adapter.editMessage?.(session.externalChatId, session.platformMessageId, FRESHNESS_HOLD_PLACEHOLDER_TEXT);
+      } catch (err) {
+        this.opts.log.warn({ err, connectorId: session.connectorId }, '[StreamingOutbound] mark hold failed');
+      }
+    }
+  }
+
   async onStreamStart(
     threadId: string,
     catId?: CatId,
@@ -153,6 +170,14 @@ export class StreamingOutboundHook {
 
     if (sessions.length === 0) {
       this.clearEndedBeforeStart(key);
+      this.heldBeforeStart.delete(key);
+      return;
+    }
+
+    if (this.heldBeforeStart.delete(key)) {
+      this.pendingChunks.delete(key);
+      this.clearEndedBeforeStart(key);
+      await this.markSessionsHeld(sessions);
       return;
     }
 
@@ -177,12 +202,41 @@ export class StreamingOutboundHook {
 
   async onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void> {
     const key = this.scopeKey(threadId, invocationId);
+    if (this.heldBeforeStart.has(key)) return;
     const sessions = this.sessions.get(key);
     if (!sessions) {
       if (!this.endedBeforeStart.has(key)) this.pendingChunks.set(key, accumulatedText);
       return;
     }
     await this.applyChunkToSessions(sessions, accumulatedText);
+  }
+
+  /**
+   * Keep the receipt visible while a stale draft is re-reviewed.
+   * This is deliberately distinct from onStreamEnd: a held draft was not delivered.
+   */
+  async onStreamHold(threadId: string, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    this.pendingChunks.delete(key);
+    this.clearEndedBeforeStart(key);
+
+    const sessions = [
+      ...(this.sessions.get(key) ?? []),
+      ...(this.pendingCleanup.get(key) ?? []),
+      ...(this.pendingInlineCleanup.get(key) ?? []),
+      ...(this.lateStartedCleanup.get(key) ?? []),
+    ];
+    this.sessions.delete(key);
+    this.pendingCleanup.delete(key);
+    this.pendingInlineCleanup.delete(key);
+    this.lateStartedCleanup.delete(key);
+
+    if (sessions.length === 0) {
+      this.heldBeforeStart.add(key);
+      return;
+    }
+    this.heldBeforeStart.delete(key);
+    await this.markSessionsHeld(sessions);
   }
 
   async onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void> {

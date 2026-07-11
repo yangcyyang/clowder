@@ -15,6 +15,7 @@ import { describe, test } from 'node:test';
 const EXPECTED_TOOLS = [
   // Callback tools (chat + task + ack)
   'cat_cafe_post_message',
+  'cat_cafe_review_held_message',
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
@@ -99,6 +100,7 @@ const EXPECTED_TOOLS = [
 
 const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_post_message',
+  'cat_cafe_review_held_message',
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
@@ -240,6 +242,26 @@ describe('MCP Server Tool Registration', () => {
       postTool.inputSchema._def.shape().agentKeyCatId.isOptional(),
       'post_message agentKeyCatId stays schema-optional for invocation auth; shared persistent agent-key auth requires it at runtime',
     );
+    assert.ok(!shapeKeys.includes('messageClass'), 'LLM post_message must not expose a freshness exemption field');
+  });
+
+  test('review_held_message schema exposes the API review contract', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const reviewTool = server._registeredTools.cat_cafe_review_held_message;
+    assert.ok(reviewTool, 'review_held_message tool should exist');
+    for (const marker of ['Use when:', 'NOT for:', 'Output:', 'GOTCHA:']) {
+      assert.ok(reviewTool.description.includes(marker), `review_held_message description must include ${marker}`);
+    }
+    const shape = reviewTool.inputSchema._def.shape();
+    assert.equal(shape.holdId.isOptional(), false);
+    assert.equal(shape.action.isOptional(), false);
+    assert.equal(shape.expectedVersion.isOptional(), false);
+    assert.equal(shape.replacement.isOptional(), true);
+    for (const action of ['replace', 'send_draft', 'discard']) {
+      assert.equal(shape.action.safeParse(action).success, true, `action ${action} should be accepted`);
+    }
   });
 
   test('cross_post_message schema must REQUIRE threadId', async () => {
@@ -327,6 +349,7 @@ describe('MCP Server Tool Registration', () => {
 
 const KNOWN_WRITE_TOOLS = [
   'cat_cafe_post_message',
+  'cat_cafe_review_held_message',
   'cat_cafe_ack_mentions',
   'cat_cafe_cross_post_message',
   'cat_cafe_multi_mention',

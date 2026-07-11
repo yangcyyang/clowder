@@ -4,6 +4,7 @@ import {
   cleanupStreamingOnFailure,
   deliverOutboundFromWeb,
   deliverWebUserMessageToConnector,
+  enqueueFreshnessReviewsFromPersistence,
 } from '../dist/routes/messages.js';
 
 function noopLog() {
@@ -29,7 +30,7 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
 
   beforeEach(() => {
     deliverCalls = [];
-    streamCalls = { start: [], chunk: [], end: [], cleanup: [] };
+    streamCalls = { start: [], chunk: [], end: [], hold: [], cleanup: [] };
 
     mockOutboundHook = {
       async deliver(threadId, content, catId, richBlocks, threadMeta) {
@@ -46,6 +47,9 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
       },
       async onStreamEnd(threadId, text, invocationId) {
         streamCalls.end.push({ threadId, text, invocationId });
+      },
+      async onStreamHold(threadId, invocationId) {
+        streamCalls.hold.push({ threadId, invocationId });
       },
       async cleanupPlaceholders(threadId, invocationId) {
         streamCalls.cleanup.push({ threadId, invocationId });
@@ -186,6 +190,97 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(streamCalls.cleanup.length, 1);
   });
 
+  it('freshness hold never reaches normal stream end or outbound delivery', async () => {
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const ctx = {
+      failed: false,
+      errors: [],
+      egressByCat: {
+        opus: { disposition: 'held', holdId: 'hold-1', observedWatermark: '2' },
+      },
+    };
+    const startPromise = mockStreamingHook.onStreamStart('t-1', 'opus', 'inv-held');
+
+    await deliverOutboundFromWeb(
+      't-1',
+      'opus',
+      'inv-held',
+      ['stale draft'],
+      [{ catId: 'opus', textParts: ['stale draft'], richBlocks: [{ id: 'private-block' }] }],
+      ctx,
+      startPromise,
+      opts,
+      noopLog(),
+    );
+
+    assert.deepEqual(streamCalls.hold, [{ threadId: 't-1', invocationId: 'inv-held' }]);
+    assert.equal(streamCalls.end.length, 0);
+    assert.equal(streamCalls.cleanup.length, 0);
+    assert.equal(deliverCalls.length, 0);
+  });
+
+  it('discarded rich-only payload is rejected even if a route leaves it in consumer state', async () => {
+    const privateRichSentinel = { id: 'PRIVATE-DISCARDED-WEB-RICH' };
+    const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });
+    const ctx = {
+      failed: false,
+      errors: [],
+      richBlocks: [privateRichSentinel],
+      egressByCat: { opus: { disposition: 'discarded', holdId: 'discarded-web' } },
+    };
+
+    await deliverOutboundFromWeb(
+      't-discarded',
+      'opus',
+      'inv-discarded',
+      [],
+      [{ catId: 'opus', textParts: [], richBlocks: [privateRichSentinel] }],
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(deliverCalls.length, 0, 'discarded rich payload must not reach outbound adapters');
+    assert.equal(JSON.stringify(deliverCalls).includes(privateRichSentinel.id), false);
+  });
+
+  it('mixed per-cat verdict still delivers the published turn and does not hold the whole invocation', async () => {
+    const opts = makeOpts({
+      outboundHook: mockOutboundHook,
+      streamingHook: mockStreamingHook,
+    });
+    const ctx = {
+      failed: false,
+      errors: [],
+      egressByCat: {
+        opus: { disposition: 'published', messageId: 'published-opus' },
+        codex: { disposition: 'held', holdId: 'held-codex', observedWatermark: '4' },
+      },
+    };
+
+    await deliverOutboundFromWeb(
+      't-mixed',
+      'opus',
+      'inv-mixed',
+      ['safe published turn'],
+      [{ catId: 'opus', textParts: ['safe published turn'] }],
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].catId, 'opus');
+    assert.equal(deliverCalls[0].content, 'safe published turn');
+    assert.equal(streamCalls.end.length, 1);
+    assert.equal(streamCalls.hold.length, 0);
+  });
+
   it('does not throw when outbound deliver fails', async () => {
     const failHook = {
       async deliver() {
@@ -249,6 +344,49 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(deliverCalls[0].threadMeta.threadTitle, 'Test Thread');
     assert.match(deliverCalls[0].threadMeta.deepLinkUrl, /\/thread\/t-1$/);
     assert.ok(!deliverCalls[0].threadMeta.deepLinkUrl.includes('/threads/'));
+  });
+});
+
+describe('freshness review continuation handoff', () => {
+  it('enqueues only actionable held reviews and never needs_attention entries', () => {
+    const calls = [];
+    const queueProcessor = {
+      enqueueFreshnessReview(review) {
+        calls.push(review);
+        return { outcome: 'enqueued' };
+      },
+    };
+    const actionable = {
+      holdId: 'hold-actionable',
+      expectedVersion: 2,
+      originalInvocationId: 'inv-original',
+      userId: 'user-1',
+      catId: 'opus',
+      threadId: 'thread-1',
+      reviewCount: 0,
+      status: 'held',
+      draftContent: 'private draft',
+      deltaMessageIds: ['new-1'],
+    };
+    const count = enqueueFreshnessReviewsFromPersistence(
+      {
+        failed: false,
+        errors: [],
+        egressByCat: {
+          opus: { disposition: 'held', holdStatus: 'held', freshnessReview: actionable },
+          codex: {
+            disposition: 'held',
+            holdStatus: 'needs_attention',
+            freshnessReview: { ...actionable, holdId: 'hold-terminal', status: 'needs_attention' },
+          },
+          kimi: { disposition: 'published', messageId: 'published-kimi' },
+        },
+      },
+      queueProcessor,
+    );
+
+    assert.equal(count, 1);
+    assert.deepEqual(calls, [actionable]);
   });
 });
 

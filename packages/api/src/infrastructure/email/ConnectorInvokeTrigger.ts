@@ -14,17 +14,21 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../../config/cat-config-loader.js';
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { isParallelDispatchEnabled } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { isParallelDispatchEnabled } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
-import type { IMessageStore, StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import type { IMessageStore, StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
+
+type FreshnessAwareStreamingHook = StreamingOutboundHook & {
+  onStreamHold?: (threadId: string, invocationId?: string) => Promise<void>;
+};
 
 export type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
@@ -383,7 +387,11 @@ export class ConnectorInvokeTrigger {
           }
           // ISSUE-9: snapshot richBlocks for current turn before next cat overwrites
           // Cloud-P1-5 fix: only reuse turn if still open (currentTurnCatId matches)
-          if (persistenceContext.richBlocks) {
+          const egressDisposition = persistenceContext.egressByCat?.[msg.catId]?.disposition;
+          const suppressCatOutput = egressDisposition === 'held' || egressDisposition === 'discarded';
+          if (suppressCatOutput) {
+            persistenceContext.richBlocks = undefined;
+          } else if (persistenceContext.richBlocks) {
             const turn = outboundTurns[outboundTurns.length - 1];
             if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
               turn.richBlocks = [...persistenceContext.richBlocks];
@@ -406,6 +414,7 @@ export class ConnectorInvokeTrigger {
               if (deliveredTurnIndices.has(i)) continue;
               const turn = outboundTurns[i];
               if (turn.catId !== msg.catId) continue;
+              if (suppressCatOutput) continue;
               const turnContent = turn.textParts.join('');
               if (!turnContent && !turn.richBlocks?.length) continue;
               try {
@@ -476,10 +485,12 @@ export class ConnectorInvokeTrigger {
           error: `Connector invoke: message delivered but persistence failed: ${errorDetail}`,
         });
       } else {
+        const freshnessHeld = hasFreshnessHold(persistenceContext);
+        const freshnessSuppressed = hasFreshnessSuppressedOutput(persistenceContext);
         const generatedVisibleContent =
           collectedTextParts.length > 0 ||
           outboundTurns.some((turn) => turn.textParts.length > 0 || (turn.richBlocks && turn.richBlocks.length > 0));
-        if (!generatedVisibleContent) {
+        if (!generatedVisibleContent && !freshnessSuppressed) {
           const fallbackContent = await this.ensureVisibleEmptyResultNotice({
             threadId,
             userId,
@@ -503,6 +514,7 @@ export class ConnectorInvokeTrigger {
               }
             : {}),
         });
+        enqueueFreshnessReviews(persistenceContext, this.opts.queueProcessor);
         finalStatus = 'succeeded';
 
         // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
@@ -517,9 +529,18 @@ export class ConnectorInvokeTrigger {
               new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
             ]);
           }
-          await this.opts.streamingHook.onStreamEnd(threadId, finalContent, createResult.invocationId).catch((err) => {
-            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
-          });
+          if (freshnessHeld) {
+            const freshnessStreamingHook = this.opts.streamingHook as FreshnessAwareStreamingHook;
+            await freshnessStreamingHook.onStreamHold?.(threadId, createResult.invocationId).catch((err) => {
+              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamHold failed');
+            });
+          } else {
+            await this.opts.streamingHook
+              .onStreamEnd(threadId, finalContent, createResult.invocationId)
+              .catch((err) => {
+                log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
+              });
+          }
         }
 
         // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
@@ -535,7 +556,7 @@ export class ConnectorInvokeTrigger {
           },
           '[ConnectorInvokeTrigger] Outbound delivery check',
         );
-        if (this.opts.outboundHook && hasContent) {
+        if (!freshnessSuppressed && this.opts.outboundHook && hasContent) {
           // Resolve threadMeta if not yet done (no mid-loop delivery happened)
           if (threadMetaPromise) {
             threadMeta = await threadMetaPromise;
@@ -650,7 +671,7 @@ export class ConnectorInvokeTrigger {
               }
             });
           }
-        } else if (this.opts.streamingHook?.cleanupPlaceholders) {
+        } else if (!freshnessHeld && this.opts.streamingHook?.cleanupPlaceholders) {
           // Cloud-P1-R3: silent invocation (no content) — still clean up placeholder
           await this.opts.streamingHook.cleanupPlaceholders(threadId, createResult.invocationId).catch((err) => {
             log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed (silent)');
@@ -768,7 +789,10 @@ export class ConnectorInvokeTrigger {
         },
       });
     } catch (err) {
-      this.opts.log.warn({ err, threadId: args.threadId }, '[ConnectorInvokeTrigger] empty-result notice append failed');
+      this.opts.log.warn(
+        { err, threadId: args.threadId },
+        '[ConnectorInvokeTrigger] empty-result notice append failed',
+      );
     }
 
     return content;
@@ -809,5 +833,34 @@ function extractConnectorVisibleSystemNotice(content: string): string | undefine
   } catch {
     const trimmed = content.trim();
     return trimmed.length > 0 ? trimmed : undefined;
+  }
+}
+
+function hasFreshnessHold(context: PersistenceContext): boolean {
+  const entries = Object.values(context.egressByCat ?? {});
+  return (
+    entries.some((egress) => egress.disposition === 'held') &&
+    !entries.some((egress) => egress.disposition === 'published')
+  );
+}
+
+function hasFreshnessSuppressedOutput(context: PersistenceContext): boolean {
+  const entries = Object.values(context.egressByCat ?? {});
+  return (
+    entries.length > 0 &&
+    !entries.some((egress) => egress.disposition === 'published') &&
+    entries.some((egress) => egress.disposition === 'held' || egress.disposition === 'discarded')
+  );
+}
+
+function enqueueFreshnessReviews(
+  context: PersistenceContext,
+  queueProcessor: Pick<QueueProcessor, 'enqueueFreshnessReview'> | undefined,
+): void {
+  if (!queueProcessor) return;
+  for (const egress of Object.values(context.egressByCat ?? {})) {
+    if (egress.disposition === 'held' && egress.holdStatus === 'held' && egress.freshnessReview?.status === 'held') {
+      queueProcessor.enqueueFreshnessReview(egress.freshnessReview);
+    }
   }
 }

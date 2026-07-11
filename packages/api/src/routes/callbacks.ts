@@ -3,20 +3,21 @@
  * 安全: 每个请求都需要 invocationId + callbackToken 验证。
  */
 
+import { randomUUID } from 'node:crypto';
 import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
 import { catRegistry, createCatId, normalizeRichBlock } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
-import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
+import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
-import { buildVoteNotification } from '../domains/votes/vote-utils.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -25,12 +26,14 @@ import {
   hydrateReplyPreview,
   type IMessageStore,
   type StoredMessage,
+  type ThreadAppendWatermark,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import { buildVoteNotification } from '../domains/votes/vote-utils.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -118,6 +121,8 @@ export interface CallbackRoutesOptions {
   registry: InvocationRegistry;
   agentKeyRegistry?: import('../domains/cats/services/agents/agent-key/AgentKeyRegistry.js').AgentKeyRegistry;
   messageStore: IMessageStore;
+  /** Freshness Hold egress gate. When absent, legacy callback delivery remains unchanged. */
+  freshnessGate?: FreshnessEgressGate;
   socketManager: SocketManager;
   /** F174 D2b-1: in-context surface for callback auth failures (optional — back-compat). */
   callbackAuthNotifier?: CallbackAuthSystemMessageNotifier;
@@ -192,10 +197,25 @@ export interface CallbackRoutesOptions {
 
 const postMessageSchema = z.object({
   content: z.string().min(1).max(50000),
+  // LLM-authored callback payloads cannot self-declare a freshness exemption.
+  messageClass: z.literal('substantive').optional(),
   threadId: z.string().min(1).optional(),
   replyTo: z.string().optional(),
   clientMessageId: z.string().min(1).max(200).optional(),
   targetCats: z.array(z.string().min(1)).optional(),
+});
+
+const freshnessReviewSchema = z.object({
+  action: z.enum(['replace', 'send_draft', 'discard']),
+  expectedVersion: z.number().int().positive(),
+  clientMessageId: z.string().min(1).max(200).optional(),
+  replacement: z
+    .object({
+      content: z.string().min(1).max(50000),
+      replyTo: z.string().optional(),
+      targetCats: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
 });
 
 const threadContextQuerySchema = z.object({
@@ -686,8 +706,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       effectiveThreadId = scoped.threadId;
     }
 
-    // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
-    if (clientMessageId) {
+    const freshnessProtected = Boolean(
+      opts.freshnessGate && effectiveThreadId === actor.threadId && record.freshnessBaseline,
+    );
+
+    // Legacy identities keep the existing claim path. Protected submissions
+    // move idempotency into FreshnessEgressGate so a held retry can replay its
+    // holdId and delta instead of degrading to a context-free "duplicate".
+    if (clientMessageId && !freshnessProtected) {
       const isFirstSeen = await registry.claimClientMessageId(invocationId, clientMessageId);
       if (!isFirstSeen) {
         return { status: 'duplicate', replyTo, clientMessageId };
@@ -706,7 +732,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F34-b: Resolve voice blocks (audio with text, no url) before storing
     const synthesizer = getVoiceBlockSynthesizer();
     let richBlocks = [...extractedBlocks, ...bufferedBlocks];
-    if (synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+    if (!freshnessProtected && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
       try {
         richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
       } catch (err) {
@@ -837,10 +863,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(extra ?? {}),
       stream: { invocationId: effectiveInvId },
     };
-    const storedMsg = await messageStore.append({
+    const outboundDraft = {
       userId: actor.userId,
       catId: actor.catId,
       content: storedContent,
+      messageClass: 'substantive' as const,
       mentions,
       ...(mentionsUser ? { mentionsUser } : {}),
       origin: 'callback',
@@ -849,7 +876,92 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       extra: persistedExtra,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
-    });
+    } as const;
+
+    let storedMsg: StoredMessage;
+    if (freshnessProtected) {
+      const freshnessResult = await opts.freshnessGate!.submit({
+        invocationId,
+        submissionKey: clientMessageId ?? randomUUID(),
+        userId: actor.userId,
+        catId: actor.catId,
+        threadId: effectiveThreadId,
+        baselineWatermark: record.freshnessBaseline as ThreadAppendWatermark,
+        draft: {
+          ...outboundDraft,
+          ...(clientMessageId ? { idempotencyKey: `callback:${invocationId}:${clientMessageId}` } : {}),
+        },
+      });
+      if (freshnessResult.outcome === 'held' || freshnessResult.outcome === 'needs_attention') {
+        return {
+          status: freshnessResult.outcome === 'held' ? 'freshness_held' : 'freshness_needs_attention',
+          disposition: 'held',
+          threadId: effectiveThreadId,
+          holdId: freshnessResult.hold.id,
+          ...(clientMessageId ? { clientMessageId } : {}),
+          freshness: {
+            baselineWatermark: freshnessResult.hold.baselineWatermark,
+            observedWatermark: freshnessResult.hold.observedWatermark,
+            version: freshnessResult.hold.version,
+            reviewCount: freshnessResult.hold.reviewCount,
+            maxReviews: 2,
+            expiresAt: freshnessResult.hold.reviewDeadlineAt,
+          },
+          newMessages: freshnessResult.delta.messages,
+          newMessageCount: freshnessResult.delta.messages.length,
+          truncated: freshnessResult.delta.truncated,
+          nextActions: ['replace', 'send_draft', 'discard'],
+          message: '草稿未发布；请先审阅新消息。',
+        };
+      }
+      if (freshnessResult.outcome === 'discarded') {
+        return {
+          status: 'freshness_discarded',
+          disposition: 'discarded',
+          threadId: freshnessResult.hold.threadId,
+          holdId: freshnessResult.hold.id,
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+      if (freshnessResult.replayed) {
+        return {
+          status: 'duplicate',
+          disposition: 'published',
+          threadId: effectiveThreadId,
+          messageId: freshnessResult.message.id,
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+      // appendIfFresh de-duplicates the formal message, but an idempotent
+      // append alone does not tell this HTTP layer which retry owns fanout.
+      // Claim only after the freshness verdict so held submissions remain
+      // replayable with their canonical holdId and delta.
+      if (clientMessageId && !(await registry.claimClientMessageId(invocationId, clientMessageId))) {
+        return {
+          status: 'duplicate',
+          disposition: 'published',
+          threadId: effectiveThreadId,
+          messageId: freshnessResult.message.id,
+          clientMessageId,
+        };
+      }
+      storedMsg = freshnessResult.message;
+      // Protected voice blocks are synthesized only after the atomic publication verdict.
+      if (synthesizer && richBlocks.some((block) => block.kind === 'audio' && 'text' in block)) {
+        try {
+          richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
+          const updated = await messageStore.updateExtra(storedMsg.id, {
+            ...(storedMsg.extra ?? {}),
+            rich: { v: 1, blocks: richBlocks },
+          });
+          if (updated) storedMsg = updated;
+        } catch (err) {
+          app.log.error({ err }, '[callbacks/post-message] Published voice block synthesis failed');
+        }
+      }
+    } else {
+      storedMsg = await messageStore.append(outboundDraft);
+    }
 
     // F121: Hydrate reply preview for broadcast
     const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
@@ -969,6 +1081,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (allExplicitFailed) {
       return {
         isError: true,
+        disposition: 'published',
         routed: [],
         routing_warnings,
         message: buildPostMessageRoutingMessage([], routing_warnings),
@@ -981,12 +1094,256 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     return {
       status: 'ok',
+      disposition: 'published',
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
       message: buildPostMessageRoutingMessage([...mentions], routing_warnings),
+    };
+  });
+
+  app.post('/api/callbacks/freshness-holds/:holdId/review', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+    if (principal.kind !== 'invocation') {
+      reply.status(403);
+      return { error: 'Freshness review requires invocation credentials' };
+    }
+    if (!opts.freshnessGate) {
+      reply.status(503);
+      return { error: 'Freshness Hold is not configured' };
+    }
+
+    const parsed = freshnessReviewSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    if (parsed.data.action === 'replace' && !parsed.data.replacement) {
+      reply.status(400);
+      return { error: 'replacement is required for replace' };
+    }
+
+    const record = request.callbackAuth!;
+    const actor = deriveCallbackActor(record);
+    if (!(await registry.isLatest(actor.invocationId))) {
+      return { status: 'stale_ignored', holdId: (request.params as { holdId: string }).holdId };
+    }
+    const holdId = (request.params as { holdId: string }).holdId;
+    let replacementDraft: Parameters<FreshnessEgressGate['review']>[0]['replacementDraft'];
+    if (parsed.data.action === 'replace' && parsed.data.replacement) {
+      const replacement = parsed.data.replacement;
+      const { cleanText, blocks } = extractRichFromText(replacement.content);
+      const storedContent = sanitizeAgentVisibleOutput(cleanText);
+      const senderCatId = createCatId(actor.catId);
+      const contentTargets = analyzeA2AMentions(storedContent, senderCatId).mentions;
+      const explicitTargets = (replacement.targetCats ?? [])
+        .map((target) => resolveCatTarget(target))
+        .flatMap((result) => ('ok' in result ? [createCatId(result.ok)] : []));
+      const mentions = [...new Set<CatId>([...contentTargets, ...explicitTargets])];
+      let validatedReplyTo: string | undefined;
+      if (replacement.replyTo) {
+        const parent = await messageStore.getById(replacement.replyTo);
+        if (parent?.threadId === actor.threadId) validatedReplyTo = replacement.replyTo;
+      }
+      const willEnqueueToQueue = Boolean(
+        mentions.length > 0 && router && invocationRecordStore && opts.invocationQueue,
+      );
+      replacementDraft = {
+        userId: actor.userId,
+        catId: actor.catId,
+        threadId: actor.threadId,
+        content: storedContent,
+        messageClass: 'substantive',
+        mentions,
+        origin: 'callback',
+        timestamp: Date.now(),
+        ...(detectUserMention(storedContent) ? { mentionsUser: true } : {}),
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
+        extra: {
+          stream: { invocationId: effectiveInvocationId(actor) },
+          ...(blocks.length > 0 ? { rich: { v: 1 as const, blocks } } : {}),
+          ...(explicitTargets.length > 0 ? { targetCats: explicitTargets } : {}),
+        },
+      };
+    }
+
+    let result;
+    try {
+      result = await opts.freshnessGate.review({
+        holdId,
+        expectedVersion: parsed.data.expectedVersion,
+        action: parsed.data.action,
+        ...(replacementDraft ? { replacementDraft } : {}),
+        invocationId: actor.invocationId,
+        userId: actor.userId,
+        catId: actor.catId,
+        threadId: actor.threadId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Freshness review failed';
+      reply.status(message.includes('ownership') ? 403 : 409);
+      return { error: message, holdId };
+    }
+
+    if (result.outcome === 'held' || result.outcome === 'needs_attention') {
+      return {
+        status: result.outcome === 'held' ? 'freshness_held' : 'freshness_needs_attention',
+        disposition: 'held',
+        threadId: result.hold.threadId,
+        holdId: result.hold.id,
+        freshness: {
+          baselineWatermark: result.hold.baselineWatermark,
+          observedWatermark: result.hold.observedWatermark,
+          version: result.hold.version,
+          reviewCount: result.hold.reviewCount,
+          maxReviews: 2,
+          expiresAt: result.hold.reviewDeadlineAt,
+        },
+        newMessages: result.delta.messages,
+        newMessageCount: result.delta.messages.length,
+        truncated: result.delta.truncated,
+      };
+    }
+    if (result.outcome === 'discarded') {
+      return {
+        status: 'freshness_discarded',
+        disposition: 'discarded',
+        threadId: result.hold.threadId,
+        holdId: result.hold.id,
+        freshness: { version: result.hold.version },
+      };
+    }
+
+    if (result.replayed) {
+      return {
+        status: 'duplicate',
+        disposition: 'published',
+        threadId: result.hold.threadId,
+        holdId: result.hold.id,
+        messageId: result.message.id,
+        freshness: { version: result.hold.version },
+      };
+    }
+
+    let storedMsg = result.message;
+    const reviewSynthesizer = getVoiceBlockSynthesizer();
+    let reviewedRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? [])] as RichBlock[];
+    if (reviewSynthesizer && reviewedRichBlocks.some((block) => block.kind === 'audio' && 'text' in block)) {
+      try {
+        reviewedRichBlocks = await reviewSynthesizer.resolveVoiceBlocks(reviewedRichBlocks, actor.catId as string);
+        const updated = await messageStore.updateExtra(storedMsg.id, {
+          ...(storedMsg.extra ?? {}),
+          rich: { v: 1, blocks: reviewedRichBlocks },
+        });
+        if (updated) storedMsg = updated;
+      } catch (err) {
+        app.log.error({ err, holdId }, '[freshness-review] Published voice block synthesis failed');
+      }
+    }
+    const senderCatId = createCatId(actor.catId);
+    const hasA2AMentions = Boolean(
+      storedMsg.mentions.length > 0 && router && invocationRecordStore && storedMsg.threadId,
+    );
+    const willEnqueueToQueue = Boolean(hasA2AMentions && opts.invocationQueue);
+    const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: hasA2AMentions,
+      willEnqueueToQueue,
+      messageId: storedMsg.id,
+      threadId: storedMsg.threadId,
+      log: app.log,
+      enqueueA2A: () =>
+        enqueueA2ATargets(
+          {
+            router: router!,
+            invocationRecordStore: invocationRecordStore!,
+            socketManager,
+            ...(invocationTracker ? { invocationTracker } : {}),
+            ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+            ...(queueProcessor ? { queueProcessor } : {}),
+            ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+            log: app.log,
+          },
+          {
+            targetCats: [...storedMsg.mentions],
+            content: storedMsg.content,
+            userId: storedMsg.userId,
+            threadId: storedMsg.threadId,
+            triggerMessage: storedMsg,
+            callerCatId: senderCatId,
+            parentInvocationId: record.parentInvocationId,
+            callerTraceContext: record.traceContext,
+          },
+        ),
+      markDelivered: (deliveredAt) => messageStore.markDelivered(storedMsg.id, deliveredAt),
+      zeroEnqueuedWarnMessage: '[freshness-review] Failed to recover queued message — broadcasting anyway',
+      enqueueFailureMessage: '[freshness-review] enqueue failed — falling back to broadcast',
+    });
+    const richBlocks = reviewedRichBlocks;
+    if (deliveryDecision.shouldBroadcastNow) {
+      const replyPreview = storedMsg.replyTo ? await hydrateReplyPreview(messageStore, storedMsg.replyTo) : undefined;
+      socketManager.broadcastAgentMessage(
+        {
+          type: 'text',
+          catId: actor.catId,
+          content: storedMsg.content,
+          origin: 'callback',
+          messageId: storedMsg.id,
+          invocationId: effectiveInvocationId(actor),
+          ...(storedMsg.extra?.targetCats?.length ? { extra: { targetCats: storedMsg.extra.targetCats } } : {}),
+          ...(storedMsg.mentionsUser ? { mentionsUser: true } : {}),
+          ...(storedMsg.replyTo ? { replyTo: storedMsg.replyTo } : {}),
+          ...(replyPreview ? { replyPreview } : {}),
+          timestamp: storedMsg.timestamp,
+        },
+        storedMsg.threadId,
+      );
+      for (const block of richBlocks) {
+        socketManager.broadcastAgentMessage(
+          {
+            type: 'system_info',
+            catId: actor.catId,
+            content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsg.id }),
+            invocationId: effectiveInvocationId(actor),
+            timestamp: storedMsg.timestamp,
+          },
+          storedMsg.threadId,
+        );
+      }
+    }
+    if (opts.outboundHook) {
+      const frontendBase = resolveFrontendBaseUrl(process.env);
+      const thread = await threadStore?.get(storedMsg.threadId);
+      void opts.outboundHook
+        .deliver(
+          storedMsg.threadId,
+          storedMsg.content,
+          actor.catId,
+          richBlocks.length > 0 ? richBlocks : undefined,
+          {
+            threadShortId: storedMsg.threadId.slice(0, 15),
+            threadTitle: thread?.title ?? undefined,
+            deepLinkUrl: buildThreadDeepLink(frontendBase, storedMsg.threadId),
+          },
+          'callback',
+          storedMsg.replyTo,
+        )
+        .catch((error: unknown) => {
+          app.log.error({ error, holdId, threadId: storedMsg.threadId }, '[freshness-review] outbound failed');
+        });
+    }
+
+    return {
+      status: 'ok',
+      disposition: 'published',
+      threadId: storedMsg.threadId,
+      messageId: storedMsg.id,
+      holdId: result.hold.id,
+      freshness: { version: result.hold.version },
+      ...(parsed.data.clientMessageId ? { clientMessageId: parsed.data.clientMessageId } : {}),
     };
   });
 
@@ -1505,7 +1862,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (messages.length === 0) {
           const charBudget = Math.max(200, safeMaxTokens * 4);
           const truncatedContent =
-            sanitized.length > charBudget ? `${sanitized.slice(0, charBudget)}\n[...truncated by maxTokens...]` : sanitized;
+            sanitized.length > charBudget
+              ? `${sanitized.slice(0, charBudget)}\n[...truncated by maxTokens...]`
+              : sanitized;
           const truncatedTokens = estimateHistoryFetchTokens(truncatedContent);
           messages.push({
             id: item.id,
@@ -1948,10 +2307,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { status: 'stale_ignored' };
     }
 
-    // F34-b: Resolve voice blocks (audio with text, no url) before buffering
+    const freshnessProtected = Boolean(opts.freshnessGate && record.freshnessBaseline);
+
+    // Legacy callbacks keep eager synthesis. Protected blocks remain private and
+    // are synthesized only after the final message publication verdict.
     let resolvedBlock: RichBlock = block as unknown as RichBlock;
     const synthesizer = getVoiceBlockSynthesizer();
-    if (synthesizer && block.kind === 'audio' && 'text' in block) {
+    if (!freshnessProtected && synthesizer && block.kind === 'audio' && 'text' in block) {
       const resolved = await synthesizer.resolveVoiceBlocks([block as unknown as RichBlock], record.catId as string);
       if (resolved.length > 0) resolvedBlock = resolved[0]!;
     }
@@ -1962,7 +2324,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Only broadcast new blocks (dedup retries at server to prevent frontend duplicates)
     // #454/573: include effectiveInvId (parent/outer) so frontend can exact-match
     // callback to stream bubble.
-    if (isNew) {
+    if (isNew && !freshnessProtected) {
       socketManager.broadcastAgentMessage(
         {
           type: 'system_info' as const,

@@ -98,6 +98,47 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.threadId, 'thread-123');
   });
 
+  test('handleReviewHeldMessage calls the freshness review endpoint with the exact review payload', async () => {
+    const { handleReviewHeldMessage } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl, capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok', disposition: 'published' }),
+      };
+    };
+
+    const result = await handleReviewHeldMessage({
+      holdId: 'hold-123',
+      action: 'replace',
+      expectedVersion: 2,
+      clientMessageId: 'review-123',
+      replacement: {
+        content: 'reviewed draft',
+        replyTo: 'message-1',
+        targetCats: ['opus'],
+      },
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.endsWith('/api/callbacks/freshness-holds/hold-123/review'));
+    assert.deepEqual(JSON.parse(capturedOptions.body), {
+      action: 'replace',
+      expectedVersion: 2,
+      clientMessageId: 'review-123',
+      replacement: {
+        content: 'reviewed draft',
+        replyTo: 'message-1',
+        targetCats: ['opus'],
+      },
+    });
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+  });
+
   test('handlePostMessage returns error when env vars missing', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 

@@ -29,6 +29,7 @@ import {
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
+  isFreshnessProtectedPublication,
   isFreshnessRelevantMessage,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
@@ -48,6 +49,19 @@ const log = createModuleLogger('redis-message-store');
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
+const MARK_DELIVERED_LUA = `
+if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
+  return 0
+end
+redis.call('HSET', KEYS[1],
+  'deliveredAt', ARGV[1],
+  'deliveryStatus', 'delivered')
+redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[1], ARGV[2])
+redis.call('ZADD', KEYS[4], ARGV[1], ARGV[2])
+return 1
+`;
+
 /**
  * One linearization point for both ordinary and conditional appends.
  *
@@ -60,7 +74,8 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * ARGV:
  *   1 mode, 2 baseline, 3 id, 4 timeline score, 5 hash-fields JSON,
  *   6 freshness-relevant flag, 7 visibility, 8 ttl seconds,
- *   9 idempotency flag, 10 mention-key count, 11 whisper-key count.
+ *   9 idempotency flag, 10 mention-key count, 11 whisper-key count,
+ *   12 publication-gate flag, 13 parent invocation group allowed as sibling.
  */
 const APPEND_MESSAGE_LUA = `
 local mode = ARGV[1]
@@ -73,13 +88,21 @@ local ttl = tonumber(ARGV[8]) or 0
 local hasIdempotency = ARGV[9] == '1'
 local mentionCount = tonumber(ARGV[10]) or 0
 local whisperCount = tonumber(ARGV[11]) or 0
+local gateCheck = ARGV[12] == '1'
+local gateGroup = ARGV[13] or ''
 
 -- Idempotency replay wins over staleness: an already-published retry returns
 -- the canonical message instead of becoming held on a newer watermark.
 if hasIdempotency then
   local existingId = redis.call('GET', KEYS[5])
   if existingId then
-    return {'existing', existingId, ''}
+    local detailPrefix = string.sub(KEYS[1], 1, string.len(KEYS[1]) - string.len(messageId))
+    if redis.call('EXISTS', detailPrefix .. existingId) == 1 then
+      return {'existing', existingId, ''}
+    end
+    -- Repair a legacy dangling pointer inside this same linearization point.
+    -- A concurrent retry can no longer delete a newly rebuilt pointer.
+    redis.call('DEL', KEYS[5])
   end
 end
 
@@ -94,8 +117,21 @@ if mode == 'conditional' then
   local publicScore = latestScore(KEYS[7])
   local whisperScore = latestScore(KEYS[8])
   if publicScore > whisperScore then observed = publicScore else observed = whisperScore end
-  if relevant and observed > (tonumber(baseline) or 0) then
-    return {'stale', baseline, tostring(observed)}
+  if gateCheck and observed > (tonumber(baseline) or 0) then
+    local independent = gateGroup == ''
+    if not independent then
+      local detailPrefix = string.sub(KEYS[1], 1, string.len(KEYS[1]) - string.len(messageId))
+      local function containsIndependent(key)
+        local ids = redis.call('ZRANGEBYSCORE', key, '(' .. baseline, '+inf')
+        for _, id in ipairs(ids) do
+          local group = redis.call('HGET', detailPrefix .. id, 'freshnessGroupId') or ''
+          if group ~= gateGroup then return true end
+        end
+        return false
+      end
+      independent = containsIndependent(KEYS[7]) or containsIndependent(KEYS[8])
+    end
+    if independent then return {'stale', baseline, tostring(observed)} end
   end
 end
 
@@ -168,6 +204,39 @@ if appendWatermark == '' then appendWatermark = tostring(observed) end
 return {'appended', messageId, appendWatermark}
 `;
 
+const COMPARE_DELETE_IDEMPOTENCY_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] and redis.call('EXISTS', KEYS[2]) == 0 then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
+
+const RESTORE_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return '' end
+if redis.call('HGET', KEYS[1], '_tombstone') == '1' then return '' end
+if not redis.call('HGET', KEYS[1], 'deletedAt') then return '' end
+redis.call('HDEL', KEYS[1], 'deletedAt', 'deletedBy')
+if ARGV[1] ~= '1' then return '0' end
+local revision = tostring(redis.call('INCR', KEYS[2]))
+redis.call('HSET', KEYS[1], 'appendWatermark', revision)
+for i = 3, #KEYS do redis.call('ZADD', KEYS[i], revision, ARGV[2]) end
+return revision
+`;
+
+const REVEAL_WHISPER_LUA = `
+if redis.call('HGET', KEYS[1], 'visibility') ~= 'whisper' then return 0 end
+if redis.call('HGET', KEYS[1], 'revealedAt') then return 0 end
+if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], 'revealedAt', ARGV[2])
+for i = 4, #KEYS do redis.call('ZREM', KEYS[i], ARGV[3]) end
+if ARGV[4] == '1' then
+  local revision = tostring(redis.call('INCR', KEYS[2]))
+  redis.call('HSET', KEYS[1], 'appendWatermark', revision)
+  redis.call('ZADD', KEYS[3], revision, ARGV[3])
+end
+return 1
+`;
+
 function parseWatermark(value: string): ThreadAppendWatermark {
   if (!/^\d+$/.test(value)) throw new Error(`Invalid freshness watermark: ${value}`);
   return value as ThreadAppendWatermark;
@@ -215,6 +284,15 @@ export class RedisMessageStore {
     }
   }
 
+  private notifyAppend(stored: StoredMessage): void {
+    if (!this.onAppend) return;
+    try {
+      void Promise.resolve(this.onAppend(stored)).catch(() => {});
+    } catch {
+      /* best-effort */
+    }
+  }
+
   /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
   private get keyPrefix(): string {
     return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
@@ -242,7 +320,7 @@ export class RedisMessageStore {
     limit: number = DEFAULT_LIMIT,
   ): Promise<FreshnessDelta> {
     parseWatermark(after);
-    const observedWatermark = through
+    const requestedWatermark = through
       ? parseWatermark(through)
       : await this.captureFreshnessWatermark(threadId, audience);
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT;
@@ -253,7 +331,7 @@ export class RedisMessageStore {
       this.redis.zrangebyscore(
         MessageKeys.freshnessPublic(threadId),
         min,
-        observedWatermark,
+        requestedWatermark,
         'WITHSCORES',
         'LIMIT',
         0,
@@ -262,7 +340,7 @@ export class RedisMessageStore {
       this.redis.zrangebyscore(
         MessageKeys.freshnessWhisper(threadId, audience.catId),
         min,
-        observedWatermark,
+        requestedWatermark,
         'WITHSCORES',
         'LIMIT',
         0,
@@ -282,8 +360,10 @@ export class RedisMessageStore {
     });
     const ids = candidates.slice(0, safeLimit).map(([id]) => id);
     const messages = (await this.hydrateMessages(ids)).filter(isFreshnessRelevantMessage);
+    const lastReturned = messages[messages.length - 1];
     return {
-      observedWatermark,
+      // The review cursor may only cover messages materialized in this page.
+      observedWatermark: lastReturned?.appendWatermark ?? after,
       messages,
       truncated: candidates.length > safeLimit,
     };
@@ -291,7 +371,7 @@ export class RedisMessageStore {
 
   async appendIfFresh(
     msg: AppendMessageInput,
-    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },
   ): Promise<ConditionalAppendResult> {
     parseWatermark(gate.baseline);
     return this.appendAtomically(msg, gate);
@@ -307,7 +387,7 @@ export class RedisMessageStore {
 
   private async appendAtomically(
     msg: AppendMessageInput,
-    gate?: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+    gate?: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },
   ): Promise<ConditionalAppendResult> {
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const id = generateSortableId(msg.timestamp);
@@ -365,6 +445,7 @@ export class RedisMessageStore {
       ...(stored.deliveredAt ? { deliveredAt: String(stored.deliveredAt) } : {}),
       ...(stored.deliveryStatus ? { deliveryStatus: stored.deliveryStatus } : {}),
       ...(stored.replyTo ? { replyTo: stored.replyTo } : {}),
+      ...(stored.extra?.stream?.invocationId ? { freshnessGroupId: stored.extra.stream.invocationId } : {}),
     };
     const ttl = this.ttlSeconds ?? 0;
 
@@ -387,6 +468,8 @@ export class RedisMessageStore {
         idempotencyIndexKey ? '1' : '0',
         String(mentionKeys.length),
         String(whisperKeys.length),
+        gate && isFreshnessProtectedPublication(stored) ? '1' : '0',
+        gate?.groupId ?? '',
       )) as unknown;
       if (!Array.isArray(raw) || raw.length < 3) throw new Error('invalid Redis append result');
       const [kind, resultId, rawWatermark] = raw.map((value) => String(value));
@@ -407,7 +490,13 @@ export class RedisMessageStore {
           return { outcome: 'appended', message: existing, committedWatermark };
         }
         if (idempotencyIndexKey && attempt === 0) {
-          await this.redis.del(idempotencyIndexKey);
+          await this.redis.eval(
+            COMPARE_DELETE_IDEMPOTENCY_LUA,
+            2,
+            idempotencyIndexKey,
+            MessageKeys.detail(resultId!),
+            resultId!,
+          );
           continue;
         }
         throw new Error('message idempotency key points to a missing message');
@@ -419,13 +508,7 @@ export class RedisMessageStore {
         stored.appendWatermark ??
         (gate ? await this.captureFreshnessWatermark(threadId, gate.audience) : ('0' as ThreadAppendWatermark));
 
-      if (this.onAppend) {
-        try {
-          void Promise.resolve(this.onAppend(stored)).catch(() => {});
-        } catch {
-          /* best-effort */
-        }
-      }
+      if (isDelivered(stored)) this.notifyAppend(stored);
       return { outcome: 'appended', message: stored, committedWatermark };
     }
 
@@ -909,11 +992,20 @@ export class RedisMessageStore {
 
     // Delete the thread sorted set
     pipeline.del(key);
+    pipeline.del(MessageKeys.freshnessPublic(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
 
     await pipeline.exec();
+
+    const matchPattern = `${this.keyPrefix}${MessageKeys.freshnessWhisper(threadId, '*')}`;
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) await this.redis.del(...keys.map((entry) => this.stripPrefix(entry)));
+    } while (cursor !== '0');
     return ids.length;
   }
 
@@ -924,10 +1016,13 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     const now = Date.now();
-    await this.redis.hset(MessageKeys.detail(id), {
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), {
       deletedAt: String(now),
       deletedBy,
     });
+    for (const key of this.freshnessIndexKeysForMessage(msg)) pipeline.zrem(key, id);
+    await pipeline.exec();
     msg.deletedAt = now;
     msg.deletedBy = deletedBy;
     return msg;
@@ -940,7 +1035,8 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     const now = Date.now();
-    await this.redis.hset(MessageKeys.detail(id), {
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), {
       content: '',
       contentBlocks: '',
       toolEvents: '',
@@ -953,6 +1049,8 @@ export class RedisMessageStore {
       deletedBy,
       _tombstone: '1',
     });
+    for (const key of this.freshnessIndexKeysForMessage(msg)) pipeline.zrem(key, id);
+    await pipeline.exec();
     msg.content = '';
     msg.mentions = [];
     delete msg.contentBlocks;
@@ -974,9 +1072,27 @@ export class RedisMessageStore {
   async restore(id: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg || !msg.deletedAt || msg._tombstone) return null;
-    await this.redis.hdel(MessageKeys.detail(id), 'deletedAt', 'deletedBy');
+    const relevant = isFreshnessRelevantMessage({ ...msg, deletedAt: undefined });
+    const indexKeys = relevant
+      ? msg.visibility === 'whisper' && !msg.revealedAt
+        ? [...new Set((msg.whisperTo ?? []).map((catId) => MessageKeys.freshnessWhisper(msg.threadId, catId)))]
+        : [MessageKeys.freshnessPublic(msg.threadId)]
+      : [];
+    const revision = String(
+      await this.redis.eval(
+        RESTORE_MESSAGE_LUA,
+        2 + indexKeys.length,
+        MessageKeys.detail(id),
+        MessageKeys.freshnessSequence(msg.threadId),
+        ...indexKeys,
+        relevant ? '1' : '0',
+        id,
+      ),
+    );
+    if (!revision) return null;
     delete msg.deletedAt;
     delete msg.deletedBy;
+    if (revision !== '0') msg.appendWatermark = parseWatermark(revision);
     return msg;
   }
 
@@ -991,12 +1107,26 @@ export class RedisMessageStore {
     const now = String(Date.now());
     let count = 0;
     for (const id of ids) {
-      const fields = await this.redis.hmget(MessageKeys.detail(id), 'visibility', 'revealedAt', 'userId');
-      if (fields[0] !== 'whisper') continue;
-      if (fields[1]) continue; // already revealed
-      if (fields[2] !== userId) continue; // only reveal caller's whispers
-      await this.redis.hset(MessageKeys.detail(id), 'revealedAt', now);
-      count++;
+      const msg = await this.getById(id);
+      if (!msg || msg.visibility !== 'whisper' || msg.revealedAt || msg.userId !== userId) continue;
+      const whisperKeys = [
+        ...new Set((msg.whisperTo ?? []).map((catId) => MessageKeys.freshnessWhisper(threadId, catId))),
+      ];
+      const changed = Number(
+        await this.redis.eval(
+          REVEAL_WHISPER_LUA,
+          3 + whisperKeys.length,
+          MessageKeys.detail(id),
+          MessageKeys.freshnessSequence(threadId),
+          MessageKeys.freshnessPublic(threadId),
+          ...whisperKeys,
+          userId,
+          now,
+          id,
+          isFreshnessRelevantMessage(msg) ? '1' : '0',
+        ),
+      );
+      if (changed === 1) count++;
     }
     return count;
   }
@@ -1045,20 +1175,20 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
-    const pipeline = this.redis.multi();
-    pipeline.hset(MessageKeys.detail(id), {
-      deliveredAt: String(deliveredAt),
-      deliveryStatus: 'delivered',
-    });
-    // Update sorted set scores so history queries return messages at delivery
-    // position, not original send-time slot (Bug A: queue message ordering).
-    const scoreStr = String(deliveredAt);
-    pipeline.zadd(MessageKeys.thread(msg.threadId), scoreStr, id);
-    pipeline.zadd(MessageKeys.TIMELINE, scoreStr, id);
-    pipeline.zadd(MessageKeys.user(msg.userId), scoreStr, id);
-    await pipeline.exec();
+    const changed = (await this.redis.eval(
+      MARK_DELIVERED_LUA,
+      4,
+      MessageKeys.detail(id),
+      MessageKeys.thread(msg.threadId),
+      MessageKeys.TIMELINE,
+      MessageKeys.user(msg.userId),
+      String(deliveredAt),
+      id,
+    )) as number;
+    if (changed !== 1) return this.getById(id);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
+    this.notifyAppend(msg);
     return msg;
   }
 

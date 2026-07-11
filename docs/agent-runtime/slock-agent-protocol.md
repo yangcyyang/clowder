@@ -1,3 +1,15 @@
+---
+feature_ids:
+  - F193
+topics:
+  - agent-runtime
+  - freshness
+  - message-delivery
+doc_kind: runtime-protocol
+created: 2026-05-27
+updated: 2026-07-11
+---
+
 # Clowder Slock-like Agent Protocol
 
 ## 目标
@@ -205,6 +217,110 @@ lastProcessedCursor(catId, surfaceId) = max processed message seq
 ```
 
 如果任务被取消，不应把未处理消息全部吞掉。取消时只标记当前 invocation 消费到的 cursor。
+
+## F193：Freshness Hold 出口协议
+
+Inbox freshness 保证 Agent 开始时看到新意图；Freshness Hold 保证 Agent 结束时不会把基于旧上下文的稿件发出。它是一道发布闸门，不是内容相似度判断。
+
+### 保护范围与身份边界
+
+首版保护：
+
+- serial / parallel 路由生成的最终 stdout，包括纯文本与 rich-block-only 回复。
+- 带 invocation 凭证、且发往本 invocation 原 thread 的 callback `post-message`。
+- Web 直接执行、`QueueProcessor` 和 `ConnectorInvokeTrigger` 消费上述结果时的 history、WebSocket、rich block、TTS、push、A2A 和 connector outbound 出口。
+- `QueueProcessor` fast-lane 成功结果：工作流执行前捕获 baseline，只有 Gate 返回 `published` 后才可把完成正文或原始执行结果放入 history、agent WebSocket 和 task completion 可见内容；被 Hold 时 task event 只保留安全元数据。
+- callback 发布工具的 `tool_use` / `tool_result` 也是稿件出口：受保护路由先私有缓冲，只有工具结果确认 `published` 才释放；`held` / `discarded` 不得把 `toolInput.content` 送入 WebSocket 或前端 tool detail。
+- 有 freshness baseline 的 invocation 在 verdict 前不得写原始 transcript 或 agent memory。当前采用 fail-closed 策略：即使最终 published 也不自动补写这两个持久 sink，避免旧稿经 transcript search/import 回到 history。
+
+明确的 legacy 边界：
+
+- `agent-key` 身份没有可信的“本轮已读水位”，仍走旧发布路径。
+- invocation 使用 callback 跨 thread 发布时，原 thread 的 baseline 不能证明它已读目标 thread，仍走旧路径。
+- 只有 `same-thread + invocation-auth + 已持久化 freshnessBaseline` 的 callback 可标记为 protected。不得把 legacy 成功响应解读为经过 Freshness Hold。
+
+### 结构分类：什么会推进水位
+
+Freshness 只看受信任结构字段，不根据正文猜测“这是不是进度”。
+
+- `messageClass: substantive`：实质消息，受发布保护并推进可见水位。为了向后兼容，未标注 `messageClass` 的普通消息也按 substantive 处理。
+- `messageClass: status`：受信任运行时产生的进度/存活提示，不推进水位，也不能自己卡住自己。LLM callback schema 只允许 substantive，不能自报 status 绕过闸门。
+- 受信任 system 消息、`origin: briefing`、`a2a_routing` 和 `progress_heartbeat` 是结构性豁免。已删除、tombstone 或 `deliveryStatus: canceled` 的消息不再参与 freshness。
+
+Delivery 生命周期的规则：
+
+- `queued` 在 append 时立即取得序号并推进水位，避免另一只猫跨过正在排队的新意图；但它在 delivered 前不进 history，不触发 `onAppend`。
+- `markDelivered` 只改变可见性和交付时间，不再分配新水位。
+- `markCanceled` 会从 freshness 索引移除该消息。
+
+Audience 与可见性一致：public 消息对 thread 内所有猫推进水位；未 reveal 的 whisper 只对 `whisperTo` 收件猫推进，reveal 后才转为 public 影响。
+
+### Per-thread watermark 契约
+
+MessageStore 给每个 thread 维护一个单调递增序列，每条 freshness-relevant append 只分配一次 `appendWatermark`。水位是不透明的十进制字符串；MessageStore 以外的代码只能原样传回，禁止转成 JavaScript `number` 或自行比较。
+
+```text
+读取上下文前 captureFreshnessWatermark(thread, cat)
+  → 将 baseline 持久到 InvocationRecord
+  → Agent 在私有缓冲区生成完整稿件
+  → appendIfFresh(draft, baseline, audience)
+      ├── 无独立新 append：同一线性化点 append，返回 published
+      └── 存在独立新 append：零正式发布，返回 stale 并创建/重放 hold
+```
+
+普通 append 与条件 append 在 Redis 中共用同一 Lua 线性化点，不存在 `check → append` 的 TOCTOU 窗口。并行路由中同一 parent invocation group 的 sibling 输出不互相卡住；任何用户或独立 invocation 的新 append 仍会触发 hold。
+
+Delta 默认最多返回 50 条。如果 `truncated: true`，`observedWatermark` 只能前进到本页最后一条已物化消息，不能跳过 Agent 尚未看见的消息。
+
+### Hold / review 状态机
+
+```text
+held --claimReview(version CAS)--> reviewing
+  |                                  ├── appendIfFresh 成功 → released → delivered
+  |                                  └── 再次 stale → held
+  └── discard -------------------------------> discarded
+
+held/reviewing --30 分钟截止或第 2 次复核仍冲突--> needs_attention
+```
+
+- `held`：完整稿件、baseline、observed watermark 和 delta message IDs 已持久化，正文尚未发布。
+- `reviewing`：某一个 reviewer 已通过 version CAS 获得处理权；该状态也是可恢复的崩溃中间态。
+- `released`：HoldStore 已记录唯一 `releasedMessageId` 与 committed watermark；闸门随后将该 queued 消息标记 delivered。终态 CAS 同时擦除私有 draft 与 delta，只保留幂等恢复 tombstone。
+- `discarded`：稿件明确放弃，重试不得复活它；终态 CAS 同样擦除私有 draft 与 delta。
+- `needs_attention`：超时或连续两轮 review 仍冲突的 fail-closed 终态。稿件持久保留、不设自动删除 TTL，且绝不自动发送。
+
+30 分钟从首次 hold 创建时起算，re-hold 不重置截止时间。运行时启动时立即执行一次 `expireDue()`，之后默认每 60 秒扫描一次；因此超时状态按轮询粒度收敛，而不是精确到截止时刻。claim/release/re-hold 仍会在迁移时再次检查 deadline 并 fail closed。
+
+### 两条 review 回路
+
+Callback 仍在活跃 invocation 内时：
+
+1. `cat_cafe_post_message` 收到 `freshness_held`，同一 tool result 携带 `holdId`、最新 version 和 `newMessages`。
+2. Agent 读完 delta 后调用 `cat_cafe_review_held_message`，选择 `replace` / `send_draft` / `discard`。
+3. review endpoint 必须使用创建 hold 的同一 invocation 凭证与最新 `expectedVersion`；发送或改写前会再做一次原子 freshness 检查。
+
+Stdout 已结束、无法把 tool result 回填原调用时，运行时使用独立 `freshness_review` continuation。可见 QueueEntry 只携带安全占位文本、hold 所有权五元组和 CAS version；完整稿件与 delta 保留在 QueueProcessor 的私有内存中，delta 在 dispatch 前再按 message IDs 从 MessageStore hydrate。后继 invocation 只需输出一个完整 replacement。
+
+`freshness_review` 是 urgent / pinned / autoExecute 控制项，与 session-seal continuation 独立。去重键为 `freshness-review:<holdId>:<expectedVersion>`；`discarded` / `needs_attention` / reviewCount 达 2 时不再续排。该队列与私有 payload 是进程内状态，API 重启会丢失自动 review 调度；Redis hold 仍保留且任何后续复核仍会按 deadline fail closed，但当前没有重启 reconciler 自动重建 continuation。
+
+### Verdict 是所有出口的唯一凭据
+
+| Gate 结果 | 允许的副作用 |
+|---|---|
+| `published` | 正式 history append/deliver，然后才可释放 WebSocket 文本、rich block、TTS、push、A2A 和 connector outbound |
+| `held` | 只允许发送无稿件正文的 hold 提示、更新外部 placeholder 为“重新审阅”、调度有界 review |
+| `needs_attention` | 在消费层按 held 处理；只允许人工介入提示，不再自动 review 或发送 |
+| `discarded` | 不发布任何稿件内容，不产生“空成功”替代文本 |
+
+路由层将 per-cat verdict 写入 `PersistenceContext.egressByCat`，HTTP、队列和 connector 只能消费该 verdict，不得根据“有没有 stdout”二次猜测。私有 draft 不得被 GET history、重启恢复、流式 chunk、tool detail、task event、transcript、agent memory 或 connector 占位符泄漏。Rich block 也按 per-cat verdict 过滤；混合多猫结果只交付 published 的猫。
+
+### 幂等与崩溃恢复
+
+- 初次提交以 `(invocationId, submissionKey)` 去重。重试在任何 append 前先重放已有 hold 或终态，不会因水位回落复活旧稿。MCP `post_message` 每次工具调用会生成 `clientMessageId`，同一传输重试复用该 ID；主动再次调用时应显式复用 ID。Stdout 使用确定性 submission key。
+- review 用 version CAS 保证只有一个 reviewer 赢得迁移；待发稿用 `freshness-hold:<holdId>` 作为消息幂等键。
+- 发布顺序是 `reviewing → queued append → released CAS → delivered`。queued 阶段不进 history；即使 API 在中间崩溃，也优先“多保留一条私有稿”而不是重复发布。
+- 在 queued append 后、released CAS 前崩溃，同一 review 重试可从 `reviewing` 恢复并取回同一条幂等消息；released 后、delivered 前崩溃，重放 released 会补做 `markDelivered`。并发败者不得取消已被胜者引用的消息。
+- 当前没有独立 publication outbox/reconciler。如果崩溃后永远没有后续重试，`reviewing + queued` 或 `released + queued` 可能长期保持私有；终态引用丢失会报错而不会重复发布。这是已知 fail-closed 运维边界。
 
 ## 与现有模块的关系
 

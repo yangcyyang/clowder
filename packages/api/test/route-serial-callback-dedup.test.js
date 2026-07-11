@@ -109,6 +109,52 @@ function createServiceWithoutPostMessage(catId) {
   };
 }
 
+function createServiceWithFreshnessHold(catId, includeFailedReview = false) {
+  const privateDraftSentinel = 'PRIVATE-CALLBACK-DRAFT-SERIAL';
+  return {
+    privateDraftSentinel,
+    async *invoke() {
+      yield { type: 'text', catId, content: 'Stale stream body must stay private.', timestamp: Date.now() };
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        toolInput: { threadId: 'thread1', content: privateDraftSentinel },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_result',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        content: JSON.stringify({
+          status: 'freshness_held',
+          disposition: 'held',
+          threadId: 'thread1',
+          holdId: 'hold-1',
+        }),
+        timestamp: Date.now(),
+      };
+      if (includeFailedReview) {
+        yield {
+          type: 'tool_use',
+          catId,
+          toolName: 'cat_cafe_review_held_message',
+          toolInput: '{}',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId,
+          toolName: 'cat_cafe_review_held_message',
+          content: 'Error: review transport failed',
+          timestamp: Date.now(),
+        };
+      }
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls, augmentCalls = []) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -164,6 +210,89 @@ function createMockDeps(services, appendCalls, augmentCalls = []) {
 }
 
 describe('#573: stream store dedup when cat_cafe_post_message used', () => {
+  it('treats freshness_held as terminal and suppresses stream fallback and metadata augment', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const augmentCalls = [];
+    const service = createServiceWithFreshnessHold('opus');
+    const deps = createMockDeps({ opus: service }, appendCalls, augmentCalls);
+    const yielded = [];
+
+    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      yielded.push(msg);
+    }
+
+    assert.equal(appendCalls.filter((message) => message.origin === 'stream').length, 0);
+    assert.equal(augmentCalls.length, 0, 'held has no canonical messageId to augment');
+    assert.doesNotMatch(
+      JSON.stringify(yielded),
+      new RegExp(service.privateDraftSentinel),
+      'callback tool input must not enter the socket-consumable route stream before a held verdict',
+    );
+  });
+
+  it('releases callback tool detail only after a published verdict', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const privateDraftSentinel = 'PUBLISHED-CALLBACK-DRAFT-SERIAL';
+    let verdictResolved = false;
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'cat_cafe_post_message',
+          toolInput: { threadId: 'thread1', content: privateDraftSentinel },
+          timestamp: Date.now(),
+        };
+        verdictResolved = true;
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          toolName: 'cat_cafe_post_message',
+          content: JSON.stringify({
+            status: 'ok',
+            disposition: 'published',
+            threadId: 'thread1',
+            messageId: 'published-callback-message',
+          }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, appendCalls);
+    const yielded = [];
+    const leakedBeforeVerdict = [];
+
+    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      yielded.push(msg);
+      if (!verdictResolved && JSON.stringify(msg).includes(privateDraftSentinel)) leakedBeforeVerdict.push(msg);
+    }
+
+    assert.equal(leakedBeforeVerdict.length, 0, 'private callback detail must remain buffered until verdict');
+    assert.ok(
+      yielded.some((msg) => msg.type === 'tool_use' && msg.toolInput?.content === privateDraftSentinel),
+      'published callback keeps its normal tool detail after the verdict',
+    );
+  });
+
+  it('does not restore stream fallback when review fails after a freshness hold', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: createServiceWithFreshnessHold('opus', true) }, appendCalls);
+
+    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    assert.equal(
+      appendCalls.filter((message) => message.origin === 'stream').length,
+      0,
+      'once held, a later review error must remain fail-closed',
+    );
+  });
+
   it('skips stream messageStore.append when cat_cafe_post_message was called', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];

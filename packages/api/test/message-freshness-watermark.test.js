@@ -108,6 +108,34 @@ describe('MessageStore freshness watermark', () => {
     );
   });
 
+  test('keeps queued publications private and notifies onAppend exactly once when delivered', async () => {
+    const appended = [];
+    const store = new MessageStore({ onAppend: (message) => appended.push(message.id) });
+    const queued = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      threadId: 'freshness-private-queued',
+      content: 'review transaction draft',
+      mentions: [],
+      timestamp: 101,
+      deliveryStatus: 'queued',
+    });
+
+    assert.deepEqual(await store.getRecent(10, 'user-1'), []);
+    assert.deepEqual(appended, [], 'queued append must not fan out through onAppend');
+
+    const delivered = await store.markDelivered(queued.id, 102);
+    assert.equal(delivered.deliveryStatus, 'delivered');
+    assert.deepEqual(
+      (await store.getRecent(10, 'user-1')).map((message) => message.id),
+      [queued.id],
+    );
+    assert.deepEqual(appended, [queued.id]);
+
+    await store.markDelivered(queued.id, 103);
+    assert.deepEqual(appended, [queued.id], 'delivery replay must not notify twice');
+  });
+
   test('status, system, and briefing messages are structurally exempt', async () => {
     const store = new MessageStore();
     const threadId = 'freshness-structural-exemptions';
@@ -195,5 +223,74 @@ describe('MessageStore freshness watermark', () => {
     assert.equal(await capture(store, threadId, 'opus'), publicMessage.appendWatermark);
     assert.equal(await capture(store, threadId, 'codex'), publicMessage.appendWatermark);
     assert.equal(opusBaseline, codexBaseline, 'empty thread audiences start from the same baseline');
+  });
+
+  test('only same-group sibling outputs are exempt; independent output and new user input make a draft stale', async () => {
+    const store = new MessageStore();
+    const threadId = 'freshness-sibling-output';
+    const baseline = await capture(store, threadId, 'opus');
+
+    const sibling = store.append({
+      userId: 'user-1',
+      catId: 'codex',
+      threadId,
+      content: 'parallel sibling proposal',
+      mentions: [],
+      timestamp: 10,
+      extra: { stream: { invocationId: 'parent-group-1' } },
+    });
+    assert.ok(assertWatermark(sibling.appendWatermark) > assertWatermark(baseline));
+
+    const acceptedSibling = store.appendIfFresh(
+      {
+        userId: 'user-1',
+        catId: 'opus',
+        threadId,
+        content: 'second proposal from same parent group',
+        mentions: [],
+        timestamp: 10,
+        extra: { stream: { invocationId: 'parent-group-1' } },
+      },
+      { baseline, audience: { kind: 'cat', catId: 'opus' }, groupId: 'parent-group-1' },
+    );
+    assert.equal(acceptedSibling.outcome, 'appended');
+
+    const independent = store.appendIfFresh(
+      {
+        userId: 'user-1',
+        catId: 'opus',
+        threadId,
+        content: 'independent invocation draft',
+        mentions: [],
+        timestamp: 11,
+        extra: { stream: { invocationId: 'independent-group' } },
+      },
+      { baseline, audience: { kind: 'cat', catId: 'opus' }, groupId: 'independent-group' },
+    );
+    assert.equal(independent.outcome, 'stale');
+
+    const afterSiblings = await capture(store, threadId, 'opus');
+
+    store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'new user constraint',
+      mentions: ['opus'],
+      timestamp: 12,
+    });
+    const afterUserUpdate = store.appendIfFresh(
+      {
+        userId: 'user-1',
+        catId: 'opus',
+        threadId,
+        content: 'same group but now outdated by user input',
+        mentions: [],
+        timestamp: 13,
+        extra: { stream: { invocationId: 'parent-group-1' } },
+      },
+      { baseline: afterSiblings, audience: { kind: 'cat', catId: 'opus' }, groupId: 'parent-group-1' },
+    );
+    assert.equal(afterUserUpdate.outcome, 'stale');
   });
 });

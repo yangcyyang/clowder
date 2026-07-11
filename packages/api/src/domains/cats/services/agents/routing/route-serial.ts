@@ -10,7 +10,7 @@
  * A2A only triggers here in routeSerial; routeParallel never chains (MVP safety boundary).
  */
 
-import type { CatConfig, CatId } from '@cat-cafe/shared';
+import type { CatConfig, CatId, RichBlock } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
@@ -60,8 +60,10 @@ import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAudi
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import {
   hydrateReplyPreview,
+  type StoredMessage,
   type StoredToolEvent,
   type StreamMetadataAugmentInput,
+  type ThreadAppendWatermark,
 } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
@@ -88,24 +90,32 @@ import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
-import type { A2ARoutingBlockedReason, HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
+import type {
+  A2ARoutingBlockedReason,
+  HistorySummaryObservation,
+  RouteOptions,
+  RouteStrategyDeps,
+} from './route-helpers.js';
 import {
-  assembleIncrementalContext,
   appendCompactBoundaryTaskEvent,
-  buildHistoryGovernanceObservation,
+  assembleIncrementalContext,
   buildContextUsageWarning,
+  buildHistoryGovernanceObservation,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   estimateFullHistoryTokens,
+  formatFreshnessReviewPrompt,
+  freshnessPersistenceEgress,
   getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
+  parseCompactBoundarySystemInfo,
   persistA2ARoutingBlockedNotice,
   persistSilentCompletionNotice,
-  parseCompactBoundarySystemInfo,
+  publishFreshnessDraft,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -116,6 +126,27 @@ import {
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 
 const log = createModuleLogger('route-serial');
+
+async function synthesizePublishedVoiceBlocks(
+  deps: RouteStrategyDeps,
+  message: StoredMessage,
+  blocks: RichBlock[],
+  catId: CatId,
+): Promise<RichBlock[]> {
+  const voiceSynth = getVoiceBlockSynthesizer();
+  if (!voiceSynth || !blocks.some((block) => block.kind === 'audio' && 'text' in block)) return blocks;
+  try {
+    const resolved = await voiceSynth.resolveVoiceBlocks(blocks, catId as string);
+    await deps.messageStore.updateExtra(message.id, {
+      ...(message.extra ?? {}),
+      rich: { v: 1, blocks: resolved },
+    });
+    return resolved;
+  } catch (err) {
+    log.error({ catId: catId as string, err }, 'Published voice block synthesis failed');
+    return blocks;
+  }
+}
 const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 function collectStructuredTargetCatsFromInput(input: unknown): string[] {
@@ -136,10 +167,24 @@ function isPostMessageToolName(toolName: string | undefined): boolean {
   return toolName === 'mcp:cat-cafe/post_message' || toolName === 'cat_cafe_post_message';
 }
 
+function isFreshnessReviewToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  if (toolName.endsWith('cat_cafe_review_held_message')) return true;
+  return toolName === 'mcp:cat-cafe/review_held_message' || toolName === 'cat_cafe_review_held_message';
+}
+
+function isCallbackDeliveryToolName(toolName: string | undefined): boolean {
+  return isPostMessageToolName(toolName) || isFreshnessReviewToolName(toolName);
+}
+
+type CallbackDisposition = 'none' | 'published' | 'held' | 'discarded';
+
 type CallbackPostResult = {
   confirmed: boolean;
+  disposition: CallbackDisposition;
   messageId?: string;
   threadId?: string;
+  holdId?: string;
 };
 
 function collectCallbackPostResultCandidates(content: string): string[] {
@@ -157,27 +202,51 @@ function collectCallbackPostResultCandidates(content: string): string[] {
 
 function callbackPostResultFromPayload(parsed: {
   status?: unknown;
+  disposition?: unknown;
   messageId?: unknown;
   threadId?: unknown;
+  holdId?: unknown;
 }): CallbackPostResult | null {
-  const confirmed = parsed.status === 'ok' || parsed.status === 'duplicate';
-  if (!confirmed && parsed.status === undefined) return null;
+  let disposition: CallbackDisposition = 'none';
+  if (parsed.disposition === 'published' || parsed.status === 'ok' || parsed.status === 'duplicate') {
+    disposition = 'published';
+  } else if (
+    parsed.disposition === 'held' ||
+    parsed.status === 'freshness_held' ||
+    parsed.status === 'freshness_needs_attention' ||
+    parsed.status === 'freshness_exhausted'
+  ) {
+    disposition = 'held';
+  } else if (parsed.disposition === 'discarded' || parsed.status === 'freshness_discarded') {
+    disposition = 'discarded';
+  }
+  if (disposition === 'none' && parsed.status === undefined) return null;
   return {
-    confirmed,
+    confirmed: disposition !== 'none',
+    disposition,
     ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
     ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
+    ...(typeof parsed.holdId === 'string' && parsed.holdId.length > 0 ? { holdId: parsed.holdId } : {}),
   };
 }
 
 function parseCallbackPostResult(content: string | undefined): {
   confirmed: boolean;
+  disposition: CallbackDisposition;
   messageId?: string;
   threadId?: string;
+  holdId?: string;
 } {
-  if (!content) return { confirmed: false };
+  if (!content) return { confirmed: false, disposition: 'none' };
   for (const candidate of collectCallbackPostResultCandidates(content)) {
     try {
-      const parsed = JSON.parse(candidate) as { status?: unknown; messageId?: unknown; threadId?: unknown };
+      const parsed = JSON.parse(candidate) as {
+        status?: unknown;
+        disposition?: unknown;
+        messageId?: unknown;
+        threadId?: unknown;
+        holdId?: unknown;
+      };
       const result = callbackPostResultFromPayload(parsed);
       if (result) return result;
     } catch {
@@ -187,6 +256,7 @@ function parseCallbackPostResult(content: string | undefined): {
 
   return {
     confirmed: /"status"\s*:\s*"(ok|duplicate)"/.test(content),
+    disposition: /"status"\s*:\s*"(ok|duplicate)"/.test(content) ? 'published' : 'none',
   };
 }
 
@@ -201,7 +271,11 @@ function inferToolResultName(msg: AgentMessage): string | undefined {
 }
 
 function toolNamesMatch(a: string, b: string): boolean {
-  return a === b || (isPostMessageToolName(a) && isPostMessageToolName(b));
+  return (
+    a === b ||
+    (isPostMessageToolName(a) && isPostMessageToolName(b)) ||
+    (isFreshnessReviewToolName(a) && isFreshnessReviewToolName(b))
+  );
 }
 
 function consumePendingToolResult(
@@ -221,7 +295,7 @@ function consumePendingToolResult(
   const firstPending = pendingToolResults[0];
   if (!firstPending) return undefined;
 
-  if (!isPostMessageToolName(firstPending)) {
+  if (!isCallbackDeliveryToolName(firstPending)) {
     return pendingToolResults.shift();
   }
 
@@ -264,6 +338,10 @@ export async function* routeSerial(
     hasQueuedOrActiveAgentForCat,
     enqueueA2ATargets,
   } = options;
+  const freshnessReview = options.persistenceContext?.freshnessReview;
+  if (freshnessReview) {
+    message = formatFreshnessReviewPrompt(freshnessReview);
+  }
   const previousResponses: { catId: CatId; content: string }[] = [];
   const thinkingMode = options.thinkingMode ?? 'play';
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
@@ -292,6 +370,16 @@ export async function* routeSerial(
   // F27: Track how many worklist entries have had a2a_handoff emitted
   let handoffEmitted = targetCats.length; // Original targets don't get handoff events
   const activeTrackedA2ASlots = new Set<CatId>();
+  const freshnessBaselineByCat = new Map<CatId, ThreadAppendWatermark>();
+  if (deps.freshnessGate) {
+    await Promise.all(
+      Object.keys(deps.services).map(async (rawCatId) => {
+        const catId = rawCatId as CatId;
+        const baseline = await deps.messageStore.captureFreshnessWatermark(threadId, { kind: 'cat', catId });
+        freshnessBaselineByCat.set(catId, baseline);
+      }),
+    );
+  }
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
   let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
   if (deps.invocationDeps.threadStore) {
@@ -812,10 +900,12 @@ export async function* routeSerial(
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
       // #573: Track confirmed cat_cafe_post_message callback persistence
-      let callbackPostConfirmed = false;
+      let callbackDisposition: CallbackDisposition = 'none';
       let callbackPostMessageId: string | undefined;
+      let callbackHoldId: string | undefined;
       let awaitingCallbackResult = false;
       const pendingToolResults: string[] = [];
+      const pendingCallbackExposureEvents: AgentMessage[] = [];
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
@@ -853,6 +943,7 @@ export async function* routeSerial(
           prompt,
           userId,
           threadId,
+          ...(freshnessBaselineByCat.get(catId) ? { freshnessBaseline: freshnessBaselineByCat.get(catId)! } : {}),
           ...(currentUserMessageId ? { currentUserMessageId } : {}),
           ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
           ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
@@ -893,6 +984,8 @@ export async function* routeSerial(
           }
 
           for (const effectiveMsg of effectiveMsgs) {
+            let suppressCallbackExposureEvent = false;
+            let releaseCallbackExposureEvents: AgentMessage[] | undefined;
             // F22 R2 P1-1: Capture invocationId from the initial system_info.
             // Keep forwarding this boundary event so frontend can reset stale task progress.
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content && !ownInvocationId) {
@@ -901,7 +994,7 @@ export async function* routeSerial(
                 if (parsed.type === 'invocation_created') {
                   ownInvocationId = parsed.invocationId;
                   // F111 Phase B: Start streaming TTS when we have an invocationId
-                  if (voiceMode && deps.socketManager) {
+                  if (voiceMode && deps.socketManager && !deps.freshnessGate) {
                     const ttsRegistry = getStreamingTtsRegistry();
                     if (ttsRegistry) {
                       voiceChunker = new StreamingTtsChunker({
@@ -982,7 +1075,11 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
               collectedToolNames.push(effectiveMsg.toolName);
               pendingToolResults.push(effectiveMsg.toolName);
-              if (isPostMessageToolName(effectiveMsg.toolName)) awaitingCallbackResult = true;
+              if (isCallbackDeliveryToolName(effectiveMsg.toolName)) {
+                awaitingCallbackResult = true;
+                pendingCallbackExposureEvents.push(effectiveMsg);
+                suppressCallbackExposureEvent = true;
+              }
             }
             // #573: Confirm callback persistence via tool_result success
             if (effectiveMsg.type === 'tool_result') {
@@ -991,17 +1088,32 @@ export async function* routeSerial(
                 pendingToolResults,
                 effectiveMsg,
                 callbackResult.confirmed,
-                Boolean(callbackResult.messageId && callbackResult.threadId),
+                Boolean(
+                  (callbackResult.messageId && callbackResult.threadId) ||
+                    (callbackResult.holdId && callbackResult.threadId),
+                ),
               );
+              if (completedToolName && isCallbackDeliveryToolName(completedToolName)) {
+                pendingCallbackExposureEvents.push(effectiveMsg);
+                suppressCallbackExposureEvent = true;
+                if (callbackResult.confirmed) {
+                  if (callbackResult.disposition === 'published') {
+                    releaseCallbackExposureEvents = pendingCallbackExposureEvents.splice(0);
+                  } else {
+                    pendingCallbackExposureEvents.length = 0;
+                  }
+                }
+              }
               if (
                 awaitingCallbackResult &&
                 completedToolName &&
-                isPostMessageToolName(completedToolName) &&
+                isCallbackDeliveryToolName(completedToolName) &&
                 callbackResult.confirmed
               ) {
-                callbackPostConfirmed = true;
+                callbackDisposition = callbackResult.disposition;
                 awaitingCallbackResult = false;
                 if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
+                if (callbackResult.holdId) callbackHoldId = callbackResult.holdId;
               }
             }
 
@@ -1035,6 +1147,7 @@ export async function* routeSerial(
                     invocationId: ownInvocationId,
                     catId,
                     content: textContent,
+                    ...(deps.freshnessGate ? { exposure: 'private' as const } : {}),
                     ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
                     ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                     updatedAt: now,
@@ -1060,6 +1173,7 @@ export async function* routeSerial(
                       invocationId: ownInvocationId,
                       catId,
                       content: textContent,
+                      ...(deps.freshnessGate ? { exposure: 'private' as const } : {}),
                       ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
                       ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                       updatedAt: now,
@@ -1088,8 +1202,22 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'done') {
               doneMsg = effectiveMsg; // Buffer — yield after A2A detection
             } else {
+              if (releaseCallbackExposureEvents) {
+                for (const callbackEvent of releaseCallbackExposureEvents) yield callbackEvent;
+              }
+              if (suppressCallbackExposureEvent) continue;
               if (effectiveMsg.type === 'text' && !effectiveMsg.content) {
                 continue;
+              }
+              if (deps.freshnessGate && effectiveMsg.type === 'text') {
+                continue;
+              }
+              if (deps.freshnessGate && effectiveMsg.type === 'system_info' && effectiveMsg.content) {
+                try {
+                  if (JSON.parse(effectiveMsg.content).type === 'rich_block') continue;
+                } catch {
+                  /* non-JSON system_info remains realtime */
+                }
               }
               // Tag CLI stdout text with origin: 'stream' (thinking/internal)
               yield effectiveMsg.type === 'text'
@@ -1133,6 +1261,10 @@ export async function* routeSerial(
       }
 
       let a2aMentions: CatId[] = [];
+      let freshnessEgressDisposition: 'published' | 'held' | 'discarded' | undefined;
+      let freshnessEgressHoldId: string | undefined;
+      let freshnessHoldStatus: 'held' | 'needs_attention' | undefined;
+      let releaseBufferedText = false;
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
@@ -1155,7 +1287,7 @@ export async function* routeSerial(
         // F111: When voiceMode is active, skip full synthesis so audio blocks
         // arrive at the frontend with text but no url — the frontend will use
         // /api/tts/stream for chunked streaming playback (<2s first-audio).
-        if (!voiceMode) {
+        if (!voiceMode && !deps.freshnessGate) {
           const voiceSynth = getVoiceBlockSynthesizer();
           if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
             try {
@@ -1164,13 +1296,6 @@ export async function* routeSerial(
               log.error({ catId: catId as string, err }, 'Voice block synthesis failed');
             }
           }
-        }
-
-        // In play mode, CLI stream output (thinking) is hidden from other cats.
-        // Only share previousResponses in debug mode where cats see each other's thinking.
-        // Important: push after review gate mutation so downstream cats see invalid-review marker.
-        if (!incrementalMode && thinkingMode === 'debug') {
-          previousResponses.push({ catId, content: storedContent });
         }
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
@@ -1308,13 +1433,13 @@ export async function* routeSerial(
           }
         }
 
-        const storedTimestamp = invocationStartedAt;
+        const storedTimestamp = Date.now();
 
         // F061: Detect @co-creator mentions in agent response for browser notification
         mentionsUser = storedContent ? detectUserMention(storedContent) : false;
 
         // #573: skip stream store only when callback confirmed persistence (not just invocation)
-        const callbackAlreadyStored = callbackPostConfirmed;
+        const callbackAlreadyStored = callbackDisposition !== 'none';
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
@@ -1323,10 +1448,11 @@ export async function* routeSerial(
           // #573: persist with the OUTER cat-cafe parentInvocationId (set by QueueProcessor)
           const persistedInvocationId = options.parentInvocationId ?? ownInvocationId;
           if (!callbackAlreadyStored) {
-            const storedMsg = await deps.messageStore.append({
+            const outboundDraft = {
               userId,
               catId,
               content: storedContent,
+              messageClass: 'substantive' as const,
               mentions: a2aMentions,
               origin: 'stream',
               timestamp: storedTimestamp,
@@ -1341,13 +1467,77 @@ export async function* routeSerial(
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
-            });
-            storedMsgId = storedMsg.id;
-            // F088-P3: Stash rich blocks for outbound delivery
-            if (options.persistenceContext && allRichBlocks.length > 0) {
+            } as const;
+            if (deps.freshnessGate) {
+              const baseline = freshnessBaselineByCat.get(catId);
+              if (!baseline) throw new Error(`Missing freshness baseline for ${catId as string}`);
+              const result = await publishFreshnessDraft({
+                deps,
+                ...(freshnessReview ? { review: freshnessReview } : {}),
+                successorInvocationId: ownInvocationId,
+                invocationId: ownInvocationId ?? persistedInvocationId ?? `route-${catId as string}`,
+                submissionKey: `stream:${persistedInvocationId ?? ownInvocationId ?? catId}`,
+                userId,
+                catId,
+                threadId,
+                baselineWatermark: baseline,
+                draft: outboundDraft,
+              });
+              const egressRecord = freshnessPersistenceEgress(result);
+              if (result.outcome === 'published') {
+                storedMsgId = result.message.id;
+                freshnessEgressDisposition = 'published';
+                releaseBufferedText = true;
+                if (!voiceMode) {
+                  allRichBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, allRichBlocks, catId);
+                }
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              } else if (result.outcome === 'discarded') {
+                freshnessEgressDisposition = 'discarded';
+                freshnessEgressHoldId = result.hold.id;
+                a2aMentions = [];
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              } else {
+                freshnessEgressDisposition = 'held';
+                freshnessEgressHoldId = result.hold.id;
+                freshnessHoldStatus = egressRecord.holdStatus;
+                a2aMentions = [];
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              }
+            } else {
+              const storedMsg = await deps.messageStore.append(outboundDraft);
+              storedMsgId = storedMsg.id;
+            }
+            // F088-P3: Stash rich blocks for outbound delivery only after publication.
+            if (
+              options.persistenceContext &&
+              allRichBlocks.length > 0 &&
+              freshnessEgressDisposition !== 'held' &&
+              freshnessEgressDisposition !== 'discarded'
+            ) {
               options.persistenceContext.richBlocks = allRichBlocks;
             }
           } else {
+            freshnessEgressDisposition = callbackDisposition === 'none' ? undefined : callbackDisposition;
+            freshnessEgressHoldId = callbackHoldId;
+            if (callbackDisposition === 'held' || callbackDisposition === 'discarded') a2aMentions = [];
+            if (options.persistenceContext && callbackDisposition !== 'none') {
+              options.persistenceContext.egressByCat ??= {};
+              options.persistenceContext.egressByCat[catId as string] = {
+                disposition: callbackDisposition,
+                ...(callbackPostMessageId ? { messageId: callbackPostMessageId } : {}),
+                ...(callbackHoldId ? { holdId: callbackHoldId } : {}),
+              };
+            }
             log.info(
               { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
               'Stream store skipped — cat_cafe_post_message callback already persisted',
@@ -1411,6 +1601,55 @@ export async function* routeSerial(
               error: err instanceof Error ? err.message : String(err),
             });
           }
+        }
+
+        if (
+          !incrementalMode &&
+          thinkingMode === 'debug' &&
+          freshnessEgressDisposition !== 'held' &&
+          freshnessEgressDisposition !== 'discarded'
+        ) {
+          previousResponses.push({ catId, content: storedContent });
+        }
+
+        if (deps.freshnessGate && releaseBufferedText && storedMsgId) {
+          for (const callbackEvent of pendingCallbackExposureEvents.splice(0)) yield callbackEvent;
+          yield {
+            type: 'text',
+            catId,
+            content: storedContent,
+            textMode: 'replace',
+            origin: 'stream',
+            messageId: storedMsgId,
+            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+            ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
+            timestamp: storedTimestamp,
+          } as AgentMessage;
+          for (const block of allRichBlocks) {
+            yield {
+              type: 'system_info',
+              catId,
+              content: JSON.stringify({ type: 'rich_block', block, messageId: storedMsgId }),
+              invocationId: ownInvocationId,
+              timestamp: storedTimestamp,
+            } as AgentMessage;
+          }
+        } else if (deps.freshnessGate && freshnessEgressDisposition === 'held') {
+          yield {
+            type: 'system_info',
+            catId,
+            content: JSON.stringify({
+              type: freshnessHoldStatus === 'needs_attention' ? 'freshness_needs_attention' : 'freshness_hold',
+              disposition: 'held',
+              holdId: freshnessEgressHoldId,
+              message:
+                freshnessHoldStatus === 'needs_attention'
+                  ? '连续两次复核仍遇到新消息，旧稿继续保留，等待人工处理。'
+                  : '收到新消息，旧稿已扣住并等待重新审阅。',
+            }),
+            invocationId: ownInvocationId,
+            timestamp: Date.now(),
+          } as AgentMessage;
         }
 
         if (invocationSpanRef.current) catInvocationSpans.set(index, invocationSpanRef.current);
@@ -1678,7 +1917,7 @@ export async function* routeSerial(
         // No text content and no error.
         // Persist assistant bubbles only when there is visible rich payload.
         // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
-        const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
+        let noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
         const shouldPersistNoTextMessage = hasRichBlocks;
         const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
@@ -1701,11 +1940,14 @@ export async function* routeSerial(
         }
 
         if (shouldPersistNoTextMessage) {
+          let storedRichMessageId: string | undefined;
           try {
-            await deps.messageStore.append({
+            const persistedInvocationId = options.parentInvocationId ?? ownInvocationId;
+            const outboundDraft = {
               userId,
               catId,
               content: '',
+              messageClass: 'substantive' as const,
               mentions: [],
               origin: 'stream',
               timestamp: invocationStartedAt,
@@ -1716,14 +1958,65 @@ export async function* routeSerial(
               ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                ...((options.parentInvocationId ?? ownInvocationId)
-                  ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
-                  : {}),
+                ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
-            });
-            // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-            if (options.persistenceContext && noTextBlocks.length > 0) {
+            } as const;
+
+            if (deps.freshnessGate) {
+              const baseline = freshnessBaselineByCat.get(catId);
+              if (!baseline) throw new Error(`Missing freshness baseline for ${catId as string}`);
+              const result = await publishFreshnessDraft({
+                deps,
+                ...(freshnessReview ? { review: freshnessReview } : {}),
+                successorInvocationId: ownInvocationId,
+                invocationId: ownInvocationId ?? persistedInvocationId ?? `route-${catId as string}`,
+                submissionKey: `stream:${persistedInvocationId ?? ownInvocationId ?? catId}`,
+                userId,
+                catId,
+                threadId,
+                baselineWatermark: baseline,
+                draft: outboundDraft,
+              });
+              const egressRecord = freshnessPersistenceEgress(result);
+              if (result.outcome === 'published') {
+                storedRichMessageId = result.message.id;
+                freshnessEgressDisposition = 'published';
+                if (!voiceMode) {
+                  noTextBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, noTextBlocks, catId);
+                }
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              } else if (result.outcome === 'discarded') {
+                freshnessEgressDisposition = 'discarded';
+                freshnessEgressHoldId = result.hold.id;
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              } else {
+                freshnessEgressDisposition = 'held';
+                freshnessEgressHoldId = result.hold.id;
+                freshnessHoldStatus = egressRecord.holdStatus;
+                if (options.persistenceContext) {
+                  options.persistenceContext.egressByCat ??= {};
+                  options.persistenceContext.egressByCat[catId as string] = egressRecord;
+                }
+              }
+            } else {
+              const stored = await deps.messageStore.append(outboundDraft);
+              storedRichMessageId = stored.id;
+            }
+
+            // F088-P3: Stash rich blocks for outbound delivery only after publication.
+            if (
+              options.persistenceContext &&
+              noTextBlocks.length > 0 &&
+              freshnessEgressDisposition !== 'held' &&
+              freshnessEgressDisposition !== 'discarded'
+            ) {
               options.persistenceContext.richBlocks = [
                 ...(options.persistenceContext.richBlocks ?? []),
                 ...noTextBlocks,
@@ -1755,6 +2048,35 @@ export async function* routeSerial(
                 error: err instanceof Error ? err.message : String(err),
               });
             }
+          }
+
+          if (deps.freshnessGate && freshnessEgressDisposition === 'published' && storedRichMessageId) {
+            for (const callbackEvent of pendingCallbackExposureEvents.splice(0)) yield callbackEvent;
+            for (const block of noTextBlocks) {
+              yield {
+                type: 'system_info',
+                catId,
+                content: JSON.stringify({ type: 'rich_block', block, messageId: storedRichMessageId }),
+                invocationId: ownInvocationId,
+                timestamp: Date.now(),
+              } as AgentMessage;
+            }
+          } else if (deps.freshnessGate && freshnessEgressDisposition === 'held') {
+            yield {
+              type: 'system_info',
+              catId,
+              content: JSON.stringify({
+                type: freshnessHoldStatus === 'needs_attention' ? 'freshness_needs_attention' : 'freshness_hold',
+                disposition: 'held',
+                holdId: freshnessEgressHoldId,
+                message:
+                  freshnessHoldStatus === 'needs_attention'
+                    ? '连续两次复核仍遇到新消息，旧稿继续保留，等待人工处理。'
+                    : '收到新消息，旧稿已扣住并等待重新审阅。',
+              }),
+              invocationId: ownInvocationId,
+              timestamp: Date.now(),
+            } as AgentMessage;
           }
         }
 

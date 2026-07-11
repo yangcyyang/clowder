@@ -44,6 +44,7 @@ export class RedisDraftStore implements IDraftStore {
       invocationId: draft.invocationId,
       catId: draft.catId as string,
       content: draft.content,
+      exposure: draft.exposure ?? 'public',
       updatedAt: String(draft.updatedAt),
     };
     if (draft.toolEvents && draft.toolEvents.length > 0) {
@@ -165,6 +166,7 @@ export class RedisDraftStore implements IDraftStore {
       invocationId: d.invocationId ?? '',
       catId: (d.catId ?? 'opus') as CatId,
       content: d.content ?? '',
+      ...(d.exposure === 'private' ? { exposure: 'private' as const } : {}),
       createdAt: parseInt(d.createdAt ?? d.updatedAt ?? '0', 10),
       updatedAt: parseInt(d.updatedAt ?? '0', 10),
       ...(toolEvents ? { toolEvents } : {}),

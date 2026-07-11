@@ -62,13 +62,12 @@ import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { estimatePromptSourceBreakdown } from '../../context/prompt-source-breakdown.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { autoUpdateAgentMemory } from '../memory/AgentMemoryAutoWriter.js';
-import { evaluateClaudeBudgetGate } from './claude-budget-gate.js';
 import {
   inferResumeTrustForSessionHandoff,
   writeContextHandoffForPromptProjects,
 } from '../memory/ProjectProgressStore.js';
+import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
@@ -78,6 +77,7 @@ import {
   summarizeOpenCodeRuntimeConfigForDebug,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
+import { evaluateClaudeBudgetGate } from './claude-budget-gate.js';
 
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -154,8 +154,7 @@ const sessionMutex = new SessionMutex();
 const SESSION_MUTEX_WAIT_TIMEOUT_MS = Number(process.env.CAT_CAFE_SESSION_MUTEX_WAIT_TIMEOUT_MS) || 90_000;
 
 function isFilesystemPermissionError(err: unknown): boolean {
-  const code =
-    typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
   const message = err instanceof Error ? err.message : String(err ?? '');
   return code === 'EPERM' || code === 'EACCES' || /operation not permitted|permission denied/i.test(message);
 }
@@ -297,6 +296,8 @@ export interface InvocationParams {
   readonly prompt: string;
   readonly userId: string;
   readonly threadId: string;
+  /** Per-thread append watermark captured before this invocation reads context. */
+  readonly freshnessBaseline?: string;
   readonly currentUserMessageId?: string;
   readonly contentBlocks?: readonly MessageContent[];
   readonly uploadDir?: string;
@@ -355,6 +356,7 @@ export interface InvocationParams {
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
+  const freshnessProtected = params.freshnessBaseline !== undefined;
 
   const { invocationId, callbackToken } = await registry.create(
     userId,
@@ -362,6 +364,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     threadId,
     params.parentInvocationId,
     params.a2aTriggerMessageId,
+    freshnessProtected ? { freshnessBaseline: params.freshnessBaseline } : undefined,
   );
 
   // F153: Record cat invocation count with trigger type
@@ -442,6 +445,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let assistantTextForMemory = '';
 
   const captureAssistantTextForMemory = (message: AgentMessage): void => {
+    // F193: the route owns the freshness verdict. Until it publishes, stdout is
+    // a private draft and must not enter a durable/searchable memory sink.
+    if (freshnessProtected) return;
     if (message.type !== 'text' || !message.content) return;
     assistantTextForMemory =
       message.textMode === 'replace' ? message.content : `${assistantTextForMemory}${message.content}`;
@@ -1612,7 +1618,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               ...(params.contextBudget.historyBudgetRatio != null
                 ? { historyBudgetRatio: params.contextBudget.historyBudgetRatio }
                 : {}),
-              ...(params.contextBudget.summarySegmentId ? { summarySegmentId: params.contextBudget.summarySegmentId } : {}),
+              ...(params.contextBudget.summarySegmentId
+                ? { summarySegmentId: params.contextBudget.summarySegmentId }
+                : {}),
               ...(params.contextBudget.historyGovernanceDegraded !== undefined
                 ? { historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded }
                 : {}),
@@ -1943,7 +1951,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
 
       // F24 Phase C: Record event to transcript buffer (best-effort)
-      if (deps.transcriptWriter && deps.sessionChainStore && sessionChainActive) {
+      if (!freshnessProtected && deps.transcriptWriter && deps.sessionChainStore && sessionChainActive) {
         try {
           const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
           if (activeRec) {
@@ -2427,7 +2435,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     }
 
-    if (otelStatus === 'ok' && assistantTextForMemory.trim()) {
+    if (!freshnessProtected && otelStatus === 'ok' && assistantTextForMemory.trim()) {
       autoUpdateAgentMemory({
         catId,
         invocationId,

@@ -35,7 +35,10 @@ function draft(content = '基于旧上下文形成的完整稿件') {
     messageClass: 'substantive',
     origin: 'callback',
     replyTo: 'msg-parent',
-    extra: { targetCats: ['codex'] },
+    extra: {
+      targetCats: ['codex'],
+      stream: { invocationId: 'invocation-freshness-gate' },
+    },
   };
 }
 
@@ -48,6 +51,16 @@ function submission(baselineWatermark, overrides = {}) {
     threadId: THREAD_ID,
     baselineWatermark,
     draft: draft(),
+    ...overrides,
+  };
+}
+
+function reviewIdentity(overrides = {}) {
+  return {
+    invocationId: 'invocation-freshness-gate',
+    userId: USER_ID,
+    catId: CAT_ID,
+    threadId: THREAD_ID,
     ...overrides,
   };
 }
@@ -132,11 +145,12 @@ describe('FreshnessEgressGate', () => {
   it('send_draft rechecks atomically from the held observed watermark before releasing', async () => {
     const { messageStore, holdStore, gate } = createHarness();
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
-    await appendQueuedUserMessage(messageStore, '触发初始 hold');
+    const trigger = await appendQueuedUserMessage(messageStore, '触发初始 hold');
     const held = await gate.submit(submission(baseline));
     assert.equal(held.outcome, 'held');
 
     const result = await gate.review({
+      ...reviewIdentity(),
       holdId: held.hold.id,
       expectedVersion: held.hold.version,
       action: 'send_draft',
@@ -152,6 +166,24 @@ describe('FreshnessEgressGate', () => {
       (await formalCatMessages(messageStore)).map((message) => message.id),
       [result.message.id],
     );
+
+    const reviewReplay = await gate.review({
+      ...reviewIdentity(),
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'send_draft',
+      now: NOW + 11,
+    });
+    assert.equal(reviewReplay.outcome, 'published');
+    assert.equal(reviewReplay.replayed, true);
+    assert.equal(reviewReplay.message.id, result.message.id);
+
+    await messageStore.markCanceled(trigger.id);
+    const submitReplay = await gate.submit(submission(baseline));
+    assert.equal(submitReplay.outcome, 'published');
+    assert.equal(submitReplay.replayed, true);
+    assert.equal(submitReplay.message.id, result.message.id);
+    assert.equal((await formalCatMessages(messageStore)).length, 1);
   });
 
   it('reholds one review conflict and fails closed as needs_attention on the second', async () => {
@@ -164,6 +196,7 @@ describe('FreshnessEgressGate', () => {
     const firstConflictMessage = await appendQueuedUserMessage(messageStore, '第一次 review 期间的新消息', NOW + 20);
     const replacementDraft = draft('根据首批新消息改写的稿件');
     const reheld = await gate.review({
+      ...reviewIdentity(),
       holdId: initial.hold.id,
       expectedVersion: initial.hold.version,
       action: 'replace',
@@ -179,6 +212,7 @@ describe('FreshnessEgressGate', () => {
 
     const secondConflictMessage = await appendQueuedUserMessage(messageStore, '第二次 review 期间的新消息', NOW + 30);
     const exhausted = await gate.review({
+      ...reviewIdentity(),
       holdId: initial.hold.id,
       expectedVersion: reheld.hold.version,
       action: 'send_draft',
@@ -198,11 +232,12 @@ describe('FreshnessEgressGate', () => {
   it('discard resolves the hold without publishing its draft', async () => {
     const { messageStore, holdStore, gate } = createHarness();
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
-    await appendQueuedUserMessage(messageStore, '触发待丢弃 hold');
+    const trigger = await appendQueuedUserMessage(messageStore, '触发待丢弃 hold');
     const held = await gate.submit(submission(baseline));
     assert.equal(held.outcome, 'held');
 
     const result = await gate.review({
+      ...reviewIdentity(),
       holdId: held.hold.id,
       expectedVersion: held.hold.version,
       action: 'discard',
@@ -213,5 +248,167 @@ describe('FreshnessEgressGate', () => {
     assert.equal(result.hold.status, 'discarded');
     assert.deepEqual(await holdStore.get(held.hold.id), result.hold);
     assert.equal((await formalCatMessages(messageStore)).length, 0);
+
+    const reviewReplay = await gate.review({
+      ...reviewIdentity(),
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'discard',
+      now: NOW + 41,
+    });
+    assert.equal(reviewReplay.outcome, 'discarded');
+
+    await messageStore.markCanceled(trigger.id);
+    const submitReplay = await gate.submit(submission(baseline));
+    assert.equal(submitReplay.outcome, 'discarded');
+  });
+
+  it('recovers a reviewing orphan after crashing between queued append and hold release', async () => {
+    const messageStore = new MessageStore();
+    const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
+    const release = holdStore.release.bind(holdStore);
+    let crashBeforeRelease = true;
+    holdStore.release = async (...args) => {
+      if (crashBeforeRelease) {
+        crashBeforeRelease = false;
+        throw new Error('simulated crash before release');
+      }
+      return release(...args);
+    };
+    const gate = new FreshnessEgressGate({ messageStore, holdStore });
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    await appendQueuedUserMessage(messageStore, '触发 orphan recovery', NOW + 60);
+    const held = await gate.submit(submission(baseline, { submissionKey: 'orphan-before-release' }));
+    assert.equal(held.outcome, 'held');
+    const input = {
+      ...reviewIdentity(),
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'send_draft',
+      now: NOW + 61,
+    };
+
+    await assert.rejects(gate.review(input), /simulated crash before release/);
+    assert.equal((await holdStore.get(held.hold.id)).status, 'reviewing');
+    assert.equal((await formalCatMessages(messageStore)).length, 0);
+
+    const recovered = await gate.review(input);
+    assert.equal(recovered.outcome, 'published');
+    assert.equal(recovered.message.deliveryStatus, 'delivered');
+    assert.equal((await formalCatMessages(messageStore)).length, 1);
+  });
+
+  it('finishes delivery after crashing between hold release and markDelivered', async () => {
+    const messageStore = new MessageStore();
+    const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
+    const markDelivered = messageStore.markDelivered.bind(messageStore);
+    let crashBeforeDelivery = true;
+    messageStore.markDelivered = async (...args) => {
+      if (crashBeforeDelivery) {
+        crashBeforeDelivery = false;
+        throw new Error('simulated crash before delivery');
+      }
+      return markDelivered(...args);
+    };
+    const gate = new FreshnessEgressGate({ messageStore, holdStore });
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    await appendQueuedUserMessage(messageStore, '触发 released queued recovery', NOW + 70);
+    const held = await gate.submit(submission(baseline, { submissionKey: 'orphan-after-release' }));
+    assert.equal(held.outcome, 'held');
+    const input = {
+      ...reviewIdentity(),
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'send_draft',
+      now: NOW + 71,
+    };
+
+    await assert.rejects(gate.review(input), /simulated crash before delivery/);
+    const released = await holdStore.get(held.hold.id);
+    assert.equal(released.status, 'released');
+    assert.equal((await messageStore.getById(released.releasedMessageId)).deliveryStatus, 'queued');
+    assert.equal((await formalCatMessages(messageStore)).length, 0);
+
+    const recovered = await gate.review(input);
+    assert.equal(recovered.outcome, 'published');
+    assert.equal(recovered.replayed, true);
+    assert.equal(recovered.message.deliveryStatus, 'delivered');
+    assert.equal((await formalCatMessages(messageStore)).length, 1);
+  });
+
+  it('does not let a concurrent recovery loser cancel the winner idempotent message', async () => {
+    const { messageStore, holdStore, gate } = createHarness();
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    await appendQueuedUserMessage(messageStore, '触发 concurrent recovery', NOW + 80);
+    const held = await gate.submit(submission(baseline, { submissionKey: 'concurrent-recovery' }));
+    assert.equal(held.outcome, 'held');
+    const reviewing = await holdStore.claimReview(held.hold.id, {
+      expectedVersion: held.hold.version,
+      now: NOW + 81,
+    });
+    assert.equal(reviewing.status, 'reviewing');
+    let canceled = 0;
+    const markCanceled = messageStore.markCanceled.bind(messageStore);
+    messageStore.markCanceled = async (...args) => {
+      canceled += 1;
+      return markCanceled(...args);
+    };
+    const input = {
+      ...reviewIdentity(),
+      holdId: held.hold.id,
+      expectedVersion: held.hold.version,
+      action: 'send_draft',
+      now: NOW + 82,
+    };
+
+    const results = await Promise.all([gate.review(input), gate.review(input)]);
+    assert.deepEqual(
+      results.map((result) => result.outcome),
+      ['published', 'published'],
+    );
+    assert.equal(new Set(results.map((result) => result.message.id)).size, 1);
+    assert.equal(results[0].message.deliveryStatus, 'delivered');
+    assert.equal(results[1].message.deliveryStatus, 'delivered');
+    assert.equal(canceled, 0);
+    assert.equal((await formalCatMessages(messageStore)).length, 1);
+  });
+
+  it('keeps the reviewed draft private when hold release loses a deadline race', async () => {
+    const messageStore = new MessageStore();
+    const backingHoldStore = new FreshnessHoldStore({ maxReviews: 2 });
+    const racingHoldStore = {
+      createOrGet: (...args) => backingHoldStore.createOrGet(...args),
+      get: (...args) => backingHoldStore.get(...args),
+      getBySubmission: (...args) => backingHoldStore.getBySubmission(...args),
+      claimReview: (...args) => backingHoldStore.claimReview(...args),
+      rehold: (...args) => backingHoldStore.rehold(...args),
+      discard: (...args) => backingHoldStore.discard(...args),
+      expireDue: (...args) => backingHoldStore.expireDue(...args),
+      async release(id, input) {
+        await backingHoldStore.expireDue(Number.MAX_SAFE_INTEGER);
+        return backingHoldStore.release(id, input);
+      },
+    };
+    const gate = new FreshnessEgressGate({ messageStore, holdStore: racingHoldStore });
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    await appendQueuedUserMessage(messageStore, '触发 deadline race hold');
+    const held = await gate.submit(submission(baseline, { submissionKey: 'deadline-race' }));
+    assert.equal(held.outcome, 'held');
+
+    await assert.rejects(
+      gate.review({
+        ...reviewIdentity(),
+        holdId: held.hold.id,
+        expectedVersion: held.hold.version,
+        action: 'send_draft',
+        now: NOW + 50,
+      }),
+      /release version conflict/,
+    );
+
+    assert.equal((await formalCatMessages(messageStore)).length, 0);
+    const allMessages = await messageStore.getRecent(100, USER_ID);
+    const attempted = allMessages.find((message) => message.catId === CAT_ID);
+    assert.ok(!attempted || attempted.deliveryStatus !== 'delivered');
   });
 });

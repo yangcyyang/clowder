@@ -758,6 +758,27 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: true,
   },
   {
+    name: 'CAT_CAFE_FRESHNESS_HOLD_ENABLED',
+    defaultValue: 'false',
+    description: 'F193 Freshness Hold 总开关；仅 true 启用，可立即回滚',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_FRESHNESS_HOLD_CATS',
+    defaultValue: '(全部)',
+    description: 'F193 猫灰度白名单，逗号分隔；空值表示全部',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_FRESHNESS_HOLD_THREADS',
+    defaultValue: '(全部)',
+    description: 'F193 线程灰度白名单，逗号分隔；空值表示全部',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_ENABLED',
     defaultValue: 'true',
     description: 'Callback outbox 是否启用',
@@ -1525,7 +1546,8 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_SUMMARY_PI_MODEL',
     defaultValue: 'mimo/mimo-v2.5-pro-ultraspeed',
-    description: 'CAT_CAFE_SUMMARY_PROVIDER=pi-cli 时的 Pi CLI 摘要模型；显式默认避免摘要调度器早于 CatRegistry 初始化时报错',
+    description:
+      'CAT_CAFE_SUMMARY_PROVIDER=pi-cli 时的 Pi CLI 摘要模型；显式默认避免摘要调度器早于 CatRegistry 初始化时报错',
     category: 'evidence',
     sensitive: false,
     runtimeEditable: true,

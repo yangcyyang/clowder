@@ -257,6 +257,32 @@ export const postMessageInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
+export const reviewHeldMessageInputSchema = {
+  holdId: z.string().min(1).describe('Hold ID returned by a freshness_held response'),
+  action: z
+    .enum(['replace', 'send_draft', 'discard'])
+    .describe('Review decision: replace the draft, send the original draft, or discard it'),
+  expectedVersion: z
+    .number()
+    .int()
+    .positive()
+    .describe('Freshness hold version returned by the latest freshness_held response'),
+  clientMessageId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key for the published review result'),
+  replacement: z
+    .object({
+      content: z.string().min(1).max(50000).describe('Replacement message content'),
+      replyTo: z.string().optional().describe('Optional message ID to reply to'),
+      targetCats: z.array(z.string().min(1)).optional().describe('Optional explicit target cat IDs'),
+    })
+    .optional()
+    .describe('Required by the API when action is replace; ignored for send_draft and discard'),
+};
+
 export const getPendingMentionsInputSchema = {
   includeAcked: z
     .boolean()
@@ -306,27 +332,21 @@ export const fetchThreadHistoryInputSchema = {
     .max(80)
     .optional()
     .describe('Max original messages to retrieve. Server also applies CAT_CAFE_HISTORY_FETCH_MAX_MESSAGES.'),
-  threadId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional: read a specific thread. Omit to read the current thread.'),
+  threadId: z.string().min(1).optional().describe('Optional: read a specific thread. Omit to read the current thread.'),
   fromMessageId: z
     .string()
     .min(1)
     .optional()
     .describe('Optional start message id for a bounded original-history range.'),
-  toMessageId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional end message id for a bounded original-history range.'),
+  toMessageId: z.string().min(1).optional().describe('Optional end message id for a bounded original-history range.'),
   query: z
     .string()
     .min(1)
     .max(200)
     .optional()
-    .describe('Optional query for finding relevant original messages in the thread. Prefer this over broad recent fetches.'),
+    .describe(
+      'Optional query for finding relevant original messages in the thread. Prefer this over broad recent fetches.',
+    ),
   catId: z.string().min(1).optional().describe("Optional: filter by speaker catId, or pass 'user' for human messages."),
   maxTokens: z
     .number()
@@ -495,6 +515,27 @@ export async function handlePostMessage(input: {
   }
 
   return result;
+}
+
+export async function handleReviewHeldMessage(input: {
+  holdId: string;
+  action: 'replace' | 'send_draft' | 'discard';
+  expectedVersion: number;
+  clientMessageId?: string | undefined;
+  replacement?:
+    | {
+        content: string;
+        replyTo?: string | undefined;
+        targetCats?: string[] | undefined;
+      }
+    | undefined;
+}): Promise<ToolResult> {
+  return callbackPost(`/api/callbacks/freshness-holds/${encodeURIComponent(input.holdId)}/review`, {
+    action: input.action,
+    expectedVersion: input.expectedVersion,
+    ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+    ...(input.replacement ? { replacement: input.replacement } : {}),
+  });
 }
 
 export async function handleGetPendingMentions(input: { includeAcked?: boolean | undefined }): Promise<ToolResult> {
@@ -1142,6 +1183,18 @@ export const callbackTools = [
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
+  },
+  {
+    name: 'cat_cafe_review_held_message',
+    description:
+      'Review a draft that was stopped by Freshness Hold because newer thread messages arrived. ' +
+      'Use when: cat_cafe_post_message returns status="freshness_held" and you have reviewed its newMessages. ' +
+      'NOT for: routine replies, progress/status updates, or any message without a freshness_held response. ' +
+      'Output: replace/send_draft may publish one message, discard publishes nothing, and a new conflict returns freshness_held again. ' +
+      'GOTCHA: pass the returned holdId and latest freshness.version as expectedVersion; replace also requires replacement content. ' +
+      'This endpoint requires the same live invocation credentials that created the hold.',
+    inputSchema: reviewHeldMessageInputSchema,
+    handler: handleReviewHeldMessage,
   },
   {
     name: 'cat_cafe_get_pending_mentions',

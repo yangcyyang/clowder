@@ -629,6 +629,171 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(deliverCalls.length, 0, 'Should NOT deliver empty reply for silent cat');
   });
 
+  it('freshness hold stays private and transitions the matching streaming placeholder to review', async () => {
+    const heldRouter = /** @type {any} */ ({
+      async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+        options.persistenceContext.egressByCat = {
+          [targetCats[0]]: {
+            disposition: 'held',
+            holdId: 'hold-1',
+            holdStatus: 'held',
+            observedWatermark: '2',
+            unseenMessageIds: ['new-message-1'],
+            freshnessReview: {
+              holdId: 'hold-1',
+              expectedVersion: 1,
+              originalInvocationId: 'inv-1',
+              userId: 'user-1',
+              catId: targetCats[0],
+              threadId,
+              reviewCount: 0,
+              status: 'held',
+              draftContent: 'private held connector draft',
+              deltaMessageIds: ['new-message-1'],
+            },
+          },
+        };
+        yield {
+          type: 'system_info',
+          catId: targetCats[0],
+          content: JSON.stringify({ type: 'freshness_hold', holdId: 'hold-1' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'done',
+          catId: targetCats[0],
+          content: '',
+          timestamp: Date.now(),
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+
+    const deliverCalls = /** @type {any[]} */ ([]);
+    const streamEndCalls = /** @type {any[]} */ ([]);
+    const streamHoldCalls = /** @type {any[]} */ ([]);
+    const cleanupCalls = /** @type {any[]} */ ([]);
+    const reviewEnqueues = /** @type {any[]} */ ([]);
+    const outboundHook = {
+      async deliver(...args) {
+        deliverCalls.push(args);
+      },
+    };
+    const streamingHook = {
+      async onStreamStart() {},
+      async onStreamChunk() {},
+      async onStreamEnd(...args) {
+        streamEndCalls.push(args);
+      },
+      async onStreamHold(...args) {
+        streamHoldCalls.push(args);
+      },
+      async cleanupPlaceholders(...args) {
+        cleanupCalls.push(args);
+      },
+    };
+
+    const queueProcessor = {
+      isThreadBusy: () => false,
+      enqueueFreshnessReview(review) {
+        reviewEnqueues.push(review);
+        return { outcome: 'enqueued' };
+      },
+      async onInvocationComplete() {},
+    };
+    const trigger = createTrigger({ router: heldRouter, outboundHook, streamingHook, queueProcessor });
+    trigger.trigger('thread-held', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-held');
+    await waitForTrigger();
+
+    assert.deepStrictEqual(
+      streamHoldCalls,
+      [['thread-held', 'inv-1']],
+      'hold transition must stay scoped to the exact thread and invocation',
+    );
+    assert.strictEqual(streamEndCalls.length, 0, 'held draft must not finalize as a normal answer');
+    assert.strictEqual(cleanupCalls.length, 0, 'held placeholder must remain visible for review');
+    assert.strictEqual(deliverCalls.length, 0, 'held draft and fake silent-success text must not be delivered');
+    assert.equal(reviewEnqueues.length, 1, 'held connector stdout must schedule one bounded review');
+    assert.equal(reviewEnqueues[0].holdId, 'hold-1');
+  });
+
+  it('discarded rich-only payload is rejected before connector delivery', async () => {
+    const privateRichSentinel = { id: 'PRIVATE-DISCARDED-CONNECTOR-RICH' };
+    const discardedRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, targetCats, _intent, options) {
+        options.persistenceContext.egressByCat = {
+          [targetCats[0]]: { disposition: 'discarded', holdId: 'discarded-connector' },
+        };
+        options.persistenceContext.richBlocks = [privateRichSentinel];
+        yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const deliverCalls = [];
+    const outboundHook = {
+      async deliver(...args) {
+        deliverCalls.push(args);
+      },
+    };
+
+    const trigger = createTrigger({ router: discardedRouter, outboundHook });
+    trigger.trigger('thread-discarded-rich', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-discarded');
+    await waitForTrigger();
+
+    assert.equal(deliverCalls.length, 0, 'discarded rich payload must not reach connector adapters');
+    assert.equal(JSON.stringify(deliverCalls).includes(privateRichSentinel.id), false);
+  });
+
+  it('mixed freshness verdict finalizes the published turn instead of holding the whole connector invocation', async () => {
+    const mixedRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, _targetCats, _intent, options) {
+        options.persistenceContext.egressByCat = {
+          opus: { disposition: 'published', messageId: 'published-opus' },
+          codex: { disposition: 'held', holdId: 'held-codex', observedWatermark: '3' },
+        };
+        yield { type: 'text', catId: 'opus', content: 'safe published answer', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        yield {
+          type: 'system_info',
+          catId: 'codex',
+          content: JSON.stringify({ type: 'freshness_hold', holdId: 'held-codex' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const deliverCalls = [];
+    const streamEndCalls = [];
+    const streamHoldCalls = [];
+    const trigger = createTrigger({
+      router: mixedRouter,
+      outboundHook: {
+        async deliver(...args) {
+          deliverCalls.push(args);
+        },
+      },
+      streamingHook: {
+        async onStreamStart() {},
+        async onStreamChunk() {},
+        async onStreamEnd(...args) {
+          streamEndCalls.push(args);
+        },
+        async onStreamHold(...args) {
+          streamHoldCalls.push(args);
+        },
+        async cleanupPlaceholders() {},
+      },
+    });
+
+    trigger.trigger('thread-mixed', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-mixed');
+    await waitForTrigger();
+
+    assert.ok(deliverCalls.some((call) => call[1] === 'safe published answer'));
+    assert.equal(streamEndCalls.length, 1);
+    assert.equal(streamHoldCalls.length, 0);
+  });
+
   it('cloud-P1: hanging deliver does not block tracker cleanup', async () => {
     const hangingRouter = /** @type {any} */ ({
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {

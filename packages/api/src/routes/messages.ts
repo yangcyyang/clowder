@@ -21,6 +21,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -28,9 +29,8 @@ import {
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
-import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { isParallelDispatchEnabled } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type {
   ConsumedContinuationToken,
   SessionContinuationCoordinator,
@@ -85,6 +85,7 @@ interface StreamingHookLike {
   ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  onStreamHold?(threadId: string, invocationId?: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that an invocation's delivery batch is complete. */
   notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
@@ -1163,7 +1164,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
             // F088 ISSUE-15: Collect outbound turns (same pattern as QueueProcessor)
             if (msg.type === 'done' && msg.catId) {
-              if (persistenceContext.richBlocks) {
+              const egressDisposition = persistenceContext.egressByCat?.[msg.catId]?.disposition;
+              if (egressDisposition === 'held' || egressDisposition === 'discarded') {
+                persistenceContext.richBlocks = undefined;
+              } else if (persistenceContext.richBlocks) {
                 const turn = outboundTurns[outboundTurns.length - 1];
                 if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
                   turn.richBlocks = [...persistenceContext.richBlocks];
@@ -1312,18 +1316,23 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             });
             finalStatus = 'succeeded';
 
-            for (const continuationCapsule of continuationCapsules.values()) {
-              opts.queueProcessor?.enqueueContinuation({
-                threadId: resolvedThreadId,
-                userId,
-                catId: continuationCapsule.catId,
-                capsule: continuationCapsule,
-              });
+            const freshnessHeld = hasFreshnessHold(persistenceContext);
+            enqueueFreshnessReviewsFromPersistence(persistenceContext, opts.queueProcessor);
+
+            if (!freshnessHeld) {
+              for (const continuationCapsule of continuationCapsules.values()) {
+                opts.queueProcessor?.enqueueContinuation({
+                  threadId: resolvedThreadId,
+                  userId,
+                  catId: continuationCapsule.catId,
+                  capsule: continuationCapsule,
+                });
+              }
             }
 
             // Push notification: cat(s) finished responding
             const pushSvc = getPushNotificationService();
-            if (pushSvc) {
+            if (pushSvc && !freshnessHeld) {
               const catNames = targetCats.join(', ');
               const assistantText = (
                 outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts)
@@ -1733,7 +1742,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // #80: Merge active streaming drafts (first page only — no before cursor)
     if (!before && opts.draftStore) {
       const draftStore = opts.draftStore;
-      const drafts = await draftStore.getByThread(userId, resolvedThreadId);
+      const drafts = (await draftStore.getByThread(userId, resolvedThreadId)).filter(
+        (draft) => draft.exposure !== 'private',
+      );
       // #80 fix-B diagnostic: trace draft merge for F5 recovery verification
       if (drafts.length > 0) {
         request.log.info(
@@ -1929,6 +1940,35 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
   });
 };
 
+/** Hold the invocation-level placeholder only when no cat produced a published turn. */
+export function hasFreshnessHold(persistenceContext: Pick<PersistenceContext, 'egressByCat'>): boolean {
+  const entries = Object.values(persistenceContext.egressByCat ?? {});
+  return (
+    entries.some((entry) => entry.disposition === 'held') && !entries.some((entry) => entry.disposition === 'published')
+  );
+}
+
+/** Schedule only actionable stdout reviews; terminal holds remain visible for manual attention. */
+export function enqueueFreshnessReviewsFromPersistence(
+  persistenceContext: Pick<PersistenceContext, 'egressByCat'>,
+  queueProcessor: Pick<QueueProcessor, 'enqueueFreshnessReview'> | undefined,
+): number {
+  if (!queueProcessor) return 0;
+  let enqueued = 0;
+  for (const egress of Object.values(persistenceContext.egressByCat ?? {})) {
+    if (
+      egress.disposition !== 'held' ||
+      egress.holdStatus !== 'held' ||
+      !egress.freshnessReview ||
+      egress.freshnessReview.status !== 'held'
+    ) {
+      continue;
+    }
+    if (queueProcessor.enqueueFreshnessReview(egress.freshnessReview).outcome === 'enqueued') enqueued += 1;
+  }
+  return enqueued;
+}
+
 /** @internal exported for testing — do not use outside of test. */
 export async function cleanupStreamingOnFailure(
   threadId: string,
@@ -1961,6 +2001,11 @@ export async function deliverOutboundFromWeb(
   opts: MessagesRoutesOptions,
   logger: typeof log,
 ): Promise<void> {
+  const egressEntries = Object.values(persistenceContext.egressByCat ?? {});
+  const fullySuppressed =
+    egressEntries.length > 0 &&
+    !egressEntries.some((entry) => entry.disposition === 'published') &&
+    egressEntries.some((entry) => entry.disposition === 'held' || entry.disposition === 'discarded');
   const finalContent =
     outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
 
@@ -1971,6 +2016,17 @@ export async function deliverOutboundFromWeb(
         new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
       ]);
     }
+  }
+
+  if (hasFreshnessHold(persistenceContext)) {
+    await opts.streamingHook?.onStreamHold?.(threadId, invocationId).catch((err) => {
+      logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamHold failed');
+    });
+    return;
+  }
+  if (fullySuppressed) return;
+
+  if (opts.streamingHook) {
     await opts.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
       logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamEnd failed');
     });

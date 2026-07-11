@@ -70,6 +70,10 @@ export interface ReleaseFreshnessHoldInput extends ClaimFreshnessReviewInput {
 export interface IFreshnessHoldStore {
   createOrGet(input: CreateFreshnessHoldInput): Promise<CreateOrGetFreshnessHoldResult>;
   get(id: string): Promise<FreshnessHoldRecord | null>;
+  /** 列出指定用户/线程尚未解决的 hold，按创建时间倒序。 */
+  listActive(userId: string, threadId: string): Promise<FreshnessHoldRecord[]>;
+  /** Read the canonical record for a submission without creating a new hold. */
+  getBySubmission(invocationId: string, submissionKey: string): Promise<FreshnessHoldRecord | null>;
   claimReview(id: string, input: ClaimFreshnessReviewInput): Promise<FreshnessHoldRecord | null>;
   rehold(id: string, input: ReholdFreshnessInput): Promise<FreshnessHoldRecord | null>;
   release(id: string, input: ReleaseFreshnessHoldInput): Promise<FreshnessHoldRecord | null>;
@@ -84,7 +88,7 @@ export interface FreshnessHoldStoreOptions {
 
 function normalizeMaxReviews(value: number | undefined): number {
   if (!Number.isInteger(value) || (value ?? 0) <= 0) return 2;
-  return value!;
+  return value ?? 2;
 }
 
 function submissionIndexKey(invocationId: string, submissionKey: string): string {
@@ -93,6 +97,16 @@ function submissionIndexKey(invocationId: string, submissionKey: string): string
 
 function cloneRecord(record: FreshnessHoldRecord): FreshnessHoldRecord {
   return structuredClone(record);
+}
+
+/**
+ * Resolved holds keep a metadata tombstone for dedupe/recovery, but no longer
+ * need the private review payload. Keep the required record shape with empty
+ * values so callers cannot recover prior content from the in-memory store.
+ */
+function scrubResolvedPayload(record: FreshnessHoldRecord): void {
+  record.draft = { content: '' };
+  record.deltaMessageIds = [];
 }
 
 /** In-memory implementation. Mutations happen synchronously before each Promise resolves. */
@@ -132,6 +146,28 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
     return record ? cloneRecord(record) : null;
   }
 
+  async listActive(userId: string, threadId: string): Promise<FreshnessHoldRecord[]> {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.userId === userId &&
+          record.threadId === threadId &&
+          (record.status === 'held' || record.status === 'reviewing' || record.status === 'needs_attention'),
+      )
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .map(cloneRecord);
+  }
+
+  async getBySubmission(invocationId: string, submissionKey: string): Promise<FreshnessHoldRecord | null> {
+    const indexKey = submissionIndexKey(invocationId, submissionKey);
+    const id = this.submissionIndex.get(indexKey);
+    if (!id) return null;
+    const record = this.records.get(id);
+    if (record) return cloneRecord(record);
+    this.submissionIndex.delete(indexKey);
+    return null;
+  }
+
   async claimReview(id: string, input: ClaimFreshnessReviewInput): Promise<FreshnessHoldRecord | null> {
     const record = this.records.get(id);
     if (!record || record.version !== input.expectedVersion || record.status !== 'held') return null;
@@ -153,6 +189,10 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
   async rehold(id: string, input: ReholdFreshnessInput): Promise<FreshnessHoldRecord | null> {
     const record = this.records.get(id);
     if (!record || record.version !== input.expectedVersion || record.status !== 'reviewing') return null;
+    if (input.now >= record.reviewDeadlineAt) {
+      this.moveToNeedsAttention(record, 'timeout', input.now);
+      return null;
+    }
 
     record.observedWatermark = input.observedWatermark;
     record.deltaMessageIds = structuredClone(input.deltaMessageIds);
@@ -172,6 +212,10 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
   async release(id: string, input: ReleaseFreshnessHoldInput): Promise<FreshnessHoldRecord | null> {
     const record = this.records.get(id);
     if (!record || record.version !== input.expectedVersion || record.status !== 'reviewing') return null;
+    if (input.now >= record.reviewDeadlineAt) {
+      this.moveToNeedsAttention(record, 'timeout', input.now);
+      return null;
+    }
 
     record.status = 'released';
     record.releasedMessageId = input.messageId;
@@ -179,6 +223,7 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
     record.resolvedAt = input.now;
     record.updatedAt = input.now;
     record.version += 1;
+    scrubResolvedPayload(record);
     return cloneRecord(record);
   }
 
@@ -196,6 +241,7 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
     record.resolvedAt = input.now;
     record.updatedAt = input.now;
     record.version += 1;
+    scrubResolvedPayload(record);
     return cloneRecord(record);
   }
 

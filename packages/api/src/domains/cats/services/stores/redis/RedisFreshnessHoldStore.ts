@@ -7,7 +7,6 @@ import type {
   ClaimFreshnessReviewInput,
   CreateFreshnessHoldInput,
   CreateOrGetFreshnessHoldResult,
-  FreshnessAttentionReason,
   FreshnessHeldDraft,
   FreshnessHoldRecord,
   FreshnessHoldStatus,
@@ -43,6 +42,7 @@ redis.call('HSET', KEYS[2],
   'reviewCount', '0',
   'updatedAt', ARGV[11])
 redis.call('ZADD', KEYS[3], ARGV[12], ARGV[1])
+redis.call('ZADD', KEYS[4], ARGV[11], ARGV[1])
 return {'created', ARGV[1]}
 `;
 
@@ -89,6 +89,17 @@ if not currentVersion or currentVersion ~= tonumber(ARGV[1]) or currentStatus ~=
   return 0
 end
 
+local deadline = tonumber(redis.call('HGET', KEYS[1], 'reviewDeadlineAt'))
+if deadline and tonumber(ARGV[5]) >= deadline then
+  redis.call('HSET', KEYS[1],
+    'status', 'needs_attention',
+    'attentionReason', 'timeout',
+    'version', tostring(currentVersion + 1),
+    'updatedAt', ARGV[5])
+  redis.call('ZREM', KEYS[2], ARGV[7])
+  return 0
+end
+
 local reviewCount = (tonumber(redis.call('HGET', KEYS[1], 'reviewCount')) or 0) + 1
 local nextStatus = 'held'
 local attentionReason = ''
@@ -117,6 +128,17 @@ if not currentVersion or currentVersion ~= tonumber(ARGV[1]) or currentStatus ~=
   return 0
 end
 
+local deadline = tonumber(redis.call('HGET', KEYS[1], 'reviewDeadlineAt'))
+if deadline and tonumber(ARGV[4]) >= deadline then
+  redis.call('HSET', KEYS[1],
+    'status', 'needs_attention',
+    'attentionReason', 'timeout',
+    'version', tostring(currentVersion + 1),
+    'updatedAt', ARGV[4])
+  redis.call('ZREM', KEYS[2], ARGV[5])
+  return 0
+end
+
 redis.call('HSET', KEYS[1],
   'status', 'released',
   'releasedMessageId', ARGV[2],
@@ -124,6 +146,7 @@ redis.call('HSET', KEYS[1],
   'resolvedAt', ARGV[4],
   'updatedAt', ARGV[4],
   'version', tostring(currentVersion + 1))
+redis.call('HDEL', KEYS[1], 'draft', 'deltaMessageIds')
 redis.call('ZREM', KEYS[2], ARGV[5])
 return 1
 `;
@@ -143,6 +166,7 @@ redis.call('HSET', KEYS[1],
   'resolvedAt', ARGV[2],
   'updatedAt', ARGV[2],
   'version', tostring(currentVersion + 1))
+redis.call('HDEL', KEYS[1], 'draft', 'deltaMessageIds')
 redis.call('ZREM', KEYS[2], ARGV[3])
 return 1
 `;
@@ -173,7 +197,7 @@ const HOLD_STATUSES = new Set<FreshnessHoldStatus>(['held', 'reviewing', 'releas
 
 function normalizeMaxReviews(value: number | undefined): number {
   if (!Number.isInteger(value) || (value ?? 0) <= 0) return 2;
-  return value!;
+  return value ?? 2;
 }
 
 function parseJson<T>(raw: string | undefined, fallback: T): T {
@@ -183,6 +207,21 @@ function parseJson<T>(raw: string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function normalizeStatus(value: string | undefined): FreshnessHoldStatus {
+  return HOLD_STATUSES.has(value as FreshnessHoldStatus) ? (value as FreshnessHoldStatus) : 'needs_attention';
+}
+
+function hydrateOptionalFields(data: Record<string, string>): Partial<FreshnessHoldRecord> {
+  const fields: Partial<FreshnessHoldRecord> = {};
+  if (data.attentionReason === 'review_limit' || data.attentionReason === 'timeout') {
+    fields.attentionReason = data.attentionReason;
+  }
+  if (data.releasedMessageId) fields.releasedMessageId = data.releasedMessageId;
+  if (data.committedWatermark) fields.committedWatermark = data.committedWatermark;
+  if (data.resolvedAt) fields.resolvedAt = Number(data.resolvedAt);
+  return fields;
 }
 
 export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
@@ -199,10 +238,11 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
     const id = randomUUID();
     const result = (await this.redis.eval(
       CREATE_OR_GET_LUA,
-      3,
+      4,
       FreshnessHoldKeys.submission(input.invocationId, input.submissionKey),
       FreshnessHoldKeys.detail(id),
       FreshnessHoldKeys.DEADLINES,
+      FreshnessHoldKeys.userThread(input.userId, input.threadId),
       id,
       input.invocationId,
       input.submissionKey,
@@ -226,6 +266,23 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
     const data = await this.redis.hgetall(FreshnessHoldKeys.detail(id));
     if (!data?.id) return null;
     return this.hydrate(data);
+  }
+
+  async listActive(userId: string, threadId: string): Promise<FreshnessHoldRecord[]> {
+    const ids = await this.redis.zrevrange(FreshnessHoldKeys.userThread(userId, threadId), 0, -1);
+    const records = await Promise.all(ids.map((id) => this.get(id)));
+    return records.filter(
+      (record): record is FreshnessHoldRecord =>
+        record !== null &&
+        record.userId === userId &&
+        record.threadId === threadId &&
+        (record.status === 'held' || record.status === 'reviewing' || record.status === 'needs_attention'),
+    );
+  }
+
+  async getBySubmission(invocationId: string, submissionKey: string): Promise<FreshnessHoldRecord | null> {
+    const id = await this.redis.get(FreshnessHoldKeys.submission(invocationId, submissionKey));
+    return id ? this.get(id) : null;
   }
 
   async claimReview(id: string, input: ClaimFreshnessReviewInput): Promise<FreshnessHoldRecord | null> {
@@ -305,12 +362,8 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
   }
 
   private hydrate(data: Record<string, string>): FreshnessHoldRecord {
-    const status = HOLD_STATUSES.has(data.status as FreshnessHoldStatus)
-      ? (data.status as FreshnessHoldStatus)
-      : 'needs_attention';
-    const attentionReason = data.attentionReason as FreshnessAttentionReason | undefined;
     return {
-      id: data.id!,
+      id: data.id ?? '',
       invocationId: data.invocationId ?? '',
       submissionKey: data.submissionKey ?? '',
       userId: data.userId ?? '',
@@ -322,14 +375,11 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
       draft: parseJson<FreshnessHeldDraft>(data.draft, { content: '' }),
       createdAt: Number(data.createdAt ?? 0),
       reviewDeadlineAt: Number(data.reviewDeadlineAt ?? 0),
-      status,
+      status: normalizeStatus(data.status),
       version: Number(data.version ?? 0),
       reviewCount: Number(data.reviewCount ?? 0),
       updatedAt: Number(data.updatedAt ?? 0),
-      ...(attentionReason === 'review_limit' || attentionReason === 'timeout' ? { attentionReason } : {}),
-      ...(data.releasedMessageId ? { releasedMessageId: data.releasedMessageId } : {}),
-      ...(data.committedWatermark ? { committedWatermark: data.committedWatermark } : {}),
-      ...(data.resolvedAt ? { resolvedAt: Number(data.resolvedAt) } : {}),
+      ...hydrateOptionalFields(data),
     };
   }
 }

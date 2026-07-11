@@ -53,6 +53,7 @@ import { ConnectionStatusBar } from './ConnectionStatusBar';
 import { EditChannelModal } from './EditChannelModal';
 import { FilesPanel } from './FilesPanel';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
+import { FreshnessHoldBar } from './FreshnessHoldBar';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
@@ -1556,6 +1557,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               getCatById={getCatById}
             />
             <QueuePanel threadId={threadId} />
+            <FreshnessHoldBar threadId={threadId} />
             <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
             {!showFirstRunQuestPrompt &&

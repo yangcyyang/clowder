@@ -15,8 +15,8 @@ export {
 export {
   ackMentionsInputSchema,
   callbackTools,
-  claimTaskInputSchema,
   checkPermissionStatusInputSchema,
+  claimTaskInputSchema,
   crossPostMessageInputSchema,
   featIndexInputSchema,
   fetchThreadHistoryInputSchema,
@@ -37,12 +37,14 @@ export {
   handlePostMessage,
   handleRegisterPrTracking,
   handleRequestPermission,
+  handleReviewHeldMessage,
   handleUpdateTask,
   listTasksInputSchema,
   listThreadsInputSchema,
   postMessageInputSchema,
   registerPrTrackingInputSchema,
   requestPermissionInputSchema,
+  reviewHeldMessageInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';
 

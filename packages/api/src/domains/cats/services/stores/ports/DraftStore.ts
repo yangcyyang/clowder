@@ -18,6 +18,8 @@ export interface DraftRecord {
   invocationId: string;
   catId: CatId;
   content: string;
+  /** Private drafts are runtime buffers and must never be returned as chat messages. */
+  exposure?: 'public' | 'private';
   toolEvents?: unknown[];
   thinking?: string;
   /** First time this draft was created. Stable across touch/upsert updates. */

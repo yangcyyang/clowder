@@ -3,7 +3,7 @@
  * All cats respond independently to the same message.
  */
 
-import type { CatConfig, CatId } from '@cat-cafe/shared';
+import type { CatConfig, CatId, RichBlock } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import {
@@ -36,7 +36,7 @@ import {
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
-import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import type { StoredMessage, StoredToolEvent, ThreadAppendWatermark } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
@@ -57,21 +57,24 @@ import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
-  assembleIncrementalContext,
   appendCompactBoundaryTaskEvent,
-  buildHistoryGovernanceObservation,
+  assembleIncrementalContext,
   buildContextUsageWarning,
+  buildHistoryGovernanceObservation,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   estimateFullHistoryTokens,
+  formatFreshnessReviewPrompt,
+  freshnessPersistenceEgress,
   getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
-  persistSilentCompletionNotice,
   parseCompactBoundarySystemInfo,
+  persistSilentCompletionNotice,
+  publishFreshnessDraft,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -82,6 +85,116 @@ import {
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 
 const log = createModuleLogger('route-parallel');
+
+type CallbackDisposition = 'none' | 'published' | 'held' | 'discarded';
+
+type CallbackPostResult = {
+  confirmed: boolean;
+  disposition: CallbackDisposition;
+  messageId?: string;
+  threadId?: string;
+  holdId?: string;
+};
+
+function isCallbackDeliveryToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  return (
+    toolName.endsWith('cat_cafe_post_message') ||
+    toolName.endsWith('cat_cafe_review_held_message') ||
+    toolName === 'mcp:cat-cafe/post_message' ||
+    toolName === 'mcp:cat-cafe/review_held_message' ||
+    toolName === 'cat_cafe_post_message' ||
+    toolName === 'cat_cafe_review_held_message'
+  );
+}
+
+function callbackDispositionFromPayload(parsed: { status?: unknown; disposition?: unknown }): CallbackDisposition {
+  if (parsed.disposition === 'published' || parsed.status === 'ok' || parsed.status === 'duplicate') {
+    return 'published';
+  }
+  if (
+    parsed.disposition === 'held' ||
+    parsed.status === 'freshness_held' ||
+    parsed.status === 'freshness_needs_attention' ||
+    parsed.status === 'freshness_exhausted'
+  ) {
+    return 'held';
+  }
+  if (parsed.disposition === 'discarded' || parsed.status === 'freshness_discarded') return 'discarded';
+  return 'none';
+}
+
+function callbackPostResultFromCandidate(candidate: string): CallbackPostResult | null {
+  try {
+    const parsed = JSON.parse(candidate) as {
+      status?: unknown;
+      disposition?: unknown;
+      messageId?: unknown;
+      threadId?: unknown;
+      holdId?: unknown;
+    };
+    const disposition = callbackDispositionFromPayload(parsed);
+    if (disposition === 'none') return null;
+    return {
+      confirmed: true,
+      disposition,
+      ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
+      ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
+      ...(typeof parsed.holdId === 'string' && parsed.holdId.length > 0 ? { holdId: parsed.holdId } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseCallbackPostResult(content: string | undefined): CallbackPostResult {
+  if (!content) return { confirmed: false, disposition: 'none' };
+  const candidates = new Set<string>([content.trim()]);
+  for (const line of content.trim().split(/\r?\n/)) {
+    const candidate = line.trim();
+    if (candidate.startsWith('{') && candidate.endsWith('}')) candidates.add(candidate);
+  }
+  const jsonStart = content.indexOf('{');
+  if (jsonStart > 0) candidates.add(content.slice(jsonStart));
+
+  for (const candidate of candidates) {
+    const result = callbackPostResultFromCandidate(candidate);
+    if (result) return result;
+  }
+  return { confirmed: false, disposition: 'none' };
+}
+
+function inferToolResultName(message: AgentMessage): string | undefined {
+  if (message.toolName) return message.toolName;
+  const firstLine = message.content?.trimStart().split('\n', 1)[0]?.trim();
+  if (!firstLine) return undefined;
+  return firstLine.match(/^(mcp:[^\s]+)\s+\(/)?.[1];
+}
+
+function callbackToolNamesMatch(left: string, right: string): boolean {
+  return left === right || (isCallbackDeliveryToolName(left) && isCallbackDeliveryToolName(right));
+}
+
+async function synthesizePublishedVoiceBlocks(
+  deps: RouteStrategyDeps,
+  message: StoredMessage,
+  blocks: RichBlock[],
+  catId: CatId,
+): Promise<RichBlock[]> {
+  const voiceSynth = getVoiceBlockSynthesizer();
+  if (!voiceSynth || !blocks.some((block) => block.kind === 'audio' && 'text' in block)) return blocks;
+  try {
+    const resolved = await voiceSynth.resolveVoiceBlocks(blocks, catId as string);
+    await deps.messageStore.updateExtra(message.id, {
+      ...(message.extra ?? {}),
+      rich: { v: 1, blocks: resolved },
+    });
+    return resolved;
+  } catch (err) {
+    log.error({ catId: catId as string, err }, 'Published voice block synthesis failed');
+    return blocks;
+  }
+}
 
 export async function* routeParallel(
   deps: RouteStrategyDeps,
@@ -102,6 +215,10 @@ export async function* routeParallel(
     modeSystemPrompt,
     modeSystemPromptByCat,
   } = options;
+  const freshnessReview = options.persistenceContext?.freshnessReview;
+  if (freshnessReview) {
+    message = formatFreshnessReviewPrompt(freshnessReview);
+  }
   const thinkingMode = options.thinkingMode ?? 'play';
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
@@ -109,6 +226,15 @@ export async function* routeParallel(
 
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
+  const freshnessBaselineByCat = new Map<CatId, ThreadAppendWatermark>();
+  if (deps.freshnessGate) {
+    await Promise.all(
+      targetCats.map(async (catId) => {
+        const baseline = await deps.messageStore.captureFreshnessWatermark(threadId, { kind: 'cat', catId });
+        freshnessBaselineByCat.set(catId, baseline);
+      }),
+    );
+  }
 
   // F042 Wave 3: Fetch thread participant activity once (shared across all cats).
   let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
@@ -544,6 +670,7 @@ export async function* routeParallel(
         prompt,
         userId,
         threadId,
+        ...(freshnessBaselineByCat.get(catId) ? { freshnessBaseline: freshnessBaselineByCat.get(catId)! } : {}),
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
@@ -579,6 +706,12 @@ export async function* routeParallel(
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
   const catPayloadStrippers = new Map<string, ReturnType<typeof createLeakedToolCallStreamStripper>>();
+  const catPendingToolResults = new Map<string, string[]>();
+  const catAwaitingCallbackResult = new Set<string>();
+  const catCallbackDisposition = new Map<string, CallbackDisposition>();
+  const catCallbackMessageId = new Map<string, string>();
+  const catCallbackHoldId = new Map<string, string>();
+  const catCallbackExposureEvents = new Map<string, AgentMessage[]>();
   let completedCount = 0;
   let yieldedFinalDone = false;
   // F153: Accumulate total tokens across all parallel streams for route aggregate
@@ -633,6 +766,8 @@ export async function* routeParallel(
       }
 
       for (const effectiveMsg of effectiveMsgs) {
+        let suppressCallbackExposureEvent = false;
+        let releaseCallbackExposureEvents: AgentMessage[] | undefined;
         // F22 R2 P1-1: Capture invocationId from the initial system_info per cat.
         // Keep forwarding this boundary event so frontend can reset stale task progress.
         if (
@@ -727,6 +862,70 @@ export async function* routeParallel(
           const names = catToolNames.get(effectiveMsg.catId) ?? [];
           names.push(effectiveMsg.toolName);
           catToolNames.set(effectiveMsg.catId, names);
+          const pending = catPendingToolResults.get(effectiveMsg.catId) ?? [];
+          pending.push(effectiveMsg.toolName);
+          catPendingToolResults.set(effectiveMsg.catId, pending);
+          if (isCallbackDeliveryToolName(effectiveMsg.toolName)) {
+            catAwaitingCallbackResult.add(effectiveMsg.catId);
+            const exposureEvents = catCallbackExposureEvents.get(effectiveMsg.catId) ?? [];
+            exposureEvents.push(effectiveMsg);
+            catCallbackExposureEvents.set(effectiveMsg.catId, exposureEvents);
+            suppressCallbackExposureEvent = true;
+          }
+        }
+
+        if (effectiveMsg.type === 'tool_result' && effectiveMsg.catId) {
+          const pending = catPendingToolResults.get(effectiveMsg.catId) ?? [];
+          const callbackResult = parseCallbackPostResult(effectiveMsg.content);
+          const resultToolName = inferToolResultName(effectiveMsg);
+          let completedToolName: string | undefined;
+          if (resultToolName) {
+            const pendingIndex = pending.findIndex((name) => callbackToolNamesMatch(name, resultToolName));
+            if (pendingIndex >= 0) {
+              completedToolName = pending[pendingIndex];
+              pending.splice(pendingIndex, 1);
+            }
+          } else {
+            const firstPending = pending[0];
+            if (firstPending && !isCallbackDeliveryToolName(firstPending)) {
+              completedToolName = pending.shift();
+            } else if (firstPending) {
+              const hasCallbackEvidence = Boolean(
+                (callbackResult.messageId && callbackResult.threadId) ||
+                  (callbackResult.holdId && callbackResult.threadId),
+              );
+              if (
+                (callbackResult.confirmed && hasCallbackEvidence) ||
+                (callbackResult.confirmed && pending.length === 1)
+              ) {
+                completedToolName = pending.shift();
+              }
+            }
+          }
+          catPendingToolResults.set(effectiveMsg.catId, pending);
+          if (completedToolName && isCallbackDeliveryToolName(completedToolName)) {
+            const exposureEvents = catCallbackExposureEvents.get(effectiveMsg.catId) ?? [];
+            exposureEvents.push(effectiveMsg);
+            suppressCallbackExposureEvent = true;
+            if (callbackResult.confirmed) {
+              if (callbackResult.disposition === 'published') releaseCallbackExposureEvents = exposureEvents;
+              catCallbackExposureEvents.delete(effectiveMsg.catId);
+            } else {
+              catCallbackExposureEvents.set(effectiveMsg.catId, exposureEvents);
+            }
+          }
+          if (
+            catAwaitingCallbackResult.has(effectiveMsg.catId) &&
+            completedToolName &&
+            isCallbackDeliveryToolName(completedToolName)
+          ) {
+            catAwaitingCallbackResult.delete(effectiveMsg.catId);
+            if (callbackResult.confirmed) {
+              catCallbackDisposition.set(effectiveMsg.catId, callbackResult.disposition);
+              if (callbackResult.messageId) catCallbackMessageId.set(effectiveMsg.catId, callbackResult.messageId);
+              if (callbackResult.holdId) catCallbackHoldId.set(effectiveMsg.catId, callbackResult.holdId);
+            }
+          }
         }
 
         // F150: Fire-and-forget tool usage counter
@@ -769,6 +968,7 @@ export async function* routeParallel(
                 invocationId: invId,
                 catId: effectiveMsg.catId as CatId,
                 content: curText,
+                ...(deps.freshnessGate ? { exposure: 'private' as const } : {}),
                 ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
                 ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
                 updatedAt: now,
@@ -794,6 +994,7 @@ export async function* routeParallel(
                   invocationId: invId,
                   catId: effectiveMsg.catId as CatId,
                   content: curText,
+                  ...(deps.freshnessGate ? { exposure: 'private' as const } : {}),
                   ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
                   ...(curThinkingTool && curThinkingTool.length > 0
                     ? { thinking: renderThinkingChunks(curThinkingTool) }
@@ -811,7 +1012,18 @@ export async function* routeParallel(
         }
 
         if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
-        yield effectiveMsg;
+        if (deps.freshnessGate && effectiveMsg.type === 'text') continue;
+        if (deps.freshnessGate && effectiveMsg.type === 'system_info' && effectiveMsg.content) {
+          try {
+            if (JSON.parse(effectiveMsg.content).type === 'rich_block') continue;
+          } catch {
+            /* non-JSON system_info remains realtime */
+          }
+        }
+        if (releaseCallbackExposureEvents) {
+          for (const callbackEvent of releaseCallbackExposureEvents) yield callbackEvent;
+        }
+        if (!suppressCallbackExposureEvent) yield effectiveMsg;
       }
 
       if (msg.type === 'done' && msg.catId) {
@@ -855,7 +1067,57 @@ export async function* routeParallel(
         const persistedInvocationId = options.parentInvocationId ?? ownInvId;
         let catProducedOutput = false;
         const text = catText.get(msg.catId);
-        if (text) {
+        const callbackDisposition = catCallbackDisposition.get(msg.catId) ?? 'none';
+        if (callbackDisposition !== 'none') {
+          catProducedOutput = true;
+          options.persistenceContext ??= { failed: false, errors: [] };
+          options.persistenceContext.egressByCat ??= {};
+          const callbackMessageId = catCallbackMessageId.get(msg.catId);
+          const callbackHoldId = catCallbackHoldId.get(msg.catId);
+          options.persistenceContext.egressByCat[msg.catId] = {
+            disposition: callbackDisposition,
+            ...(callbackMessageId ? { messageId: callbackMessageId } : {}),
+            ...(callbackHoldId ? { holdId: callbackHoldId } : {}),
+          };
+          if (deps.draftStore && ownInvId) {
+            deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
+          }
+          if (deps.invocationDeps.threadStore) {
+            try {
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                msg.catId as CatId,
+                !catHadProviderError.has(msg.catId),
+              );
+            } catch (activityErr) {
+              log.warn({ catId: msg.catId, err: activityErr }, 'updateParticipantActivity failed');
+            }
+          }
+          log.info(
+            {
+              threadId,
+              catId: msg.catId,
+              callbackDisposition,
+              callbackMessageId,
+              callbackHoldId,
+            },
+            'Parallel stream publication skipped — callback already reached a terminal disposition',
+          );
+          if (callbackDisposition === 'held') {
+            yield {
+              type: 'system_info',
+              catId: msg.catId as CatId,
+              content: JSON.stringify({
+                type: 'freshness_hold',
+                disposition: 'held',
+                holdId: callbackHoldId,
+                message: '收到新消息，旧稿已扣住并等待重新审阅。',
+              }),
+              invocationId: ownInvId,
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+        } else if (text) {
           catProducedOutput = true;
           const meta = catMeta.get(msg.catId);
           const sanitized = sanitizeInjectedContent(text);
@@ -865,7 +1127,7 @@ export async function* routeParallel(
           let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
           // F34-b: synthesize text-only audio blocks (voice messages)
           // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
-          if (!voiceMode) {
+          if (!voiceMode && !deps.freshnessGate) {
             const voiceSynth = getVoiceBlockSynthesizer();
             if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
               try {
@@ -882,13 +1144,15 @@ export async function* routeParallel(
 
           const thinking = catThinking.get(msg.catId);
           try {
-            await deps.messageStore.append({
+            const publishTimestamp = Date.now();
+            const outboundDraft = {
               userId,
               catId: msg.catId as CatId,
               content: storedContent,
+              messageClass: 'substantive' as const,
               mentions: [],
               origin: 'stream',
-              timestamp: invocationStartedAt,
+              timestamp: publishTimestamp,
               threadId,
               ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
               ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
@@ -899,13 +1163,97 @@ export async function* routeParallel(
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
               },
-            });
-            // F088-P3: Stash rich blocks for outbound delivery
-            if (options.persistenceContext && allRichBlocks.length > 0) {
-              options.persistenceContext.richBlocks = [
-                ...(options.persistenceContext.richBlocks ?? []),
-                ...allRichBlocks,
-              ];
+            } as const;
+            if (deps.freshnessGate) {
+              const catId = msg.catId as CatId;
+              const baseline = freshnessBaselineByCat.get(catId);
+              if (!baseline) throw new Error(`Missing freshness baseline for ${msg.catId}`);
+              const egress = await publishFreshnessDraft({
+                deps,
+                ...(freshnessReview ? { review: freshnessReview } : {}),
+                successorInvocationId: ownInvId,
+                invocationId: ownInvId ?? persistedInvocationId ?? `parallel-${msg.catId}`,
+                submissionKey: `parallel:${persistedInvocationId ?? ownInvId ?? 'route'}:${msg.catId}`,
+                userId,
+                catId,
+                threadId,
+                baselineWatermark: baseline,
+                draft: outboundDraft,
+              });
+              const egressRecord = freshnessPersistenceEgress(egress);
+              options.persistenceContext ??= { failed: false, errors: [] };
+              options.persistenceContext.egressByCat ??= {};
+              if (egress.outcome === 'published') {
+                options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+                if (!voiceMode) {
+                  allRichBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, allRichBlocks, catId);
+                }
+                // Sibling messages from this parallel parent are known outputs,
+                // not new inbound intent. Advancing sibling baselines exactly to
+                // this committed revision ignores only this publication; any
+                // subsequently appended user/independent-agent message still holds.
+                if (egress.message.appendWatermark) {
+                  for (const sibling of targetCats) freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
+                }
+                for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
+                catCallbackExposureEvents.delete(msg.catId);
+                yield {
+                  type: 'text',
+                  catId,
+                  content: storedContent,
+                  textMode: 'replace',
+                  origin: 'stream',
+                  messageId: egress.message.id,
+                  ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
+                  timestamp: publishTimestamp,
+                } as AgentMessage;
+                for (const block of allRichBlocks) {
+                  yield {
+                    type: 'system_info',
+                    catId,
+                    content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
+                    invocationId: ownInvId,
+                    timestamp: publishTimestamp,
+                  } as AgentMessage;
+                }
+                if (allRichBlocks.length > 0) {
+                  options.persistenceContext.richBlocks = [
+                    ...(options.persistenceContext.richBlocks ?? []),
+                    ...allRichBlocks,
+                  ];
+                }
+              } else if (egress.outcome === 'discarded') {
+                options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+              } else {
+                options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+                yield {
+                  type: 'system_info',
+                  catId,
+                  content: JSON.stringify({
+                    type:
+                      egressRecord.holdStatus === 'needs_attention' ? 'freshness_needs_attention' : 'freshness_hold',
+                    disposition: 'held',
+                    holdId: egress.hold.id,
+                    message:
+                      egressRecord.holdStatus === 'needs_attention'
+                        ? '连续两次复核仍遇到新消息，旧稿继续保留，等待人工处理。'
+                        : '收到新消息，旧稿已扣住并等待重新审阅。',
+                  }),
+                  invocationId: ownInvId,
+                  timestamp: Date.now(),
+                } as AgentMessage;
+              }
+            } else {
+              await deps.messageStore.append(outboundDraft);
+              for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
+              catCallbackExposureEvents.delete(msg.catId);
+              // F088-P3: Stash rich blocks for outbound delivery
+              if (options.persistenceContext && allRichBlocks.length > 0) {
+                options.persistenceContext.richBlocks = [
+                  ...(options.persistenceContext.richBlocks ?? []),
+                  ...allRichBlocks,
+                ];
+              }
             }
             // #80: Clean up draft only after successful append
             if (deps.draftStore && ownInvId) {
@@ -941,7 +1289,7 @@ export async function* routeParallel(
           const meta = catMeta.get(msg.catId);
           const catTools = catToolEvents.get(msg.catId);
           const thinking = catThinking.get(msg.catId);
-          const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+          let noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
           const hasRichBlocks = noTextBlocks.length > 0;
           const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
           const shouldPersistNoTextMessage = hasRichBlocks;
@@ -953,13 +1301,15 @@ export async function* routeParallel(
 
           if (shouldPersistNoTextMessage) {
             try {
-              await deps.messageStore.append({
+              const publishTimestamp = invocationStartedAt;
+              const outboundDraft = {
                 userId,
                 catId: msg.catId as CatId,
                 content: '',
+                messageClass: 'substantive' as const,
                 mentions: [],
                 origin: 'stream',
-                timestamp: invocationStartedAt,
+                timestamp: publishTimestamp,
                 threadId,
                 ...(options.replyToMessageId ? { replyTo: options.replyToMessageId } : {}),
                 ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
@@ -970,13 +1320,83 @@ export async function* routeParallel(
                   ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                   ...(msg.tracing ? { tracing: msg.tracing } : {}),
                 },
-              });
-              // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-              if (options.persistenceContext && noTextBlocks.length > 0) {
-                options.persistenceContext.richBlocks = [
-                  ...(options.persistenceContext.richBlocks ?? []),
-                  ...noTextBlocks,
-                ];
+              } as const;
+
+              if (deps.freshnessGate) {
+                const catId = msg.catId as CatId;
+                const baseline = freshnessBaselineByCat.get(catId);
+                if (!baseline) throw new Error(`Missing freshness baseline for ${msg.catId}`);
+                const egress = await publishFreshnessDraft({
+                  deps,
+                  ...(freshnessReview ? { review: freshnessReview } : {}),
+                  successorInvocationId: ownInvId,
+                  invocationId: ownInvId ?? persistedInvocationId ?? `parallel-${msg.catId}`,
+                  submissionKey: `parallel:${persistedInvocationId ?? ownInvId ?? 'route'}:${msg.catId}`,
+                  userId,
+                  catId,
+                  threadId,
+                  baselineWatermark: baseline,
+                  draft: outboundDraft,
+                });
+                const egressRecord = freshnessPersistenceEgress(egress);
+                options.persistenceContext ??= { failed: false, errors: [] };
+                options.persistenceContext.egressByCat ??= {};
+                if (egress.outcome === 'published') {
+                  options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+                  if (!voiceMode) {
+                    noTextBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, noTextBlocks, catId);
+                  }
+                  if (egress.message.appendWatermark) {
+                    for (const sibling of targetCats)
+                      freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
+                  }
+                  for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
+                  catCallbackExposureEvents.delete(msg.catId);
+                  for (const block of noTextBlocks) {
+                    yield {
+                      type: 'system_info',
+                      catId,
+                      content: JSON.stringify({ type: 'rich_block', block, messageId: egress.message.id }),
+                      invocationId: ownInvId,
+                      timestamp: publishTimestamp,
+                    } as AgentMessage;
+                  }
+                  options.persistenceContext.richBlocks = [
+                    ...(options.persistenceContext.richBlocks ?? []),
+                    ...noTextBlocks,
+                  ];
+                } else if (egress.outcome === 'discarded') {
+                  options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+                } else {
+                  options.persistenceContext.egressByCat[msg.catId] = egressRecord;
+                  yield {
+                    type: 'system_info',
+                    catId,
+                    content: JSON.stringify({
+                      type:
+                        egressRecord.holdStatus === 'needs_attention' ? 'freshness_needs_attention' : 'freshness_hold',
+                      disposition: 'held',
+                      holdId: egress.hold.id,
+                      message:
+                        egressRecord.holdStatus === 'needs_attention'
+                          ? '连续两次复核仍遇到新消息，旧稿继续保留，等待人工处理。'
+                          : '收到新消息，旧稿已扣住并等待重新审阅。',
+                    }),
+                    invocationId: ownInvId,
+                    timestamp: Date.now(),
+                  } as AgentMessage;
+                }
+              } else {
+                await deps.messageStore.append(outboundDraft);
+                for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
+                catCallbackExposureEvents.delete(msg.catId);
+                // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
+                if (options.persistenceContext && noTextBlocks.length > 0) {
+                  options.persistenceContext.richBlocks = [
+                    ...(options.persistenceContext.richBlocks ?? []),
+                    ...noTextBlocks,
+                  ];
+                }
               }
               // #80: Clean up draft only after successful append
               if (deps.draftStore && ownInvId) {
@@ -1228,5 +1648,4 @@ export async function* routeParallel(
       timestamp: Date.now(),
     } as AgentMessage;
   }
-
 }

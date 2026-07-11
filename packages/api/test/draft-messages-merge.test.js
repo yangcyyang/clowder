@@ -175,6 +175,36 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.catId, 'opus');
   });
 
+  it('never exposes private freshness drafts through message history', async () => {
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-private-freshness',
+      catId: 'opus',
+      content: '这段旧稿在 freshness verdict 前不得外泄',
+      exposure: 'private',
+      updatedAt: Date.now(),
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(
+      body.messages.some((message) => message.content.includes('旧稿')),
+      false,
+    );
+    assert.equal(
+      body.messages.some((message) => message.id === 'draft-inv-private-freshness'),
+      false,
+    );
+  });
+
   it('excludes drafts on paginated request (with before cursor)', async () => {
     // Seed messages
     const ts = Date.now();

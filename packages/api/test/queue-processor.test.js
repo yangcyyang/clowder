@@ -433,12 +433,7 @@ describe('QueueProcessor', () => {
         /wechat-cli/,
       );
       const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
-      assert.deepEqual(eventTypes, [
-        'fast_lane_decision',
-        'fast_lane_started',
-        'fast_lane_completed',
-        'artifact',
-      ]);
+      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_completed', 'artifact']);
       const completed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_completed');
       assert.equal(completed.data.workflowId, 'project-init');
       assert.equal(completed.data.routeExecutionBypassed, true);
@@ -537,10 +532,7 @@ describe('QueueProcessor', () => {
 
       assert.equal(result.started, true);
       assert.equal(result.entries?.length, 2);
-      assert.deepEqual(
-        result.entries?.map((entry) => entry.targetCats[0]).sort(),
-        ['codex', 'opus'],
-      );
+      assert.deepEqual(result.entries?.map((entry) => entry.targetCats[0]).sort(), ['codex', 'opus']);
       await new Promise((r) => setTimeout(r, 20));
       assert.equal(slowDeps.invocationTracker.startAll.mock.calls.length, 2);
     } finally {
@@ -1866,20 +1858,22 @@ describe('QueueProcessor', () => {
           }),
         },
         router: {
-          routeExecution: mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
-            if (targetCats[0] === 'opus') {
-              const enqueued = await opts.enqueueA2ATargets({
-                threadId: 't1',
-                userId: 'u1',
-                callerCatId: 'opus',
-                targetCats: ['pi', 'codex'],
-                content: '@Pi 做 A，@codex 做 B',
-                triggerMessageId: 'msg-opus-handoff',
-              });
-              assert.deepEqual(enqueued, ['pi', 'codex']);
-            }
-            yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
-          }),
+          routeExecution: mock.fn(
+            async function* (_userId, _content, _threadId, _messageId, targetCats, _intent, opts) {
+              if (targetCats[0] === 'opus') {
+                const enqueued = await opts.enqueueA2ATargets({
+                  threadId: 't1',
+                  userId: 'u1',
+                  callerCatId: 'opus',
+                  targetCats: ['pi', 'codex'],
+                  content: '@Pi 做 A，@codex 做 B',
+                  triggerMessageId: 'msg-opus-handoff',
+                });
+                assert.deepEqual(enqueued, ['pi', 'codex']);
+              }
+              yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+            },
+          ),
           ackCollectedCursors: mock.fn(async () => {}),
         },
       });
@@ -1917,7 +1911,10 @@ describe('QueueProcessor', () => {
           updatedTasks.map((task) => task.events.at(-1).data.toCatId),
           ['pi', 'codex'],
         );
-        const handoffLog = await readFile(join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'), 'utf-8');
+        const handoffLog = await readFile(
+          join(projectRoot, '.cat-cafe', 'projects', 'demo', 'handoff-log.md'),
+          'utf-8',
+        );
         assert.ok(handoffLog.includes('**from**: opus'), 'handoff-log should include sender');
         assert.ok(handoffLog.includes('**to**: pi'), 'handoff-log should include first target');
         assert.ok(handoffLog.includes('**to**: codex'), 'handoff-log should include second target');
@@ -2501,7 +2498,9 @@ describe('QueueProcessor', () => {
           await hookProcessor.processNext('t1', 'u1');
           await waitFor(() => hookDeps.socketManager.broadcastAgentMessage.mock.calls.length >= 2);
 
-          const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+          const agentMessages = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map(
+            (call) => call.arguments[0],
+          );
           const textMessages = agentMessages.filter((msg) => msg.type === 'text');
           const doneMessages = agentMessages.filter((msg) => msg.type === 'done');
           const roomEvents = hookDeps.socketManager.broadcastToRoom.mock.calls.map((call) => call.arguments[1]);
@@ -2707,6 +2706,56 @@ describe('QueueProcessor', () => {
         streamingHook.cleanupPlaceholders.mock.calls.length >= 1,
         'cleanupPlaceholders should be called when all deliveries succeed',
       );
+    });
+
+    it('freshness hold skips normal outbound and marks only the matching placeholder held', async () => {
+      const outboundHook = {
+        deliver: mock.fn(async () => {}),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        onStreamHold: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            const routeOpts = args[6];
+            routeOpts.persistenceContext.egressByCat = {
+              opus: {
+                disposition: 'held',
+                holdId: 'hold-queue-1',
+                observedWatermark: '3',
+                unseenMessageIds: ['new-user-message'],
+              },
+            };
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({ type: 'freshness_hold', holdId: 'hold-queue-1' }),
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-held');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => streamingHook.onStreamHold.mock.calls.length >= 1);
+
+      assert.equal(outboundHook.deliver.mock.calls.length, 0);
+      assert.equal(streamingHook.onStreamEnd.mock.calls.length, 0);
+      assert.equal(streamingHook.cleanupPlaceholders.mock.calls.length, 0);
+      assert.deepEqual(streamingHook.onStreamHold.mock.calls[0].arguments, ['t1', 'inv-stub']);
     });
 
     it('outboundHook set via late-bind setOutboundHook: deliver is called', async () => {

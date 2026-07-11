@@ -15,6 +15,23 @@ function draft(content = '基于旧上下文形成的完整草稿') {
   };
 }
 
+function privateDraft(prefix) {
+  return {
+    content: `${prefix}-CONTENT`,
+    richBlocks: [{ id: `${prefix}-RICH`, kind: 'card', v: 1, bodyMarkdown: `${prefix}-RICH-BODY` }],
+    extra: {
+      privateMarker: `${prefix}-EXTRA`,
+      nested: { secret: `${prefix}-NESTED` },
+    },
+  };
+}
+
+function assertPrivatePayloadScrubbed(record, prefix) {
+  assert.deepEqual(record.draft, { content: '' });
+  assert.deepEqual(record.deltaMessageIds, []);
+  assert.equal(JSON.stringify(record).includes(prefix), false);
+}
+
 function createInput(overrides = {}) {
   return {
     invocationId: 'inv-1',
@@ -55,6 +72,8 @@ describe('FreshnessHoldStore', () => {
     assert.equal(replay.outcome, 'existing');
     assert.equal(replay.hold.id, first.hold.id);
     assert.deepEqual(replay.hold.draft, draft());
+    assert.deepEqual(await store.getBySubmission('inv-1', 'client-message-1'), first.hold);
+    assert.equal(await store.getBySubmission('inv-1', 'missing'), null);
     assert.equal(anotherInvocation.outcome, 'created');
     assert.notEqual(anotherInvocation.hold.id, first.hold.id);
   });
@@ -130,12 +149,73 @@ describe('FreshnessHoldStore', () => {
     assert.equal(await store.discard(discardable.id, { expectedVersion: discardable.version, now: NOW + 9 }), null);
   });
 
+  it('scrubs resolved draft and delta while preserving release/discard tombstones', async () => {
+    const store = new FreshnessHoldStore({ maxReviews: 2 });
+
+    const releasePrefix = 'MEMORY-RELEASE-PRIVATE';
+    const releasable = await createHeld(store, {
+      invocationId: 'inv-private-release',
+      submissionKey: 'private-release',
+      draft: privateDraft(releasePrefix),
+      deltaMessageIds: [`${releasePrefix}-DELTA`],
+    });
+    const claimed = await store.claimReview(releasable.id, {
+      expectedVersion: releasable.version,
+      now: NOW + 1,
+    });
+    const released = await store.release(releasable.id, {
+      expectedVersion: claimed.version,
+      messageId: 'released-message-id',
+      committedWatermark: '13',
+      now: NOW + 2,
+    });
+
+    assert.equal(released.status, 'released');
+    assert.equal(released.releasedMessageId, 'released-message-id');
+    assert.equal(released.committedWatermark, '13');
+    assert.equal(released.invocationId, 'inv-private-release');
+    assert.equal(released.submissionKey, 'private-release');
+    assertPrivatePayloadScrubbed(released, releasePrefix);
+    assertPrivatePayloadScrubbed(await store.get(releasable.id), releasePrefix);
+    const releaseReplay = await store.createOrGet(
+      createInput({
+        invocationId: 'inv-private-release',
+        submissionKey: 'private-release',
+        draft: privateDraft(releasePrefix),
+        deltaMessageIds: [`${releasePrefix}-DELTA`],
+      }),
+    );
+    assert.equal(releaseReplay.outcome, 'existing');
+    assert.equal(releaseReplay.hold.id, releasable.id);
+    assertPrivatePayloadScrubbed(releaseReplay.hold, releasePrefix);
+
+    const discardPrefix = 'MEMORY-DISCARD-PRIVATE';
+    const discardable = await createHeld(store, {
+      invocationId: 'inv-private-discard',
+      submissionKey: 'private-discard',
+      draft: privateDraft(discardPrefix),
+      deltaMessageIds: [`${discardPrefix}-DELTA`],
+    });
+    const discarded = await store.discard(discardable.id, {
+      expectedVersion: discardable.version,
+      now: NOW + 3,
+    });
+
+    assert.equal(discarded.status, 'discarded');
+    assert.equal(discarded.invocationId, 'inv-private-discard');
+    assert.equal(discarded.submissionKey, 'private-discard');
+    assertPrivatePayloadScrubbed(discarded, discardPrefix);
+    assertPrivatePayloadScrubbed(await store.getBySubmission('inv-private-discard', 'private-discard'), discardPrefix);
+    assert.equal(await store.discard(discardable.id, { expectedVersion: discarded.version, now: NOW + 4 }), null);
+  });
+
   it('moves timed-out holds to needs_attention without deleting the draft', async () => {
     const store = new FreshnessHoldStore({ maxReviews: 2 });
-    const fullDraft = draft('超时后仍需完整保留的稿件');
+    const fullDraft = privateDraft('MEMORY-ATTENTION-PRIVATE');
     const held = await createHeld(store, {
       submissionKey: 'timeout-key',
       draft: fullDraft,
+      deltaMessageIds: ['MEMORY-ATTENTION-PRIVATE-DELTA'],
       reviewDeadlineAt: NOW + 100,
     });
 
@@ -146,5 +226,111 @@ describe('FreshnessHoldStore', () => {
     assert.equal(retained.status, 'needs_attention');
     assert.equal(retained.attentionReason, 'timeout');
     assert.deepEqual(retained.draft, fullDraft);
+    assert.deepEqual(retained.deltaMessageIds, ['MEMORY-ATTENTION-PRIVATE-DELTA']);
+  });
+
+  it('fails closed when a claimed review crosses its deadline before release or rehold', async () => {
+    const store = new FreshnessHoldStore({ maxReviews: 2 });
+
+    for (const transition of ['release', 'rehold']) {
+      const held = await createHeld(store, {
+        invocationId: `inv-late-${transition}`,
+        submissionKey: `late-${transition}`,
+        reviewDeadlineAt: NOW + 10,
+      });
+      const claimed = await store.claimReview(held.id, { expectedVersion: held.version, now: NOW + 9 });
+      assert.ok(claimed);
+
+      const result =
+        transition === 'release'
+          ? await store.release(held.id, {
+              expectedVersion: claimed.version,
+              messageId: `msg-${transition}`,
+              committedWatermark: '15',
+              now: NOW + 10,
+            })
+          : await store.rehold(held.id, {
+              expectedVersion: claimed.version,
+              observedWatermark: '15',
+              deltaMessageIds: ['msg-15'],
+              draft: draft('deadline 后不得重新进入待审'),
+              now: NOW + 10,
+            });
+
+      assert.equal(result, null);
+      const retained = await store.get(held.id);
+      assert.equal(retained.status, 'needs_attention');
+      assert.equal(retained.attentionReason, 'timeout');
+      assert.deepEqual(retained.draft, draft());
+    }
+  });
+
+  it('lists only active holds for the requested user and thread', async () => {
+    const store = new FreshnessHoldStore({ maxReviews: 2 });
+    const held = await createHeld(store, {
+      invocationId: 'inv-active-held',
+      submissionKey: 'active-held',
+      createdAt: NOW + 1,
+    });
+    const reviewing = await createHeld(store, {
+      invocationId: 'inv-active-reviewing',
+      submissionKey: 'active-reviewing',
+      createdAt: NOW + 2,
+    });
+    await store.claimReview(reviewing.id, { expectedVersion: reviewing.version, now: NOW + 3 });
+
+    const needsAttention = await createHeld(store, {
+      invocationId: 'inv-active-attention',
+      submissionKey: 'active-attention',
+      createdAt: NOW + 4,
+      reviewDeadlineAt: NOW + 5,
+    });
+    await store.expireDue(NOW + 5);
+
+    const releasable = await createHeld(store, {
+      invocationId: 'inv-resolved-released',
+      submissionKey: 'resolved-released',
+      createdAt: NOW + 6,
+    });
+    const releaseClaim = await store.claimReview(releasable.id, {
+      expectedVersion: releasable.version,
+      now: NOW + 7,
+    });
+    await store.release(releasable.id, {
+      expectedVersion: releaseClaim.version,
+      messageId: 'released-message',
+      committedWatermark: '16',
+      now: NOW + 8,
+    });
+
+    const discarded = await createHeld(store, {
+      invocationId: 'inv-resolved-discarded',
+      submissionKey: 'resolved-discarded',
+      createdAt: NOW + 9,
+    });
+    await store.discard(discarded.id, { expectedVersion: discarded.version, now: NOW + 10 });
+
+    await createHeld(store, {
+      invocationId: 'inv-other-user',
+      submissionKey: 'other-user',
+      userId: 'user-2',
+      createdAt: NOW + 11,
+    });
+    await createHeld(store, {
+      invocationId: 'inv-other-thread',
+      submissionKey: 'other-thread',
+      threadId: 'thread-2',
+      createdAt: NOW + 12,
+    });
+
+    const active = await store.listActive('user-1', 'thread-1');
+    assert.deepEqual(
+      active.map((record) => [record.id, record.status]),
+      [
+        [needsAttention.id, 'needs_attention'],
+        [reviewing.id, 'reviewing'],
+        [held.id, 'held'],
+      ],
+    );
   });
 });

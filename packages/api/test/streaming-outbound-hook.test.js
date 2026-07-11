@@ -315,6 +315,91 @@ describe('StreamingOutboundHook', () => {
     assert.equal(adapter._calls.deleteMessage.length, 1, 'second A cleanup must be no-op');
   });
 
+  it('freshness hold edits only the matching invocation placeholder without finalizing it', async () => {
+    const adapter = wrapAdapter(createMockAdapter());
+    let placeholderCounter = 0;
+    adapter.sendPlaceholder = async () => {
+      placeholderCounter += 1;
+      return `msg-placeholder-${placeholderCounter}`;
+    };
+    const adapters = new Map([['feishu', adapter]]);
+    const bindingStore = createBindingStore([
+      { connectorId: 'feishu', externalChatId: 'chat1', threadId: 'thread-1', userId: 'u1', createdAt: Date.now() },
+    ]);
+    const log = {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      fatal: () => {},
+      trace: () => {},
+    };
+    log.child = () => log;
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log });
+
+    await hook.onStreamStart('thread-1', undefined, 'inv-A');
+    await hook.onStreamStart('thread-1', undefined, 'inv-B');
+    await hook.onStreamHold('thread-1', 'inv-A');
+
+    assert.equal(adapter._calls.editMessage.length, 1);
+    assert.equal(adapter._calls.editMessage[0].msgId, 'msg-placeholder-1');
+    assert.match(adapter._calls.editMessage[0].text, /重新审阅/);
+    assert.equal(adapter._calls.finalizeStreamCard.length, 0);
+    assert.equal(adapter._calls.deleteMessage.length, 0);
+
+    await hook.onStreamEnd('thread-1', 'B final', 'inv-B');
+    await hook.cleanupPlaceholders('thread-1', 'inv-B');
+    assert.equal(adapter._calls.finalizeStreamCard.length, 1, 'B keeps its independent normal lifecycle');
+    assert.equal(adapter._calls.finalizeStreamCard[0].msgId, 'msg-placeholder-2');
+  });
+
+  it('freshness hold wins when it arrives before a late placeholder is created', async () => {
+    let resolvePlaceholder;
+    const editCalls = [];
+    const finalizeCalls = [];
+    const deleteCalls = [];
+    const adapter = {
+      connectorId: 'telegram',
+      sendReply: async () => {},
+      sendPlaceholder: async () =>
+        new Promise((resolve) => {
+          resolvePlaceholder = resolve;
+        }),
+      editMessage: async (chatId, msgId, text) => editCalls.push({ chatId, msgId, text }),
+      deleteMessage: async (msgId, chatId) => deleteCalls.push({ msgId, chatId }),
+      finalizeStreamCard: async (chatId, msgId, catName) => finalizeCalls.push({ chatId, msgId, catName }),
+    };
+    const adapters = new Map([['telegram', adapter]]);
+    const bindingStore = createBindingStore([
+      {
+        connectorId: 'telegram',
+        externalChatId: 'chat1',
+        threadId: 'thread-1',
+        userId: 'u1',
+        createdAt: Date.now(),
+      },
+    ]);
+    const log = {
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      fatal: () => {},
+      trace: () => {},
+    };
+    log.child = () => log;
+    const hook = new StreamingOutboundHook({ bindingStore, adapters, log });
+
+    const startPromise = hook.onStreamStart('thread-1', undefined, 'inv-late');
+    await hook.onStreamHold('thread-1', 'inv-late');
+    resolvePlaceholder('ph-held-late');
+    await startPromise;
+
+    assert.deepEqual(editCalls, [{ chatId: 'chat1', msgId: 'ph-held-late', text: '📝 收到新消息，正在重新审阅…' }]);
+    assert.equal(finalizeCalls.length, 0);
+    assert.equal(deleteCalls.length, 0);
+  });
+
   // K2: inline final — registerInlinePlaceholder path
   describe('K2 inline final (registerInlinePlaceholder)', () => {
     function makeLog() {

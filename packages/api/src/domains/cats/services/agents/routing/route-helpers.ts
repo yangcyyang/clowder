@@ -3,7 +3,15 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, ContextBudget, MessageContent, RichBlock, RichBlockBase, TaskItem, ToolPolicy } from '@cat-cafe/shared';
+import type {
+  CatId,
+  ContextBudget,
+  MessageContent,
+  RichBlock,
+  RichBlockBase,
+  TaskItem,
+  ToolPolicy,
+} from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -16,10 +24,19 @@ import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import { isDelivered, type IMessageStore, type StoredMessage, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import {
+  type AppendMessageInput,
+  type IMessageStore,
+  isDelivered,
+  type StoredMessage,
+  type StoredToolEvent,
+  type ThreadAppendWatermark,
+} from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
+import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
+import type { FreshnessReviewPayload } from '../invocation/InvocationQueue.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
 import { extractRecentArtifacts, mergeLedger, sortAndCapArtifacts } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
@@ -456,10 +473,7 @@ export function resolveHistoryGovernanceDecision(input: {
     }
   }
 
-  if (
-    input.summary &&
-    (shadowRequested || ratio >= thresholds.shadowRatio)
-  ) {
+  if (input.summary && (shadowRequested || ratio >= thresholds.shadowRatio)) {
     return { mode: 'shadow-summary', thresholds, reason: 'shadow' };
   }
 
@@ -731,7 +745,8 @@ export function buildRuntimeContextBudgetSnapshot(input: {
           summarySegmentId: input.historySummary.segmentIds[0],
         }
       : {}),
-    ...(input.historyGovernanceDegraded !== undefined || input.historyObservation?.historyGovernanceDegraded !== undefined
+    ...(input.historyGovernanceDegraded !== undefined ||
+    input.historyObservation?.historyGovernanceDegraded !== undefined
       ? {
           historyGovernanceDegraded: Boolean(
             input.historyObservation?.historyGovernanceDegraded || input.historyGovernanceDegraded,
@@ -746,6 +761,8 @@ export interface RouteStrategyDeps {
   services: Record<string, AgentService>;
   invocationDeps: InvocationDeps;
   messageStore: IMessageStore;
+  /** Atomic final-output gate. When configured, user-visible text is final-only. */
+  freshnessGate?: FreshnessEgressGate;
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */
   draftStore?: IDraftStore;
@@ -878,6 +895,153 @@ export interface PersistenceContext {
   errors: Array<{ catId: string; error: string }>;
   /** F088-P3: Rich blocks consumed during this invocation, for outbound delivery */
   richBlocks?: import('@cat-cafe/shared').RichBlock[];
+  /** Per-cat publication verdict consumed by HTTP/queue/connector delivery layers. */
+  egressByCat?: Record<string, FreshnessPersistenceEgress>;
+  /** Input-only control envelope for a queued successor review. */
+  freshnessReview?: FreshnessReviewPayload;
+}
+
+export interface FreshnessPersistenceEgress {
+  disposition: 'published' | 'held' | 'discarded';
+  messageId?: string;
+  holdId?: string;
+  /** Current hold CAS version. Required before scheduling a successor review. */
+  version?: number;
+  observedWatermark?: string;
+  unseenMessageIds?: readonly string[];
+  reviewCount?: number;
+  holdStatus?: 'held' | 'needs_attention';
+  /** Fully bound next-review envelope; consumers may pass it through unchanged. */
+  freshnessReview?: FreshnessReviewPayload;
+}
+
+type FreshnessGateResult =
+  | Awaited<ReturnType<FreshnessEgressGate['submit']>>
+  | Awaited<ReturnType<FreshnessEgressGate['review']>>;
+
+export function formatFreshnessReviewPrompt(review: FreshnessReviewPayload): string {
+  const deltaLines = (review.deltaMessages ?? []).map((item) => {
+    const speaker = item.catId ?? item.userId;
+    return `- [${item.id}] ${speaker}: ${sanitizeInjectedContent(item.content)}`;
+  });
+  return [
+    '[Freshness Review Continuation]',
+    `holdId: ${review.holdId}`,
+    `reviewAttempt: ${review.reviewCount + 1}/2`,
+    'A previous answer was withheld because newer same-thread messages arrived before publication.',
+    'Revise the complete answer against the newer messages below. Output only one complete replacement answer.',
+    'Do not publish through a callback tool; the runtime will atomically review and publish stdout.',
+    '',
+    '[Held Draft]',
+    review.draftContent,
+    '[/Held Draft]',
+    '',
+    '[Newer Messages]',
+    ...(deltaLines.length > 0 ? deltaLines : review.deltaMessageIds.map((id) => `- [${id}]`)),
+    '[/Newer Messages]',
+    '[/Freshness Review Continuation]',
+  ].join('\n');
+}
+
+/**
+ * Publish a normal draft or let the latest, ownership-bound successor replace
+ * an existing hold. The gate still performs the authoritative hold ownership
+ * check using originalInvocationId.
+ */
+export async function publishFreshnessDraft(input: {
+  deps: RouteStrategyDeps;
+  review?: FreshnessReviewPayload;
+  successorInvocationId?: string;
+  invocationId: string;
+  submissionKey: string;
+  userId: string;
+  catId: CatId;
+  threadId: string;
+  baselineWatermark: ThreadAppendWatermark;
+  draft: AppendMessageInput;
+}): Promise<FreshnessGateResult> {
+  const gate = input.deps.freshnessGate;
+  if (!gate) throw new Error('Freshness gate is not configured');
+
+  if (!input.review) {
+    return gate.submit({
+      invocationId: input.invocationId,
+      submissionKey: input.submissionKey,
+      userId: input.userId,
+      catId: input.catId,
+      threadId: input.threadId,
+      baselineWatermark: input.baselineWatermark,
+      draft: input.draft,
+    });
+  }
+
+  const review = input.review;
+  if (
+    review.status !== 'held' ||
+    review.userId !== input.userId ||
+    review.catId !== (input.catId as string) ||
+    review.threadId !== input.threadId
+  ) {
+    throw new Error('Freshness review successor ownership mismatch');
+  }
+  if (!input.successorInvocationId) {
+    throw new Error('Freshness review successor invocation is missing');
+  }
+  if (!(await input.deps.invocationDeps.registry.isLatest(input.successorInvocationId))) {
+    throw new Error('Freshness review successor is not the latest invocation');
+  }
+
+  return gate.review({
+    holdId: review.holdId,
+    expectedVersion: review.expectedVersion,
+    action: 'replace',
+    replacementDraft: input.draft,
+    invocationId: review.originalInvocationId,
+    userId: input.userId,
+    catId: input.catId,
+    threadId: input.threadId,
+  });
+}
+
+export function freshnessPersistenceEgress(result: FreshnessGateResult): FreshnessPersistenceEgress {
+  if (result.outcome === 'published') {
+    return { disposition: 'published', messageId: result.message.id };
+  }
+  if (result.outcome === 'discarded') {
+    return { disposition: 'discarded', holdId: result.hold.id };
+  }
+
+  const holdStatus = result.outcome === 'needs_attention' ? 'needs_attention' : 'held';
+  const deltaMessageIds = result.delta.messages.map((message) => message.id);
+  const freshnessReview: FreshnessReviewPayload = {
+    holdId: result.hold.id,
+    expectedVersion: result.hold.version,
+    originalInvocationId: result.hold.invocationId,
+    userId: result.hold.userId,
+    catId: result.hold.catId as string,
+    threadId: result.hold.threadId,
+    reviewCount: result.hold.reviewCount,
+    status: holdStatus,
+    draftContent: result.hold.draft.content,
+    deltaMessageIds,
+    deltaMessages: result.delta.messages.map((message) => ({
+      id: message.id,
+      userId: message.userId,
+      catId: message.catId as string | null,
+      content: message.content,
+      timestamp: message.timestamp,
+    })),
+  };
+  return {
+    disposition: 'held',
+    holdId: result.hold.id,
+    version: result.hold.version,
+    observedWatermark: result.hold.observedWatermark,
+    unseenMessageIds: deltaMessageIds,
+    reviewCount: result.hold.reviewCount,
+    holdStatus,
+    freshnessReview,
+  };
 }
 
 /** Common options for both strategies */
@@ -988,9 +1152,7 @@ export async function persistA2ARoutingBlockedNotice(
   } as const;
   const targetHandle = `@${args.targetCatId}`;
   const reasonText = A2A_BLOCKED_REASON_TEXT[args.reason];
-  const content =
-    `[交接提醒]: ${targetHandle} 未自动触发：${reasonText}。` +
-    `可稍后重试，或手动 ${targetHandle}。`;
+  const content = `[交接提醒]: ${targetHandle} 未自动触发：${reasonText}。` + `可稍后重试，或手动 ${targetHandle}。`;
 
   try {
     const stored = await deps.messageStore.append({
@@ -1140,7 +1302,8 @@ export interface AgentStageGate {
   instruction: string;
 }
 
-const ACTION_INTENT_RE = /(修复|推进|执行|构建|导出|检查|排查|改造|写入|备份|push|提交|实现|处理|你来做|帮我做|开始做|继续做)/i;
+const ACTION_INTENT_RE =
+  /(修复|推进|执行|构建|导出|检查|排查|改造|写入|备份|push|提交|实现|处理|你来做|帮我做|开始做|继续做)/i;
 const CORRECTION_INTENT_RE =
   /(先别|别急|等等|暂停|停止|不要做|先不做|不是这个|换方向|先讨论|先确认|先看方案|先给.*方案|确认后再执行)/i;
 const APPROVAL_INTENT_RE = /^(ok|OK|确认|可以|同意|按这个|开始吧|开始做吧|继续|推进吧|执行吧)[。！!\s]*$/i;
@@ -1205,7 +1368,12 @@ export function buildAgentIntentSnapshot(
     latestInstruction: selected.content,
     latestMessageId: selected.id,
     supersededMessageIds:
-      intentType === 'correction' ? recentMessages.slice(0, -1).map((m) => m.id).slice(-5) : [],
+      intentType === 'correction'
+        ? recentMessages
+            .slice(0, -1)
+            .map((m) => m.id)
+            .slice(-5)
+        : [],
     requiresTask: intentType === 'action',
     requiresUserConfirmation: intentType === 'stage-input' || intentType === 'correction',
     stage: inferIntentStage(combinedContent),
@@ -1254,8 +1422,7 @@ export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefi
     .map((m) => `- id=${m.id} ${m.type}: ${m.content}`)
     .join('\n');
   const stageGateText = formatAgentStageGate(buildAgentStageGate(snapshot));
-  const superseded =
-    snapshot.supersededMessageIds.length > 0 ? snapshot.supersededMessageIds.join(', ') : 'none';
+  const superseded = snapshot.supersededMessageIds.length > 0 ? snapshot.supersededMessageIds.join(', ') : 'none';
   return [
     '[Agent Inbox Snapshot]',
     'Scope: current thread only. Treat this as the latest user intent before acting.',
@@ -1868,9 +2035,7 @@ export async function assembleIncrementalContext(
         env: historyGovernanceEnv,
       })
     : false;
-  const historyGovernanceQualityIssues = missingActiveSummary
-    ? (['empty_summary'] as const)
-    : summaryQuality.issues;
+  const historyGovernanceQualityIssues = missingActiveSummary ? (['empty_summary'] as const) : summaryQuality.issues;
   const historyGovernanceDegraded = missingActiveSummary || !summaryQuality.ok;
   const effectiveHistoryGovernanceDecision = historyGovernanceDegraded
     ? modeAfterSummaryQualityFailure(historyGovernanceDecision, options?.historyObservation)
@@ -1892,7 +2057,8 @@ export async function assembleIncrementalContext(
   // F148: Smart window — cold mention detection
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
   const hcConfig =
-    effectiveHistoryGovernanceDecision.mode === 'summary-active' && effectiveHistoryGovernanceDecision.recentMessageLimit
+    effectiveHistoryGovernanceDecision.mode === 'summary-active' &&
+    effectiveHistoryGovernanceDecision.recentMessageLimit
       ? {
           ...DEFAULT_HIERARCHICAL_CONTEXT,
           maxBurstMessages: effectiveHistoryGovernanceDecision.recentMessageLimit,
@@ -1951,7 +2117,8 @@ export async function assembleIncrementalContext(
   // and stale cursor scenarios where large unseen batches accumulate.
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const maxRecentMessages =
-    effectiveHistoryGovernanceDecision.mode === 'summary-active' && effectiveHistoryGovernanceDecision.recentMessageLimit
+    effectiveHistoryGovernanceDecision.mode === 'summary-active' &&
+    effectiveHistoryGovernanceDecision.recentMessageLimit
       ? Math.min(budget.maxMessages, effectiveHistoryGovernanceDecision.recentMessageLimit)
       : budget.maxMessages;
   const wasCapped = relevant.length > maxRecentMessages;
@@ -2049,7 +2216,7 @@ export async function assembleIncrementalContext(
 
   let includedHistorySummary = includedThreadHistorySummary;
   let historySummaryText = includedHistorySummary?.text ?? '';
-  let finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
+  const finalLines = tokenTrimmed ? lines.slice(tokenTrimStart) : lines;
   const finalCapped = tokenTrimmed ? capped.slice(tokenTrimStart) : capped;
 
   if (historySummaryText && estimateTokens([historySummaryText, ...finalLines].join('\n')) > effectiveTokenBudget) {
@@ -2099,8 +2266,7 @@ export async function assembleIncrementalContext(
 
   const boundaryId = finalCapped[finalCapped.length - 1]?.id;
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
-  const historyRecallSmokeText =
-    includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
+  const historyRecallSmokeText = includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
   const historySummarySection = historySummaryText
     ? [historySummaryText, historyRecallSmokeText, '[Recent Messages]'].filter(Boolean).join('\n')
     : '';
@@ -2428,8 +2594,7 @@ async function assembleSmartWindowContext(
   );
 
   const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
-  const historyRecallSmokeText =
-    includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
+  const historyRecallSmokeText = includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
   const historySummarySection = finalThreadHistorySummaryText
     ? [finalThreadHistorySummaryText, historyRecallSmokeText, '[Recent Messages]'].filter(Boolean).join('\n')
     : '';

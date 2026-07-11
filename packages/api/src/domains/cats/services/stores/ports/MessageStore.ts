@@ -266,7 +266,7 @@ export interface IMessageStore {
   /** Compare the audience watermark and append in one linearization point. */
   appendIfFresh(
     msg: AppendMessageInput,
-    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },
   ): ConditionalAppendResult | Promise<ConditionalAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
@@ -351,7 +351,7 @@ function parseWatermark(value: ThreadAppendWatermark): bigint {
 }
 
 /** Structural freshness classification. Content text is deliberately ignored. */
-export function isFreshnessRelevantMessage(
+export function isFreshnessProtectedPublication(
   msg: Pick<
     StoredMessage,
     'userId' | 'catId' | 'messageClass' | 'origin' | 'extra' | 'deliveryStatus' | 'deletedAt' | '_tombstone'
@@ -364,6 +364,20 @@ export function isFreshnessRelevantMessage(
   if (msg.origin === 'briefing') return false;
   if (msg.extra?.systemKind) return false;
   return true;
+}
+
+export function isFreshnessRelevantMessage(
+  msg: Pick<
+    StoredMessage,
+    'userId' | 'catId' | 'messageClass' | 'origin' | 'extra' | 'deliveryStatus' | 'deletedAt' | '_tombstone'
+  >,
+): boolean {
+  return isFreshnessProtectedPublication(msg);
+}
+
+function freshnessGroupId(msg: Pick<StoredMessage, 'extra'>): string | undefined {
+  const groupId = msg.extra?.stream?.invocationId?.trim();
+  return groupId || undefined;
 }
 
 /**
@@ -397,6 +411,15 @@ export class MessageStore {
   }) {
     this.maxMessages = options?.maxMessages ?? MAX_MESSAGES;
     this.onAppend = options?.onAppend;
+  }
+
+  private notifyAppend(stored: StoredMessage): void {
+    if (!this.onAppend) return;
+    try {
+      void Promise.resolve(this.onAppend(stored)).catch(() => {});
+    } catch {
+      /* best-effort */
+    }
   }
 
   private buildIdempotencyIndexKey(userId: string, threadId: string, idempotencyKey?: string): string | null {
@@ -475,8 +498,8 @@ export class MessageStore {
     limit: number = DEFAULT_LIMIT,
   ): FreshnessDelta {
     const afterRevision = parseWatermark(after);
-    const observedWatermark = through ?? this.captureFreshnessWatermark(threadId, audience);
-    const throughRevision = parseWatermark(observedWatermark);
+    const requestedWatermark = through ?? this.captureFreshnessWatermark(threadId, audience);
+    const throughRevision = parseWatermark(requestedWatermark);
     const candidates = [...this.freshnessEntries(threadId, audience).entries()]
       .filter(([, revision]) => revision > afterRevision && revision <= throughRevision)
       .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
@@ -485,8 +508,10 @@ export class MessageStore {
       .slice(0, safeLimit)
       .map(([id]) => this.getById(id))
       .filter((msg): msg is StoredMessage => Boolean(msg && isFreshnessRelevantMessage(msg)));
+    const lastReturned = messages[messages.length - 1];
     return {
-      observedWatermark,
+      // Never advance a review cursor past a message that was not returned.
+      observedWatermark: lastReturned?.appendWatermark ?? after,
       messages,
       truncated: candidates.length > safeLimit,
     };
@@ -494,7 +519,7 @@ export class MessageStore {
 
   appendIfFresh(
     msg: AppendMessageInput,
-    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience },
+    gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },
   ): ConditionalAppendResult {
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
@@ -510,14 +535,24 @@ export class MessageStore {
       }
     }
 
-    if (isFreshnessRelevantMessage(msg)) {
+    if (isFreshnessProtectedPublication(msg)) {
       const observedWatermark = this.captureFreshnessWatermark(threadId, gate.audience);
       if (parseWatermark(observedWatermark) > parseWatermark(gate.baseline)) {
-        return {
-          outcome: 'stale',
-          baseline: gate.baseline,
-          observedWatermark,
-        };
+        const baseline = parseWatermark(gate.baseline);
+        const hasIndependentAppend = [...this.freshnessEntries(threadId, gate.audience).entries()].some(
+          ([id, revision]) => {
+            if (revision <= baseline) return false;
+            const existing = this.getById(id);
+            return !gate.groupId || !existing || freshnessGroupId(existing) !== gate.groupId;
+          },
+        );
+        if (hasIndependentAppend) {
+          return {
+            outcome: 'stale',
+            baseline: gate.baseline,
+            observedWatermark,
+          };
+        }
       }
     }
 
@@ -571,15 +606,8 @@ export class MessageStore {
       this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
     }
 
-    // F102 KD-34: fire-and-forget append listener for thread index updates
-    // P2 fix: try-catch handles sync throws; Promise.resolve handles async rejections
-    if (this.onAppend) {
-      try {
-        void Promise.resolve(this.onAppend(stored)).catch(() => {});
-      } catch {
-        /* best-effort */
-      }
-    }
+    // Queued review publications are private until markDelivered completes.
+    if (isDelivered(stored)) this.notifyAppend(stored);
 
     return stored;
   }
@@ -601,6 +629,7 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
+      if (!isDelivered(msg)) continue;
       if (userId && msg.userId !== userId) continue;
       matches.push(msg);
     }
@@ -762,7 +791,8 @@ export class MessageStore {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => m.threadId !== threadId);
     this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
-    this.freshnessSequenceByThread.delete(threadId);
+    // Keep the monotonic sequence as an ABA tombstone. A still-running old
+    // invocation must not become fresh again if the same thread id is reused.
     this.freshnessPublicByThread.delete(threadId);
     this.freshnessWhisperByThread.delete(threadId);
     return before - this.messages.length;
@@ -875,6 +905,7 @@ export class MessageStore {
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
+    this.notifyAppend(msg);
     return msg;
   }
 

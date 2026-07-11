@@ -10,35 +10,49 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { catRegistry, type ConnectorSource, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type ConnectorSource,
+  catRegistry,
+  type RichBlock,
+  type TaskEvent,
+  type TaskItem,
+} from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
+import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
+import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
+import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
+import { freshnessPersistenceEgress, type PersistenceContext } from '../routing/route-helpers.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
   flattenTextParts,
   flattenTurnTextParts,
 } from '../text-aggregation.js';
-import { mergeTokenUsage, type MessageMetadata, type TokenUsage } from '../../types.js';
+import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
   formatContinuationPrompt,
   isCollaborationContinuityCapsuleV1,
 } from './CollaborationContinuityCapsule.js';
-import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import { type FastLaneExecutionResult, FastLaneExecutor } from './FastLaneExecutor.js';
+import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
+import type {
+  FreshnessReviewPayload,
+  FreshnessReviewQueueMetadata,
+  InvocationQueue,
+  QueueEntry,
+} from './InvocationQueue.js';
 import type {
   ConsumedContinuationToken,
   InvocationFinalStatus,
   SessionContinuationCoordinator,
 } from './SessionContinuationCoordinator.js';
-import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
-import { FastLaneExecutor, type FastLaneExecutionResult } from './FastLaneExecutor.js';
-import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
-import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
@@ -56,6 +70,14 @@ const PROGRESS_INTENT_SOURCE: ConnectorSource = {
   icon: '▶',
   meta: { presentation: 'status', noticeTone: 'info' },
 };
+
+function shouldHoldWholeInvocation(context: Pick<PersistenceContext, 'egressByCat'>): boolean {
+  const verdicts = Object.values(context.egressByCat ?? {});
+  return (
+    verdicts.some((entry) => entry.disposition === 'held') &&
+    !verdicts.some((entry) => entry.disposition === 'published')
+  );
+}
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[]): AbortController;
@@ -140,9 +162,24 @@ interface TokenPricing {
 }
 
 const TOKEN_PRICING_BY_MODEL: Record<string, TokenPricing> = {
-  'claude-opus-4': { inputPerMillion: 15, outputPerMillion: 75, cacheReadPerMillion: 1.5, cacheCreationPerMillion: 18.75 },
-  'claude-sonnet-4': { inputPerMillion: 3, outputPerMillion: 15, cacheReadPerMillion: 0.3, cacheCreationPerMillion: 3.75 },
-  'claude-haiku-4': { inputPerMillion: 0.8, outputPerMillion: 4, cacheReadPerMillion: 0.08, cacheCreationPerMillion: 1 },
+  'claude-opus-4': {
+    inputPerMillion: 15,
+    outputPerMillion: 75,
+    cacheReadPerMillion: 1.5,
+    cacheCreationPerMillion: 18.75,
+  },
+  'claude-sonnet-4': {
+    inputPerMillion: 3,
+    outputPerMillion: 15,
+    cacheReadPerMillion: 0.3,
+    cacheCreationPerMillion: 3.75,
+  },
+  'claude-haiku-4': {
+    inputPerMillion: 0.8,
+    outputPerMillion: 4,
+    cacheReadPerMillion: 0.08,
+    cacheCreationPerMillion: 1,
+  },
   'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.6 },
   'gpt-4o': { inputPerMillion: 2.5, outputPerMillion: 10 },
   'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
@@ -396,7 +433,7 @@ export interface OutboundDeliveryHookLike {
     threadId: string,
     content: string,
     catId: string,
-    richBlocks?: ReadonlyArray<{ kind: string; [key: string]: unknown }>,
+    richBlocks?: readonly RichBlock[],
     threadMeta?: { threadShortId?: string; threadTitle?: string; deepLinkUrl?: string },
     origin?: string,
     triggerMessageId?: string,
@@ -413,6 +450,7 @@ export interface StreamingOutboundHookLike {
   ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
+  onStreamHold?(threadId: string, invocationId: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
   notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
@@ -432,6 +470,8 @@ export interface QueueProcessorDeps {
   router: RouterLike;
   socketManager: SocketManagerLike;
   messageStore: IMessageStore;
+  /** Final-output gate for route-bypassing fast-lane completions. */
+  freshnessGate?: FreshnessEgressGate;
   log: LoggerLike;
   /** F088 fix: optional outbound delivery hook (late-bound after gateway bootstrap). */
   outboundHook?: OutboundDeliveryHookLike;
@@ -469,6 +509,13 @@ export type ContinuationEnqueueOutcome =
   | 'skipped_rate_limited'
   | 'queue_full';
 
+export type FreshnessReviewEnqueueOutcome =
+  | 'enqueued'
+  | 'skipped_existing_entry'
+  | 'skipped_review_limit'
+  | 'skipped_terminal'
+  | 'queue_full';
+
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
@@ -483,6 +530,8 @@ export class QueueProcessor {
   private processingSlotTtlMs: number;
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
+  /** Private held draft bodies keyed by queue entry id; never exposed in queue_updated. */
+  private freshnessReviewPayloads = new Map<string, FreshnessReviewPayload>();
   private fastLaneRouter = new FastLaneRouter();
   private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
@@ -766,7 +815,9 @@ export class QueueProcessor {
                 inputTokens: aggregate.usage.inputTokens ?? 0,
                 outputTokens: aggregate.usage.outputTokens ?? 0,
                 totalTokens,
-                ...(aggregate.usage.cacheReadTokens != null ? { cacheReadTokens: aggregate.usage.cacheReadTokens } : {}),
+                ...(aggregate.usage.cacheReadTokens != null
+                  ? { cacheReadTokens: aggregate.usage.cacheReadTokens }
+                  : {}),
                 ...(aggregate.usage.cacheCreationTokens != null
                   ? { cacheCreationTokens: aggregate.usage.cacheCreationTokens }
                   : {}),
@@ -850,7 +901,10 @@ export class QueueProcessor {
     threadId: string;
     catId: string;
     sourceMessageIds: readonly string[];
-    type: Extract<TaskEvent['type'], 'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'>;
+    type: Extract<
+      TaskEvent['type'],
+      'fast_lane_decision' | 'fast_lane_started' | 'fast_lane_completed' | 'fast_lane_failed'
+    >;
     data: Record<string, unknown>;
   }): Promise<void> {
     const { taskStore } = this.deps;
@@ -1089,6 +1143,79 @@ export class QueueProcessor {
       threadId,
       queue: this.deps.queue.list(threadId, userId),
       action: 'continuation_enqueued',
+    });
+    return { outcome: 'enqueued', entry: result.entry };
+  }
+
+  enqueueFreshnessReview(input: FreshnessReviewPayload): {
+    outcome: FreshnessReviewEnqueueOutcome;
+    entry?: QueueEntry;
+  } {
+    if (input.status !== 'held') {
+      return { outcome: 'skipped_terminal' };
+    }
+    if (input.reviewCount >= 2) {
+      return { outcome: 'skipped_review_limit' };
+    }
+    if (
+      input.userId.length === 0 ||
+      input.catId.length === 0 ||
+      input.threadId.length === 0 ||
+      input.originalInvocationId.length === 0 ||
+      input.holdId.length === 0 ||
+      !Number.isInteger(input.expectedVersion) ||
+      input.expectedVersion <= 0
+    ) {
+      return { outcome: 'skipped_terminal' };
+    }
+
+    const continuationKey = `freshness-review:${input.holdId}:${input.expectedVersion}`;
+    if (
+      this.deps.queue.hasPendingForCat(input.threadId, input.catId, {
+        sources: ['agent'],
+        sourceCategories: ['freshness_review'],
+        continuationKey,
+      })
+    ) {
+      return { outcome: 'skipped_existing_entry' };
+    }
+
+    const metadata: FreshnessReviewQueueMetadata = {
+      holdId: input.holdId,
+      expectedVersion: input.expectedVersion,
+      originalInvocationId: input.originalInvocationId,
+      userId: input.userId,
+      catId: input.catId,
+      threadId: input.threadId,
+      reviewCount: input.reviewCount,
+      status: input.status,
+    };
+    const result = this.deps.queue.enqueue({
+      threadId: input.threadId,
+      userId: input.userId,
+      idempotencyKey: continuationKey,
+      content: 'Freshness review pending',
+      source: 'agent',
+      sourceCategory: 'freshness_review',
+      continuationKey,
+      freshnessReview: metadata,
+      targetCats: [input.catId],
+      intent: 'execute',
+      autoExecute: true,
+      priority: 'urgent',
+    });
+    if (result.outcome === 'full' || !result.entry) {
+      return { outcome: 'queue_full' };
+    }
+    if (result.deduped) {
+      return { outcome: 'skipped_existing_entry', entry: result.entry };
+    }
+
+    this.freshnessReviewPayloads.set(result.entry.id, structuredClone(input));
+    this.deps.socketManager.emitToUser(input.userId, 'queue_updated', {
+      threadId: input.threadId,
+      queue: this.deps.queue.list(input.threadId, input.userId),
+      action: 'freshness_review_enqueued',
     });
     return { outcome: 'enqueued', entry: result.entry };
   }
@@ -1468,6 +1595,7 @@ export class QueueProcessor {
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
     const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
+    const nonPublishedCatIds = new Set<string>();
     let consumedContinuation: ConsumedContinuationToken | undefined;
 
     try {
@@ -1680,15 +1808,52 @@ export class QueueProcessor {
         }
       }
 
-      // 7. Route execution
-      const persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> } = {};
+      // 7. Route execution. Review bodies live outside QueueEntry because the
+      // public queue is emitted to clients; hydrate them only at dispatch time.
+      let freshnessReview: FreshnessReviewPayload | undefined;
+      if (entry.freshnessReview) {
+        const privatePayload = this.freshnessReviewPayloads.get(entry.id);
+        if (!privatePayload) {
+          throw new Error('Freshness review private payload is missing');
+        }
+        if (
+          privatePayload.holdId !== entry.freshnessReview.holdId ||
+          privatePayload.expectedVersion !== entry.freshnessReview.expectedVersion ||
+          privatePayload.userId !== userId ||
+          privatePayload.catId !== primaryCat ||
+          privatePayload.threadId !== threadId
+        ) {
+          throw new Error('Freshness review queue metadata mismatch');
+        }
+        const deltaMessages = (
+          await Promise.all(
+            privatePayload.deltaMessageIds.map(async (id) => {
+              const stored = await messageStore.getById(id);
+              if (!stored) return null;
+              return {
+                id: stored.id,
+                userId: stored.userId,
+                catId: stored.catId as string | null,
+                content: stored.content,
+                timestamp: stored.timestamp,
+              };
+            }),
+          )
+        ).filter((item): item is NonNullable<typeof item> => item !== null);
+        freshnessReview = { ...structuredClone(privatePayload), deltaMessages };
+      }
+      const persistenceContext: PersistenceContext = {
+        failed: false,
+        errors: [],
+        ...(freshnessReview ? { freshnessReview } : {}),
+      };
       const collectedTextParts: string[] = [];
 
       // F088 fix: Track per-turn content for outbound delivery (same pattern as ConnectorInvokeTrigger)
       const outboundTurns: Array<{
         catId: string;
         textParts: string[];
-        richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
+        richBlocks?: RichBlock[];
       }> = [];
       let currentTurnCatId: string | undefined;
       const completeMessageDeliveryEnabled =
@@ -1755,6 +1920,10 @@ export class QueueProcessor {
             },
           });
         } else {
+          const fastLaneCatId = primaryCat as CatId;
+          const fastLaneFreshnessBaseline = this.deps.freshnessGate
+            ? await messageStore.captureFreshnessWatermark(threadId, { kind: 'cat', catId: fastLaneCatId })
+            : undefined;
           await this.appendFastLaneTaskEvent({
             threadId,
             catId: primaryCat,
@@ -1789,18 +1958,80 @@ export class QueueProcessor {
               phase: 'done',
             });
             finalStatus = 'succeeded';
-            responseText = this.formatFastLaneSuccessMessage(result);
-            socketManager.broadcastAgentMessage(
-              {
-                type: 'text',
-                catId: primaryCat,
-                content: responseText,
-                origin: 'fast_lane',
-                timestamp: Date.now(),
+            const fastLaneResponseText = this.formatFastLaneSuccessMessage(result);
+            let fastLaneEgress: ReturnType<typeof freshnessPersistenceEgress> | undefined;
+            if (this.deps.freshnessGate && fastLaneFreshnessBaseline) {
+              const publication = await this.deps.freshnessGate.submit({
                 invocationId,
-              },
-              threadId,
-            );
+                submissionKey: `fast-lane:${invocationId}`,
+                userId,
+                catId: fastLaneCatId,
+                threadId,
+                baselineWatermark: fastLaneFreshnessBaseline,
+                draft: {
+                  userId,
+                  catId: fastLaneCatId,
+                  threadId,
+                  content: fastLaneResponseText,
+                  messageClass: 'substantive',
+                  mentions: [],
+                  origin: 'stream',
+                  timestamp: Date.now(),
+                  extra: { stream: { invocationId } },
+                },
+              });
+              const egress = freshnessPersistenceEgress(publication);
+              fastLaneEgress = egress;
+              persistenceContext.egressByCat ??= {};
+              persistenceContext.egressByCat[primaryCat] = egress;
+              if (egress.disposition === 'published') {
+                responseText = fastLaneResponseText;
+                socketManager.broadcastAgentMessage(
+                  {
+                    type: 'text',
+                    catId: primaryCat,
+                    content: fastLaneResponseText,
+                    origin: 'fast_lane',
+                    messageId: egress.messageId,
+                    timestamp: Date.now(),
+                    invocationId,
+                  },
+                  threadId,
+                );
+              } else if (egress.disposition === 'held') {
+                socketManager.broadcastAgentMessage(
+                  {
+                    type: 'system_info',
+                    catId: primaryCat,
+                    content: JSON.stringify({
+                      type: 'freshness_hold',
+                      disposition: 'held',
+                      holdId: egress.holdId,
+                      message: '收到新消息，快车道结果已扣住并等待重新审阅。',
+                    }),
+                    timestamp: Date.now(),
+                    invocationId,
+                  },
+                  threadId,
+                );
+                if (egress.holdStatus === 'held' && egress.freshnessReview) {
+                  this.enqueueFreshnessReview(egress.freshnessReview);
+                }
+              }
+            } else {
+              responseText = fastLaneResponseText;
+              socketManager.broadcastAgentMessage(
+                {
+                  type: 'text',
+                  catId: primaryCat,
+                  content: fastLaneResponseText,
+                  origin: 'fast_lane',
+                  timestamp: Date.now(),
+                  invocationId,
+                },
+                threadId,
+              );
+            }
             socketManager.broadcastAgentMessage(
               {
                 type: 'done',
@@ -1819,9 +2050,18 @@ export class QueueProcessor {
                 workflowId: fastLaneDecision.workflowId,
                 workflowVersion: '1',
                 durationMs: result.durationMs,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                files: result.files,
+                ...(fastLaneEgress && fastLaneEgress.disposition !== 'published'
+                  ? {
+                      disposition: fastLaneEgress.disposition,
+                      ...(fastLaneEgress.holdId ? { holdId: fastLaneEgress.holdId } : {}),
+                      ...(fastLaneEgress.version != null ? { version: fastLaneEgress.version } : {}),
+                      ...(fastLaneEgress.reviewCount != null ? { reviewCount: fastLaneEgress.reviewCount } : {}),
+                    }
+                  : {
+                      stdout: result.stdout,
+                      stderr: result.stderr,
+                      files: result.files,
+                    }),
                 artifactCount: artifact?.files.length ?? 0,
                 routeExecutionBypassed: true,
                 tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
@@ -2062,7 +2302,11 @@ export class QueueProcessor {
           }
           currentTurnCatId = undefined;
           // F151: Deliver completed cat's turns immediately (same fix as ConnectorInvokeTrigger)
-          if (this.deps.outboundHook) {
+          if (
+            this.deps.outboundHook &&
+            (!persistenceContext.egressByCat?.[msg.catId] ||
+              persistenceContext.egressByCat[msg.catId]?.disposition === 'published')
+          ) {
             if (threadMetaPromise) {
               threadMeta = await threadMetaPromise;
               threadMetaPromise = undefined;
@@ -2178,6 +2422,12 @@ export class QueueProcessor {
 
       finalStatus = 'succeeded';
 
+      for (const [catId, egress] of Object.entries(persistenceContext.egressByCat ?? {})) {
+        if (egress.disposition !== 'published') {
+          nonPublishedCatIds.add(catId);
+        }
+      }
+
       // 10. Outbound delivery: send remaining per-turn content to bound external chats
       await this.deliverOutbound(
         threadId,
@@ -2192,6 +2442,14 @@ export class QueueProcessor {
         deliveredTurnIndices,
         threadMeta,
       );
+
+      if (!persistenceContext.failed) {
+        for (const egress of Object.values(persistenceContext.egressByCat ?? {})) {
+          if (egress.disposition === 'held' && egress.holdStatus === 'held' && egress.freshnessReview) {
+            this.enqueueFreshnessReview(egress.freshnessReview);
+          }
+        }
+      }
 
       await this.appendUsageTaskEvents({
         threadId,
@@ -2252,12 +2510,14 @@ export class QueueProcessor {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      this.freshnessReviewPayloads.delete(entry.id);
       // F175: on success remove batched entries; on failure/cancel rollback so they can retry
       if (finalStatus === 'succeeded') {
         for (const bid of batchedEntryIds) {
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         for (const continuationCapsule of continuationCapsules.values()) {
+          if (nonPublishedCatIds.has(continuationCapsule.catId)) continue;
           this.enqueueContinuation({
             threadId,
             userId,
@@ -2272,13 +2532,16 @@ export class QueueProcessor {
       }
       if (this.deps.sessionContinuationCoordinator) {
         try {
+          const producedCapsules = [...continuationCapsules.values()].filter(
+            (capsule) => !nonPublishedCatIds.has(capsule.catId),
+          );
           await this.deps.sessionContinuationCoordinator.commitInvocationOutcome({
             finalStatus,
             threadId,
             catId: primaryCat,
             userId,
             consumedContinuation,
-            producedCapsules: continuationCapsules.values(),
+            producedCapsules,
           });
         } catch (err) {
           log.warn({ threadId, targetCats, err }, '[QueueProcessor] F224: commitInvocationOutcome failed');
@@ -2316,19 +2579,23 @@ export class QueueProcessor {
     outboundTurns: Array<{
       catId: string;
       textParts: string[];
-      richBlocks?: Array<{ kind: string; [key: string]: unknown }>;
+      richBlocks?: RichBlock[];
     }>,
-    persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> },
+    persistenceContext: PersistenceContext,
     streamStartPromise: Promise<void> | undefined,
     log: LoggerLike,
     triggerMessageId?: string,
     deliveredTurnIndices?: Set<number>,
     preResolvedMeta?: ThreadMetaLike | undefined,
   ): Promise<void> {
+    const deliverableTurns = outboundTurns.filter((turn) => {
+      const verdict = persistenceContext.egressByCat?.[turn.catId];
+      return !verdict || verdict.disposition === 'published';
+    });
     const finalContent =
-      outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
+      outboundTurns.length > 0 ? flattenTurnTextParts(deliverableTurns) : flattenTextParts(collectedTextParts);
 
-    // Finalize streaming — ensure start completed before ending
+    // Finalize streaming — ensure start completed before ending/holding.
     if (this.deps.streamingHook) {
       if (streamStartPromise) {
         const STREAM_START_TIMEOUT_MS = 5000;
@@ -2337,12 +2604,22 @@ export class QueueProcessor {
           new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
         ]);
       }
+    }
+
+    if (shouldHoldWholeInvocation(persistenceContext)) {
+      await this.deps.streamingHook?.onStreamHold?.(threadId, invocationId).catch((err) => {
+        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamHold failed');
+      });
+      return;
+    }
+
+    if (this.deps.streamingHook) {
       await this.deps.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
         log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamEnd failed');
       });
     }
 
-    const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+    const hasContent = collectedTextParts.length > 0 || deliverableTurns.length > 0;
     if (this.deps.outboundHook && hasContent) {
       // F151: Use pre-resolved threadMeta from mid-loop delivery, or do fresh lookup
       let threadMeta: ThreadMetaLike | undefined = preResolvedMeta;
@@ -2370,6 +2647,8 @@ export class QueueProcessor {
       const nonEmptyTurns = outboundTurns.filter(
         (t, i) =>
           !(deliveredTurnIndices && deliveredTurnIndices.has(i)) &&
+          (!persistenceContext.egressByCat?.[t.catId] ||
+            persistenceContext.egressByCat[t.catId]?.disposition === 'published') &&
           (t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0)),
       );
 
