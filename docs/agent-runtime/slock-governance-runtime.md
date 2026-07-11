@@ -79,6 +79,9 @@ FreshnessEgressGate + FreshnessHoldStore
   └── published / held / discarded / needs_attention verdict
       └── CAS review、幂等发布和恢复记录
 
+Callback side-effect claim
+  └── protected 写回调先原子认领；stale/replay 零业务副作用
+
 HTTP / Queue / Connector consumers
   └── 只消费 verdict，不重做 freshness 判断
 ```
@@ -94,6 +97,8 @@ Redis 后端是跨进程恢复的前提：hold 详情、submission 去重索引�
 | same-thread invocation callback | protected | InvocationRecord 持有本 thread baseline 与临时身份 |
 | agent-key callback | legacy | 持久身份不能证明本轮已读位置 |
 | invocation cross-thread callback | legacy | 原 thread baseline 不适用于目标 thread |
+
+写型 callback 采用集中 allowlist 加三个高风险路由的校验后认领。新增 callback 若会修改持久状态、广播业务内容、启动 timer/A2A、生成文件、调用设备或外部 SaaS，必须先加入 side-effect claim；只读查询不得误列入。评审时应以“首次不可逆写是否位于 claim 之后”为准，而不能用 `registry.isLatest()` 替代 freshness verdict。
 
 Review 不能放宽身份。Callback review 要求原 invocation 凭证；stdout `freshness_review` successor 必须携带原 hold 所有权五元组，且后继 invocation 本身必须仍是当前 latest。
 

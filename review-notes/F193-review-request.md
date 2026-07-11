@@ -10,7 +10,7 @@ created: 2026-07-11
 Review-Target-ID: freshness-hold
 Branch: codex/freshness-hold
 Range: b1a1683..HEAD
-Review-Fix-Head: 8ade644
+Review-Fix-Head: d2034a4
 
 ## What
 
@@ -43,10 +43,11 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 2. Hold 的 `reviewing → queued → released → delivered` 恢复与终态 scrubbing 是否存在 CAS/崩溃窗口？
 3. fail-closed transcript/memory 取舍、默认关闭 rollout，以及进程内 successor 限制是否与已批准的 P0-1 范围一致？
 4. route-serial/parallel 与 QueueProcessor 的改动是否引入非 Freshness 行为回归？
+5. callback side-effect claim 是否在所有写型回调的首次业务写之前执行，并保证 stale/replay 零副作用？
 
 ## Next Action
 
-请同一独立 reviewer 对照原始需求、F193 AC、前两次 review findings、状态机/安全边界和 `8ade644` 修复差异进行只读复审；重点确认 public/private lookup capability、专用 release、批量 reveal 单 Lua 与跨 Queue protected lineage。无阻塞项时明确给出 APPROVE。
+请同一独立 reviewer 对照原始需求、F193 AC、前三次 review findings、状态机/安全边界和 `d2034a4` 修复差异进行只读复审；重点确认 callback side-effect 原子认领、stale/current/replay、legacy 边界和剩余写路由覆盖。无阻塞项时明确给出 APPROVE。
 
 ## Re-review Fix Map
 
@@ -66,6 +67,7 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 | 二审 P1：queued 私稿公共读取/普通 delivery 旁路 | public getById/scanAll/around/reply preview 默认隐藏；Gate raw capability + 专用 release | exact-id/around/reply preview/marker delivery tests |
 | 二审 P1：动态 A2A 跨 Queue 恢复 legacy | QueueEntry immutable lineage；Web/Queue/callback 传播；child 强制 protected Gate | freshness-protected-a2a-lineage + route handoff tests |
 | 二审 P2：多 whisper reveal 部分提交 | 单 Lua 发现候选、精确容量预检、整批 hash/index 更新 | Redis multi-whisper MAX_SAFE test |
+| 三审 P0：callback 写副作用绕过 Gate | MessageStore 原子 side-effect claim；统一 route adapter；高风险路由校验后认领；写路由共享边界 | callback-side-effect-freshness 4/4；Gate 13/13；Redis Message freshness 12/12 |
 
 ## Review Sandbox（必填）
 

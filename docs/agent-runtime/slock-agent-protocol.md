@@ -273,6 +273,14 @@ MessageStore 给每个 thread 维护一个单调递增序列，每条 freshness-
 
 成功提交也必须幂等：Gate 从 `(invocationId, submissionKey)` 派生稳定 key；同一提交的重试返回原 messageId 与 `replayed=true`。Route、Web、Queue、Connector、Push、continuation 和 callback consumer 必须把 replay 当作“已完成但本次无新发布”，不得再次发正文、工具详情、Rich/audio、stream end、通知、续跑任务或原始 task payload。
 
+Callback 的写副作用同样属于发布边界。带 baseline 的 same-thread invocation 在投票、任务、文档、企业动作、A2A 编排、设备动作、记忆/工作流/引导状态和权限请求等首次持久或外部写之前，必须调用 `claimFreshnessSideEffect`：
+
+- baseline 仍为 current 时原子认领稳定的 `route + request digest`，当前请求执行一次；同请求重放返回 `duplicate`，不得再次写状态、文件、socket、timer、A2A 或外部 API。
+- baseline 已 stale 时返回 `freshness_retry_required`，只暴露水位和 thread 等安全元数据，零业务副作用；Agent 读取新上下文后以新 invocation 重试。
+- 无 baseline 的 legacy invocation 保持原行为；只读/状态查询与凭据保活不认领副作用。
+
+该认领是副作用的线性化提交点：它先于实际业务写，因此认领后到达的新消息与已提交副作用有明确顺序。首版不把任意业务动作序列化为可重放 Hold 草稿；进程在认领后、业务写前崩溃时会 fail closed，不自动重放这次动作。
+
 Redis 当前用 ZSET score 维护 audience 顺序，因此水位上限固定为 `9007199254740991`。到达上限后 append / restore / whisper reveal 都在任何状态写入前 fail closed；批量 reveal 必须在单个 Lua 内先核完整批容量，再统一更新 hash/index，禁止部分提交，也禁止让 Lua double 把水位转为科学计数法或发生相邻 score 碰撞。
 
 Delta 默认最多返回 50 条。如果 `truncated: true`，`observedWatermark` 只能前进到本页最后一条已物化消息，不能跳过 Agent 尚未看见的消息。
