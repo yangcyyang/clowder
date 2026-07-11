@@ -2,7 +2,7 @@
 
 更新时间：2026-05-12 00:55
 负责人：@老者-codex
-项目路径：`/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai`
+项目路径：`~/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai`
 
 ---
 
@@ -158,7 +158,7 @@ remote unpack failed: index-pack failed
 如果需要把代码放到私有 GitHub，推荐采用“当前工作树快照上传”：
 
 ```bash
-cd "/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目"
+cd "~/Documents/03 life/AI design/OrbitOS-CN/20_项目"
 rsync -a --exclude .git clowder-ai/ clowder-ai-cy-snapshot/
 cd clowder-ai-cy-snapshot
 git init
@@ -213,7 +213,7 @@ git push -u origin main
 回到 Phase 1 备份点：
 
 ```bash
-cd "/Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai"
+cd "~/Documents/03 life/AI design/OrbitOS-CN/20_项目/clowder-ai"
 git checkout feature/slock-like-webui
 git reset --hard 1d880be
 ```

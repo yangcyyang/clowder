@@ -2,7 +2,7 @@
 doc_kind: research-extract
 topics: [prompt-engineering, pack-instructions, a2a, subagent-design, skill-authoring]
 created: 2026-07-06
-source: https://github.com/Piebald-AI/claude-code-system-prompts (clone 于 /Users/cy/.slock/external-clones/claude-code-system-prompts，只读引用，不入 Clowder 代码库)
+source: https://github.com/Piebald-AI/claude-code-system-prompts (clone 于 ~/.slock/external-clones/claude-code-system-prompts，只读引用，不入 Clowder 代码库)
 ---
 
 # Claude Code 官方 System Prompt 提取 vs Clowder Pack 指令 · Gap 对照与提案

@@ -29,8 +29,8 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | **P1-1 返工完成，已回审** 处理对象：阶段回看时 `CURRENT STAGE` 文案误导。 改动： - `src/App.tsx`：… | review-assistant | 35天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | 本文档是 AI 整理资料的硬性规则，所有生成的笔记严格遵守。raw 目录为原始资料区，AI 只读取，不修改、不新增、不删除其中任何文件。 ##… | gpt52 | 31天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @codex 确认 | gpt52 | 30天 | 推进：owner 24h 内补进展/证据；无响应转人 |
-| @布偶猫4.5 你现在看下 这个 /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件… | gpt52 | 28天 | 推进：owner 24h 内补进展/证据；无响应转人 |
-| /Users/cy/Documents/03 life/AI design/.git @布偶猫4.5 看一下这个点git是谁创建的，会不会后续… | opus-45 | 25天 | 推进：owner 24h 内补进展/证据；无响应转人 |
+| @布偶猫4.5 你现在看下 这个 ~/Documents/03 life/AI design/OrbitOS-CN/00_收件… | gpt52 | 28天 | 推进：owner 24h 内补进展/证据；无响应转人 |
+| ~/Documents/03 life/AI design/.git @布偶猫4.5 看一下这个点git是谁创建的，会不会后续… | opus-45 | 25天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @布偶猫4.5 你来吧 | opus-45 | 25天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @布偶猫4.5 脑暴下，现在ppt-agent思路应该如何构建。究竟什么样的形态才能满足我的需求：原始资料---2加工成可输出大纲---3有图… | opus-45 | 25天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @Pi 提交 | pi | 24天 | 推进：owner 24h 内补进展/证据；无响应转人 |
@@ -39,8 +39,8 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | 风格预览集成 + guizang 渲染器支持 | 未指派 | 21天 | 转人：无人认领，24h 内指定 owner；否则关闭 |
 | @Pi OK | pi | 21天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @pi outline-preview 整包工单转给你，Codex 因 CLI 限制两次 claim 失败，洋哥确认转派。 ## 交接五件套 … | pi | 21天 | 推进：owner 24h 内补进展/证据；无响应转人 |
-| '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/vendor' 你重新审查… | gpt52 | 20天 | 推进：owner 24h 内补进展/证据；无响应转人 |
-| @codex '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/vendor… | gpt52 | 20天 | 推进：owner 24h 内补进展/证据；无响应转人 |
+| '~/Documents/03 life/AI design/产品项目/designe agent/vendor' 你重新审查… | gpt52 | 20天 | 推进：owner 24h 内补进展/证据；无响应转人 |
+| @codex '~/Documents/03 life/AI design/产品项目/designe agent/vendor… | gpt52 | 20天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | @codex 你继续 | gpt52 | 20天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 | 换案例测 B 的多风格能力——文旅轻松游。我先确认它有没有现成 design MD,同时派 Codex 出多套风格。查了:**文旅轻松游目录下… | gpt52 | 15天 | 推进：owner 24h 内补进展/证据；无响应转人 |
 
@@ -64,19 +64,19 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | 我不是只让你测下pptagent 的skill嘛 @codex 现在这个skill是怎样的？ | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | ppt-agent skill @codex 我如何调用呢？起个中文名字。 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 确认 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/Clippings/Claude Dynam… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/Clippings/Claude Dynam… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 重排 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 你排版怎么这么烂？ | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 形成md给我看下 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱 复制一份到这 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱 复制一份到这 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 同时你需要更新skill | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 这份输出prd不错，那你更新下skill，包括我们讨论的思路，生成这类md文档流程。 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 1. huashu skill 2.kami skill 3 .guizang 的pptskill 4. https://github.com… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 我觉得这个思路也是对的，先还是先把这个MD文档确定下来，先确定整体的结构与设计的一个蓝图规划。不用立马直接跳到成稿 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/20_项目/PPTagent/迭代版本053… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 确认 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 据上面的结论在重新更新一份那个MD文档 | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 页面类型：目录 - 标题：这份 PPT 只回答三个问题 - 正文全文： 第一，为什么普通 AI 对话在复杂任务里容易失控。 第二，Dynami… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -86,7 +86,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | http://localhost:8317/management.html#/config 这个东西给你，你可以从里面获取具体的要的那apik… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex @codex 我觉得Claude 的方案一ok http://localhost:3003/thread/thread_mpjf… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | OK@codex | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| 不要在这个原来旧的pptagent 做。你单独开个新的html 来做吧。@codex 划分步骤，制定计划。 '/Users/cy/Docume… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| 不要在这个原来旧的pptagent 做。你单独开个新的html 来做吧。@codex 划分步骤，制定计划。 '~/Docume… | gpt52 | 34天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/api/skills/dashboard @codex 这个怎么没有内容呢？修复下 | gpt52 | 33天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 🚀 我的推荐：方案 B（改造版） @codex 你觉得呢？你觉得具体的方案应该是怎么样的 | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 不要一开始就“改造 dbs-content-system 写进 OrbitOS”。 正确顺序是： ⧉复制 先沙盒试跑 → 看产物质量 → 稳定… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -94,21 +94,21 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | 01信息源 codex会话 slock会话 clowder会话 日常采集会丢进00收件箱+OrbitOS-CN/Clippings、位置 02… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-6b986390-0a6b-… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 那么我需要看到的方案应该的结构应该有，信息源有哪一些？然后信息源是怎么接入这个Obsidian的 然后目前的管理工具有哪一些？Obsidian… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱 将你这个MD文档放到这里来 | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱 将你这个MD文档放到这里来 | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 本文档是 AI 整理资料的硬性规则，所有生成的笔记严格遵守。raw 目录为原始资料区，AI 只读取，不修改、不新增、不删除其中任何文件。 ##… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-92c07630-2c3a-… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS内容资… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS内容资… | gpt52 | 30天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-a3a4ba5d-a35f-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-49093c43-0aac-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | ok 开始 再顺便问一句，你觉得是在Codex客户端里面做，还是在clowder 里面做会好一些 | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 我觉得你可以，因为我们上面讨论的内容都是在这个Cloud的频道里面聊的嘛。我觉得你可以总结一下上面的上下文，做一份交接文档，然后… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| @codex 别废话，你就帮我把交接文档放到这里 /Users/cy/Documents/03 life/AI design/OrbitOS-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| @codex 别废话，你就帮我把交接文档放到这里 ~/Documents/03 life/AI design/OrbitOS-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @Pi @codex 你现在基于我们现在讨论的东西，把这个整个流程方案写一篇文章呗。文章的目录框架要有。目标，为什么要做这个东西？然后做这个东… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | OrbitOS知识管理流程方案文章框架.md 这个文件夹你放哪里啊@codex 帮我放到orbit的收件箱嘛 | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | OK | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 可以。你这套系统不要只理解成“内容资产系统”，它更像一个通用的 **“资产化引擎”**。 用费曼一点的话说： > 只要某类东西经常被重复使用，… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-f37f6f97-e7a9-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS内容资… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS内容资… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-11a86b89-799b-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#msg-19fba18e-e5a8-… | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 你说的话没有排版，我已经找人排查了。你现在用费曼原理回答我，你结论是什么？ | gpt52 | 29天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -129,7 +129,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | OK 按照你步骤来， | gpt52 | 28天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 你哈喽，按照你的思路进行更新就行了 | gpt52 | 28天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 先做方案A吧 然后你制定计划，然后让Codex执行 | gpt52 | 28天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS资产化… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/知识管理/OrbitOS资产化… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mq2gqvgudkhnvd0j#msg-57e77daf-b39d-… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/#0001780811551981-000581-6339c7a0 @codex 这边处理，在这边… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 结合上面讨论 ，你在更新这个md给我 | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -138,7 +138,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | @codex 帮我看下 opendesign 创建一个design system 的流程以及用到的skill 提示词有哪些？ | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | design system workspace 细说这块里面的内容@codex | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 我只能去opendesign 去运行吗？不能通过cli形式来执行吗？或者说我用clowder 也可以调用她？@codex | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| 本地opendesign 即使调整为中文，但有些还是英文，能否修复下 '/Users/cy/Documents/03 life/AI desi… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| 本地opendesign 即使调整为中文，但有些还是英文，能否修复下 '~/Documents/03 life/AI desi… | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 你新建一份出来md即可 | gpt52 | 27天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | Canon_PS_Installer.pkg 这个已经安装了 @codex 帮我看下 | gpt52 | 26天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 看下opendesign 反馈的问题 | gpt52 | 26天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -146,7 +146,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | https://github.com/alchaincyf/huashu-design 更新下本地skill | gpt52 | 25天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | huashu-design 这个也更新到文件夹里面 | gpt52 | 25天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpjf3uemzsnstd7x#0001780941475694-0… | gpt52 | 25天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/00open-design… | opus-45 | 25天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| '~/Documents/03 life/AI design/产品项目/designe agent/00open-design… | opus-45 | 25天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | https://github.com/Leonxlnx/taste-skill 下载安装这个 @布偶猫4.5 你来 | opus-45 | 24天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | mimo-v2.5-pro-ultraspeed @codex 帮忙给piagent 更新一个新的模型 | gpt52 | 23天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mpjf3uemzsnstd7x#0001781186400390-0… | claude | 23天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -159,7 +159,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | 后面执行生成第一页的是谁负责做的？@codex 具体怎么做的？ | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | OK | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | OK | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| 再阅读 /Users/cy/Documents/03 life/AI design/OrbitOS-CN/20_项目/生成html-ppt/p… | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| 再阅读 ~/Documents/03 life/AI design/OrbitOS-CN/20_项目/生成html-ppt/p… | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 开始执行 | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | Style C: 高密战略汇报 按照这个来模拟推进。但请记住我们是为了整个方案不是了这个案例。 | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex l4其他事项都接着完成，并留下一份md文档给Claude 去reveiew。他现在额度不够、 | gpt52 | 22天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -192,11 +192,11 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | Pipeline 修复：路径修正 + 渲染器替换 + 风格预览步骤 + SKILL.md | gpt52 | 21天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | Step 3 Page Planner（图片提示词） ❌ 需用 image-slot-planner Skill 重写 @布偶猫4.5 让co… | gpt52 | 21天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | Codex 交付了 deck.json 提示词重写 + deck-preview.html 重新生成。我来验收。**Codex 交付验收通过。… | gpt52 | 21天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| @布偶猫4.5 完成也推进更新下 file:///Users/cy/Documents/03%20life/AI%20design/%E4%B… | gpt52 | 21天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| @布偶猫4.5 完成也推进更新下 file://~/Documents/03%20life/AI%20design/%E4%B… | gpt52 | 21天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mqc1ct664kb75xkd#msg-85f70937-4ff5-… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 结论：recommend_styles.py → 转化为 Skill 逻辑，融入 style-selector/SKILL.md；build_… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mqc1ct664kb75xkd#0001781368142056-0… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/vendor' @布偶猫4… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| '~/Documents/03 life/AI design/产品项目/designe agent/vendor' @布偶猫4… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 两猫审美 + 我的架构判断 + 三版 pilot 实测,**四重印证收敛**。底座选型锁定,不再讨论。 ## 决策锁定 - **cy-ppt … | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | cy 问进度,我先核实一眼 Codex 那两个 bug 动了没,免得报空头。进度报告: ## cy-ppt 改造进度 \| 阶段 \| 状态 … | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | Codex 这条把 runtime 也用浏览器实测补全了(`goToSlide(4)→activeSlideId=slide-16b, has… | gpt52 | 20天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -220,7 +220,7 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | 对,卡片墙是现成的,要把它**正式焊进 cy-ppt 流程**。先定位再派活。 ## 卡片墙在流程里的定位 它是 **A 内容规划阶段的"内容… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 好,用"介绍 Clowder"作内容试跑完整 cy-ppt。Clowder 我最懂(我就在里面跑),内容骨架我来出,派 Codex 按完整流程… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 你说得对,这是真问题——而且**根因在我**:我派工时写了"为不卡流程,先用最贴的那套继续跑完出成品",等于**让 Codex 把三个确认门自… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/tests/e2e-out… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| '~/Documents/03 life/AI design/产品项目/designe agent/tests/e2e-out… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 明白:同一套 Clowder 大纲,换上**悦智玻璃蓝**这套 design.md 再出一版封面样张,插进现有对比页,跟之前 3 套(Warm… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | http://localhost:3003/thread/thread_mqc1ct664kb75xkd#0001781875750264-0… | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 直接打开那个HTML给我预览一下就行了 | gpt52 | 15天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -237,14 +237,14 @@ schedule_task_id: dyn-1783177855467-5jpo67
 | @codex 给我打开cowart 我去看下。 | gpt52 | 5天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 检查Claude 在干嘛？ | gpt52 | 5天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 能否找到之前我们在做23页ppt时候生成cowart 的画板 | gpt52 | 5天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| @codex 我需要你沉淀一份说明指南 用于说明这个风格沉淀的-skill。 /Users/cy/Documents/03 life/AI d… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| @codex 你来接手，把生成图 file:///Users/cy/Documents/03%20life/AI%20design/%E4%B… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| '/Users/cy/Documents/03 life/AI design/产品项目/designe agent/tests/fullpag… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| @codex 我需要你沉淀一份说明指南 用于说明这个风格沉淀的-skill。 ~/Documents/03 life/AI d… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| @codex 你来接手，把生成图 file://~/Documents/03%20life/AI%20design/%E4%B… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| '~/Documents/03 life/AI design/产品项目/designe agent/tests/fullpag… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex 有更新提示词，你再输出3张我们再对比下。我觉得你刚才生成这个效果是OK的，看新提示词会不会更好些。 | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex OK你来生成吧 | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 报错了先修复了@codex | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | @codex http://localhost:3003/thread/thread_mqc1ct664kb75xkd#msg-069c0b9… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
-| /Users/cy/Documents/03 life/AI design/产品项目/designe agent/tests/fullpage… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
+| ~/Documents/03 life/AI design/产品项目/designe agent/tests/fullpage… | gpt52 | 4天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 任务8：布局×渲染器能力矩阵核实 | gpt52 | 2天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 好,试跑开始。资料:空港食府纲要;模式:正常模式;规矩:**每步硬停,产物贴回来,你和我对照预期表打分后才放行下一步**。我只监控验收,执行全… | gpt52 | 2天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
 | 门1 通过,大纲锁定。进步3"风格定调",按我建议走 **style-selector 推荐三方向**这条没跑过的路,产出三个方向后**停下等… | gpt52 | 2天 | 推进：验收人 24h 内判定；已过则 done，重复/过期则关闭 |
@@ -269,10 +269,10 @@ schedule_task_id: dyn-1783177855467-5jpo67
 
 | 票名 | 负责人 | 卡龄 | 建议动作 |
 |------|--------|------|----------|
-| 调用技能：AI 阅读教练 来帮我把这本书解读 /Users/cy/Downloads/Agentic-Design-Patterns.pdf | gpt52 | 39天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
+| 调用技能：AI 阅读教练 来帮我把这本书解读 ~/Downloads/Agentic-Design-Patterns.pdf | gpt52 | 39天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
 | 写入 PPT Agent 第4模块设计终稿 Harness 计划 | gpt52 | 38天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
 | 实现 PPT Agent 第一模块 Task 1/2：outline schema 与 markdown 渲染 | gpt52 | 38天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
-| /Users/cy/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/dynamic-workflo… | gpt52 | 34天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
+| ~/Documents/03 life/AI design/OrbitOS-CN/00_收件箱/dynamic-workflo… | gpt52 | 34天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
 | http://localhost:3003/thread/thread_mpzjfu56r1xtjon0#0001780736809516-0… | gpt52 | 28天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
 | 确认 | gpt52 | 27天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |
 | ## Review: SystemPromptBuilder 路由句柄修复 **Reviewer**: @布偶猫4.5 (ragdoll) →… | gpt52 | 22天 | 推进：确认 blocker 是否仍存在；无下一动作则关闭 |

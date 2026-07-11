@@ -1,6 +1,10 @@
-const nodeBin = '/Users/cy/.uclaw/node/bin';
-const pnpmBin = '/Users/cy/.npm-global/bin/pnpm';
-const stableNode = `${nodeBin}/node`;
+const { homedir } = require('node:os');
+const { join } = require('node:path');
+
+const homeDir = homedir();
+const nodeBin = process.env.CAT_CAFE_NODE_BIN || join(homeDir, '.uclaw/node/bin');
+const pnpmBin = process.env.CAT_CAFE_PNPM_BIN || join(homeDir, '.npm-global/bin/pnpm');
+const stableNode = process.env.CAT_CAFE_STABLE_NODE || join(nodeBin, 'node');
 
 // Keep npm lifecycle scripts on the same Node ABI as PM2. Do not append the
 // caller's PATH here: `pm2 restart --update-env` may be launched from shells
@@ -8,12 +12,12 @@ const stableNode = `${nodeBin}/node`;
 // modules such as better-sqlite3.
 const stablePath = [
   nodeBin,
-  '/Users/cy/.npm-global/bin',
-  '/Users/cy/Library/pnpm/.tools/pnpm/9.15.4/bin',
-  '/Users/cy/.local/bin',
-  '/Users/cy/.opencode/bin',
-  '/Users/cy/.mimocode/bin',
-  '/Users/cy/.bun/bin',
+  join(homeDir, '.npm-global/bin'),
+  join(homeDir, 'Library/pnpm/.tools/pnpm/9.15.4/bin'),
+  join(homeDir, '.local/bin'),
+  join(homeDir, '.opencode/bin'),
+  join(homeDir, '.mimocode/bin'),
+  join(homeDir, '.bun/bin'),
   '/opt/homebrew/bin',
   '/opt/homebrew/sbin',
   '/usr/local/bin',

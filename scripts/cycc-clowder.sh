@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CYCC_CLI_PATH="${CYCC_CLI_PATH:-/Users/cy/Documents/03 life/AI design/CYCC/dist/cli.js}"
+CYCC_CLI_PATH="${CYCC_CLI_PATH:-$HOME/Documents/03 life/AI design/CYCC/dist/cli.js}"
 
 if [[ ! -f "$CYCC_CLI_PATH" ]]; then
   echo "CYCC CLI not found: $CYCC_CLI_PATH" >&2

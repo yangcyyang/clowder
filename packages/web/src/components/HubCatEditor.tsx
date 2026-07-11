@@ -27,17 +27,18 @@ import {
   toStrategyForm,
   withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
-import {
-  AccountSection,
-  AssetCardSection,
-  IdentitySection,
-  LocalCliProbeSection,
-  type LocalCliProbeResult,
-  RoutingSection,
-} from './hub-cat-editor.sections';
+import { AccountSection, AssetCardSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
+import {
+  type CatModelOptionsResponse,
+  isScannedModelSource,
+  type ModelOptionsByClient,
+  type ModelSourcesByClient,
+  parseModelOptionsResponse,
+} from './hub-cat-model-options';
 import type { CatStrategyEntry } from './hub-strategy-types';
+import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 import { useConfirm } from './useConfirm';
 
 interface HubCatEditorProps {
@@ -52,24 +53,8 @@ interface HubCatEditorProps {
   hideDelete?: boolean;
 }
 
-type ModelOptionsByClient = Partial<Record<HubCatEditorFormState['clientId'], string[]>>;
-
-interface CatModelOptionsResponse {
-  clients?: Partial<Record<HubCatEditorFormState['clientId'], string[] | { models?: string[] }>>;
-}
-
 interface LocalCliProbesResponse {
   clis?: LocalCliProbeResult[];
-}
-
-function parseModelOptionsResponse(body: CatModelOptionsResponse): ModelOptionsByClient {
-  const next: ModelOptionsByClient = {};
-  for (const [clientId, preset] of Object.entries(body.clients ?? {})) {
-    const models = Array.isArray(preset) ? preset : preset?.models;
-    if (!Array.isArray(models)) continue;
-    next[clientId as HubCatEditorFormState['clientId']] = uniqueModelOptions(models);
-  }
-  return next;
 }
 
 function uniqueModelOptions(...groups: Array<string[] | undefined>): string[] {
@@ -118,6 +103,9 @@ export function HubCatEditor({
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
   const [modelOptionsByClient, setModelOptionsByClient] = useState<ModelOptionsByClient>({});
+  const [modelSourcesByClient, setModelSourcesByClient] = useState<ModelSourcesByClient>({});
+  const [modelsScannedAt, setModelsScannedAt] = useState<string | null>(null);
+  const [modelOptionsError, setModelOptionsError] = useState<string | null>(null);
   const [localCliProbes, setLocalCliProbes] = useState<LocalCliProbeResult[] | null>(null);
   const [scanningLocalClis, setScanningLocalClis] = useState(false);
   const [localCliProbeError, setLocalCliProbeError] = useState<string | null>(null);
@@ -131,6 +119,14 @@ export function HubCatEditor({
     if (form.clientId === 'antigravity') return [];
     return uniqueModelOptions(selectedProfile?.models, modelOptionsByClient[form.clientId]);
   }, [form.clientId, selectedProfile?.models, modelOptionsByClient]);
+  const modelSource = form.clientId === 'antigravity' ? undefined : modelSourcesByClient[form.clientId];
+  const modelDrifted = Boolean(
+    modelsScannedAt &&
+      form.clientId !== 'antigravity' &&
+      isScannedModelSource(modelSource) &&
+      form.defaultModel.trim() &&
+      !(modelOptionsByClient[form.clientId] ?? []).includes(form.defaultModel.trim()),
+  );
   const showCodexSettings = form.clientId === 'openai';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
@@ -155,6 +151,7 @@ export function HubCatEditor({
     setCodexSettingsError(null);
     setLocalCliProbes(null);
     setLocalCliProbeError(null);
+    setModelOptionsError(null);
     setScanningLocalClis(false);
     setStrategyBaselineHasOverride(false);
     setCodexSettingsBaseline(null);
@@ -196,20 +193,35 @@ export function HubCatEditor({
   useEffect(() => {
     if (!open) {
       setModelOptionsByClient({});
+      setModelSourcesByClient({});
+      setModelsScannedAt(null);
+      setModelOptionsError(null);
       return;
     }
     let cancelled = false;
+    setModelOptionsError(null);
     Promise.resolve()
       .then(() => apiFetch('/api/cat-model-options'))
       .then(async (res) => {
-        if (!res.ok) throw new Error('load failed');
-        return (await res.json()) as CatModelOptionsResponse;
+        const body = (await res.json().catch(() => ({}))) as CatModelOptionsResponse & { error?: string };
+        if (!res.ok) throw new Error(body.error ?? `模型候选加载失败 (${res.status})`);
+        return body;
       })
       .then((body) => {
-        if (!cancelled) setModelOptionsByClient(parseModelOptionsResponse(body));
+        if (cancelled) return;
+        const parsed = parseModelOptionsResponse(body);
+        setModelOptionsByClient(parsed.options);
+        setModelSourcesByClient(parsed.sources);
+        setModelsScannedAt(parsed.scannedAt ?? null);
+        setModelOptionsError(null);
       })
-      .catch(() => {
-        if (!cancelled) setModelOptionsByClient({});
+      .catch((err) => {
+        if (!cancelled) {
+          setModelOptionsByClient({});
+          setModelSourcesByClient({});
+          setModelsScannedAt(null);
+          setModelOptionsError(err instanceof Error ? err.message : '模型候选加载失败');
+        }
       });
     return () => {
       cancelled = true;
@@ -462,7 +474,10 @@ export function HubCatEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: assetPath }),
       });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; cat?: { assetCard?: { path?: string } } };
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        cat?: { assetCard?: { path?: string } };
+      };
       if (!res.ok) {
         setError(payload.error ?? `资产卡重新加载失败 (${res.status})`);
         return;
@@ -489,6 +504,26 @@ export function HubCatEditor({
         return;
       }
       setLocalCliProbes(payload.clis ?? []);
+      let modelOptionsResponse: Response;
+      try {
+        modelOptionsResponse = await apiFetch('/api/cat-model-options');
+      } catch (err) {
+        const detail = err instanceof Error ? `：${err.message}` : '';
+        setLocalCliProbeError(`模型候选刷新失败${detail}`);
+        return;
+      }
+      const modelOptionsPayload = (await modelOptionsResponse.json().catch(() => ({}))) as CatModelOptionsResponse & {
+        error?: string;
+      };
+      if (!modelOptionsResponse.ok) {
+        setLocalCliProbeError(modelOptionsPayload.error ?? `模型候选刷新失败 (${modelOptionsResponse.status})`);
+        return;
+      }
+      const parsed = parseModelOptionsResponse(modelOptionsPayload);
+      setModelOptionsByClient(parsed.options);
+      setModelSourcesByClient(parsed.sources);
+      setModelsScannedAt(parsed.scannedAt ?? null);
+      setModelOptionsError(null);
     } catch (err) {
       setLocalCliProbeError(err instanceof Error ? err.message : 'CLI 探测失败');
     } finally {
@@ -498,6 +533,7 @@ export function HubCatEditor({
 
   const handleAdoptLocalCli = (probe: LocalCliProbeResult) => {
     if (!probe.clientId) return;
+    const scannedModels = probe.models?.filter((model) => isScannedModelSource(model.source)) ?? [];
     const availableForClient = filterAccounts(probe.clientId, profiles);
     const preferredBuiltin = builtinAccountIdForClient(probe.clientId);
     const accountRef =
@@ -507,7 +543,8 @@ export function HubCatEditor({
     patchForm({
       clientId: probe.clientId,
       accountRef,
-      defaultModel: probe.defaultModel ?? '',
+      defaultModel:
+        scannedModels.find((model) => model.isDefault)?.id ?? scannedModels[0]?.id ?? probe.defaultModel ?? '',
       provider: '',
       cliEffort: '',
     });
@@ -810,6 +847,9 @@ export function HubCatEditor({
         form={form}
         hasError={fieldErrors.account}
         modelOptions={modelOptions}
+        modelSource={modelSource}
+        modelDrifted={modelDrifted}
+        modelOptionsError={modelOptionsError}
         availableProfiles={availableProfiles}
         loadingProfiles={loadingProfiles}
         onChange={patchForm}

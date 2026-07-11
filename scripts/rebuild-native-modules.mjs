@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
-const stableNodeBin = '/Users/cy/.uclaw/node/bin';
-const stableNode = `${stableNodeBin}/node`;
+const stableNodeBin = process.env.CAT_CAFE_NODE_BIN || join(homedir(), '.uclaw/node/bin');
+const stableNode = process.env.CAT_CAFE_STABLE_NODE || join(stableNodeBin, 'node');
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {

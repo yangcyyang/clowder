@@ -18,7 +18,7 @@ See `cat-cafe-skills/` for the full skill-based workflow:
 - `merge-gate` — Merge approval process
 
 ## Harness Skills
-Clowder also uses the Slock-derived Harness SOPs in `/Users/cy/Downloads/slock-harness-skills/`.
+Clowder also uses the Slock-derived Harness SOPs in `~/Downloads/slock-harness-skills/`.
 Apply these four rules by default:
 
 - `harness-intake` — Classify each user request as answer-only or action. If it requires execution, clarify scope only when blocked; otherwise start work.
@@ -27,7 +27,7 @@ Apply these four rules by default:
 - `harness-quality-gate` — Before review, run the smallest meaningful verification set and report evidence: tests, typecheck, build, browser screenshot, API smoke test, or migration dry-run as appropriate.
 
 ## Slock Frontend Harness
-When adding or changing Clowder UI, use `/Users/cy/Downloads/slock-frontend-harness/` as the default visual reference.
+When adding or changing Clowder UI, use `~/Downloads/slock-frontend-harness/` as the default visual reference.
 
 - `skills/new-component.md` — Use before creating a reusable component. Pick the closest template from `components/`, keep default/hover/active/disabled states, and use CSS variables instead of hardcoded colors.
 - `skills/new-page.md` — Use before creating a new page. Start from regions first (navigation/header/content/right panel), prefer thin borders over heavy containers, and keep empty/focus states.

@@ -182,7 +182,7 @@ ps aux | grep "start-dev\|tsx.*api\|node.*3003\|node.*3004" | grep -v grep
 **修复**：
 
 ```bash
-cd /Users/cy/.slock/worktrees/clowder-ai-slock-like-webui
+cd ~/.slock/worktrees/clowder-ai-slock-like-webui
 pnpm start:direct --quick
 ```
 

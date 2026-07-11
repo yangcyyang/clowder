@@ -89,7 +89,7 @@ function resolveCatCafeSkillsSourceDir(): string {
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
-const SKILL_MANAGEMENT_DIR = '/Users/cy/Documents/03 life/AI design/产品项目/skill管理';
+const SKILL_MANAGEMENT_DIR = resolve(homedir(), 'Documents/03 life/AI design/产品项目/skill管理');
 const SKILL_DASHBOARD_PATH = join(SKILL_MANAGEMENT_DIR, 'skills-dashboard.html');
 
 function extractSkillFrontmatter(content: string): LocalSkillFrontmatter | null {
