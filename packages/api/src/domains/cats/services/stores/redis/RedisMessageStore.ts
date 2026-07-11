@@ -20,6 +20,8 @@ import type {
   ConditionalAppendResult,
   FreshnessAudience,
   FreshnessDelta,
+  FreshnessSideEffectClaimInput,
+  FreshnessSideEffectClaimResult,
   StoredMessage,
   StreamMetadataAugmentInput,
   ThreadAppendWatermark,
@@ -227,6 +229,52 @@ end
 
 if appendWatermark == '' then appendWatermark = observed end
 return {'appended', messageId, appendWatermark}
+`;
+
+/** Atomically reserve an idempotent callback side effect at the captured audience watermark. */
+const CLAIM_FRESHNESS_SIDE_EFFECT_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return {'claimed', '1', ARGV[1]}
+end
+
+local function latestScore(key)
+  local row = redis.call('ZREVRANGE', key, 0, 0, 'WITHSCORES')
+  if #row >= 2 then return row[2] end
+  return '0'
+end
+
+local function decimalGreater(left, right)
+  if string.len(left) ~= string.len(right) then
+    return string.len(left) > string.len(right)
+  end
+  return left > right
+end
+
+local baseline = ARGV[1]
+local gateGroup = ARGV[2] or ''
+local publicScore = latestScore(KEYS[2])
+local whisperScore = latestScore(KEYS[3])
+local observed = whisperScore
+if decimalGreater(publicScore, whisperScore) then observed = publicScore end
+
+if decimalGreater(observed, baseline) then
+  local independent = gateGroup == ''
+  if not independent then
+    local function containsIndependent(key)
+      local ids = redis.call('ZRANGEBYSCORE', key, '(' .. baseline, '+inf')
+      for _, id in ipairs(ids) do
+        local group = redis.call('HGET', KEYS[4] .. id, 'freshnessGroupId') or ''
+        if group ~= gateGroup then return true end
+      end
+      return false
+    end
+    independent = containsIndependent(KEYS[2]) or containsIndependent(KEYS[3])
+  end
+  if independent then return {'stale', '0', observed} end
+end
+
+redis.call('SET', KEYS[1], '1', 'EX', ARGV[3])
+return {'claimed', '0', observed}
 `;
 
 const COMPARE_DELETE_IDEMPOTENCY_LUA = `
@@ -574,6 +622,28 @@ export class RedisMessageStore {
       throw new Error('ordinary append unexpectedly evaluated as stale');
     }
     return result.message;
+  }
+
+  async claimFreshnessSideEffect(input: FreshnessSideEffectClaimInput): Promise<FreshnessSideEffectClaimResult> {
+    parseWatermark(input.baseline);
+    const raw = (await this.redis.eval(
+      CLAIM_FRESHNESS_SIDE_EFFECT_LUA,
+      4,
+      MessageKeys.freshnessSideEffectClaim(input.idempotencyKey),
+      MessageKeys.freshnessPublic(input.threadId),
+      MessageKeys.freshnessWhisper(input.threadId, input.audience.catId),
+      MessageKeys.detail(''),
+      input.baseline,
+      input.groupId ?? '',
+      String(24 * 60 * 60),
+    )) as [string, string, string];
+    const [outcome, replayed, observed] = raw;
+    const observedWatermark = parseWatermark(observed);
+    if (outcome === 'stale') {
+      return { outcome: 'stale', baseline: input.baseline, observedWatermark };
+    }
+    if (outcome !== 'claimed') throw new Error(`Unexpected freshness side-effect claim outcome: ${outcome}`);
+    return { outcome: 'claimed', observedWatermark, replayed: replayed === '1' };
   }
 
   private async appendAtomically(

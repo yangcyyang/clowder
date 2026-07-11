@@ -1670,7 +1670,11 @@ async function main(): Promise<void> {
     auditStore: authAuditStore,
     io: socketManager.getIO(),
   });
-  await app.register(callbackAuthRoutes, { authManager, registry });
+  await app.register(callbackAuthRoutes, {
+    authManager,
+    registry,
+    ...(freshnessGate ? { freshnessGate } : {}),
+  });
   await app.register(authorizationRoutes, {
     authManager,
     ruleStore: authRuleStore,

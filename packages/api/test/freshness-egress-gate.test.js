@@ -84,6 +84,31 @@ async function formalCatMessages(messageStore) {
 }
 
 describe('FreshnessEgressGate', () => {
+  it('atomically authorizes one current side effect and rejects a stale one before mutation', async () => {
+    const { messageStore, gate } = createHarness();
+    const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());
+    const input = {
+      invocationId: 'invocation-freshness-gate',
+      submissionKey: 'create-task:task-1',
+      userId: USER_ID,
+      catId: CAT_ID,
+      threadId: THREAD_ID,
+      baselineWatermark: baseline,
+    };
+
+    const first = await gate.claimSideEffect(input);
+    const replay = await gate.claimSideEffect(input);
+    assert.equal(first.outcome, 'authorized');
+    assert.equal(first.replayed, false);
+    assert.equal(replay.outcome, 'authorized');
+    assert.equal(replay.replayed, true);
+
+    await appendQueuedUserMessage(messageStore, 'new input before another side effect', NOW + 1);
+    const stale = await gate.claimSideEffect({ ...input, submissionKey: 'start-vote:vote-1' });
+    assert.equal(stale.outcome, 'stale');
+    assert.ok(BigInt(stale.observedWatermark) > BigInt(baseline));
+  });
+
   it('atomically publishes exactly once when the captured baseline is current', async () => {
     const { messageStore, gate } = createHarness();
     const baseline = await messageStore.captureFreshnessWatermark(THREAD_ID, audience());

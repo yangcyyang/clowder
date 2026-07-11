@@ -5,13 +5,16 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { AuthorizationManager } from '../domains/cats/services/auth/AuthorizationManager.js';
 import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 export interface CallbackAuthRoutesOptions {
   authManager: AuthorizationManager;
   registry: InvocationRegistry;
+  freshnessGate?: FreshnessEgressGate;
 }
 
 const requestPermissionSchema = z.object({
@@ -40,6 +43,14 @@ export const callbackAuthRoutes: FastifyPluginAsync<CallbackAuthRoutesOptions> =
     }
 
     const { action, reason, context } = parseResult.data;
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: opts.freshnessGate,
+      record,
+      route: 'request-permission',
+      requestBody: parseResult.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     const response = await authManager.requestPermission(
       record.catId,

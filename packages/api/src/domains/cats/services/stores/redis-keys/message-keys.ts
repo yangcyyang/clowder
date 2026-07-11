@@ -30,4 +30,7 @@ export const MessageKeys = {
 
   /** Idempotency index: msg:idem:{userId}:{threadId}:{key} -> messageId */
   idempotency: (userId: string, threadId: string, key: string) => `msg:idem:${userId}:${threadId}:${key}`,
+
+  /** Idempotent callback side-effect claim reserved at a freshness boundary. */
+  freshnessSideEffectClaim: (key: string) => `msg:freshness:effect:${key}`,
 } as const;

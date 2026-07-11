@@ -332,6 +332,41 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     assert.equal((await store.getByThread(threadId, 10)).length, 1);
   });
 
+  test('atomically claims a current callback side effect once and rejects stale claims', async () => {
+    const threadId = 'freshness-redis-side-effect-claim';
+    const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);
+    const claim = {
+      userId: 'user-1',
+      threadId,
+      audience: OPUS_AUDIENCE,
+      baseline,
+      idempotencyKey: 'invocation-1:start-vote',
+      groupId: 'invocation-1',
+    };
+
+    const first = await store.claimFreshnessSideEffect(claim);
+    const replay = await store.claimFreshnessSideEffect(claim);
+    assert.equal(first.outcome, 'claimed');
+    assert.equal(first.replayed, false);
+    assert.equal(replay.outcome, 'claimed');
+    assert.equal(replay.replayed, true);
+
+    await store.append({
+      userId: 'user-1',
+      catId: null,
+      threadId,
+      content: 'new input before task creation',
+      mentions: ['opus'],
+      timestamp: 345,
+    });
+    const stale = await store.claimFreshnessSideEffect({
+      ...claim,
+      idempotencyKey: 'invocation-1:create-task',
+    });
+    assert.equal(stale.outcome, 'stale');
+    assert.ok(revision(stale.observedWatermark, 'side effect observed') > revision(baseline, 'side effect baseline'));
+  });
+
   test('allows only same parent-group siblings past a shared baseline', async () => {
     const threadId = 'freshness-redis-sibling-group';
     const baseline = await store.captureFreshnessWatermark(threadId, OPUS_AUDIENCE);

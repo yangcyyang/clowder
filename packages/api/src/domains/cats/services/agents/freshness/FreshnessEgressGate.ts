@@ -34,6 +34,19 @@ export interface FreshnessSubmitInput {
   now?: number;
 }
 
+export interface FreshnessSideEffectInput {
+  invocationId: string;
+  submissionKey: string;
+  userId: string;
+  catId: CatId;
+  threadId: string;
+  baselineWatermark: ThreadAppendWatermark;
+}
+
+export type FreshnessSideEffectResult =
+  | { outcome: 'authorized'; replayed: boolean; observedWatermark: ThreadAppendWatermark }
+  | { outcome: 'stale'; baselineWatermark: ThreadAppendWatermark; observedWatermark: ThreadAppendWatermark };
+
 export type FreshnessSubmitResult =
   | { outcome: 'published'; message: StoredMessage; replayed?: true }
   | { outcome: 'held'; hold: FreshnessHoldRecord; delta: FreshnessDelta }
@@ -83,6 +96,24 @@ export class FreshnessEgressGate {
 
   isEnabledFor(threadId: string, catId: CatId): boolean {
     return this.enabledForPolicy(threadId, catId);
+  }
+
+  async claimSideEffect(input: FreshnessSideEffectInput): Promise<FreshnessSideEffectResult> {
+    const claim = await this.messageStore.claimFreshnessSideEffect({
+      threadId: input.threadId,
+      audience: { kind: 'cat', catId: input.catId },
+      baseline: input.baselineWatermark,
+      idempotencyKey: this.sideEffectIdempotencyKey(input.userId, input.invocationId, input.submissionKey),
+      groupId: input.invocationId,
+    });
+    if (claim.outcome === 'stale') {
+      return {
+        outcome: 'stale',
+        baselineWatermark: claim.baseline,
+        observedWatermark: claim.observedWatermark,
+      };
+    }
+    return { outcome: 'authorized', replayed: claim.replayed, observedWatermark: claim.observedWatermark };
   }
 
   /**
@@ -416,5 +447,9 @@ export class FreshnessEgressGate {
 
   private submitIdempotencyKey(invocationId: string, submissionKey: string): string {
     return `freshness-submit:${invocationId.length}:${invocationId}:${submissionKey}`;
+  }
+
+  private sideEffectIdempotencyKey(userId: string, invocationId: string, submissionKey: string): string {
+    return `freshness-side-effect:${userId.length}:${userId}:${invocationId.length}:${invocationId}:${submissionKey}`;
   }
 }

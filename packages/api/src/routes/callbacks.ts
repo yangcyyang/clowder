@@ -50,6 +50,7 @@ import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-messag
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
@@ -77,6 +78,31 @@ const log = createModuleLogger('routes/callbacks');
 const DEFAULT_HISTORY_FETCH_MESSAGES = 24;
 const DEFAULT_HISTORY_FETCH_MAX_TOKENS = 8000;
 const DEFAULT_HISTORY_FETCH_SCAN_MESSAGES = 500;
+
+// Routes whose successful execution mutates durable or external state. The
+// three most complex routes (vote/task/document) claim after route validation;
+// this list closes the remaining callback family at the shared boundary.
+const FRESHNESS_PROTECTED_SIDE_EFFECT_ROUTES = new Set([
+  'POST /api/callbacks/ack-mentions',
+  'POST /api/callbacks/register-pr-tracking',
+  'POST /api/callbacks/multi-mention',
+  'POST /api/callbacks/hold-ball',
+  'DELETE /api/callbacks/hold-ball/:taskId',
+  'POST /api/callbacks/wecom-action',
+  'POST /api/callbacks/lark-action',
+  'POST /api/callbacks/submit-game-action',
+  'POST /api/callback/limb/invoke',
+  'POST /api/callback/limb/pair/approve',
+  'POST /api/callbacks/retain-memory',
+  'POST /api/callbacks/update-workflow-sop',
+  'POST /api/callbacks/update-bootcamp-state',
+  'POST /api/callbacks/bootcamp-env-check',
+  'POST /api/callbacks/update-quest-state',
+  'POST /api/callbacks/update-guide-state',
+  'POST /api/callbacks/start-guide',
+  'POST /api/callbacks/guide-resolve',
+  'POST /api/callbacks/guide-control',
+]);
 
 function readBoundedIntEnv(key: string, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(process.env[key] ?? '', 10);
@@ -455,6 +481,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   registerCallbackAuthHook(app, registry, {
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
+  });
+
+  app.addHook('preHandler', async (request, reply) => {
+    const route = request.routeOptions.url;
+    const routeKey = `${request.method.toUpperCase()} ${route}`;
+    if (!FRESHNESS_PROTECTED_SIDE_EFFECT_ROUTES.has(routeKey)) return;
+    const record = request.callbackAuth;
+    if (!record) return;
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: opts.freshnessGate,
+      record,
+      route: routeKey,
+      requestBody: { body: request.body, params: request.params, query: request.query },
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') {
+      return reply.send(freshness.response);
+    }
   });
 
   app.post('/api/callbacks/post-message', async (request, reply) => {
@@ -2369,11 +2413,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const { question, options, anonymous, timeoutSec, voters } = parsed.data;
 
-    // P1-2 fix: stale invocation guard (parity with post-message, create-rich-block)
-    if (!(await registry.isLatest(record.invocationId))) {
-      return { status: 'stale_ignored' };
-    }
-
     // P2 fix: verify thread exists
     const thread = await threadStore.get(record.threadId);
     if (!thread) {
@@ -2390,6 +2429,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return resolved.error;
       }
       resolvedVoters.push(createCatId(resolved.ok));
+    }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: opts.freshnessGate,
+      record,
+      route: 'start-vote',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
+    // Legacy invocations keep the pre-F193 latest-invocation behavior.
+    if (freshness.outcome === 'legacy' && !(await registry.isLatest(record.invocationId))) {
+      return { status: 'stale_ignored' };
     }
 
     // Check for existing active vote
@@ -2497,6 +2549,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager,
       messageStore,
       ...(threadStore ? { threadStore } : {}),
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
   }
 
@@ -2561,7 +2614,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   // F088 Phase J2: Document generation callback routes
-  registerCallbackDocumentRoutes(app, { registry, socketManager });
+  registerCallbackDocumentRoutes(app, {
+    registry,
+    socketManager,
+    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+  });
 
   // F162: WeChat Work enterprise action callback routes
   registerCallbackWeComActionRoutes(app, { registry });

@@ -6,12 +6,14 @@ import type { CatId } from '@cat-cafe/shared';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 
@@ -50,11 +52,15 @@ export function registerCallbackTaskRoutes(
     socketManager: SocketManager;
     messageStore?: IMessageStore;
     threadStore?: IThreadStore;
+    freshnessGate?: FreshnessEgressGate;
   },
 ): void {
   const { taskStore, socketManager, messageStore, threadStore } = deps;
 
-  function emitTaskAttention(previousStatus: string | undefined, task: { kind?: string; status: string; userId?: string }): void {
+  function emitTaskAttention(
+    previousStatus: string | undefined,
+    task: { kind?: string; status: string; userId?: string },
+  ): void {
     if (task.kind === 'pr_tracking') return;
     if (!task.userId) return;
     if (previousStatus === task.status) return;
@@ -88,6 +94,14 @@ export function registerCallbackTaskRoutes(
       reply.status(403);
       return { error: 'Task is owned by another cat' };
     }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      record,
+      route: 'update-task',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
@@ -133,6 +147,14 @@ export function registerCallbackTaskRoutes(
       return { error: 'Task is already claimed by another cat', ownerCatId: existing.ownerCatId };
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      record,
+      route: 'claim-task',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const updated = await taskStore.update(taskId, {
       ownerCatId: actor.catId,
       status: 'doing',
@@ -172,6 +194,14 @@ export function registerCallbackTaskRoutes(
       }
       resolvedOwnerCatId = createCatId(resolved.ok);
     }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      record,
+      route: 'create-task',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     const created = await taskStore.create({
       threadId: actor.threadId,

@@ -75,6 +75,26 @@ export type ConditionalAppendResult =
       readonly observedWatermark: ThreadAppendWatermark;
     };
 
+export interface FreshnessSideEffectClaimInput {
+  readonly threadId: string;
+  readonly audience: FreshnessAudience;
+  readonly baseline: ThreadAppendWatermark;
+  readonly idempotencyKey: string;
+  readonly groupId?: string;
+}
+
+export type FreshnessSideEffectClaimResult =
+  | {
+      readonly outcome: 'claimed';
+      readonly observedWatermark: ThreadAppendWatermark;
+      readonly replayed: boolean;
+    }
+  | {
+      readonly outcome: 'stale';
+      readonly baseline: ThreadAppendWatermark;
+      readonly observedWatermark: ThreadAppendWatermark;
+    };
+
 /**
  * A stored message entry (after append — threadId always present)
  */
@@ -272,6 +292,10 @@ export interface IMessageStore {
     msg: AppendMessageInput,
     gate: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },
   ): ConditionalAppendResult | Promise<ConditionalAppendResult>;
+  /** Atomically reserve one idempotent callback side effect at the captured freshness boundary. */
+  claimFreshnessSideEffect(
+    input: FreshnessSideEffectClaimInput,
+  ): FreshnessSideEffectClaimResult | Promise<FreshnessSideEffectClaimResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
   /** Internal capability: raw lookup reserved for recovering a hold's released publication. */
@@ -422,6 +446,7 @@ export class MessageStore {
   private readonly freshnessPublicByThread = new Map<string, Map<string, bigint>>();
   private readonly freshnessWhisperByThread = new Map<string, Map<string, Map<string, bigint>>>();
   private readonly freshnessReviewPublicationIds = new Set<string>();
+  private readonly freshnessSideEffectClaims = new Set<string>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
@@ -591,6 +616,31 @@ export class MessageStore {
       message,
       committedWatermark: message.appendWatermark ?? this.captureFreshnessWatermark(threadId, gate.audience),
     };
+  }
+
+  claimFreshnessSideEffect(input: FreshnessSideEffectClaimInput): FreshnessSideEffectClaimResult {
+    parseWatermark(input.baseline);
+    const observedWatermark = this.captureFreshnessWatermark(input.threadId, input.audience);
+    if (this.freshnessSideEffectClaims.has(input.idempotencyKey)) {
+      return { outcome: 'claimed', observedWatermark, replayed: true };
+    }
+
+    const baseline = parseWatermark(input.baseline);
+    if (parseWatermark(observedWatermark) > baseline) {
+      const hasIndependentAppend = [...this.freshnessEntries(input.threadId, input.audience).entries()].some(
+        ([id, revision]) => {
+          if (revision <= baseline) return false;
+          const existing = this.getByIdRaw(id);
+          return !input.groupId || !existing || freshnessGroupId(existing) !== input.groupId;
+        },
+      );
+      if (hasIndependentAppend) {
+        return { outcome: 'stale', baseline: input.baseline, observedWatermark };
+      }
+    }
+
+    this.freshnessSideEffectClaims.add(input.idempotencyKey);
+    return { outcome: 'claimed', observedWatermark, replayed: false };
   }
 
   /**

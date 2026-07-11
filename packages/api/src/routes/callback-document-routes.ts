@@ -12,12 +12,14 @@ import { resolve } from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { PandocService } from '../infrastructure/document/PandocService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 const generateDocumentSchema = z.object({
   /** Markdown content to convert */
@@ -33,6 +35,7 @@ export function registerCallbackDocumentRoutes(
   deps: {
     registry: InvocationRegistry;
     socketManager: SocketManager;
+    freshnessGate?: FreshnessEgressGate;
   },
 ): void {
   const pandocService = new PandocService(app.log);
@@ -49,6 +52,14 @@ export function registerCallbackDocumentRoutes(
 
     const { markdown, format, baseName } = parsed.data;
     const invocationId = record.invocationId;
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      record,
+      route: 'generate-document',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     if (!(await deps.registry.isLatest(invocationId))) {
       return { status: 'stale_ignored' };
