@@ -103,6 +103,11 @@ describe('FreshnessEgressGate', () => {
     assert.equal(replay.outcome, 'authorized');
     assert.equal(replay.replayed, true);
 
+    await gate.abortSideEffect(input);
+    const retryAfterProvenNoop = await gate.claimSideEffect(input);
+    assert.equal(retryAfterProvenNoop.outcome, 'authorized');
+    assert.equal(retryAfterProvenNoop.replayed, false);
+
     await appendQueuedUserMessage(messageStore, 'new input before another side effect', NOW + 1);
     const stale = await gate.claimSideEffect({ ...input, submissionKey: 'start-vote:vote-1' });
     assert.equal(stale.outcome, 'stale');

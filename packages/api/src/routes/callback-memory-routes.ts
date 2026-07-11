@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 interface CallbackMemoryRoutesDeps {
   /** F102: DI — SQLite-backed services (required) */
   evidenceStore: IEvidenceStore;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
+  freshnessGate?: FreshnessEgressGate;
+  registry: Pick<InvocationRegistry, 'isLatest'>;
 }
 
 const searchEvidenceQuerySchema = z.object({
@@ -91,6 +96,15 @@ export async function registerCallbackMemoryRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
     const { content } = parsed.data;
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record,
+      route: 'retain-memory',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     try {
       await deps.markerQueue.submit({

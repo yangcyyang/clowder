@@ -296,6 +296,8 @@ export interface IMessageStore {
   claimFreshnessSideEffect(
     input: FreshnessSideEffectClaimInput,
   ): FreshnessSideEffectClaimResult | Promise<FreshnessSideEffectClaimResult>;
+  /** Release a claim only when the caller proved that no business side effect occurred. */
+  abortFreshnessSideEffect(idempotencyKey: string): void | Promise<void>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
   /** Internal capability: raw lookup reserved for recovering a hold's released publication. */
@@ -446,7 +448,7 @@ export class MessageStore {
   private readonly freshnessPublicByThread = new Map<string, Map<string, bigint>>();
   private readonly freshnessWhisperByThread = new Map<string, Map<string, Map<string, bigint>>>();
   private readonly freshnessReviewPublicationIds = new Set<string>();
-  private readonly freshnessSideEffectClaims = new Set<string>();
+  private readonly freshnessSideEffectClaims = new Map<string, number>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
@@ -621,6 +623,10 @@ export class MessageStore {
   claimFreshnessSideEffect(input: FreshnessSideEffectClaimInput): FreshnessSideEffectClaimResult {
     parseWatermark(input.baseline);
     const observedWatermark = this.captureFreshnessWatermark(input.threadId, input.audience);
+    const now = Date.now();
+    for (const [key, expiresAt] of this.freshnessSideEffectClaims) {
+      if (expiresAt <= now) this.freshnessSideEffectClaims.delete(key);
+    }
     if (this.freshnessSideEffectClaims.has(input.idempotencyKey)) {
       return { outcome: 'claimed', observedWatermark, replayed: true };
     }
@@ -639,8 +645,12 @@ export class MessageStore {
       }
     }
 
-    this.freshnessSideEffectClaims.add(input.idempotencyKey);
+    this.freshnessSideEffectClaims.set(input.idempotencyKey, now + 24 * 60 * 60 * 1000);
     return { outcome: 'claimed', observedWatermark, replayed: false };
+  }
+
+  abortFreshnessSideEffect(idempotencyKey: string): void {
+    this.freshnessSideEffectClaims.delete(idempotencyKey);
   }
 
   /**

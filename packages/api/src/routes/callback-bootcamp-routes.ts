@@ -7,12 +7,14 @@
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { runEnvironmentCheck } from '../domains/cats/services/bootcamp/env-check.js';
 import type { BootcampStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { BOOTCAMP_PHASE_ACHIEVEMENTS } from '../domains/leaderboard/achievement-defs.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { deriveCallbackActor, resolveBoundThreadScope } from './callback-scope-helpers.js';
 
 /**
@@ -105,7 +107,12 @@ const updateBootcampStateCallbackSchema = z.object({
 
 export function registerCallbackBootcampRoutes(
   app: FastifyInstance,
-  deps: { registry: InvocationRegistry; threadStore: IThreadStore; socketManager: SocketManager },
+  deps: {
+    registry: InvocationRegistry;
+    threadStore: IThreadStore;
+    socketManager: SocketManager;
+    freshnessGate?: FreshnessEgressGate;
+  },
 ): void {
   const { registry, threadStore, socketManager } = deps;
 
@@ -205,6 +212,15 @@ export function registerCallbackBootcampRoutes(
       }
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'update-bootcamp-state',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     // Build merged state — spreads preserve existing fields, updates override
     const raw: Record<string, unknown> = { ...existing };
     if (updates.phase !== undefined) raw.phase = updates.phase;
@@ -296,6 +312,15 @@ export function registerCallbackBootcampRoutes(
       reply.status(404);
       return { error: 'Thread not found' };
     }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'bootcamp-env-check',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     const results = await runEnvironmentCheck();
 

@@ -55,6 +55,7 @@ export function registerCallbackDocumentRoutes(
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
       record,
       route: 'generate-document',
       requestBody: parsed.data,
@@ -68,6 +69,7 @@ export function registerCallbackDocumentRoutes(
     // Generate document via Pandoc
     const result = await pandocService.generate(markdown, baseName, format);
     if (!result) {
+      if (freshness.outcome === 'authorized') await freshness.abort();
       reply.status(500);
       return { error: 'Document generation failed' };
     }

@@ -5,10 +5,12 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { QUEST_PHASES, validateQuestTransition } from '../domains/cats/services/first-run-quest/quest-state.js';
 import type { FirstRunQuestPhase, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { deriveCallbackActor } from './callback-scope-helpers.js';
 
 const questPhaseSchema = z.enum([...QUEST_PHASES]);
@@ -27,7 +29,7 @@ const updateQuestStateSchema = z.object({
 
 export function registerCallbackQuestRoutes(
   app: FastifyInstance,
-  deps: { registry: InvocationRegistry; threadStore: IThreadStore },
+  deps: { registry: InvocationRegistry; threadStore: IThreadStore; freshnessGate?: FreshnessEgressGate },
 ): void {
   const { registry, threadStore } = deps;
 
@@ -77,6 +79,15 @@ export function registerCallbackQuestRoutes(
         };
       }
     }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'update-quest-state',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     // Build merged state
     const merged = { ...existing };

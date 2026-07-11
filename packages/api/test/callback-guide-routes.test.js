@@ -260,6 +260,41 @@ describe('F155 Guide callback routes', () => {
       assert.equal(legacyBody.guides, undefined);
     });
 
+    test('keeps guide-resolve read-only across protected replay and stale watermark', async () => {
+      const { FreshnessEgressGate } = await import(
+        '../dist/domains/cats/services/agents/freshness/FreshnessEgressGate.js'
+      );
+      const { FreshnessHoldStore } = await import('../dist/domains/cats/services/stores/ports/FreshnessHoldStore.js');
+      const freshnessGate = new FreshnessEgressGate({
+        messageStore,
+        holdStore: new FreshnessHoldStore({ maxReviews: 2 }),
+      });
+      const app = await createApp({ freshnessGate });
+      const thread = threadStore.create('user-1', 'Protected guide query');
+      const baseline = await messageStore.captureFreshnessWatermark(thread.id, { kind: 'cat', catId: 'opus' });
+      const auth = await registry.create('user-1', 'opus', thread.id, undefined, undefined, {
+        freshnessBaseline: baseline,
+      });
+      await messageStore.append({
+        userId: 'user-1',
+        threadId: thread.id,
+        catId: null,
+        content: 'newer input does not block a query',
+        mentions: [],
+      });
+      const request = {
+        method: 'POST',
+        url: '/api/callbacks/guide-resolve',
+        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+        payload: { intent: '帮我添加成员' },
+      };
+      const first = (await app.inject(request)).json();
+      const replay = (await app.inject(request)).json();
+      assert.equal(first.status, 'ok');
+      assert.equal(replay.status, 'ok');
+      assert.deepEqual(replay.matches, first.matches);
+    });
+
     test('filters guides that are unavailable in the current context', async () => {
       const app = await createApp({
         getGuideAvailabilityContext: (threadId) => {

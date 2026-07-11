@@ -46,6 +46,7 @@ export const callbackAuthRoutes: FastifyPluginAsync<CallbackAuthRoutesOptions> =
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: opts.freshnessGate,
+      registry,
       record,
       route: 'request-permission',
       requestBody: parseResult.data,

@@ -79,31 +79,6 @@ const DEFAULT_HISTORY_FETCH_MESSAGES = 24;
 const DEFAULT_HISTORY_FETCH_MAX_TOKENS = 8000;
 const DEFAULT_HISTORY_FETCH_SCAN_MESSAGES = 500;
 
-// Routes whose successful execution mutates durable or external state. The
-// three most complex routes (vote/task/document) claim after route validation;
-// this list closes the remaining callback family at the shared boundary.
-const FRESHNESS_PROTECTED_SIDE_EFFECT_ROUTES = new Set([
-  'POST /api/callbacks/ack-mentions',
-  'POST /api/callbacks/register-pr-tracking',
-  'POST /api/callbacks/multi-mention',
-  'POST /api/callbacks/hold-ball',
-  'DELETE /api/callbacks/hold-ball/:taskId',
-  'POST /api/callbacks/wecom-action',
-  'POST /api/callbacks/lark-action',
-  'POST /api/callbacks/submit-game-action',
-  'POST /api/callback/limb/invoke',
-  'POST /api/callback/limb/pair/approve',
-  'POST /api/callbacks/retain-memory',
-  'POST /api/callbacks/update-workflow-sop',
-  'POST /api/callbacks/update-bootcamp-state',
-  'POST /api/callbacks/bootcamp-env-check',
-  'POST /api/callbacks/update-quest-state',
-  'POST /api/callbacks/update-guide-state',
-  'POST /api/callbacks/start-guide',
-  'POST /api/callbacks/guide-resolve',
-  'POST /api/callbacks/guide-control',
-]);
-
 function readBoundedIntEnv(key: string, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(process.env[key] ?? '', 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -481,24 +456,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   registerCallbackAuthHook(app, registry, {
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
-  });
-
-  app.addHook('preHandler', async (request, reply) => {
-    const route = request.routeOptions.url;
-    const routeKey = `${request.method.toUpperCase()} ${route}`;
-    if (!FRESHNESS_PROTECTED_SIDE_EFFECT_ROUTES.has(routeKey)) return;
-    const record = request.callbackAuth;
-    if (!record) return;
-
-    const freshness = await claimCallbackSideEffect({
-      freshnessGate: opts.freshnessGate,
-      record,
-      route: routeKey,
-      requestBody: { body: request.body, params: request.params, query: request.query },
-    });
-    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') {
-      return reply.send(freshness.response);
-    }
   });
 
   app.post('/api/callbacks/post-message', async (request, reply) => {
@@ -1507,6 +1464,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: opts.freshnessGate,
+      registry,
+      record,
+      route: 'ack-mentions',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     await deliveryCursorStore.ackMentionCursor(record.userId, catId, record.threadId, upToMessageId);
     return { status: 'ok', ackedUpTo: upToMessageId };
   });
@@ -2187,6 +2153,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: opts.freshnessGate,
+      registry,
+      record,
+      route: 'register-pr-tracking',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const subjectKey = `pr:${repoFullName}#${prNumber}`;
     try {
       const task = await taskStore.upsertBySubject({
@@ -2433,6 +2408,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: opts.freshnessGate,
+      registry,
       record,
       route: 'start-vote',
       requestBody: parsed.data,
@@ -2447,6 +2423,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Check for existing active vote
     const existing = await threadStore.getVotingState(record.threadId);
     if (existing && existing.status === 'active') {
+      if (freshness.outcome === 'authorized') await freshness.abort();
       reply.status(409);
       return { error: '已有活跃投票', code: 'VOTE_ALREADY_ACTIVE' };
     }
@@ -2545,6 +2522,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (taskStore) {
     registerCallbackTaskRoutes(app, {
+      registry,
       taskStore,
       socketManager,
       messageStore,
@@ -2555,23 +2533,37 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (opts.workflowSopStore && opts.backlogStore) {
     registerCallbackWorkflowSopRoutes(app, {
+      registry,
       workflowSopStore: opts.workflowSopStore,
       backlogStore: opts.backlogStore,
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
   }
 
   // F087: Bootcamp state transition callbacks
   if (opts.threadStore) {
-    registerCallbackBootcampRoutes(app, { registry, threadStore: opts.threadStore, socketManager });
+    registerCallbackBootcampRoutes(app, {
+      registry,
+      threadStore: opts.threadStore,
+      socketManager,
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+    });
   }
 
   // F171: First-Run Quest state transition callbacks
   if (opts.threadStore) {
-    registerCallbackQuestRoutes(app, { registry, threadStore: opts.threadStore });
+    registerCallbackQuestRoutes(app, {
+      registry,
+      threadStore: opts.threadStore,
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+    });
   }
 
   if (opts.holdBallDeps) {
-    registerCallbackHoldBallRoutes(app, opts.holdBallDeps);
+    registerCallbackHoldBallRoutes(app, {
+      ...opts.holdBallDeps,
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+    });
   }
 
   // Thread cats discovery for MCP
@@ -2583,22 +2575,27 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   await registerCallbackMemoryRoutes(app, {
+    registry,
     evidenceStore: opts.evidenceStore,
     markerQueue: opts.markerQueue,
     reflectionService: opts.reflectionService,
+    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
   });
 
   // F126: Limb node callback routes
   if (opts.limbRegistry) {
     registerCallbackLimbRoutes(app, {
+      registry,
       limbRegistry: opts.limbRegistry,
       pairingStore: opts.limbPairingStore,
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
   }
 
   // F086: Multi-mention orchestration routes
   if (router && invocationRecordStore) {
     registerMultiMentionRoutes(app, {
+      registry,
       messageStore,
       socketManager,
       router,
@@ -2606,6 +2603,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(invocationTracker ? { invocationTracker } : {}),
       ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
       ...(queueProcessor ? { queueProcessor } : {}),
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
     // Wire orchestrator into SocketManager for cancel propagation (P1-1 fix)
     if (typeof socketManager.setMultiMentionOrchestrator === 'function') {
@@ -2621,13 +2619,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   });
 
   // F162: WeChat Work enterprise action callback routes
-  registerCallbackWeComActionRoutes(app, { registry });
+  registerCallbackWeComActionRoutes(app, {
+    registry,
+    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+  });
 
   // F162 Phase B: Lark/Feishu enterprise action callback routes
-  registerCallbackLarkActionRoutes(app, { registry });
+  registerCallbackLarkActionRoutes(app, {
+    registry,
+    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+  });
 
   // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
-  registerCallbackGameRoutes(app);
+  registerCallbackGameRoutes(app, {
+    registry,
+    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+  });
 
   // F155: Guide engine — state-validated routes with ThreadStore authority
   if (opts.threadStore) {
@@ -2638,6 +2645,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(opts.guideSessionStore ? { guideSessionStore: opts.guideSessionStore } : {}),
       ...(opts.loadGuideFlow ? { loadGuideFlow: opts.loadGuideFlow } : {}),
       ...(opts.getGuideAvailabilityContext ? { getGuideAvailabilityContext: opts.getGuideAvailabilityContext } : {}),
+      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
   }
 };

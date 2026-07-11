@@ -10,7 +10,10 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 const submitGameActionSchema = z.object({
   gameId: z.string().min(1),
@@ -23,7 +26,10 @@ const submitGameActionSchema = z.object({
   nonce: z.string().min(1).max(200),
 });
 
-export function registerCallbackGameRoutes(app: FastifyInstance): void {
+export function registerCallbackGameRoutes(
+  app: FastifyInstance,
+  deps: { registry: Pick<InvocationRegistry, 'isLatest'>; freshnessGate?: FreshnessEgressGate },
+): void {
   app.post('/api/callbacks/submit-game-action', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
@@ -35,6 +41,15 @@ export function registerCallbackGameRoutes(app: FastifyInstance): void {
     }
 
     const { gameId, round, phase, seat, action, target, text, nonce } = parsed.data;
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record,
+      route: 'submit-game-action',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     // Proxy to existing game action route — reuses all validation + nonce dedup
     // Pass invocation threadId so downstream enforces thread-game isolation (P1 fix)
@@ -49,6 +64,12 @@ export function registerCallbackGameRoutes(app: FastifyInstance): void {
       },
       payload: { round, phase, seat, action, target, text, nonce },
     });
+
+    // The downstream route guarantees 4xx before mutation; allow a corrected
+    // retry instead of turning a validation error into a false duplicate.
+    if (response.statusCode >= 400 && response.statusCode < 500 && freshness.outcome === 'authorized') {
+      await freshness.abort();
+    }
 
     reply.status(response.statusCode);
     return response.json();

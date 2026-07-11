@@ -646,6 +646,10 @@ export class RedisMessageStore {
     return { outcome: 'claimed', observedWatermark, replayed: replayed === '1' };
   }
 
+  async abortFreshnessSideEffect(idempotencyKey: string): Promise<void> {
+    await this.redis.del(MessageKeys.freshnessSideEffectClaim(idempotencyKey));
+  }
+
   private async appendAtomically(
     msg: AppendMessageInput,
     gate?: { baseline: ThreadAppendWatermark; audience: FreshnessAudience; groupId?: string },

@@ -8,6 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import {
   type CreateBaseOpts,
@@ -26,6 +27,7 @@ import {
 } from '../infrastructure/enterprise/LarkCliExecutor.js';
 import { callbackAuthSchema } from './callback-auth-schema.js';
 import { makeCallbackAuthError } from './callback-errors.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 const createDocSchema = callbackAuthSchema.extend({
   action: z.literal('create_doc'),
@@ -99,7 +101,10 @@ const actionSchema = z.discriminatedUnion('action', [
   goldenChainSchema,
 ]);
 
-export function registerCallbackLarkActionRoutes(app: FastifyInstance, deps: { registry: InvocationRegistry }): void {
+export function registerCallbackLarkActionRoutes(
+  app: FastifyInstance,
+  deps: { registry: InvocationRegistry; freshnessGate?: FreshnessEgressGate },
+): void {
   const executor = new LarkCliExecutor(app.log);
   const service = new LarkActionService(executor, app.log);
 
@@ -116,6 +121,15 @@ export function registerCallbackLarkActionRoutes(app: FastifyInstance, deps: { r
       reply.status(401);
       return makeCallbackAuthError(result.reason);
     }
+
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record: result.record,
+      route: 'lark-action',
+      requestBody: body,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     try {
       switch (body.action) {

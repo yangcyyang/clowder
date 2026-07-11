@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getProjectResolvedCats } from '../config/resolved-cats.js';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { GuideLifecycleService } from '../domains/guides/GuideLifecycleService.js';
@@ -18,6 +19,7 @@ import { createGuideStoreBridge, type IGuideSessionStore } from '../domains/guid
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -57,6 +59,7 @@ export async function registerCallbackGuideRoutes(
     getGuideAvailabilityContext?: (
       threadId: string,
     ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
+    freshnessGate?: FreshnessEgressGate;
   },
 ): Promise<void> {
   const { registry } = deps;
@@ -115,6 +118,15 @@ export async function registerCallbackGuideRoutes(
       return { error: 'Cross-thread write rejected' };
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'update-guide-state',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const result = await lifecycle.updateGuideState({
       threadId,
       guideId,
@@ -124,6 +136,7 @@ export async function registerCallbackGuideRoutes(
       catId: record.catId,
     });
     if (result.ok) return { guideState: result.guideState };
+    if (freshness.outcome === 'authorized') await freshness.abort();
     reply.status(result.code);
     return {
       error: result.error,
@@ -145,12 +158,22 @@ export async function registerCallbackGuideRoutes(
     const { guideId } = parsed.data;
     if (!(await registry.isLatest(record.invocationId))) return { status: 'stale_ignored' };
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'start-guide',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const result = await lifecycle.startGuideCallback({
       threadId: record.threadId,
       guideId,
       userId: record.userId,
     });
     if (!result.ok) {
+      if (freshness.outcome === 'authorized') await freshness.abort();
       reply.status(result.code);
       return { error: result.error, ...(result.message ? { message: result.message } : {}) };
     }
@@ -197,12 +220,22 @@ export async function registerCallbackGuideRoutes(
     const { action } = parsed.data;
     if (!(await registry.isLatest(record.invocationId))) return { status: 'stale_ignored' };
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry,
+      record,
+      route: 'guide-control',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const result = await lifecycle.controlGuide({
       threadId: record.threadId,
       userId: record.userId,
       action,
     });
     if (!result.ok) {
+      if (freshness.outcome === 'authorized') await freshness.abort();
       reply.status(result.code);
       return { error: result.error, ...(result.message ? { message: result.message } : {}) };
     }

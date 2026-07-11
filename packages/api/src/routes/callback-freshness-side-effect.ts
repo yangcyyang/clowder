@@ -4,12 +4,13 @@ import type { InvocationRecord } from '../domains/cats/services/agents/invocatio
 import type { ThreadAppendWatermark } from '../domains/cats/services/stores/ports/MessageStore.js';
 
 export type CallbackSideEffectClaim =
-  | { outcome: 'legacy' | 'authorized' }
+  | { outcome: 'legacy' }
+  | { outcome: 'authorized'; abort: () => Promise<void> }
   | { outcome: 'replayed'; response: CallbackSideEffectResponse }
   | { outcome: 'stale'; response: CallbackSideEffectResponse };
 
 export interface CallbackSideEffectResponse {
-  status: 'duplicate' | 'freshness_retry_required';
+  status: 'duplicate' | 'freshness_retry_required' | 'stale_ignored';
   disposition: 'published' | 'held';
   threadId: string;
   retryRequired?: true;
@@ -35,6 +36,10 @@ function canonicalize(value: unknown): unknown {
  */
 export async function claimCallbackSideEffect(input: {
   freshnessGate?: FreshnessEgressGate;
+  registry: Pick<
+    import('../domains/cats/services/agents/invocation/InvocationRegistry.js').InvocationRegistry,
+    'isLatest'
+  >;
   record: InvocationRecord;
   route: string;
   requestBody: unknown;
@@ -42,17 +47,25 @@ export async function claimCallbackSideEffect(input: {
   const { freshnessGate, record } = input;
   if (!freshnessGate || record.freshnessBaseline === undefined) return { outcome: 'legacy' };
 
+  if (!(await input.registry.isLatest(record.invocationId))) {
+    return {
+      outcome: 'stale',
+      response: { status: 'stale_ignored', disposition: 'held', threadId: record.threadId },
+    };
+  }
+
   const digest = createHash('sha256')
     .update(JSON.stringify(canonicalize(input.requestBody)))
     .digest('hex');
-  const result = await freshnessGate.claimSideEffect({
+  const claimInput = {
     invocationId: record.invocationId,
     submissionKey: `${input.route}:${digest}`,
     userId: record.userId,
     catId: record.catId,
     threadId: record.threadId,
     baselineWatermark: record.freshnessBaseline as ThreadAppendWatermark,
-  });
+  };
+  const result = await freshnessGate.claimSideEffect(claimInput);
 
   if (result.outcome === 'stale') {
     return {
@@ -73,5 +86,5 @@ export async function claimCallbackSideEffect(input: {
       response: { status: 'duplicate', disposition: 'published', threadId: record.threadId },
     };
   }
-  return { outcome: 'authorized' };
+  return { outcome: 'authorized', abort: () => freshnessGate.abortSideEffect(claimInput) };
 }

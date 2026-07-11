@@ -7,6 +7,7 @@ import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
@@ -53,6 +54,7 @@ export function registerCallbackTaskRoutes(
     messageStore?: IMessageStore;
     threadStore?: IThreadStore;
     freshnessGate?: FreshnessEgressGate;
+    registry: Pick<InvocationRegistry, 'isLatest'>;
   },
 ): void {
   const { taskStore, socketManager, messageStore, threadStore } = deps;
@@ -97,6 +99,7 @@ export function registerCallbackTaskRoutes(
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
       record,
       route: 'update-task',
       requestBody: parsed.data,
@@ -149,6 +152,7 @@ export function registerCallbackTaskRoutes(
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
       record,
       route: 'claim-task',
       requestBody: parsed.data,
@@ -197,6 +201,7 @@ export function registerCallbackTaskRoutes(
 
     const freshness = await claimCallbackSideEffect({
       freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
       record,
       route: 'create-task',
       requestBody: parsed.data,

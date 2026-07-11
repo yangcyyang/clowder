@@ -7,10 +7,13 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { LimbPairingStore } from '../domains/limb/LimbPairingStore.js';
 import type { LimbRegistry } from '../domains/limb/LimbRegistry.js';
 import { RemoteLimbNode } from '../domains/limb/RemoteLimbNode.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 const limbListSchema = z.object({
   capability: z.string().optional(),
@@ -29,11 +32,13 @@ const limbPairApproveSchema = z.object({
 export interface CallbackLimbRoutesOptions {
   limbRegistry: LimbRegistry;
   pairingStore?: LimbPairingStore;
+  freshnessGate?: FreshnessEgressGate;
+  registry: Pick<InvocationRegistry, 'isLatest'>;
 }
 
 export function registerCallbackLimbRoutes(
   app: FastifyInstance,
-  { limbRegistry, pairingStore }: CallbackLimbRoutesOptions,
+  { limbRegistry, pairingStore, freshnessGate, registry }: CallbackLimbRoutesOptions,
 ): void {
   app.post('/api/callback/limb/list', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);
@@ -66,6 +71,23 @@ export function registerCallbackLimbRoutes(
 
     const { nodeId, command, params } = parsed.data;
 
+    if (!limbRegistry.getNode(nodeId)) {
+      return reply.send(
+        await limbRegistry.invoke(nodeId, command, params ?? {}, {
+          catId: record.catId,
+          invocationId: record.invocationId,
+        }),
+      );
+    }
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate,
+      registry,
+      record,
+      route: 'limb-invoke',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return reply.send(freshness.response);
+
     const result = await limbRegistry.invoke(nodeId, command, params ?? {}, {
       catId: record.catId,
       invocationId: record.invocationId,
@@ -89,8 +111,19 @@ export function registerCallbackLimbRoutes(
       const parsed = limbPairApproveSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
 
+      const pending = pairingStore.getPending().find((entry) => entry.requestId === parsed.data.requestId);
+      if (!pending) return reply.status(404).send({ error: 'Pairing request not found' });
+      const freshness = await claimCallbackSideEffect({
+        freshnessGate,
+        registry,
+        record,
+        route: 'limb-pair-approve',
+        requestBody: parsed.data,
+      });
+      if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return reply.send(freshness.response);
+
       const req = pairingStore.approve(parsed.data.requestId);
-      if (!req) return reply.status(404).send({ error: 'Pairing request not found' });
+      if (!req) return reply.status(409).send({ error: 'Pairing request is no longer pending' });
 
       // Register RemoteLimbNode if not already registered
       if (!limbRegistry.getNode(req.nodeId)) {

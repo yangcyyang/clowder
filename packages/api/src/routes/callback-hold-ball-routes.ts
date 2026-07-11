@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -22,6 +23,7 @@ import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.j
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { deriveCallbackActor } from './callback-scope-helpers.js';
 import { executeHoldCancel, findHoldBallTask } from './hold-ball-cancel.js';
 
@@ -78,6 +80,7 @@ const holdBallSchema = z.object({
 });
 
 export interface HoldBallRouteDeps {
+  freshnessGate?: FreshnessEgressGate;
   registry: InvocationRegistry;
   taskRunner: TaskRunnerV2;
   templateRegistry: { get(id: string): TaskTemplate | undefined };
@@ -155,6 +158,15 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
           t.deliveryThreadId === threadId,
       );
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record,
+      route: 'hold-ball',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const taskId = `hold-ball-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const fireAt = Date.now() + wakeAfterMs;
     const wakeMessage =
@@ -193,6 +205,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       taskRunner.registerDynamic(spec, taskId);
     } catch (err) {
       dynamicTaskStore.remove(taskId);
+      if (freshness.outcome === 'authorized') await freshness.abort();
       log.error(
         { threadId, catId: catIdStr, taskId, err },
         'F167 Phase G P1: taskRunner.registerDynamic failed — rolled back insert; prior hold (if any) retained',

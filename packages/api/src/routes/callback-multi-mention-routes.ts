@@ -8,7 +8,9 @@
 import { type CatId, catRegistry, createCatId, DEFAULT_TIMEOUT_MINUTES } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import {
@@ -21,6 +23,7 @@ import type { IInvocationRecordStore } from '../domains/cats/services/stores/por
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 // ── Singleton orchestrator ───────────────────────────────────────────
 let globalOrchestrator: MultiMentionOrchestrator | undefined;
@@ -54,6 +57,8 @@ const multiMentionStatusSchema = z.object({
 
 // ── Deps ─────────────────────────────────────────────────────────────
 export interface MultiMentionRouteDeps {
+  freshnessGate?: FreshnessEgressGate;
+  registry: Pick<InvocationRegistry, 'isLatest'>;
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router: AgentRouter;
@@ -461,6 +466,15 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
       });
     }
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record,
+      route: 'multi-mention',
+      requestBody: body,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     const createParams = {
       threadId: record.threadId,
       initiator: callerCatId,
@@ -479,6 +493,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     // If already created (idempotency), return existing
     if (mmRequest.status !== 'pending') {
+      if (freshness.outcome === 'authorized') await freshness.abort();
       return reply.send({ requestId: mmRequest.id, status: mmRequest.status });
     }
 

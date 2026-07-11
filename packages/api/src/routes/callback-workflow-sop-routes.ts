@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { VersionConflictError } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
 const updateWorkflowSopCallbackSchema = z.object({
   backlogItemId: z.string().min(1),
@@ -34,6 +37,8 @@ export function registerCallbackWorkflowSopRoutes(
   deps: {
     workflowSopStore: IWorkflowSopStore;
     backlogStore: IBacklogStore;
+    freshnessGate?: FreshnessEgressGate;
+    registry: Pick<InvocationRegistry, 'isLatest'>;
   },
 ): void {
   const { workflowSopStore, backlogStore } = deps;
@@ -60,6 +65,15 @@ export function registerCallbackWorkflowSopRoutes(
     // Extract updatedBy from invocation context (cat's unique handle)
     const updatedBy = record.catId ?? 'unknown';
 
+    const freshness = await claimCallbackSideEffect({
+      freshnessGate: deps.freshnessGate,
+      registry: deps.registry,
+      record,
+      route: 'update-workflow-sop',
+      requestBody: parsed.data,
+    });
+    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
     try {
       const input = {
         ...(rest.stage !== undefined ? { stage: rest.stage } : {}),
@@ -74,6 +88,7 @@ export function registerCallbackWorkflowSopRoutes(
       return sop;
     } catch (err) {
       if (err instanceof VersionConflictError) {
+        if (freshness.outcome === 'authorized') await freshness.abort();
         reply.status(409);
         return { error: 'Version conflict', currentState: err.currentState };
       }

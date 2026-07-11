@@ -116,6 +116,12 @@ export class FreshnessEgressGate {
     return { outcome: 'authorized', replayed: claim.replayed, observedWatermark: claim.observedWatermark };
   }
 
+  async abortSideEffect(input: FreshnessSideEffectInput): Promise<void> {
+    await this.messageStore.abortFreshnessSideEffect(
+      this.sideEffectIdempotencyKey(input.userId, input.invocationId, input.submissionKey),
+    );
+  }
+
   /**
    * Create an invocation-scoped gate after the router has already selected a
    * protected route. Stores and limits remain shared; rollout checks no longer

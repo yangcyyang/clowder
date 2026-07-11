@@ -22,6 +22,7 @@ describe('protected callback side effects', () => {
   let threadStore;
   let broadcasts;
   let uploadDir;
+  let validateRepo;
 
   beforeEach(async () => {
     registry = new InvocationRegistry();
@@ -31,6 +32,7 @@ describe('protected callback side effects', () => {
     broadcasts = [];
     uploadDir = await mkdtemp(join(tmpdir(), 'clowder-freshness-doc-'));
     process.env.UPLOAD_DIR = uploadDir;
+    validateRepo = undefined;
 
     const freshnessGate = new FreshnessEgressGate({
       messageStore,
@@ -53,6 +55,7 @@ describe('protected callback side effects', () => {
       threadStore,
       socketManager,
       freshnessGate,
+      ...(validateRepo ? { validateRepo } : {}),
     });
   });
 
@@ -109,6 +112,24 @@ describe('protected callback side effects', () => {
     assert.equal(first.json().status, 'ok');
     assert.equal(replay.json().status, 'duplicate');
     assert.equal(broadcasts.filter((entry) => entry.event === 'vote_started').length, voteBroadcastsAfterFirst);
+  });
+
+  test('a protected invocation superseded without a new message cannot start a vote', async () => {
+    const thread = threadStore.create('user-1', 'superseded vote');
+    const oldAuth = await createProtectedInvocation(thread.id);
+    await registry.create('user-1', 'opus', thread.id);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': oldAuth.invocationId, 'x-callback-token': oldAuth.callbackToken },
+      payload: { question: 'old question', options: ['A', 'B'], voters: ['codex'] },
+    });
+    assert.equal(response.json().status, 'stale_ignored');
+    assert.equal(await threadStore.getVotingState(thread.id), null);
+    assert.equal(
+      broadcasts.some((entry) => entry.event === 'vote_started'),
+      false,
+    );
   });
 
   test('create-task: stale is inert, current executes once, replay is inert', async () => {
@@ -193,5 +214,41 @@ describe('protected callback side effects', () => {
     assert.equal((await app.inject(request)).json().status, 'ok');
     assert.equal((await app.inject(request)).json().status, 'duplicate');
     assert.equal(taskStore.listByThread('pr-current').length, 1);
+  });
+
+  test('a failed business precondition does not consume the side-effect claim', async () => {
+    let repoAccessible = false;
+    validateRepo = async () => repoAccessible;
+    await app.close();
+    const freshnessGate = new FreshnessEgressGate({
+      messageStore,
+      holdStore: new FreshnessHoldStore({ maxReviews: 2 }),
+    });
+    app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      taskStore,
+      threadStore,
+      socketManager: {
+        broadcastAgentMessage() {},
+        broadcastToRoom() {},
+        emitToUser() {},
+      },
+      freshnessGate,
+      validateRepo,
+    });
+
+    const auth = await createProtectedInvocation('pr-retry');
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { repoFullName: 'cat-cafe/clowder', prNumber: 194 },
+    };
+    assert.equal((await app.inject(request)).statusCode, 422);
+    repoAccessible = true;
+    assert.equal((await app.inject(request)).json().status, 'ok');
+    assert.equal(taskStore.listByThread('pr-retry').length, 1);
   });
 });

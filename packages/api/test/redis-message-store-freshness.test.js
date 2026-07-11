@@ -351,6 +351,11 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
     assert.equal(replay.outcome, 'claimed');
     assert.equal(replay.replayed, true);
 
+    await store.abortFreshnessSideEffect(claim.idempotencyKey);
+    const retryAfterProvenNoop = await store.claimFreshnessSideEffect(claim);
+    assert.equal(retryAfterProvenNoop.outcome, 'claimed');
+    assert.equal(retryAfterProvenNoop.replayed, false);
+
     await store.append({
       userId: 'user-1',
       catId: null,
