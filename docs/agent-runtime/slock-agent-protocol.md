@@ -230,7 +230,7 @@ Inbox freshness 保证 Agent 开始时看到新意图；Freshness Hold 保证 Ag
 - 带 invocation 凭证、且发往本 invocation 原 thread 的 callback `post-message`。
 - Web 直接执行、`QueueProcessor` 和 `ConnectorInvokeTrigger` 消费上述结果时的 history、WebSocket、rich block、TTS、push、A2A 和 connector outbound 出口。
 - `QueueProcessor` fast-lane 成功结果：工作流执行前捕获 baseline，只有 Gate 返回 `published` 后才可把完成正文或原始执行结果放入 history、agent WebSocket 和 task completion 可见内容；被 Hold 时 task event 只保留安全元数据。
-- callback 发布工具的 `tool_use` / `tool_result` 也是稿件出口：受保护路由先私有缓冲，只有工具结果确认 `published` 才释放；`held` / `discarded` 不得把 `toolInput.content` 送入 WebSocket 或前端 tool detail。
+- 所有 `tool_use` / `tool_result` 都是稿件出口：受保护路由先私有缓冲普通工具与 callback 发布工具的完整详情，只有最终 verdict 确认本次新 `published` 才释放；`held` / `discarded` / provider error / `replayed` 不得把 `toolInput` 或 result 送入 history、WebSocket、Connector 或前端 tool detail。
 - 有 freshness baseline 的 invocation 在 verdict 前不得写原始 transcript 或 agent memory。当前采用 fail-closed 策略：即使最终 published 也不自动补写这两个持久 sink，避免旧稿经 transcript search/import 回到 history。
 
 明确的 legacy 边界：
@@ -249,7 +249,8 @@ Freshness 只看受信任结构字段，不根据正文猜测“这是不是进�
 
 Delivery 生命周期的规则：
 
-- `queued` 在 append 时立即取得序号并推进水位，避免另一只猫跨过正在排队的新意图；但它在 delivered 前不进 history，不触发 `onAppend`。
+- 普通 `queued` 在 append 时立即取得序号并推进水位，避免另一只猫跨过正在排队的新意图；但它在 delivered 前不进 history，不触发 `onAppend`。
+- Hold release 的内部 queued publication 额外带受信任私有 marker：它仍占据水位作为 barrier，但 delivered 前不得被 delta hydrate 或返回，review cursor 也不得跨过；release 崩溃时宁可阻塞后续 review，也不能暴露旧稿。
 - `markDelivered` 只改变可见性和交付时间，不再分配新水位。
 - `markCanceled` 会从 freshness 索引移除该消息。
 
@@ -269,6 +270,10 @@ MessageStore 给每个 thread 维护一个单调递增序列，每条 freshness-
 ```
 
 普通 append 与条件 append 在 Redis 中共用同一 Lua 线性化点，不存在 `check → append` 的 TOCTOU 窗口。并行路由中同一 parent invocation group 的 sibling 输出不互相卡住；任何用户或独立 invocation 的新 append 仍会触发 hold。
+
+成功提交也必须幂等：Gate 从 `(invocationId, submissionKey)` 派生稳定 key；同一提交的重试返回原 messageId 与 `replayed=true`。Route、Web、Queue、Connector、Push 和 callback consumer 必须把 replay 当作“已完成但本次无新发布”，不得再次发正文、工具详情、Rich/audio、stream end 或原始 task payload。
+
+Redis 当前用 ZSET score 维护 audience 顺序，因此水位上限固定为 `9007199254740991`。到达上限后 append / restore / whisper reveal 都在任何状态写入前 fail closed；禁止让 Lua double 把水位转为科学计数法或发生相邻 score 碰撞。
 
 Delta 默认最多返回 50 条。如果 `truncated: true`，`observedWatermark` 只能前进到本页最后一条已物化消息，不能跳过 Agent 尚未看见的消息。
 

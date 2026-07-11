@@ -134,6 +134,7 @@ in_context_observability:
 | 2026-07-11 | 用户批准执行方案；完成 Message watermark、持久 Hold Store 与 baseline 持久化的第一阶段实现 |
 | 2026-07-11 | 完成统一出口门、callback/stdout review、续跑恢复、过期扫描、灰度开关与状态 UI |
 | 2026-07-11 | 完成私有性审计与回归验证：工具参数、Rich/audio、task event、transcript、memory、终态草稿均 fail closed |
+| 2026-07-11 | 独立审查返回 CHANGES_REQUESTED；完成 queued 私稿 barrier、全工具事件缓冲、成功重放幂等、callback epoch 隔离、动态 A2A 路由冻结、Redis 安全水位与 Web 切线程竞态修复 |
 
 ## Close Gate Report
 
@@ -141,7 +142,7 @@ in_context_observability:
 close_gate_report:
   feature_id: F193
   spec_path: docs/features/F193-output-publication-freshness-hold.md
-  head_sha: 4a66378
+  head_sha: 7128ac9
   report_date: 2026-07-11
 
   ac_matrix:
@@ -157,14 +158,14 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/redis-message-store-freshness.test.js
-          description: 隔离 Redis 上验证并发线性化与幂等修复
+          description: 隔离 Redis 上验证并发线性化、max-safe 水位 fail-closed 与无部分写入
       resolution: null
     - ac_id: AC-A3
       status: met
       evidence:
         - kind: test
           ref: packages/api/test/redis-freshness-hold-store.test.js
-          description: Redis 重建、submission 去重、CAS 单赢家与 active index
+          description: Redis 重建、submission 去重、CAS 单赢家与终态 active index 原子清理
       resolution: null
     - ac_id: AC-A4
       status: met
@@ -178,7 +179,7 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/freshness-egress-gate.test.js
-          description: current 单次发布、stale 单一 Hold 与重试幂等
+          description: current 单次发布、stale 单一 Hold、成功 submit replay 与下游重放标记
       resolution: null
     - ac_id: AC-B2
       status: met
@@ -192,7 +193,7 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/route-serial-freshness-hold.test.js
-          description: text、Rich 与 TTS 在裁决前均保持私有
+          description: text、普通工具详情、Rich、TTS、provider error 与派生路由提示在裁决前均保持私有
         - kind: test
           ref: packages/api/test/web-outbound-delivery.test.js
           description: Web、Push/Connector 消费统一 per-cat verdict
@@ -202,7 +203,7 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/freshness-hold-rollout.test.js
-          description: 未受保护路线保持整体 legacy，灰度边界不混用
+          description: 未受保护路线保持整体 legacy；受保护路线的动态 A2A 后代继承同一保护语义
         - kind: doc
           ref: docs/agent-runtime/slock-agent-protocol.md
           description: agent-key/cross-thread 的可信 baseline 边界与观测语义
@@ -215,7 +216,7 @@ close_gate_report:
           description: current-user/thread 过滤且只返回安全元数据
         - kind: test
           ref: packages/web/src/components/__tests__/freshness-hold-bar.test.ts
-          description: UI 状态文本不含草稿正文
+          description: UI 状态文本不含草稿正文，快速切 thread 时旧响应不能覆盖当前状态
       resolution: null
     - ac_id: AC-C2
       status: met
@@ -245,7 +246,10 @@ close_gate_report:
           description: transcript、history import 与 agent memory 零泄漏
         - kind: test
           ref: packages/api/test/fast-lane-freshness-hold.test.js
-          description: QueueEntry、task event 与 socket 仅携带安全元数据
+          description: QueueEntry、task event 与 socket 仅携带安全元数据，成功 replay 不重复 fanout
+        - kind: test
+          ref: packages/api/test/redis-message-store-freshness.test.js
+          description: queued review 私稿只形成结构 barrier，不 hydrate、不进入 delta
       resolution: null
     - ac_id: AC-D1
       status: met
@@ -262,7 +266,7 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/route-parallel-freshness-hold.test.js
-          description: callback/stdout/Rich/PersistenceContext 使用同一 per-cat verdict
+          description: callback/stdout/普通工具/Rich/PersistenceContext/replay 使用同一 per-cat verdict
         - kind: test
           ref: packages/api/test/streaming-outbound-hook.test.js
           description: Connector streaming placeholder 只接收 Hold 状态
@@ -279,7 +283,10 @@ close_gate_report:
       evidence:
         - kind: test
           ref: packages/api/test/route-serial-callback-dedup.test.js
-          description: held/discarded/failed callback 不恢复旧 stream fallback
+          description: held/discarded/failed/replayed callback 不恢复旧 stream fallback，replacement 不附着旧 epoch 工具详情
+        - kind: test
+          ref: packages/api/test/freshness-egress-gate.test.js
+          description: release CAS 异常留下的 queued publication 对 delta 保持 fail closed，恢复后才可见
         - kind: doc
           ref: docs/agent-runtime/slock-governance-runtime.md
           description: protected 异常 fail closed、legacy 观测与回滚边界
@@ -290,8 +297,8 @@ close_gate_report:
 
 - 原始需求：`2026-07-11-Raft借鉴-Clowder优化点与执行方案.md` 的 P0-1 Freshness Hold；16 条 AC 均已覆盖，不扩张到 ACK 或发布协调器。
 - 设计稿检查：仓库只命中 `docs/design/f190-console-layout.pen`，与 F193 无关；状态 UI 已在当前 worktree 的 3013 页面配合隔离 mock API 3014 实际预览。
-- F193 API 矩阵：202 项中 201 项通过；唯一失败为目标分支同样存在的 Connector 静默回复旧语义，Freshness Connector 子集 3/3 通过。
-- Redis：`127.0.0.1:6398/15` 串行 11/11 通过；MCP server 173/173 通过；Web 新增状态条 1/1 通过。
-- 全仓构建与 lint 均 exit 0；本次 54 个变更文件 Biome 全通过；`git diff --check` 与 artifact hygiene 通过。
-- Web 全量差分：功能分支 81 个既有失败、2916 通过；目标分支相同 81 个失败、2915 通过，新增的 1 项为 F193 通过项。
+- 首轮 F193 API 矩阵：202 项中 201 项通过；独立审查修复后的 F193 + consumer 矩阵 195 项中 194 项通过；两次唯一失败均为目标分支同样存在的 Connector 静默回复旧语义，新增 Freshness Connector replay 用例通过。
+- Redis：`127.0.0.1:6398/15` 串行 16/16 通过；MCP server 173/173 通过；Web 状态条 2/2 通过。
+- 全仓递归 build 与 lint 均通过（lint 只有既有 warning）；变更范围 Biome 61 文件 0 error；`git diff --check` 与 artifact hygiene 通过。
+- 路由大基线仍为 72/98，与目标分支完全一致；Web 全量为 81 个既有失败、2917 通过，目标分支为相同 81 个失败、2915 通过，新增 2 项均为 F193 通过项。
 - 全仓 `pnpm check` 被外部 `~/.claude/skills/gstack` 的 1534 个既有格式错误阻断；changed-scope Biome 为 0 error。env registry 的 6 个既有缺口已在目标分支同命令复现，本次新增的三个 F193 变量已登记。

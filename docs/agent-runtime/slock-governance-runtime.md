@@ -123,23 +123,24 @@ truncated, releasedMessageId/messageId
 - stdout/WebSocket：无稿件正文的 `system_info`，type 为 `freshness_hold` 或 `freshness_needs_attention`；connector 占位符只改为“重新审阅”。
 - 内部交付：`PersistenceContext.egressByCat[catId]` 携带 per-cat disposition、hold/message ID、version、reviewCount 和 holdStatus，供 Web / Queue / Connector 消费。
 - 浏览器恢复查询：`GET /api/freshness-holds?threadId=...` 只返回当前用户的 `held` / `reviewing` / `needs_attention` 元数据，包括 id、catId、threadId、status、version、reviewCount、时间字段和可选 attentionReason；不暴露 draft、delta、watermark 或 invocation 凭证。
-- Web 恢复条：当前 thread 每 5 秒刷新 active metadata，并在页面重新可见时立即刷新；只显示猫、状态、复核次数与人工介入原因，不展示稿件。
+- Web 恢复条：当前 thread 每 5 秒刷新 active metadata，并在页面重新可见时立即刷新；切换 thread 或卸载时中止旧请求并用请求世代拒绝迟到响应；只显示猫、状态、复核次数与人工介入原因，不展示稿件。
 
 当前仍无统一持久 audit event stream。Web 已通过 active-holds API 恢复只含元数据的 Hold 通知条，但它不等价于完整状态迁移审计；Hold record 仍是恢复真相源，且不得直接暴露给前端。
 
 ### 故障恢复与运维边界
 
-- 发布恢复顺序是 `reviewing → queued → released → delivered`；重试依靠 hold version CAS 与 `freshness-hold:<holdId>` 消息幂等键，不依靠时间戳或消息 ID 大小。
-- queued 发布会先占据 freshness 水位，但在 released CAS 成功前不进 history；恢复时要么补完同一条消息，要么保持私有，不得生成第二条。
+- 发布恢复顺序是 `reviewing → queued → released → delivered`；重试依靠 hold version CAS 与 `freshness-hold:<holdId>` 消息幂等键，不依靠时间戳或消息 ID 大小。普通 successful submit 也从 `(invocationId, submissionKey)` 派生稳定幂等键，并把 `replayed` 向上传给所有 consumer，禁止二次 fanout。
+- queued review publication 会先占据 freshness 水位并形成结构化私有 barrier，但在 released CAS 成功前不进 history、不会被 delta hydrate，也不会推进 reviewer cursor；恢复时要么补完同一条消息，要么保持私有，不得生成第二条。
 - released/discarded 迁移在 memory 与 Redis 的同一终态 CAS 内擦除 draft/delta；`needs_attention` 为人工恢复需要，继续保留完整私稿且不设自动 TTL。
 - 30 分钟 deadline 与最多两轮 review 都以 fail closed 收敛到 `needs_attention`。Deadline scheduler 在 API 启动时立即 sweep，随后默认每 60 秒调用 `expireDue()`；进程运行且 store 可用时，到期 held/reviewing 会在后续轮询中收敛。当前仍没有 publication reconciler，`reviewing + queued` 或 `released + queued` 在无重试时可能长期保持私有，但不得自动发布。
 - `freshness_review` QueueEntry 与它的私有稿件/delta payload 是进程内状态，重启会丢失自动 review 调度；Redis hold 本体仍保留。当前没有 restart reconciler，所以运维上需将“稿件仍安全保留”与“自动 review 已恢复”区分开。
 - 如果 HoldStore、MessageStore 或出口 verdict 无法确认，运行时应报错并保留稿件，禁止回退到 legacy 发布。
+- Redis freshness 水位在 `9007199254740991` 达到安全上限；append / restore / reveal 必须在任何 hash/index 变更前 fail closed。扩容到更大序列前必须迁出 ZSET double score，不能静默继续 INCR。
 
 ### 渐进启用与回滚
 
 - `CAT_CAFE_FRESHNESS_HOLD_ENABLED=true` 才构造运行时 Gate；默认关闭，避免未验证环境被一次性切换。
-- `CAT_CAFE_FRESHNESS_HOLD_CATS` 与 `CAT_CAFE_FRESHNESS_HOLD_THREADS` 是可选逗号白名单；同一路由只有全部目标猫都命中时才启用，避免混合路线一半缓冲、一半 legacy。
+- `CAT_CAFE_FRESHNESS_HOLD_CATS` 与 `CAT_CAFE_FRESHNESS_HOLD_THREADS` 是可选逗号白名单；同一路由只有全部初始目标猫都命中时才启用。路线一旦选中 protected，其运行中动态发现的 A2A 后代也继承 protected 语义，避免同一路线一半缓冲、一半 legacy。
 - 关闭总开关只影响新的 invocation；既有 Hold 仍由同一个 store、active API 与 expiry scheduler fail closed 管理，不能因回滚自动发布。
 
 ### 验证方法与当前验收边界
