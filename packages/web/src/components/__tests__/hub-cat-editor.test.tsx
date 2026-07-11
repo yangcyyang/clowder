@@ -494,10 +494,12 @@ describe('HubCatEditor', () => {
       if (path === '/api/cat-model-options') {
         return Promise.resolve(
           jsonResponse({
+            scannedAt: '2026-07-10T08:00:00.000Z',
             clients: {
               anthropic: {
                 defaultModel: 'claude-sonnet-5',
                 models: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-4-7'],
+                modelsSource: 'config',
               },
             },
           }),
@@ -531,9 +533,186 @@ describe('HubCatEditor', () => {
     expect(container.textContent).toContain('claude-sonnet-5');
     expect(container.textContent).toContain('claude-opus-4-7');
     expect(container.textContent).toContain('claude-opus-4-6');
+    expect(container.textContent).toContain('配置');
+    expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
+
+    await changeField(modelInput, 'claude-not-in-latest-scan');
+    expect(container.textContent).toContain('当前模型未在最近扫描中发现');
+    await changeField(modelInput, 'claude-opus-4-8');
+    expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
   });
 
-  it('scans local CLIs only after explicit click and can adopt Codex config', async () => {
+  it('shows an explicit error when the initial model-candidate request fails', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(jsonResponse({ error: '模型候选加载失败：未授权' }, 401));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(container.textContent).toContain('模型候选加载失败：未授权');
+  });
+
+  it('does not report model drift when this client only has static fallback candidates', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                mode: 'subscription',
+                models: ['claude-opus-4-8'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(
+          jsonResponse({
+            scannedAt: '2026-07-10T08:00:00.000Z',
+            clients: {
+              openai: {
+                models: ['gpt-5.6-sol'],
+                modelsSource: 'config',
+              },
+              anthropic: {
+                models: ['claude-sonnet-5'],
+                modelsSource: 'static',
+              },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'anthropic', accountRef: 'claude-oauth', defaultModel: 'claude-opus-4-8' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(container.textContent).toContain('内置(可能过期)');
+    expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
+  });
+
+  it('reports a model-candidate refresh failure after a successful local CLI scan', async () => {
+    let modelOptionsCalls = 0;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      }
+      if (path === '/api/cat-model-options') {
+        modelOptionsCalls += 1;
+        if (modelOptionsCalls === 1) {
+          return Promise.resolve(jsonResponse({ clients: {} }));
+        }
+        return Promise.resolve(jsonResponse({ error: '模型候选刷新失败：扫描结果不可用' }, 503));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      if (path === '/api/local-cli-probes') {
+        return Promise.resolve(jsonResponse({ clis: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    const scanButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '扫描本机 CLI 与模型',
+    );
+    await act(async () => {
+      scanButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(modelOptionsCalls).toBe(2);
+    expect(container.textContent).toContain('模型候选刷新失败：扫描结果不可用');
+  });
+
+  it('clears an initial model-candidate error after a successful manual scan refresh', async () => {
+    let modelOptionsCalls = 0;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      }
+      if (path === '/api/cat-model-options') {
+        modelOptionsCalls += 1;
+        return modelOptionsCalls === 1
+          ? Promise.resolve(jsonResponse({ error: '模型候选加载失败：临时不可用' }, 503))
+          : Promise.resolve(jsonResponse({ clients: {} }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      if (path === '/api/local-cli-probes') {
+        return Promise.resolve(jsonResponse({ clis: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+    await flushEffects();
+    expect(container.textContent).toContain('模型候选加载失败：临时不可用');
+
+    const scanButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '扫描本机 CLI 与模型',
+    );
+    await act(async () => {
+      scanButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+    await flushEffects();
+
+    expect(modelOptionsCalls).toBe(2);
+    expect(container.textContent).not.toContain('模型候选加载失败：临时不可用');
+  });
+
+  it('scans local CLIs only after explicit click and adopts the first scanned model before fallback default', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
@@ -560,7 +739,23 @@ describe('HubCatEditor', () => {
         );
       }
       if (path === '/api/cat-model-options') {
-        return Promise.resolve(jsonResponse({ clients: { openai: { models: ['gpt-5.5'] } } }));
+        return Promise.resolve(
+          jsonResponse({
+            clients: {
+              openai: {
+                models: [
+                  'gpt-5.6-sol',
+                  'gpt-5.6-terra',
+                  'gpt-5.6-luna',
+                  'gpt-5.5',
+                  'gpt-5.4',
+                  'gpt-5.4-mini',
+                  'gpt-5.3-codex-spark',
+                ],
+              },
+            },
+          }),
+        );
       }
       if (path === '/api/cat-templates') {
         return Promise.resolve(jsonResponse({ templates: [] }));
@@ -574,7 +769,17 @@ describe('HubCatEditor', () => {
                 label: 'Codex',
                 command: 'codex',
                 clientId: 'openai',
-                defaultModel: 'gpt-5.5',
+                defaultModel: 'gpt-fallback-default',
+                models: [
+                  { id: 'gpt-5.6-sol', source: 'config' },
+                  { id: 'gpt-5.6-terra', source: 'config' },
+                  { id: 'gpt-5.6-luna', source: 'config' },
+                  { id: 'gpt-5.5', source: 'config' },
+                  { id: 'gpt-5.4', source: 'config' },
+                  { id: 'gpt-5.4-mini', source: 'config' },
+                  { id: 'gpt-5.3-codex-spark', source: 'config' },
+                ],
+                modelsStatus: 'config_only',
                 installed: true,
                 resolvedPath: '/usr/local/bin/codex',
                 version: 'codex 1.2.3',
@@ -595,6 +800,21 @@ describe('HubCatEditor', () => {
                 authStatusReason: '未安装，未执行认证探测。',
                 installHint: 'npm install -g @google/gemini-cli',
               },
+              {
+                id: 'opencode',
+                label: 'OpenCode',
+                command: 'opencode',
+                clientId: 'opencode',
+                models: [],
+                modelsStatus: 'failed',
+                installed: true,
+                resolvedPath: '/usr/local/bin/opencode',
+                version: 'opencode 1.0.0',
+                versionStatus: 'ok',
+                authStatus: 'unknown',
+                authStatusReason: '安全模式：不读取凭证文件。',
+                installHint: 'npm install -g opencode-ai',
+              },
             ],
           }),
         );
@@ -612,7 +832,7 @@ describe('HubCatEditor', () => {
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/local-cli-probes');
 
     const scanButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '扫描本机 CLI',
+      (button) => button.textContent === '扫描本机 CLI 与模型',
     );
     await act(async () => {
       scanButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -621,10 +841,14 @@ describe('HubCatEditor', () => {
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/local-cli-probes');
     expect(container.textContent).toContain('Codex');
+    expect(container.textContent).toContain('gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna / gpt-5.5 / gpt-5.4');
     expect(container.textContent).toContain('Gemini CLI');
     expect(container.textContent).toContain('npm install -g @google/gemini-cli');
+    expect(container.textContent).toContain('模型扫描失败');
 
-    const adoptCodex = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '用 Codex');
+    const adoptCodex = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '用 Codex',
+    );
     await act(async () => {
       adoptCodex?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -642,7 +866,7 @@ describe('HubCatEditor', () => {
     const payload = JSON.parse(String(postCall?.[1]?.body));
     expect(payload.clientId).toBe('openai');
     expect(payload.accountRef).toBe('codex-sponsor');
-    expect(payload.defaultModel).toBe('gpt-5.5');
+    expect(payload.defaultModel).toBe('gpt-5.6-sol');
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -2250,7 +2474,9 @@ describe('HubCatEditor', () => {
     });
 
     await act(async () => {
-      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }));
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
     });
     await flushEffects();
 

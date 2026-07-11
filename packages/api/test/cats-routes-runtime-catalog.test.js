@@ -251,28 +251,154 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
   it('GET /api/cat-model-options returns the shared model candidate source', async () => {
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { resetLocalCliModelsSnapshot } = await import('../dist/utils/local-cli-model-cache.js');
+    resetLocalCliModelsSnapshot();
 
     const app = Fastify();
     await app.register(catsRoutes);
 
-    const res = await app.inject({ method: 'GET', url: '/api/cat-model-options' });
+    const unauthenticated = await app.inject({ method: 'GET', url: '/api/cat-model-options' });
+    assert.equal(unauthenticated.statusCode, 401);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'model-user' },
+    });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.source, 'static-presets-v1');
+    assert.equal(body.scannedAt, undefined);
+    assert.equal(body.clients.anthropic.modelsSource, 'static');
     assert.deepEqual(body.clients.anthropic.models, [
       'claude-fable-5',
       'claude-opus-4-8',
       'claude-sonnet-5',
-      'claude-haiku-4-5-20251001',
       'claude-opus-4-7',
       'claude-opus-4-6',
-      'claude-opus-3',
-      'claude-sonnet-4-6',
     ]);
-    assert.equal(body.clients.openai.defaultModel, 'gpt-5.5');
-    assert.ok(body.clients.opencode.models.includes('anthropic/claude-opus-4.8'));
+    assert.equal(body.clients.openai.defaultModel, 'gpt-5.6-sol');
+    assert.deepEqual(body.clients.openai.models, [
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex-spark',
+    ]);
+    assert.deepEqual(body.clients.opencode.models, ['xiaomi-mimo/mimo-v2.5-pro']);
 
     await app.close();
+  });
+
+  it('GET /api/cat-model-options prefers the latest CLI scan cache and exposes per-client source', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { resetLocalCliModelsSnapshot, updateLocalCliModelsSnapshot } = await import(
+      '../dist/utils/local-cli-model-cache.js'
+    );
+    resetLocalCliModelsSnapshot();
+    updateLocalCliModelsSnapshot('scan-owner', {
+      scannedAt: '2026-07-10T08:00:00.000Z',
+      clis: [
+        {
+          id: 'codex',
+          label: 'Codex',
+          command: 'codex',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.6-sol',
+          models: [
+            { id: 'gpt-5.6-sol', source: 'config', isDefault: true },
+            { id: 'gpt-5.6-terra', source: 'config' },
+          ],
+          modelsStatus: 'config_only',
+          installed: true,
+          resolvedPath: '/opt/bin/codex',
+          version: 'codex 0.144.0',
+          versionStatus: 'ok',
+          authStatus: 'unknown',
+          authStatusReason: 'safe',
+          installHint: 'install',
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'scan-owner' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.source, 'local-cli-scan-v1');
+    assert.equal(body.scannedAt, '2026-07-10T08:00:00.000Z');
+    assert.deepEqual(body.clients.openai.models, ['gpt-5.6-sol', 'gpt-5.6-terra']);
+    assert.equal(body.clients.openai.defaultModel, 'gpt-5.6-sol');
+    assert.equal(body.clients.openai.modelsSource, 'config');
+    assert.equal(body.clients.anthropic.modelsSource, 'static');
+
+    const otherUserRes = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'other-user' },
+    });
+    assert.equal(otherUserRes.statusCode, 200);
+    const otherUserBody = JSON.parse(otherUserRes.body);
+    assert.equal(otherUserBody.source, 'static-presets-v1');
+    assert.equal(otherUserBody.scannedAt, undefined);
+    assert.equal(otherUserBody.clients.openai.modelsSource, 'static');
+
+    await app.close();
+    resetLocalCliModelsSnapshot();
+  });
+
+  it('GET /api/cat-model-options does not treat an L3 static fallback as a real scan', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { resetLocalCliModelsSnapshot, updateLocalCliModelsSnapshot } = await import(
+      '../dist/utils/local-cli-model-cache.js'
+    );
+    resetLocalCliModelsSnapshot();
+    updateLocalCliModelsSnapshot('static-fallback-user', {
+      scannedAt: '2026-07-10T09:00:00.000Z',
+      clis: [
+        {
+          id: 'codex',
+          label: 'Codex',
+          command: 'codex',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.6-sol',
+          models: [{ id: 'gpt-5.6-sol', source: 'static', isDefault: true }],
+          modelsStatus: 'static_only',
+          installed: true,
+          resolvedPath: '/opt/bin/codex',
+          version: 'codex 0.144.0',
+          versionStatus: 'ok',
+          authStatus: 'unknown',
+          authStatusReason: 'safe',
+          installHint: 'install',
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'static-fallback-user' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.source, 'static-presets-v1');
+    assert.equal(body.scannedAt, undefined);
+    assert.equal(body.clients.openai.modelsSource, 'static');
+
+    await app.close();
+    resetLocalCliModelsSnapshot();
   });
 
   it('GET /api/cats returns roster metadata without source field', async () => {

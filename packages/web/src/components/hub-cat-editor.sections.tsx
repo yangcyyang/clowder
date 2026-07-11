@@ -7,8 +7,8 @@ import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
   autoSlug,
-  CODEX_FAST_MODE_ARG,
   CLIENT_OPTIONS,
+  CODEX_FAST_MODE_ARG,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   joinTags,
@@ -18,6 +18,7 @@ import {
   TOOL_POLICY_OPTIONS,
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
+import { MODEL_SOURCE_LABELS, type ModelCandidateSource } from './hub-cat-model-options';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
@@ -29,21 +30,6 @@ type AssetBrowseResult = {
   homePath: string;
   entries: AssetBrowseEntry[];
 };
-
-export interface LocalCliProbeResult {
-  id: 'claude' | 'codex' | 'gemini' | 'opencode' | 'kimi' | 'cursor' | 'opencli';
-  label: string;
-  command: string;
-  clientId?: HubCatEditorFormState['clientId'];
-  defaultModel?: string;
-  installed: boolean;
-  resolvedPath?: string;
-  version?: string;
-  versionStatus: 'ok' | 'failed' | 'not_installed';
-  authStatus: 'unknown';
-  authStatusReason: string;
-  installHint: string;
-}
 
 const CLI_EFFORT_LABELS: Record<string, string> = {
   low: 'low — 快速思考',
@@ -155,6 +141,7 @@ function AssetCardFilePicker({
 
   return (
     <div
+      role="group"
       aria-label="Asset Card MD Picker"
       className="rounded-[14px] border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] p-3"
     >
@@ -802,6 +789,9 @@ export function AccountSection({
   form,
   hasError,
   modelOptions,
+  modelSource,
+  modelDrifted,
+  modelOptionsError,
   availableProfiles,
   loadingProfiles,
   onChange,
@@ -809,6 +799,9 @@ export function AccountSection({
   form: HubCatEditorFormState;
   hasError?: boolean;
   modelOptions: string[];
+  modelSource?: ModelCandidateSource;
+  modelDrifted: boolean;
+  modelOptionsError: string | null;
   availableProfiles: ProfileItem[];
   loadingProfiles: boolean;
   onChange: (patch: FormPatch) => void;
@@ -886,6 +879,24 @@ export function AccountSection({
                   : '模型标识符，如 claude-sonnet-4-5'
               }
             />
+            {modelOptionsError ? (
+              <p className="rounded-[10px] bg-conn-red-bg px-3 py-2 text-[11px] font-bold text-conn-red-text">
+                {modelOptionsError}
+              </p>
+            ) : null}
+            {modelSource ? (
+              <p className="text-[11px] leading-4 text-cafe-secondary">
+                模型候选来源：
+                <span className="ml-1 rounded-full bg-[var(--console-field-bg)] px-2 py-0.5 font-extrabold text-cafe">
+                  {MODEL_SOURCE_LABELS[modelSource]}
+                </span>
+              </p>
+            ) : null}
+            {modelDrifted ? (
+              <p className="rounded-[10px] bg-conn-orange-bg px-3 py-2 text-[11px] font-bold text-conn-orange-text">
+                当前模型未在最近扫描中发现
+              </p>
+            ) : null}
             {cliEffortOptions ? (
               <SelectField
                 label="思考等级"
@@ -961,82 +972,6 @@ export function AccountSection({
           </>
         )}
       </div>
-    </SectionCard>
-  );
-}
-
-export function LocalCliProbeSection({
-  probes,
-  scanning,
-  error,
-  onScan,
-  onAdopt,
-}: {
-  probes: LocalCliProbeResult[] | null;
-  scanning: boolean;
-  error: string | null;
-  onScan: () => void;
-  onAdopt: (probe: LocalCliProbeResult) => void;
-}) {
-  return (
-    <SectionCard
-      title="本地 CLI 探测"
-      description="点击后只扫描固定 allowlist：claude / codex / gemini / opencode / kimi / cursor / opencli。不会读取凭证文件。"
-    >
-      <div className="flex flex-col gap-2 rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-[12px] leading-5 text-cafe-secondary sm:flex-row sm:items-center sm:justify-between">
-        <span>用于确认后端机器是否能启动本地 Agent CLI；扫描是手动触发，不会后台自动跑。</span>
-        <button
-          type="button"
-          onClick={onScan}
-          disabled={scanning}
-          className="shrink-0 rounded-[9px] bg-cafe-accent px-3 py-1.5 text-[12px] font-bold text-[var(--cafe-bg)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {scanning ? '扫描中…' : '扫描本机 CLI'}
-        </button>
-      </div>
-      {error ? <p className="text-[12px] font-semibold text-conn-red-text">{error}</p> : null}
-      {probes ? (
-        <div className="space-y-2">
-          {probes.map((probe) => (
-            <div
-              key={probe.id}
-              className="flex flex-col gap-2 rounded-[12px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-2 text-[13px] font-extrabold text-cafe">
-                  <span>{probe.installed ? '●' : '○'}</span>
-                  <span>{probe.label}</span>
-                  <span className="font-mono text-[11px] text-cafe-secondary">{probe.command}</span>
-                  <span
-                    className={[
-                      'rounded-full px-2 py-0.5 text-[10px] font-extrabold',
-                      probe.installed
-                        ? 'bg-conn-green-bg text-conn-green-text'
-                        : 'bg-[var(--console-field-bg)] text-cafe-secondary',
-                    ].join(' ')}
-                  >
-                    {probe.installed ? '已安装' : '未检测到'}
-                  </span>
-                </p>
-                <p className="mt-1 truncate text-[11px] text-cafe-secondary" title={probe.resolvedPath}>
-                  {probe.installed
-                    ? `${probe.version ?? '版本未知'} · 认证状态：${probe.authStatusReason}`
-                    : `安装建议：${probe.installHint}`}
-                </p>
-              </div>
-              {probe.installed && probe.clientId ? (
-                <button
-                  type="button"
-                  onClick={() => onAdopt(probe)}
-                  className="shrink-0 rounded-[9px] bg-[var(--console-field-bg)] px-3 py-1.5 text-[12px] font-bold text-cafe-secondary transition hover:text-cafe"
-                >
-                  用 {probe.label}
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
     </SectionCard>
   );
 }
