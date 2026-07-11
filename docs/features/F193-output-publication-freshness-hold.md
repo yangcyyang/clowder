@@ -135,6 +135,7 @@ in_context_observability:
 | 2026-07-11 | 完成统一出口门、callback/stdout review、续跑恢复、过期扫描、灰度开关与状态 UI |
 | 2026-07-11 | 完成私有性审计与回归验证：工具参数、Rich/audio、task event、transcript、memory、终态草稿均 fail closed |
 | 2026-07-11 | 独立审查返回 CHANGES_REQUESTED；完成 queued 私稿 barrier、全工具事件缓冲、成功重放幂等、callback epoch 隔离、动态 A2A 路由冻结、Redis 安全水位与 Web 切线程竞态修复 |
+| 2026-07-11 | 第二轮独立审查返回 CHANGES_REQUESTED；关闭 Web replay 二次 Push/continuation、公共私稿读取与普通 delivery 旁路、Redis 批量 reveal 部分提交，以及跨 InvocationQueue 的 A2A protected lineage |
 
 ## Close Gate Report
 
@@ -142,7 +143,7 @@ in_context_observability:
 close_gate_report:
   feature_id: F193
   spec_path: docs/features/F193-output-publication-freshness-hold.md
-  head_sha: 7128ac9
+  head_sha: 8ade644
   report_date: 2026-07-11
 
   ac_matrix:
@@ -249,7 +250,10 @@ close_gate_report:
           description: QueueEntry、task event 与 socket 仅携带安全元数据，成功 replay 不重复 fanout
         - kind: test
           ref: packages/api/test/redis-message-store-freshness.test.js
-          description: queued review 私稿只形成结构 barrier，不 hydrate、不进入 delta
+          description: queued review 私稿不进入 delta/getById/scanAll，普通 markDelivered 无法绕过专用 release
+        - kind: test
+          ref: packages/api/test/messages-endpoint.test.js
+          description: around history 与 exact-id/reply preview 公共读取边界均隐藏私稿
       resolution: null
     - ac_id: AC-D1
       status: met
@@ -270,6 +274,9 @@ close_gate_report:
         - kind: test
           ref: packages/api/test/streaming-outbound-hook.test.js
           description: Connector streaming placeholder 只接收 Hold 状态
+        - kind: test
+          ref: packages/api/test/freshness-protected-a2a-lineage.test.js
+          description: Web/Queue/callback 的 protected lineage 跨 Queue 传播，非白名单 child 不回退 legacy
       resolution: null
     - ac_id: AC-D3
       status: met
@@ -297,8 +304,8 @@ close_gate_report:
 
 - 原始需求：`2026-07-11-Raft借鉴-Clowder优化点与执行方案.md` 的 P0-1 Freshness Hold；16 条 AC 均已覆盖，不扩张到 ACK 或发布协调器。
 - 设计稿检查：仓库只命中 `docs/design/f190-console-layout.pen`，与 F193 无关；状态 UI 已在当前 worktree 的 3013 页面配合隔离 mock API 3014 实际预览。
-- 首轮 F193 API 矩阵：202 项中 201 项通过；独立审查修复后的 F193 + consumer 矩阵 195 项中 194 项通过；两次唯一失败均为目标分支同样存在的 Connector 静默回复旧语义，新增 Freshness Connector replay 用例通过。
-- Redis：`127.0.0.1:6398/15` 串行 16/16 通过；MCP server 173/173 通过；Web 状态条 2/2 通过。
+- 最新 F193 + consumer 矩阵 229 项中 228 项通过；唯一失败仍为目标分支 45 项中同样失败的 Connector 静默回复旧语义，新增私稿边界、replay 与 A2A lineage 用例全部通过。
+- Redis：`127.0.0.1:6398/15` 串行 17/17 通过（Message 11、Hold 5、delta paging 1）；MCP server 173/173 通过；Web 状态条 2/2 通过。
 - 全仓递归 build 与 lint 均通过（lint 只有既有 warning）；变更范围 Biome 61 文件 0 error；`git diff --check` 与 artifact hygiene 通过。
 - 路由大基线仍为 72/98，与目标分支完全一致；Web 全量为 81 个既有失败、2917 通过，目标分支为相同 81 个失败、2915 通过，新增 2 项均为 F193 通过项。
 - 全仓 `pnpm check` 被外部 `~/.claude/skills/gstack` 的 1534 个既有格式错误阻断；changed-scope Biome 为 0 error。env registry 的 6 个既有缺口已在目标分支同命令复现，本次新增的三个 F193 变量已登记。

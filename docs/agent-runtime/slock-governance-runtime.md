@@ -130,17 +130,17 @@ truncated, releasedMessageId/messageId
 ### 故障恢复与运维边界
 
 - 发布恢复顺序是 `reviewing → queued → released → delivered`；重试依靠 hold version CAS 与 `freshness-hold:<holdId>` 消息幂等键，不依靠时间戳或消息 ID 大小。普通 successful submit 也从 `(invocationId, submissionKey)` 派生稳定幂等键，并把 `replayed` 向上传给所有 consumer，禁止二次 fanout。
-- queued review publication 会先占据 freshness 水位并形成结构化私有 barrier，但在 released CAS 成功前不进 history、不会被 delta hydrate，也不会推进 reviewer cursor；恢复时要么补完同一条消息，要么保持私有，不得生成第二条。
+- queued review publication 会先占据 freshness 水位并形成结构化私有 barrier，但在 released CAS 成功前不进 history、不会被 delta / public `getById` / `scanAll` / around / reply preview hydrate，也不会推进 reviewer cursor；普通 `markDelivered` 无权清 marker，Gate 只能在 released 后通过专用 raw capability 补完同一条消息。
 - released/discarded 迁移在 memory 与 Redis 的同一终态 CAS 内擦除 draft/delta；`needs_attention` 为人工恢复需要，继续保留完整私稿且不设自动 TTL。
 - 30 分钟 deadline 与最多两轮 review 都以 fail closed 收敛到 `needs_attention`。Deadline scheduler 在 API 启动时立即 sweep，随后默认每 60 秒调用 `expireDue()`；进程运行且 store 可用时，到期 held/reviewing 会在后续轮询中收敛。当前仍没有 publication reconciler，`reviewing + queued` 或 `released + queued` 在无重试时可能长期保持私有，但不得自动发布。
 - `freshness_review` QueueEntry 与它的私有稿件/delta payload 是进程内状态，重启会丢失自动 review 调度；Redis hold 本体仍保留。当前没有 restart reconciler，所以运维上需将“稿件仍安全保留”与“自动 review 已恢复”区分开。
 - 如果 HoldStore、MessageStore 或出口 verdict 无法确认，运行时应报错并保留稿件，禁止回退到 legacy 发布。
-- Redis freshness 水位在 `9007199254740991` 达到安全上限；append / restore / reveal 必须在任何 hash/index 变更前 fail closed。扩容到更大序列前必须迁出 ZSET double score，不能静默继续 INCR。
+- Redis freshness 水位在 `9007199254740991` 达到安全上限；append / restore / reveal 必须在任何 hash/index 变更前 fail closed。一次多 whisper reveal 的候选复核、容量检查与全部 HSET/ZREM/ZADD 位于同一个 Lua，不能逐条提交。扩容到更大序列前必须迁出 ZSET double score，不能静默继续 INCR。
 
 ### 渐进启用与回滚
 
 - `CAT_CAFE_FRESHNESS_HOLD_ENABLED=true` 才构造运行时 Gate；默认关闭，避免未验证环境被一次性切换。
-- `CAT_CAFE_FRESHNESS_HOLD_CATS` 与 `CAT_CAFE_FRESHNESS_HOLD_THREADS` 是可选逗号白名单；同一路由只有全部初始目标猫都命中时才启用。路线一旦选中 protected，其运行中动态发现的 A2A 后代也继承 protected 语义，避免同一路线一半缓冲、一半 legacy。
+- `CAT_CAFE_FRESHNESS_HOLD_CATS` 与 `CAT_CAFE_FRESHNESS_HOLD_THREADS` 是可选逗号白名单；同一路由只有全部初始目标猫都命中时才启用。路线一旦选中 protected，Web、Queue、callback 产生的 A2A QueueEntry 都携带不可变 lineage，非白名单后代的新 route 强制使用 `forProtectedRoute()`，避免跨 Queue 后一半 protected、一半 legacy。
 - 关闭总开关只影响新的 invocation；既有 Hold 仍由同一个 store、active API 与 expiry scheduler fail closed 管理，不能因回滚自动发布。
 
 ### 验证方法与当前验收边界

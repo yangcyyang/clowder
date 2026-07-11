@@ -250,8 +250,8 @@ Freshness 只看受信任结构字段，不根据正文猜测“这是不是进�
 Delivery 生命周期的规则：
 
 - 普通 `queued` 在 append 时立即取得序号并推进水位，避免另一只猫跨过正在排队的新意图；但它在 delivered 前不进 history，不触发 `onAppend`。
-- Hold release 的内部 queued publication 额外带受信任私有 marker：它仍占据水位作为 barrier，但 delivered 前不得被 delta hydrate 或返回，review cursor 也不得跨过；release 崩溃时宁可阻塞后续 review，也不能暴露旧稿。
-- `markDelivered` 只改变可见性和交付时间，不再分配新水位。
+- Hold release 的内部 queued publication 额外带受信任私有 marker：它仍占据水位作为 barrier，但 delivered 前不得被 delta hydrate、`getById`、`scanAll`、around history 或 reply preview 返回，review cursor 也不得跨过；只有 Gate 的显式 raw lookup 能恢复该消息。
+- 普通 `markDelivered` 不能清除 review marker；只有 Hold `released` CAS 之后调用专用 publication delivery primitive 才能转为 delivered。两种 delivery 都只改变可见性和交付时间，不再分配新水位。
 - `markCanceled` 会从 freshness 索引移除该消息。
 
 Audience 与可见性一致：public 消息对 thread 内所有猫推进水位；未 reveal 的 whisper 只对 `whisperTo` 收件猫推进，reveal 后才转为 public 影响。
@@ -271,9 +271,9 @@ MessageStore 给每个 thread 维护一个单调递增序列，每条 freshness-
 
 普通 append 与条件 append 在 Redis 中共用同一 Lua 线性化点，不存在 `check → append` 的 TOCTOU 窗口。并行路由中同一 parent invocation group 的 sibling 输出不互相卡住；任何用户或独立 invocation 的新 append 仍会触发 hold。
 
-成功提交也必须幂等：Gate 从 `(invocationId, submissionKey)` 派生稳定 key；同一提交的重试返回原 messageId 与 `replayed=true`。Route、Web、Queue、Connector、Push 和 callback consumer 必须把 replay 当作“已完成但本次无新发布”，不得再次发正文、工具详情、Rich/audio、stream end 或原始 task payload。
+成功提交也必须幂等：Gate 从 `(invocationId, submissionKey)` 派生稳定 key；同一提交的重试返回原 messageId 与 `replayed=true`。Route、Web、Queue、Connector、Push、continuation 和 callback consumer 必须把 replay 当作“已完成但本次无新发布”，不得再次发正文、工具详情、Rich/audio、stream end、通知、续跑任务或原始 task payload。
 
-Redis 当前用 ZSET score 维护 audience 顺序，因此水位上限固定为 `9007199254740991`。到达上限后 append / restore / whisper reveal 都在任何状态写入前 fail closed；禁止让 Lua double 把水位转为科学计数法或发生相邻 score 碰撞。
+Redis 当前用 ZSET score 维护 audience 顺序，因此水位上限固定为 `9007199254740991`。到达上限后 append / restore / whisper reveal 都在任何状态写入前 fail closed；批量 reveal 必须在单个 Lua 内先核完整批容量，再统一更新 hash/index，禁止部分提交，也禁止让 Lua double 把水位转为科学计数法或发生相邻 score 碰撞。
 
 Delta 默认最多返回 50 条。如果 `truncated: true`，`observedWatermark` 只能前进到本页最后一条已物化消息，不能跳过 Agent 尚未看见的消息。
 
@@ -324,7 +324,7 @@ Stdout 已结束、无法把 tool result 回填原调用时，运行时使用独
 - 初次提交以 `(invocationId, submissionKey)` 去重。重试在任何 append 前先重放已有 hold 或终态，不会因水位回落复活旧稿。MCP `post_message` 每次工具调用会生成 `clientMessageId`，同一传输重试复用该 ID；主动再次调用时应显式复用 ID。Stdout 使用确定性 submission key。
 - review 用 version CAS 保证只有一个 reviewer 赢得迁移；待发稿用 `freshness-hold:<holdId>` 作为消息幂等键。
 - 发布顺序是 `reviewing → queued append → released CAS → delivered`。queued 阶段不进 history；即使 API 在中间崩溃，也优先“多保留一条私有稿”而不是重复发布。
-- 在 queued append 后、released CAS 前崩溃，同一 review 重试可从 `reviewing` 恢复并取回同一条幂等消息；released 后、delivered 前崩溃，重放 released 会补做 `markDelivered`。并发败者不得取消已被胜者引用的消息。
+- 在 queued append 后、released CAS 前崩溃，同一 review 重试可从 `reviewing` 恢复并通过私有 raw capability 取回同一条幂等消息；released 后、delivered 前崩溃，重放 released 会补做专用 publication delivery。并发败者不得取消已被胜者引用的消息。
 - 当前没有独立 publication outbox/reconciler。如果崩溃后永远没有后续重试，`reviewing + queued` 或 `released + queued` 可能长期保持私有；终态引用丢失会报错而不会重复发布。这是已知 fail-closed 运维边界。
 
 ## 与现有模块的关系

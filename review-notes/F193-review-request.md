@@ -10,7 +10,7 @@ created: 2026-07-11
 Review-Target-ID: freshness-hold
 Branch: codex/freshness-hold
 Range: b1a1683..HEAD
-Review-Fix-Head: 7128ac9
+Review-Fix-Head: 8ade644
 
 ## What
 
@@ -46,7 +46,7 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 
 ## Next Action
 
-请同一独立 reviewer 对照原始需求、F193 AC、第一次 review findings、状态机/安全边界和 `7128ac9` 修复差异进行只读复审；逐项确认原 2×P0、3×P1、1×P2 及残余风险是否关闭。无阻塞项时明确给出 APPROVE。
+请同一独立 reviewer 对照原始需求、F193 AC、前两次 review findings、状态机/安全边界和 `8ade644` 修复差异进行只读复审；重点确认 public/private lookup capability、专用 release、批量 reveal 单 Lua 与跨 Queue protected lineage。无阻塞项时明确给出 APPROVE。
 
 ## Re-review Fix Map
 
@@ -62,6 +62,10 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 | 残余：active ZSET 膨胀 | release/discard CAS 同 Lua 原子 ZREM | Redis Hold active-index tests |
 | 残余：旧 thread fetch 迟到 | AbortController + request generation | FreshnessHoldBar thread isolation test |
 | 残余：私稿派生路由提示抢跑 | routing syntax/inline feedback 延后到 published | held inline routing hint test |
+| 二审 P1：Web replay 二次 Push/continuation | invocation-wide 与 per-cat 新发布判定；replay-only 零 fanout | Web Push + continuation route tests |
+| 二审 P1：queued 私稿公共读取/普通 delivery 旁路 | public getById/scanAll/around/reply preview 默认隐藏；Gate raw capability + 专用 release | exact-id/around/reply preview/marker delivery tests |
+| 二审 P1：动态 A2A 跨 Queue 恢复 legacy | QueueEntry immutable lineage；Web/Queue/callback 传播；child 强制 protected Gate | freshness-protected-a2a-lineage + route handoff tests |
+| 二审 P2：多 whisper reveal 部分提交 | 单 Lua 发现候选、精确容量预检、整批 hash/index 更新 | Redis multi-whisper MAX_SAFE test |
 
 ## Review Sandbox（必填）
 
@@ -81,8 +85,8 @@ Agent 组织回答期间若用户或另一 Agent 写入独立新消息，旧回�
 
 - `pnpm -r --if-present run build` → exit 0
 - `pnpm lint` → exit 0（仅仓库既有 warning）
-- 首轮 F193 API matrix → 201/202；修复后 F193 + consumer matrix → 194/195；唯一失败仍在目标分支同命令复现，新增 replay consumer 用例全部通过
-- Redis F193（127.0.0.1:6398/15，串行）→ 16/16
+- 最新 F193 + consumer matrix → 228/229；唯一失败在目标分支同文件 44/45 复现，新增私稿边界、replay 与 A2A lineage 用例全部通过
+- Redis F193（127.0.0.1:6398/15，串行）→ 17/17
 - MCP server → 173/173
 - Web FreshnessHoldBar → 2/2
 - Web 全量差分：分支 81 fail / 2917 pass；目标分支相同 81 fail / 2915 pass
