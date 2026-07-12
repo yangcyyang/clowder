@@ -20,15 +20,20 @@ import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import { ImagePreview } from './ImagePreview';
 import { MentionPicker } from './MentionPicker';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref } from './ThreadSidebar/thread-navigation';
 import { ResizeHandle } from './workspace/ResizeHandle';
+import { compressImage } from '@/utils/compressImage';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 520;
 const THREAD_PANEL_MIN_WIDTH = 420;
 const THREAD_PANEL_FALLBACK_MAX_WIDTH = 720;
 const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.66;
+const MAX_THREAD_IMAGES = 5;
+const MAX_THREAD_IMAGE_BYTES = 10 * 1024 * 1024;
+const THREAD_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
@@ -86,6 +91,28 @@ type ViewInChannelWindow = {
   history: { pushState: (data: unknown, unused: string, url?: string | URL | null) => void };
   dispatchEvent: (event: Event) => boolean;
 };
+
+export function createInlineThreadImageFormData({
+  content,
+  threadId,
+  userId,
+  replyTo,
+  images,
+}: {
+  content: string;
+  threadId: string;
+  userId: string;
+  replyTo?: string;
+  images: File[];
+}): FormData {
+  const formData = new FormData();
+  formData.append('content', content);
+  formData.append('threadId', threadId);
+  formData.append('userId', userId);
+  if (replyTo) formData.append('replyTo', replyTo);
+  for (const image of images) formData.append('images', image);
+  return formData;
+}
 
 export function getViewInChannelHref(parentThreadId: string, sourceMessageId: string): string {
   return `${getThreadHref(parentThreadId)}?highlight=${encodeURIComponent(sourceMessageId)}`;
@@ -283,7 +310,10 @@ export function InlineThreadPanel({
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
+  const [images, setImages] = useState<File[]>([]);
+  const [isPreparingImages, setIsPreparingImages] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -555,8 +585,8 @@ export function InlineThreadPanel({
   }, [loading, onReplyCountChange, replyMessages.length, sourceMessage.id, threadId]);
 
   const handleSend = useCallback(async () => {
-    const content = input.trim();
-    if (!content || sending) return;
+    const content = input.trim() || (images.length > 0 ? '上传图片' : '');
+    if (!content || sending || isPreparingImages) return;
 
     setSending(true);
     setSendError(null);
@@ -564,21 +594,36 @@ export function InlineThreadPanel({
       if (isUnsafeInlineThreadTarget(threadId, sourceMessage)) {
         throw new Error('Thread 未创建成功，已阻止把回复写入主频道');
       }
-      const res = await apiFetch('/api/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content,
-          threadId,
-          userId: getUserId(),
-          ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
-        }),
-      });
+      const res = await apiFetch(
+        '/api/messages',
+        images.length > 0
+          ? {
+              method: 'POST',
+              body: createInlineThreadImageFormData({
+                content,
+                threadId,
+                userId: getUserId(),
+                ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
+                images,
+              }),
+            }
+          : {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content,
+                threadId,
+                userId: getUserId(),
+                ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
+              }),
+            },
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.detail ?? body?.error ?? `HTTP ${res.status}`);
       }
       setInput('');
+      setImages([]);
       closeMentionPicker();
       onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1, { authoritative: false });
       void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(() => startReplyPolling());
@@ -590,6 +635,8 @@ export function InlineThreadPanel({
   }, [
     closeMentionPicker,
     input,
+    images,
+    isPreparingImages,
     loadMessages,
     loadQueueRuntime,
     onReplyCountChange,
@@ -600,6 +647,57 @@ export function InlineThreadPanel({
     startReplyPolling,
     threadId,
   ]);
+
+  const addImages = useCallback(async (candidates: File[]) => {
+    const capacity = MAX_THREAD_IMAGES - images.length;
+    if (capacity <= 0) {
+      setSendError(`每条消息最多 ${MAX_THREAD_IMAGES} 张图片`);
+      return;
+    }
+
+    setIsPreparingImages(true);
+    try {
+      const accepted: File[] = [];
+      let rejected = 0;
+      for (const file of candidates) {
+        if (accepted.length >= capacity) break;
+        if (!THREAD_IMAGE_TYPES.has(file.type) || file.size > MAX_THREAD_IMAGE_BYTES) {
+          rejected += 1;
+          continue;
+        }
+        accepted.push(await compressImage(file));
+      }
+      if (rejected > 0 || candidates.length > capacity) {
+        setSendError(`仅支持 PNG、JPEG、GIF、WebP，单张不超过 10MB，最多 ${MAX_THREAD_IMAGES} 张`);
+      } else {
+        setSendError(null);
+      }
+      if (accepted.length > 0) setImages((current) => [...current, ...accepted].slice(0, MAX_THREAD_IMAGES));
+    } finally {
+      setIsPreparingImages(false);
+    }
+  }, [images.length]);
+
+  const handleImageSelect = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      void addImages(Array.from(event.target.files ?? []));
+      event.target.value = '';
+    },
+    [addImages],
+  );
+
+  const handleImagePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const pastedImages = Array.from(event.clipboardData.items)
+        .filter((item) => item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
+      if (pastedImages.length === 0) return;
+      event.preventDefault();
+      void addImages(pastedImages);
+    },
+    [addImages],
+  );
 
   const handleInputChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -911,6 +1009,15 @@ export function InlineThreadPanel({
 
         <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-4">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
+          <ImagePreview files={images} onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))} />
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            className="hidden"
+            onChange={handleImageSelect}
+          />
           <div className="slock-composer-frame relative">
             {showMentionPicker && (
               <MentionPicker
@@ -934,6 +1041,7 @@ export function InlineThreadPanel({
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
+              onPaste={handleImagePaste}
               placeholder="Message thread"
               rows={2}
               className="h-[84px] w-full resize-none border-0 bg-transparent px-3 py-2 pr-12 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none placeholder:text-[var(--cafe-text-muted)]"
@@ -941,7 +1049,7 @@ export function InlineThreadPanel({
             <button
               type="button"
               onClick={handleSend}
-              disabled={!input.trim() || sending}
+              disabled={(!input.trim() && images.length === 0) || sending || isPreparingImages}
               className="slock-send-button absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center disabled:cursor-not-allowed disabled:opacity-45"
               aria-label={sending ? '发送中' : '发送 Thread 回复'}
               title={sending ? '发送中...' : '发送'}
@@ -953,7 +1061,16 @@ export function InlineThreadPanel({
           </div>
           <div className="mt-2 flex items-center justify-between">
             <div className="flex items-center gap-2 text-[var(--cafe-text-muted)]">
-              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">▧</span>
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={sending || isPreparingImages || images.length >= MAX_THREAD_IMAGES}
+                className="slock-inline-control flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="上传图片"
+                title="上传图片"
+              >
+                ▧
+              </button>
               <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">⌘</span>
             </div>
             <span className="text-[11px] text-[var(--cafe-text-muted)]">Enter 发送 · Shift+Enter 换行</span>
