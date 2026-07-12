@@ -14,6 +14,7 @@ import { describe, test } from 'node:test';
 
 const EXPECTED_TOOLS = [
   // Callback tools (chat + task + ack)
+  'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_review_held_message',
   'cat_cafe_get_pending_mentions',
@@ -99,6 +100,7 @@ const EXPECTED_TOOLS = [
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
+  'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_review_held_message',
   'cat_cafe_get_pending_mentions',
@@ -348,6 +350,7 @@ describe('MCP Server Tool Registration', () => {
 // --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
 
 const KNOWN_WRITE_TOOLS = [
+  'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_review_held_message',
   'cat_cafe_ack_mentions',
@@ -443,7 +446,11 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
       const { createServer } = await import(${JSON.stringify(distIndexUrl)});
       const server = createServer();
       const names = Object.keys(server._registeredTools);
-      if (!names.includes('cat_cafe_post_message') || !names.includes('cat_cafe_get_thread_context')) {
+      if (
+        !names.includes('cat_cafe_post_progress') ||
+        !names.includes('cat_cafe_post_message') ||
+        !names.includes('cat_cafe_get_thread_context')
+      ) {
         console.error(JSON.stringify(names.sort()));
         process.exit(1);
       }

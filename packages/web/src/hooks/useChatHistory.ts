@@ -506,7 +506,7 @@ export function useChatHistory(threadId: string) {
             contentBlocks?: unknown[];
             toolEvents?: unknown[];
             metadata?: ChatMessageData['metadata'];
-            origin?: 'stream' | 'callback' | 'briefing';
+            origin?: 'stream' | 'callback' | 'briefing' | 'progress';
             thinking?: string;
             extra?: {
               rich?: { v: number; blocks: unknown[] };
@@ -514,6 +514,7 @@ export function useChatHistory(threadId: string) {
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing' | 'progress_heartbeat';
+              agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
               slockThread?: { branchThreadId: string; replyCount: number };
             };
             timestamp: number;
@@ -567,6 +568,7 @@ export function useChatHistory(threadId: string) {
               m.extra?.stream ||
               m.extra?.scheduler ||
               m.extra?.systemKind ||
+              m.extra?.agentCommunication ||
               m.extra?.slockThread
                 ? {
                     extra: {
@@ -575,6 +577,7 @@ export function useChatHistory(threadId: string) {
                       ...(m.extra.stream ? { stream: m.extra.stream } : {}),
                       ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
                       ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                      ...(m.extra.agentCommunication ? { agentCommunication: m.extra.agentCommunication } : {}),
                       ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
                     },
                   }

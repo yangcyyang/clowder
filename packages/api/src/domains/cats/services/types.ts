@@ -195,12 +195,16 @@ export interface AgentMessage {
   isFinal?: boolean;
   /** Provider/model metadata (set by agent services) */
   metadata?: MessageMetadata;
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
-  origin?: 'stream' | 'callback';
+  /** Message origin: progress is a non-terminal Agent-authored acknowledgement/heartbeat. */
+  origin?: 'stream' | 'callback' | 'progress';
   /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
   messageId?: string;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
-  extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string }; targetCats?: string[] };
+  extra?: {
+    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    targetCats?: string[];
+    agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+  };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
   /** F121: Hydrated preview of the replied-to message */

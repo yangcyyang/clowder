@@ -174,9 +174,13 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
     });
 
-    assert.ok(prompt.includes('开工预告与长任务心跳'));
-    assert.ok(prompt.includes('行动任务认领后、深入执行前'));
-    assert.ok(prompt.includes('预计超过 30 秒'));
+    assert.ok(prompt.includes('即时开工回执与长任务心跳'));
+    assert.ok(prompt.includes('cat_cafe_post_progress'));
+    assert.ok(prompt.includes("kind='ack'"));
+    assert.ok(prompt.includes('第一次耗时工具调用前'));
+    assert.ok(prompt.includes('纯问答、闲聊或预计 30 秒内可直接完成'));
+    assert.ok(prompt.includes('45–60 秒'));
+    assert.ok(prompt.includes('不是最终交付'));
   });
 
   test('omits MCP tools when mcpAvailable is false', async () => {

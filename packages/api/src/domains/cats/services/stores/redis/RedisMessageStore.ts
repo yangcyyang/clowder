@@ -844,8 +844,11 @@ export class RedisMessageStore {
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
-      ...(data.origin === 'stream' || data.origin === 'callback' || data.origin === 'briefing'
-        ? { origin: data.origin as 'stream' | 'callback' | 'briefing' }
+      ...(data.origin === 'stream' ||
+      data.origin === 'callback' ||
+      data.origin === 'briefing' ||
+      data.origin === 'progress'
+        ? { origin: data.origin as 'stream' | 'callback' | 'briefing' | 'progress' }
         : {}),
       ...(data.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
       ...(data.whisperTo ? { whisperTo: safeParseMentions(data.whisperTo) } : {}),
@@ -1545,8 +1548,8 @@ export class RedisMessageStore {
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),
-        ...(d.origin === 'stream' || d.origin === 'callback' || d.origin === 'briefing'
-          ? { origin: d.origin as 'stream' | 'callback' | 'briefing' }
+        ...(d.origin === 'stream' || d.origin === 'callback' || d.origin === 'briefing' || d.origin === 'progress'
+          ? { origin: d.origin as 'stream' | 'callback' | 'briefing' | 'progress' }
           : {}),
         ...(d.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
         ...(d.whisperTo ? { whisperTo: safeParseMentions(d.whisperTo) } : {}),

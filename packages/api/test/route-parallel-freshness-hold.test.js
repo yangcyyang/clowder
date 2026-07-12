@@ -51,6 +51,22 @@ async function createHarness(injectNewMessage, outputMode = 'text') {
           timestamp: Date.now(),
         };
       } else {
+        if (outputMode === 'progress') {
+          yield {
+            type: 'tool_use',
+            catId: 'opus',
+            toolName: 'cat_cafe_post_progress',
+            toolInput: { kind: 'ack', content: '我先核对并行链路。' },
+            timestamp: Date.now(),
+          };
+          yield {
+            type: 'tool_result',
+            catId: 'opus',
+            toolName: 'cat_cafe_post_progress',
+            content: JSON.stringify({ status: 'ok', messageId: 'parallel-progress-1' }),
+            timestamp: Date.now(),
+          };
+        }
         yield { type: 'text', catId: 'opus', content: '并行旧回答', timestamp: Date.now() };
       }
       if (injectNewMessage) {
@@ -182,6 +198,25 @@ async function createCallbackHarness(disposition) {
 }
 
 describe('routeParallel Freshness Hold', () => {
+  test('keeps final stdout publication after non-terminal cat_cafe_post_progress', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { deps, messageStore } = await createHarness(false, 'progress');
+    const persistenceContext = { failed: false, errors: [], egressByCat: {} };
+
+    for await (const _message of routeParallel(deps, ['opus'], '开始', 'user-1', 'thread-1', {
+      persistenceContext,
+      parentInvocationId: 'parallel-parent-progress',
+    })) {
+      // drain
+    }
+
+    const formal = messageStore.getRecent(20).filter((message) => message.catId === 'opus');
+    assert.equal(formal.length, 1);
+    assert.equal(formal[0].origin, 'stream');
+    assert.equal(formal[0].content, '并行旧回答');
+    assert.equal(persistenceContext.egressByCat.opus.disposition, 'published');
+  });
+
   for (const callbackDisposition of ['published', 'replayed', 'held', 'discarded', 'failed']) {
     test(`treats callback ${callbackDisposition} with serial-compatible stdout fallback semantics`, async () => {
       const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');

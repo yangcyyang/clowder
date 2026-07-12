@@ -427,6 +427,40 @@ describe('#573: stream store dedup when cat_cafe_post_message used', () => {
     assert.equal(streamAppends.length, 0, 'should NOT persist stream output when cat_cafe_post_message was used');
   });
 
+  it('keeps the final stream publication after non-terminal cat_cafe_post_progress', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'cat_cafe_post_progress',
+          toolInput: { kind: 'ack', content: '我先核对消息链路。' },
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          toolName: 'cat_cafe_post_progress',
+          content: JSON.stringify({ status: 'ok', messageId: 'progress-msg-1' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: '最终交付正文', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _message of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    assert.equal(streamAppends.length, 1);
+    assert.equal(streamAppends[0].content, '最终交付正文');
+  });
+
   it('augments the callback-stored message with stream-only metadata without duplicating the stream bubble', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];

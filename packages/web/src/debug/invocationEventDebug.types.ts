@@ -75,7 +75,7 @@ export type StoredDebugEvent = {
   recoveryAction?: string;
   violationKind?: string;
   level?: 'warn' | 'error';
-  origin?: 'stream' | 'callback' | 'briefing';
+  origin?: 'stream' | 'callback' | 'briefing' | 'progress';
 };
 
 export type DebugEventInput = Partial<StoredDebugEvent> & {

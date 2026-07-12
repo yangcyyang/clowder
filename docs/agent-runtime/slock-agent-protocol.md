@@ -197,6 +197,19 @@ newMessages = messages after lastProcessedCursor in same surface
 - push
 - 你来做
 
+### 4.5 即时开工回执
+
+action 认领成功且 invocation 已真正开始后，Agent 必须在第一次耗时工具调用前，
+通过 `cat_cafe_post_progress(kind='ack')` 发一条任务专属的自然语言回执。
+该消息固定为 `messageClass=status`、`origin=progress`，不参与 A2A 路由，
+不推进 Freshness watermark，也不把本轮 callback 标记为最终发布。
+
+纯问答、闲聊和预计 30 秒内完成的短任务不单独发回执。长任务只在阶段变化且
+距上次可见更新约 45–60 秒时发送 `kind='heartbeat'`；最终交付仍走正常输出路径。
+
+禁止恢复 synthetic `agent_ack` / “已接球”系统气泡，也禁止复用终态
+`post-message` 发送开工回执，因为终态 callback 会抑制后续 stdout 正文。
+
 ### 5. 执行与交付
 
 执行任务时，Agent 输出必须包含验收证据：

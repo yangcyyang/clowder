@@ -206,6 +206,14 @@ const postMessageSchema = z.object({
   targetCats: z.array(z.string().min(1)).optional(),
 });
 
+const postProgressSchema = z.object({
+  content: z.string().min(1).max(2000),
+  kind: z.enum(['ack', 'heartbeat']),
+  threadId: z.string().min(1).optional(),
+  replyTo: z.string().optional(),
+  clientMessageId: z.string().min(1).max(200),
+});
+
 const freshnessReviewSchema = z.object({
   action: z.enum(['replace', 'send_draft', 'discard']),
   expectedVersion: z.number().int().positive(),
@@ -456,6 +464,145 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   registerCallbackAuthHook(app, registry, {
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
+  });
+
+  app.post('/api/callbacks/post-progress', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = postProgressSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const { content, kind, threadId, replyTo, clientMessageId } = parsed.data;
+    const storedContent = sanitizeAgentVisibleOutput(content);
+    if (!storedContent.trim()) {
+      reply.status(400);
+      return { error: 'Progress content is empty after sanitization' };
+    }
+    const routingAnalysis = analyzeA2AMentions(storedContent, createCatId(principal.catId));
+    if (routingAnalysis.mentions.length > 0 || routingAnalysis.routing_warnings.length > 0) {
+      reply.status(400);
+      return { error: 'Progress messages cannot route or mention other Agents' };
+    }
+
+    let effectiveThreadId: string;
+    let effectiveInvocationId: string | undefined;
+
+    if (principal.kind === 'agent_key') {
+      const threadResult = await resolvePrincipalThread(principal, threadId, { threadStore });
+      if (!threadResult.ok) {
+        reply.status(threadResult.statusCode);
+        return { error: threadResult.error };
+      }
+      effectiveThreadId = threadResult.threadId;
+    } else {
+      if (!(await registry.isLatest(principal.invocationId))) {
+        return { status: 'stale_ignored', clientMessageId };
+      }
+      if (threadId && threadId !== principal.threadId) {
+        reply.status(400);
+        return { error: 'Progress messages must stay in the current invocation thread' };
+      }
+      effectiveThreadId = principal.threadId;
+      effectiveInvocationId = principal.parentInvocationId ?? principal.invocationId;
+    }
+
+    let validatedReplyTo: string | undefined;
+    if (replyTo) {
+      const parentMsg = await messageStore.getById(replyTo);
+      if (parentMsg && parentMsg.threadId === effectiveThreadId) validatedReplyTo = replyTo;
+    }
+
+    const agentCommunication = {
+      kind,
+      ...(effectiveInvocationId ? { invocationId: effectiveInvocationId } : {}),
+    } as const;
+    const invocationAckKey =
+      principal.kind === 'invocation' && kind === 'ack'
+        ? `agent-progress:ack:${principal.catId}`
+        : `agent-progress:${clientMessageId}`;
+    const storageIdempotencyKey =
+      principal.kind === 'invocation' && kind === 'ack'
+        ? `agent-progress:${principal.invocationId}:${principal.catId}:ack`
+        : `agent-progress:${principal.kind}:${principal.catId}:${clientMessageId}`;
+    const storedMsg = await messageStore.append({
+      threadId: effectiveThreadId,
+      userId: principal.userId,
+      catId: principal.catId,
+      content: storedContent,
+      messageClass: 'status',
+      mentions: [],
+      origin: 'progress',
+      timestamp: Date.now(),
+      extra: {
+        agentCommunication,
+      },
+      ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+      idempotencyKey: storageIdempotencyKey,
+    });
+
+    if (principal.kind === 'agent_key') {
+      if (!agentKeyRegistry) {
+        reply.status(503);
+        return { error: 'Agent-key registry unavailable' };
+      }
+      const isFirst = await agentKeyRegistry.claimClientMessageId(principal.agentKeyId, invocationAckKey);
+      if (!isFirst) return { status: 'duplicate', clientMessageId, messageId: storedMsg.id };
+    } else {
+      const isFirst = await registry.claimClientMessageId(principal.invocationId, invocationAckKey);
+      if (!isFirst) return { status: 'duplicate', clientMessageId, messageId: storedMsg.id };
+    }
+
+    const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
+
+    socketManager.broadcastAgentMessage(
+      {
+        type: 'text',
+        catId: principal.catId,
+        content: storedContent,
+        origin: 'progress',
+        messageId: storedMsg.id,
+        ...(effectiveInvocationId ? { invocationId: effectiveInvocationId } : {}),
+        extra: { agentCommunication },
+        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        ...(replyPreview ? { replyPreview } : {}),
+        timestamp: Date.now(),
+      },
+      effectiveThreadId,
+    );
+
+    if (opts.outboundHook) {
+      const frontendBase = resolveFrontendBaseUrl(process.env);
+      const thread = await threadStore?.get(effectiveThreadId);
+      opts.outboundHook
+        .deliver(
+          effectiveThreadId,
+          storedContent,
+          principal.catId,
+          undefined,
+          {
+            threadShortId: effectiveThreadId.slice(0, 15),
+            threadTitle: thread?.title ?? undefined,
+            deepLinkUrl: buildThreadDeepLink(frontendBase, effectiveThreadId),
+          },
+          'agent',
+          validatedReplyTo,
+        )
+        .catch((err: unknown) => {
+          app.log.error({ err, threadId: effectiveThreadId }, '[callbacks/post-progress] Outbound delivery failed');
+        });
+    }
+
+    return {
+      status: 'ok',
+      threadId: effectiveThreadId,
+      messageId: storedMsg.id,
+      kind,
+      clientMessageId,
+    };
   });
 
   app.post('/api/callbacks/post-message', async (request, reply) => {

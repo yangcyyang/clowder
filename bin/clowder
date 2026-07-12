@@ -17,6 +17,7 @@ function usage() {
   clowder task update --task <taskId|n> --status <status> [--channel <threadId>]
 
   clowder message send --target <threadId> [--text <content>]
+  clowder message progress --kind <ack|heartbeat> --client-message-id <key> [--target <threadId>] [--text <content>]
   clowder message read --channel <threadId> [--limit <n>]
   clowder message check
   clowder message search --query <query> [--limit <n>]
@@ -237,6 +238,43 @@ async function sendAgentMessage(threadId, content) {
   );
 }
 
+async function sendAgentProgress(threadId, content, kind, clientMessageId) {
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error('Progress content is empty');
+  if (kind !== 'ack' && kind !== 'heartbeat') throw new Error('Progress --kind must be ack or heartbeat');
+  if (!clientMessageId) throw new Error('Progress requires --client-message-id');
+
+  const body = {
+    content: trimmed,
+    kind,
+    clientMessageId,
+    ...(threadId ? { threadId } : {}),
+  };
+  const agentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
+  if (agentKeySecret) {
+    return request('/api/callbacks/post-progress', {
+      method: 'POST',
+      headers: { 'x-agent-key-secret': agentKeySecret },
+      body: JSON.stringify(body),
+    });
+  }
+
+  const invocationId = process.env.CAT_CAFE_INVOCATION_ID;
+  const callbackToken = process.env.CAT_CAFE_CALLBACK_TOKEN;
+  if (invocationId && callbackToken) {
+    const result = await request('/api/callbacks/post-progress', {
+      method: 'POST',
+      body: JSON.stringify({ invocationId, callbackToken, ...body }),
+    });
+    if (result?.status === 'stale_ignored') {
+      throw new Error('Progress was not delivered because this invocation was superseded');
+    }
+    return result;
+  }
+
+  throw new Error('message progress requires callback env or CAT_CAFE_AGENT_KEY_SECRET');
+}
+
 function printTasks(tasks) {
   if (tasks.length === 0) {
     console.log('No tasks.');
@@ -323,6 +361,19 @@ async function main() {
   }
 
   if (domain === 'message') {
+    if (action === 'progress') {
+      const threadId = flags.target || flags.channel || flags.thread ? normalizeThreadId(flags.target || flags.channel || flags.thread) : '';
+      const content = flags.text ? String(flags.text) : await readStdin();
+      const result = await sendAgentProgress(
+        threadId,
+        content,
+        String(flags.kind || ''),
+        String(flags['client-message-id'] || ''),
+      );
+      const id = result?.messageId || result?.status || 'sent';
+      console.log(`Progress sent to ${threadId || normalizeThreadId()}: ${id}`);
+      return;
+    }
     if (action === 'send') {
       const threadId = normalizeThreadId(flags.target || flags.channel || flags.thread);
       const content = flags.text ? String(flags.text) : await readStdin();

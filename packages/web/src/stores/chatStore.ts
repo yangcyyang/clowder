@@ -993,7 +993,7 @@ export interface ChatState {
       timestamp: number;
       contentBlocks?: readonly unknown[];
       extra?: Record<string, unknown>;
-      origin?: 'stream' | 'callback' | 'briefing';
+      origin?: 'stream' | 'callback' | 'briefing' | 'progress';
       editedAt?: number;
       threadId?: string;
       replyTo?: string;

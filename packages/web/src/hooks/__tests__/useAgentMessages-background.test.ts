@@ -78,6 +78,37 @@ describe('background thread socket handling', () => {
     clearDoneTimeoutCalls = [];
   });
 
+  describe('non-terminal Agent progress messages', () => {
+    it('stores progress as an independent assistant message without finalizing or notifying', () => {
+      const progress = {
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: '我先核对消息链路，再跑回归。',
+        origin: 'progress' as const,
+        messageId: 'progress-msg-1',
+        invocationId: 'inv-progress-1',
+        extra: { agentCommunication: { kind: 'ack' as const, invocationId: 'inv-progress-1' } },
+        timestamp: Date.now(),
+      };
+
+      simulateBackgroundMessage(progress);
+      simulateBackgroundMessage(progress);
+
+      const state = useChatStore.getState().getThreadState('thread-bg');
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0]).toMatchObject({
+        id: 'progress-msg-1',
+        type: 'assistant',
+        origin: 'progress',
+        content: '我先核对消息链路，再跑回归。',
+      });
+      expect(state.hasActiveInvocation).toBe(false);
+      expect(state.unreadCount).toBe(0);
+      expect(useToastStore.getState().toasts).toHaveLength(0);
+    });
+  });
+
   describe('P1-2: done event handling', () => {
     it('done event updates cat status to done', () => {
       // First set streaming status

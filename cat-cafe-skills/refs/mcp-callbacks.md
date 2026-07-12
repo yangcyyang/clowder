@@ -12,6 +12,24 @@
 
 ## Endpoints
 
+### Post Progress（非终态）
+
+行动任务认领后、第一次耗时工具调用前，用它发送一次自然语言开工回执；
+长任务只在阶段变化且距上次更新约 45–60 秒时发送 heartbeat。
+它不会终结当前 invocation，也不会触发 A2A 路由。
+
+```bash
+curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/post-progress \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "我先核对消息链路，再跑回归。" --arg k "ack:$CAT_CAFE_INVOCATION_ID:$CAT_CAFE_CAT_ID" '{invocationId:$i,callbackToken:$t,content:$c,kind:"ack",clientMessageId:$k}')"
+```
+
+约束：
+- `kind` 只能是 `ack` 或 `heartbeat`。
+- `clientMessageId` 必填；ack 推荐 `ack:<invocationId>:<catId>`。
+- 不得包含用于路由其他 Agent 的行首 `@`。
+- 最终交付仍走正常回复或 `post-message`。
+
 ### Post Message
 ```bash
 curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/post-message \
@@ -19,7 +37,8 @@ curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/post-message \
   -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "消息内容" '{invocationId:$i,callbackToken:$t,content:$c}')"
 ```
 
-post-message 始终发到当前 invocation 的 thread。跨 thread 发消息请用 `cross-post-message`（需传 `threadId`）。
+post-message 是正式/终态发布路径，不能拿来发开工回执或阶段心跳。
+它始终发到当前 invocation 的 thread。跨 thread 发消息请用 `cross-post-message`（需传 `threadId`）。
 
 ### Get Thread Context
 ```bash

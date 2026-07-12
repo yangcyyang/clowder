@@ -191,6 +191,47 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'live-1']);
   });
 
+  it('deduplicates a live progress ack against history hydration and preserves protocol metadata', async () => {
+    const history = installDeferredHistoryResponse();
+    const timestamp = Date.now() - 1000;
+    mountReplaceHydrationThread(makeThreadBState(timestamp, { messages: [] }));
+
+    act(() => {
+      useChatStore.getState().addMessage({
+        id: 'progress-1',
+        type: 'assistant',
+        catId: 'opus',
+        content: '我先核对消息链路，再跑回归。',
+        origin: 'progress',
+        extra: { agentCommunication: { kind: 'ack', invocationId: 'inv-progress' } },
+        timestamp,
+      });
+    });
+
+    await history.waitUntilPending();
+    history.expectPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'progress-1',
+          catId: 'opus',
+          content: '我先核对消息链路，再跑回归。',
+          origin: 'progress',
+          extra: { agentCommunication: { kind: 'ack', invocationId: 'inv-progress' } },
+          timestamp,
+        },
+      ],
+      hasMore: false,
+    });
+
+    const progress = useChatStore.getState().messages.filter((message) => message.id === 'progress-1');
+    expect(progress).toHaveLength(1);
+    expect(progress[0]).toMatchObject({
+      origin: 'progress',
+      extra: { agentCommunication: { kind: 'ack', invocationId: 'inv-progress' } },
+    });
+  });
+
   it('keeps a richer local stream bubble instead of a stale draft duplicate', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

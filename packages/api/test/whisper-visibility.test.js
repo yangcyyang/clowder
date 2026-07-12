@@ -66,6 +66,23 @@ describe('canViewMessage', () => {
       false,
     );
   });
+
+  test('Agent progress is visible in history but does not increment unread', () => {
+    assert.equal(
+      isUserVisibleUnreadMessage({
+        id: 'progress-1',
+        userId: 'user-1',
+        catId: 'opus',
+        content: '我先核对消息链路，再跑回归。',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread1',
+        origin: 'progress',
+        messageClass: 'status',
+      }),
+      false,
+    );
+  });
 });
 
 describe('MessageStore whisper', () => {

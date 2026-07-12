@@ -1925,6 +1925,8 @@ export async function assembleIncrementalContext(
     if (m.userId === 'system') return false;
     // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
     if (m.origin === 'briefing') return false;
+    // Ack/heartbeat messages are user-visible status, not new conversational input.
+    if (m.origin === 'progress') return false;
     // F35: Exclude whispers not intended for this cat (play mode only)
     if (!canViewMessage(m, viewer)) return false;
     // Exclude own messages (only include user messages and other cats' messages)

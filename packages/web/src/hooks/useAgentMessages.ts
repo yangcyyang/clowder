@@ -106,8 +106,8 @@ interface AgentMsg {
   toolName?: string;
   /** Tool input params (for 'tool_use' events from backend) */
   toolInput?: Record<string, unknown>;
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
-  origin?: 'stream' | 'callback';
+  /** progress = non-terminal Agent-authored acknowledgement/heartbeat. */
+  origin?: 'stream' | 'callback' | 'progress';
   /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
   messageId?: string;
   /** F173 a2a-handoff bug fix: server-side timestamp (epoch ms). Required for
@@ -116,7 +116,10 @@ interface AgentMsg {
   /** F67: Whether this message @mentions the co-creator */
   mentionsUser?: boolean;
   /** F52: Cross-thread origin metadata */
-  extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
+  extra?: {
+    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+  };
   /** F121: Reply-to message ID */
   replyTo?: string;
   /** F121: Server-hydrated reply preview */
@@ -239,7 +242,7 @@ export interface BackgroundAgentMessage {
   content?: string;
   textMode?: 'append' | 'replace';
   messageId?: string;
-  origin?: 'stream' | 'callback';
+  origin?: 'stream' | 'callback' | 'progress';
   toolName?: string;
   toolInput?: Record<string, unknown>;
   error?: string;
@@ -248,7 +251,10 @@ export interface BackgroundAgentMessage {
   isFinal?: boolean;
   metadata?: { provider: string; model: string; sessionId?: string; usage?: TokenUsage };
   /** F52: Cross-thread origin metadata */
-  extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
+  extra?: {
+    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+  };
   /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
   /** F121: Reply-to message ID */
@@ -1275,6 +1281,36 @@ export function handleBackgroundAgentMessage(
   msg: BackgroundAgentMessage,
   options: HandleBackgroundMessageOptions,
 ): void {
+  if (msg.type === 'text' && msg.content && msg.origin === 'progress') {
+    const id = msg.messageId ?? `progress-${msg.invocationId ?? 'detached'}-${msg.catId}-${msg.timestamp}`;
+    const state = options.store.getThreadState(msg.threadId);
+    if (!state.messages.some((message) => message.id === id)) {
+      options.store.replaceThreadMessages(
+        msg.threadId,
+        [
+          ...state.messages,
+          {
+            id,
+            type: 'assistant',
+            catId: msg.catId,
+            content: msg.content,
+            origin: 'progress',
+            extra: {
+              ...(msg.extra?.agentCommunication
+                ? { agentCommunication: msg.extra.agentCommunication }
+                : {}),
+            },
+            ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+            ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+            timestamp: msg.timestamp,
+          },
+        ],
+        state.hasMore,
+      );
+    }
+    return;
+  }
+
   const streamKey = getStreamKey(msg);
   const existing = options.bgStreamRefs.get(streamKey);
 
@@ -2966,6 +3002,28 @@ export function useAgentMessages() {
       resetTimeout();
 
       if (msg.type === 'text' && msg.content) {
+        if (msg.origin === 'progress') {
+          const id = msg.messageId ?? `progress-${msg.invocationId ?? 'detached'}-${msg.catId}-${Date.now()}`;
+          const existing = useChatStore.getState().messages.some((message) => message.id === id);
+          if (!existing) {
+            addMessage({
+              id,
+              type: 'assistant',
+              catId: msg.catId,
+              content: msg.content,
+              origin: 'progress',
+              extra: {
+                ...(msg.extra?.agentCommunication
+                  ? { agentCommunication: msg.extra.agentCommunication }
+                  : {}),
+              },
+              ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
+              ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
+              timestamp: msg.timestamp ?? Date.now(),
+            });
+          }
+          return;
+        }
         if (msg.origin !== 'callback' && shouldSuppressLateStreamChunk(msg.catId, msg.invocationId)) {
           settlePendingActiveTextFinalCallback(msg, { stale: true });
           return;

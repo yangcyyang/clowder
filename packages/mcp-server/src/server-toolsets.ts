@@ -59,6 +59,7 @@ export const READONLY_ALLOWED_TOOLS = new Set([
  * tools that persistent agents (Bengal) need. File/shell mutators stay blocked.
  */
 export const AGENT_KEY_TOOLS = new Set([
+  'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
   'cat_cafe_get_thread_context',

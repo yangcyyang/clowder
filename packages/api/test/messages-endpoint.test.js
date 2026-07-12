@@ -69,6 +69,31 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('preserves non-terminal Agent progress metadata for history hydration', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      threadId: 'progress-thread',
+      content: '我先核对消息链路，再跑回归。',
+      messageClass: 'status',
+      mentions: [],
+      origin: 'progress',
+      timestamp: 2000,
+      extra: {
+        agentCommunication: { kind: 'ack', invocationId: 'inv-progress' },
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=progress-thread' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].origin, 'progress');
+    assert.deepEqual(body.messages[0].extra.agentCommunication, {
+      kind: 'ack',
+      invocationId: 'inv-progress',
+    });
+  });
+
   it('does not expose a queued freshness review publication through around lookup', async () => {
     const publicMessage = messageStore.append({
       userId: 'default-user',

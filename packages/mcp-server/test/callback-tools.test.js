@@ -76,6 +76,55 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handlePostProgress uses the non-terminal callback endpoint and preserves idempotency', async () => {
+    const { handlePostProgress } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl, capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handlePostProgress({
+      content: '我先核对调用链，再跑回归。',
+      kind: 'ack',
+      clientMessageId: 'ack:test-invocation:opus',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/post-progress'));
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.content, '我先核对调用链，再跑回归。');
+    assert.equal(body.kind, 'ack');
+    assert.equal(body.clientMessageId, 'ack:test-invocation:opus');
+  });
+
+  test('callback tool registry exposes post_progress separately from terminal post_message', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const progress = callbackTools.find((tool) => tool.name === 'cat_cafe_post_progress');
+    const terminal = callbackTools.find((tool) => tool.name === 'cat_cafe_post_message');
+
+    assert.ok(progress);
+    assert.match(progress.description, /does NOT finalize/i);
+    assert.ok(terminal);
+    assert.match(terminal.description, /terminal publication path/i);
+  });
+
+  test('handlePostProgress reports stale_ignored as not delivered', async () => {
+    const { handlePostProgress } = await import('../dist/tools/callback-tools.js');
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'stale_ignored' }) });
+
+    const result = await handlePostProgress({
+      content: '我先核对消息链路。',
+      kind: 'ack',
+      clientMessageId: 'ack:test-invocation:opus',
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /NOT delivered/i);
+  });
+
   test('handlePostMessage forwards optional threadId for cross-thread posting', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 

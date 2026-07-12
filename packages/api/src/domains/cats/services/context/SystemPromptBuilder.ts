@@ -331,10 +331,12 @@ const LOCAL_TOOL_DISCOVERY_SECTION = `## 常用本地工具提示
 - 用户说加载/安装/关联 skill：先查 \`skill-linker\` 或 \`cat_cafe_list_skills\`，确认本地已有再挂载。
 - 工具没出现在当前 tools 列表时，先走 Skill Router / MCP 发现，不要假设不可用。`;
 
-const PROGRESS_VISIBILITY_SECTION = `## 开工预告与长任务心跳
-- 行动任务认领后、深入执行前，先发一句用户可读的开工预告：我要做什么、主要涉及哪些文件/模块。
-- 预计超过 30 秒的排查、测试、构建或多文件修改，执行中每约 30 秒用一句话更新当前阶段；短任务不用刷屏。
-- 进度更新只写当前动作和已验证事实，不写内部推理链；最终交付仍必须给证据和验证方式。`;
+const PROGRESS_VISIBILITY_SECTION = `## 即时开工回执与长任务心跳
+- 纯问答、闲聊或预计 30 秒内可直接完成的短任务，直接给最终答案，不单独发回执。
+- 行动任务认领成功后、第一次耗时工具调用前，必须调用 \`cat_cafe_post_progress\`，用 \`kind='ack'\` 发一条真实、自然、任务专属的 Agent 消息：说明理解了什么和准备先做哪 2–3 步。工具不可用但有 shell 时，改用 \`$CLI message progress\`。
+- ack 每个 invocation 只发一次，\`clientMessageId\` 使用 \`ack:<invocationId>:<catId>\`；禁止固定“已接球”模板、禁止 system_info、禁止在回执里 @ 其他 Agent。
+- 长任务仅在阶段确实变化且距上次用户可见更新约 45–60 秒时，用 \`kind='heartbeat'\` 发新事实；相同阶段不得重复刷屏。
+- progress 消息不是最终交付，也不能替代最终回复；最终结果仍走正常输出，并给交付物、验证证据和下一步。`;
 
 /**
  * L0 Governance Core — Slock-like always-on constitutional floor.

@@ -105,7 +105,10 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
       continue;
     }
 
-    if (key === 'origin' && (value === 'stream' || value === 'callback' || value === 'briefing')) {
+    if (
+      key === 'origin' &&
+      (value === 'stream' || value === 'callback' || value === 'briefing' || value === 'progress')
+    ) {
       out.origin = value;
       continue;
     }

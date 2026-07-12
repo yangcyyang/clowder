@@ -343,6 +343,8 @@ export interface ChatMessage {
      * should precede.
      */
     systemKind?: 'a2a_routing' | 'progress_heartbeat';
+    /** Model-authored, non-terminal acknowledgement/heartbeat. */
+    agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
     /** Slock 归档导入：当前批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
   };
@@ -350,8 +352,8 @@ export interface ChatMessage {
   thinking?: string;
   /** Internal chunk boundaries for robust thinking dedupe when payloads contain the visual separator. */
   thinkingChunks?: string[];
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing */
-  origin?: 'stream' | 'callback' | 'briefing';
+  /** progress = non-terminal Agent-authored acknowledgement/heartbeat. */
+  origin?: 'stream' | 'callback' | 'briefing' | 'progress';
   /** F35: Message visibility. undefined/public = visible to all */
   visibility?: 'public' | 'whisper';
   /** F35: Whisper recipients (cat IDs). Only meaningful when visibility='whisper' */

@@ -96,6 +96,140 @@ describe('Callback Routes', () => {
 
   // ---- POST /api/callbacks/post-message ----
 
+  test('POST post-progress stores a non-terminal Agent status message', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '我先核对消息投递链，再验证输出闸门。',
+        kind: 'ack',
+        clientMessageId: `ack:${invocationId}:opus`,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'ok');
+
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1);
+    assert.equal(recent[0].catId, 'opus');
+    assert.equal(recent[0].messageClass, 'status');
+    assert.equal(recent[0].origin, 'progress');
+    assert.deepEqual(recent[0].mentions, []);
+    assert.equal(recent[0].extra.agentCommunication.kind, 'ack');
+
+    const broadcasted = socketManager.getMessages();
+    assert.equal(broadcasted.length, 1);
+    assert.equal(broadcasted[0].origin, 'progress');
+    assert.equal(broadcasted[0].invocationId, invocationId);
+    assert.equal(broadcasted[0].messageId, recent[0].id);
+  });
+
+  test('POST post-progress is idempotent and never routes A2A mentions', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const payload = {
+      content: '正在验证回归测试。',
+      kind: 'heartbeat',
+      clientMessageId: `heartbeat:${invocationId}:opus:test`,
+    };
+
+    const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-progress', headers, payload });
+    const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-progress', headers, payload });
+    assert.equal(first.statusCode, 200);
+    assert.equal(replay.statusCode, 200);
+    assert.equal(JSON.parse(replay.body).status, 'duplicate');
+    assert.equal(messageStore.getRecent(10).length, 1);
+    assert.equal(socketManager.getMessages().length, 1);
+
+    const mention = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers,
+      payload: {
+        content: '@codex 请接手',
+        kind: 'heartbeat',
+        clientMessageId: `heartbeat:${invocationId}:opus:mention`,
+      },
+    });
+    assert.equal(mention.statusCode, 400);
+    assert.equal(messageStore.getRecent(10).length, 1);
+
+    const corrected = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers,
+      payload: {
+        content: '已改为不路由的阶段更新。',
+        kind: 'heartbeat',
+        clientMessageId: `heartbeat:${invocationId}:opus:mention`,
+      },
+    });
+    assert.equal(corrected.statusCode, 200);
+    assert.equal(JSON.parse(corrected.body).status, 'ok');
+    assert.equal(messageStore.getRecent(10).length, 2);
+  });
+
+  test('POST post-progress does not burn the idempotency key when persistence fails', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const payload = {
+      content: '我先核对消息链路。',
+      kind: 'ack',
+      clientMessageId: `ack:${invocationId}:opus`,
+    };
+    const originalAppend = messageStore.append.bind(messageStore);
+    messageStore.append = () => {
+      throw new Error('simulated persistence failure');
+    };
+
+    const failed = await app.inject({ method: 'POST', url: '/api/callbacks/post-progress', headers, payload });
+    assert.equal(failed.statusCode, 500);
+
+    messageStore.append = originalAppend;
+    const retried = await app.inject({ method: 'POST', url: '/api/callbacks/post-progress', headers, payload });
+    assert.equal(retried.statusCode, 200);
+    assert.equal(JSON.parse(retried.body).status, 'ok');
+  });
+
+  test('POST post-progress accepts at most one ack per invocation even when callers change keys', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers,
+      payload: {
+        content: '我先核对消息链路。',
+        kind: 'ack',
+        clientMessageId: `ack:${invocationId}:opus:first`,
+      },
+    });
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers,
+      payload: {
+        content: '我换个 key 再发一次。',
+        kind: 'ack',
+        clientMessageId: `ack:${invocationId}:opus:second`,
+      },
+    });
+
+    assert.equal(JSON.parse(first.body).status, 'ok');
+    assert.equal(JSON.parse(duplicate.body).status, 'duplicate');
+    assert.equal(messageStore.getRecent(10).length, 1);
+    assert.equal(socketManager.getMessages().length, 1);
+  });
+
   test('POST post-message succeeds with valid credentials', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

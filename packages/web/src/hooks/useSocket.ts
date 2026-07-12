@@ -58,8 +58,13 @@ interface AgentMessage {
   error?: string;
   isFinal?: boolean;
   metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
-  origin?: 'stream' | 'callback';
+  /** progress = non-terminal Agent-authored acknowledgement/heartbeat. */
+  origin?: 'stream' | 'callback' | 'progress';
+  messageId?: string;
+  extra?: {
+    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+  };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
   /** F121: Hydrated preview of the replied-to message */
@@ -908,7 +913,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           userId: string;
           contentBlocks?: readonly unknown[];
           extra?: Record<string, unknown>;
-          origin?: 'stream' | 'callback' | 'briefing';
+          origin?: 'stream' | 'callback' | 'briefing' | 'progress';
           replyTo?: string;
           replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
           mentionsUser?: boolean;

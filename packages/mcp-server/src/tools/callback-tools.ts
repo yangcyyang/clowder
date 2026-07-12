@@ -257,6 +257,23 @@ export const postMessageInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
+export const postProgressInputSchema = {
+  content: z.string().min(1).max(2000).describe('Natural-language acknowledgement or progress update'),
+  kind: z.enum(['ack', 'heartbeat']).describe('ack = one opening commitment; heartbeat = later stage update'),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Required only for persistent agent-key auth; invocation auth always uses the current thread'),
+  replyTo: z.string().optional().describe('Optional message ID to reply to'),
+  clientMessageId: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('Required idempotency key, e.g. ack:<invocationId>:<catId>'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
 export const reviewHeldMessageInputSchema = {
   holdId: z.string().min(1).describe('Hold ID returned by a freshness_held response'),
   action: z
@@ -514,6 +531,47 @@ export async function handlePostMessage(input: {
     return errorResult(original + hint);
   }
 
+  return result;
+}
+
+export async function handlePostProgress(input: {
+  content: string;
+  kind: 'ack' | 'heartbeat';
+  threadId?: string | undefined;
+  replyTo?: string | undefined;
+  clientMessageId: string;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const result = await withDegradation({
+    toolName: 'post_progress',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/post-progress',
+        {
+          content: input.content,
+          kind: input.kind,
+          clientMessageId: input.clientMessageId,
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        },
+        { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
+      ),
+    policy: { kind: 'none' },
+  });
+
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Progress was NOT delivered because this invocation was superseded by a newer one. ' +
+            'Do not report the acknowledgement as sent.',
+        );
+      }
+    } catch {
+      // Non-JSON success payloads keep the normal tool result.
+    }
+  }
   return result;
 }
 
@@ -1173,14 +1231,24 @@ export async function handleHoldBall(input: {
 
 export const callbackTools = [
   {
+    name: 'cat_cafe_post_progress',
+    description:
+      'Post a non-terminal, model-authored acknowledgement or stage heartbeat to the current thread. ' +
+      'Use when: an action task was claimed and the user needs an immediate natural-language commitment before time-consuming work; use heartbeat only after a real stage change around 45–60 seconds later. ' +
+      'NOT for: short questions, routine replies, final answers, cross-thread messages, or Agent handoffs. ' +
+      'Output: one persisted Agent status message visible in the timeline; it does not finalize the invocation, increment unread, advance freshness, or trigger A2A. ' +
+      'GOTCHA: use kind=ack exactly once with a stable clientMessageId and never include line-start Agent @mentions; use cat_cafe_post_message only for substantive/final publication.',
+    inputSchema: postProgressInputSchema,
+    handler: handlePostProgress,
+  },
+  {
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to YOUR CURRENT thread mid-task (e.g. progress updates, sharing results). ' +
-      'Always posts to the thread your invocation belongs to. To post to a DIFFERENT thread, use cat_cafe_cross_post_message instead. ' +
-      'To hand off to another cat, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route — it is treated as narrative only). ' +
-      'Output: message appears in your current thread as a new message (separate from your invocation response). ' +
-      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
-      'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
+      'Post a substantive/final proactive message to the current invocation thread. ' +
+      'Use when: the Agent must formally publish a result before normal stdout completes or hand off by a line-start Agent @mention. ' +
+      'NOT for: acknowledgements, heartbeats, routine replies, or cross-thread posting; use cat_cafe_post_progress for non-terminal updates and cat_cafe_cross_post_message for another thread. ' +
+      'Output: one formal callback-origin message persisted and delivered to the current thread; it may become the canonical final publication. ' +
+      'GOTCHA: this is a terminal publication path and can suppress later stdout; callback credentials expire, and only line-start Agent @mentions route.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
   },
@@ -1482,7 +1550,7 @@ export const callbackTools = [
       '(e.g. CI running, build compiling, PR checks pending) + you know exactly what to do next. ' +
       'NOT for: need review/approval → @ reviewer or @co-creator; need another cat to act → @ that cat; ' +
       '"let me think" / "I\'ll hold for now" → hesitation not hold, pick 接/退/升; ' +
-      'review/analysis done → MUST @ author, conclusion ≠ endpoint; status updates → use post_message. ' +
+      'review/analysis done → MUST @ author, conclusion ≠ endpoint; non-terminal status updates → use post_progress. ' +
       'Output: system schedules a one-shot wake-up after wakeAfterMs; you get re-invoked with reason + nextStep as trigger context. ' +
       'GOTCHA: max 3 holds per (thread, cat) within a rolling ~1h window — 4th call returns 429, you MUST pass (@ another cat or @co-creator). ' +
       'GOTCHA: the counter is process-local best-effort (in-memory on the API node); API restart or multi-instance deploys may reset it, so do not treat the 429 as a hard security boundary — treat it as a self-discipline guardrail. ' +

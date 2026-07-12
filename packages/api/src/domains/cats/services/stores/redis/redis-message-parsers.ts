@@ -56,6 +56,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+      agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
       systemKind?: 'a2a_routing' | 'progress_heartbeat';
       slockThread?: { branchThreadId: string; replyCount: number };
     }
@@ -81,6 +82,7 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+      agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
       systemKind?: 'a2a_routing' | 'progress_heartbeat';
       slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
@@ -132,6 +134,20 @@ export function safeParseExtra(raw: string | undefined):
 
     if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'progress_heartbeat') {
       result.systemKind = parsed.systemKind;
+      hasField = true;
+    }
+
+    if (
+      parsed.agentCommunication &&
+      typeof parsed.agentCommunication === 'object' &&
+      (parsed.agentCommunication.kind === 'ack' || parsed.agentCommunication.kind === 'heartbeat')
+    ) {
+      result.agentCommunication = {
+        kind: parsed.agentCommunication.kind,
+        ...(typeof parsed.agentCommunication.invocationId === 'string'
+          ? { invocationId: parsed.agentCommunication.invocationId }
+          : {}),
+      };
       hasField = true;
     }
 

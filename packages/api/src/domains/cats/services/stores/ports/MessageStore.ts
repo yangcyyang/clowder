@@ -124,6 +124,11 @@ export interface StoredMessage {
     targetCats?: string[];
     scheduler?: SchedulerMessageExtra['scheduler'];
     tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+    /** Non-terminal, model-authored communication that must not finalize the invocation. */
+    agentCommunication?: {
+      kind: 'ack' | 'heartbeat';
+      invocationId?: string;
+    };
     systemKind?: 'a2a_routing' | 'progress_heartbeat';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
@@ -139,8 +144,8 @@ export interface StoredMessage {
   editedAt?: number;
   /** F045: Extended thinking content (accumulated from CLI thinking blocks). Persisted for F5 recovery. */
   thinking?: string;
-  /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech), briefing = F148 Phase E context briefing (non-routing) */
-  origin?: 'stream' | 'callback' | 'briefing';
+  /** Message origin: progress is a non-terminal Agent-authored acknowledgement/heartbeat. */
+  origin?: 'stream' | 'callback' | 'briefing' | 'progress';
   /** F35: Message visibility. Default 'public' (undefined = public for backward compat) */
   visibility?: 'public' | 'whisper';
   /** F35: Whisper recipients. Only meaningful when visibility='whisper' */
