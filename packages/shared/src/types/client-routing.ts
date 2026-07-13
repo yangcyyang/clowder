@@ -1,14 +1,18 @@
 import type { ClientId } from './cat.js';
 import type { AccountProtocol } from './cat-breed.js';
 
-export type BuiltinAccountClient = Extract<ClientId, 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode'>;
-export type BuiltinAccountProtocol = Extract<AccountProtocol, 'anthropic' | 'openai' | 'google' | 'kimi'>;
+export type BuiltinAccountClient = Extract<
+  ClientId,
+  'anthropic' | 'openai' | 'google' | 'kimi' | 'grok' | 'dare' | 'opencode'
+>;
+export type BuiltinAccountProtocol = Extract<AccountProtocol, 'anthropic' | 'openai' | 'google' | 'kimi' | 'xai'>;
 
 const BUILTIN_ACCOUNT_IDS: Record<BuiltinAccountClient, string> = {
   anthropic: 'claude',
   openai: 'codex',
   google: 'gemini',
   kimi: 'kimi',
+  grok: 'grok',
   dare: 'dare',
   opencode: 'opencode',
 };
@@ -19,6 +23,7 @@ export function builtinAccountFamilyForClient(client: ClientId): BuiltinAccountC
     case 'openai':
     case 'google':
     case 'kimi':
+    case 'grok':
     case 'dare':
     case 'opencode':
       return client;
@@ -47,6 +52,8 @@ export function protocolForClient(client: ClientId): BuiltinAccountProtocol | nu
       return 'google';
     case 'kimi':
       return 'kimi';
+    case 'grok':
+      return 'xai';
     default:
       return null;
   }

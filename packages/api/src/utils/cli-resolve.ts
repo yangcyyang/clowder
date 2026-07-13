@@ -171,6 +171,7 @@ export function formatCliNotFoundError(command: string): string {
     codex: 'npm install -g @openai/codex',
     gemini: 'npm install -g @google/gemini-cli',
     kimi: 'uv tool install --python 3.13 kimi-cli',
+    grok: 'follow the official xAI Grok CLI installation guide',
     opencode: 'npm install -g opencode',
   };
   const hint = installHints[command] ?? `install the "${command}" CLI`;

@@ -12,14 +12,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-export type LocalCliId = 'claude' | 'codex' | 'gemini' | 'opencode' | 'kimi' | 'cursor' | 'opencli';
+export type LocalCliId = 'claude' | 'codex' | 'gemini' | 'opencode' | 'kimi' | 'grok' | 'cursor' | 'opencli';
 
 export interface LocalCliProbeDefinition {
   readonly id: LocalCliId;
   readonly label: string;
   readonly command: LocalCliId;
   readonly commandAliases?: readonly string[];
-  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'opencode' | 'kimi';
+  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'opencode' | 'kimi' | 'grok';
   readonly defaultModel?: string;
   readonly modelsProbe?: LocalCliModelsProbeDefinition;
   readonly installHint: string;
@@ -92,6 +92,16 @@ export const LOCAL_CLI_ALLOWLIST: readonly LocalCliProbeDefinition[] = [
     defaultModel: 'kimi-code/kimi-for-coding',
     modelsProbe: LOCAL_CLI_MODELS_PROBES.kimi,
     installHint: 'uv tool install --python 3.13 kimi-cli',
+    versionArgs: ['--version'],
+  },
+  {
+    id: 'grok',
+    label: 'Grok CLI',
+    command: 'grok',
+    clientId: 'grok',
+    defaultModel: 'grok-4.5',
+    modelsProbe: LOCAL_CLI_MODELS_PROBES.grok,
+    installHint: '按 xAI Grok CLI 官方说明安装 grok，并确保命令可被后端进程访问',
     versionArgs: ['--version'],
   },
   {

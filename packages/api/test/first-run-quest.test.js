@@ -63,6 +63,10 @@ describe('First-Run Quest Routes', () => {
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.clients));
     assert.ok(body.clients.length > 0);
+    const grok = body.clients.find((client) => client.client === 'grok');
+    assert.ok(grok, 'first-run client detection should include Grok');
+    assert.equal(grok.provider, 'xai');
+    assert.equal(grok.cli, 'grok');
     // Each client has required fields
     for (const c of body.clients) {
       assert.ok(typeof c.client === 'string');
@@ -388,6 +392,12 @@ describe('buildProbeEnv (unit)', () => {
     const env = buildProbeEnv('kimi', 'moon-key', 'https://api.moonshot.cn');
     assert.equal(env.MOONSHOT_API_KEY, 'moon-key');
     assert.equal(env.CAT_CAFE_KIMI_BASE_URL, 'https://api.moonshot.cn');
+  });
+
+  test('grok: sets XAI_API_KEY', async () => {
+    const { buildProbeEnv } = await import('../dist/routes/first-run-quest.js');
+    const env = buildProbeEnv('grok', 'xai-key');
+    assert.equal(env.XAI_API_KEY, 'xai-key');
   });
 
   test('unknown protocol: falls back to generic API_KEY', async () => {

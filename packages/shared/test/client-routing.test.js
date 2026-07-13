@@ -13,3 +13,9 @@ test('protocolForClient normalizes provider family routing', () => {
   assert.equal(protocolForClient('dare'), 'openai');
   assert.equal(protocolForClient('antigravity'), null);
 });
+
+test('grok has its own builtin account family and xAI protocol', () => {
+  assert.equal(builtinAccountFamilyForClient('grok'), 'grok');
+  assert.equal(builtinAccountIdForClient('grok'), 'grok');
+  assert.equal(protocolForClient('grok'), 'xai');
+});

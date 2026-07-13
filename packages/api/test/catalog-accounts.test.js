@@ -687,6 +687,8 @@ describe('global accounts (clowder-ai#340)', () => {
           version: 2,
           providers: [
             { id: 'installer-openai', authType: 'api_key', baseUrl: 'https://api.openai.com/v1' },
+            { id: 'grok', authType: 'oauth' },
+            { id: 'builtin_grok', authType: 'oauth' },
             { id: 'agent-teams-local', authType: 'api_key', displayName: 'Agent Teams Local' },
             {
               id: 'codex-sponsor',
@@ -704,6 +706,8 @@ describe('global accounts (clowder-ai#340)', () => {
         JSON.stringify({
           profiles: {
             'installer-openai': { apiKey: 'sk-installer-openai' },
+            grok: { apiKey: 'xai-grok' },
+            builtin_grok: { apiKey: 'xai-builtin-grok' },
             'agent-teams-local': { apiKey: 'sk-agent-teams-local' },
             'codex-sponsor': { apiKey: 'sk-codex-sponsor' },
           },
@@ -713,12 +717,16 @@ describe('global accounts (clowder-ai#340)', () => {
 
       const result = readCatalogAccounts(projectRoot);
       assert.ok(result['installer-openai'], 'well-known installer account should still migrate');
+      assert.ok(result.grok, 'well-known Grok account should migrate');
+      assert.ok(result.builtin_grok, 'well-known builtin Grok account should migrate');
       assert.equal(result['agent-teams-local'], undefined, 'unreferenced homedir experiment must not migrate');
       assert.equal(result['codex-sponsor'], undefined, 'unreferenced homedir test fixture must not migrate');
 
       const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
       const creds = JSON.parse(credsRaw);
       assert.equal(creds['installer-openai']?.apiKey, 'sk-installer-openai');
+      assert.equal(creds.grok?.apiKey, 'xai-grok');
+      assert.equal(creds.builtin_grok?.apiKey, 'xai-builtin-grok');
       assert.equal(creds['agent-teams-local'], undefined, 'skipped experiment credential must not migrate');
       assert.equal(creds['codex-sponsor'], undefined, 'skipped fixture credential must not migrate');
     } finally {

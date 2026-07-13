@@ -10,6 +10,8 @@ export function builtinClientLabel(client?: BuiltinAccountClient): string {
       return 'Gemini';
     case 'kimi':
       return 'Kimi';
+    case 'grok':
+      return 'Grok';
     case 'dare':
       return 'Dare';
     case 'opencode':

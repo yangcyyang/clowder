@@ -15,6 +15,7 @@ export type ClientId =
   | 'openai'
   | 'google'
   | 'kimi'
+  | 'grok'
   | 'dare'
   | 'opencode'
   | 'pi'
@@ -104,6 +105,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'openai', label: 'Codex' },
   { value: 'google', label: 'Gemini' },
   { value: 'kimi', label: 'Kimi' },
+  { value: 'grok', label: 'Grok' },
   { value: 'dare', label: 'Dare' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'pi', label: 'Pi' },
@@ -265,6 +267,7 @@ function isBuiltinClient(client: ClientId): client is BuiltinAccountClient {
     client === 'openai' ||
     client === 'google' ||
     client === 'kimi' ||
+    client === 'grok' ||
     client === 'dare' ||
     client === 'opencode'
   );
@@ -278,6 +281,7 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
   if (normalizedId.includes('codex')) return 'openai';
   if (normalizedId.includes('gemini')) return 'google';
   if (normalizedId.includes('kimi') || normalizedId.includes('moonshot')) return 'kimi';
+  if (normalizedId.includes('grok') || normalizedId.includes('xai')) return 'grok';
   if (normalizedId.includes('dare')) return 'dare';
   if (normalizedId.includes('opencode')) return 'opencode';
   return undefined;

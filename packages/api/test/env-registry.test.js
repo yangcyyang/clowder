@@ -70,6 +70,14 @@ describe('env-registry', () => {
     assert.equal(apiKey.sensitive, true);
   });
 
+  it('registers XAI_API_KEY as hidden sensitive Grok configuration', () => {
+    const apiKey = ENV_VARS.find((v) => v.name === 'XAI_API_KEY');
+    assert.ok(apiKey, 'XAI_API_KEY should be in registry');
+    assert.equal(apiKey.category, 'grok');
+    assert.equal(apiKey.sensitive, true);
+    assert.equal(apiKey.hubVisible, false);
+  });
+
   it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
     const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
     assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');

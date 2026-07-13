@@ -71,6 +71,16 @@ export function parseLineModelCatalog(stdout: string): string[] {
   return uniqueModelIds(stdout.split(/\r?\n/));
 }
 
+export function parseGrokModelCatalog(stdout: string): string[] {
+  const models: string[] = [];
+  for (const rawLine of stripAnsi(stdout).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const match = line.match(/^[*-]\s+([^\s]+)(?:\s+\(default\))?$/);
+    if (match?.[1]) models.push(match[1]);
+  }
+  return uniqueModelIds(models);
+}
+
 export function parseCodexModelCatalog(content: string): string[] {
   const parsed = parseJsonObject(content);
   if (!parsed || !Array.isArray(parsed.models)) return [];
@@ -188,6 +198,11 @@ export const LOCAL_CLI_MODELS_PROBES = {
   kimi: {
     configFile: { path: '~/.kimi/config.toml', extract: extractKimiConfigModels },
     static: ['kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
+  },
+  // Grok CLI 0.2.93 prints a human-readable catalog with one bullet per model.
+  grok: {
+    command: { args: ['models'], parse: parseGrokModelCatalog },
+    static: ['grok-4.5', 'grok-composer-2.5-fast'],
   },
   // Cursor Agent 2026.07.01 has an account-scoped, non-interactive models command; unauthenticated runs fail cleanly.
   cursor: {

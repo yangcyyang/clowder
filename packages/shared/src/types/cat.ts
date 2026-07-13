@@ -16,6 +16,7 @@ export type ClientId =
   | 'openai'
   | 'google'
   | 'kimi'
+  | 'grok'
   | 'dare'
   | 'antigravity'
   | 'opencode'

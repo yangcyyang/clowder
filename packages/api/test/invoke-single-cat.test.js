@@ -3405,6 +3405,72 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_BASE_URL, undefined);
   });
 
+  it('injects a member-bound Grok API key as XAI_API_KEY', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'grok-bound-profile-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(join(root, '.cat-cafe'), { recursive: true });
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    await writeFile(
+      join(root, '.cat-cafe', 'accounts.json'),
+      JSON.stringify({ 'grok-api': { authType: 'api_key', clientId: 'grok', models: ['grok-4.5'] } }),
+      'utf-8',
+    );
+    await writeFile(
+      join(root, '.cat-cafe', 'credentials.json'),
+      JSON.stringify({ 'grok-api': { apiKey: 'xai-test-key' } }),
+      'utf-8',
+    );
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const catId = 'grok-bound-profile-test';
+    catRegistry.register(catId, {
+      ...originalConfig,
+      id: catId,
+      mentionPatterns: [`@${catId}`],
+      clientId: 'grok',
+      accountRef: 'grok-api',
+      defaultModel: 'grok-4.5',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId, timestamp: Date.now() };
+      },
+    };
+    const previousCwd = process.cwd();
+    const previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    try {
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(makeDeps(), {
+          catId,
+          service,
+          prompt: 'test',
+          userId: 'user-grok-api-key',
+          threadId: 'thread-grok-api-key',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobalRoot;
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) catRegistry.register(id, config);
+      await rmWithRetry(root);
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_GROK_PROFILE_MODE, 'api_key');
+    assert.equal(callbackEnv.XAI_API_KEY, 'xai-test-key');
+  });
+
   it('F127 P1: prefers member-bound openai profile over protocol active profile', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-profile-'));

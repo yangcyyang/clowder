@@ -27,6 +27,7 @@ export type EnvCategory =
   | 'dare'
   | 'gemini'
   | 'kimi'
+  | 'grok'
   | 'tts'
   | 'frontend'
   | 'push'
@@ -79,6 +80,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   dare: '狸花猫 (Dare)',
   gemini: '暹罗猫 (Gemini)',
   kimi: 'Kimi',
+  grok: 'Grok',
   tts: '语音合成 (TTS)',
   frontend: '前端',
   push: '推送通知',
@@ -1316,6 +1318,16 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     hubVisible: false,
     runtimeEditable: false,
+  },
+
+  // --- grok ---
+  {
+    name: 'XAI_API_KEY',
+    defaultValue: '(未设置 → 由 accounts/credentials 系统注入)',
+    description: 'xAI API Key（Grok CLI API Key 模式用）',
+    category: 'grok',
+    sensitive: true,
+    hubVisible: false,
   },
 
   // --- tts ---

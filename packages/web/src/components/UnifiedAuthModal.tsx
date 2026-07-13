@@ -6,7 +6,7 @@ import type { BuiltinAccountClient, ProfileAuthType } from './hub-accounts.types
 import { builtinClientLabel } from './hub-accounts.view';
 import { TagEditor } from './hub-tag-editor';
 
-const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'];
+const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'grok', 'dare', 'opencode'];
 
 type ModelSuggestionsByClient = Partial<Record<BuiltinAccountClient, string[]>>;
 

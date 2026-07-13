@@ -280,6 +280,9 @@ function buildProbeEnv(clientId: string, apiKey: string, baseUrl?: string): Reco
       env.MOONSHOT_API_KEY = apiKey;
       if (baseUrl) env.CAT_CAFE_KIMI_BASE_URL = baseUrl;
       break;
+    case 'xai':
+      env.XAI_API_KEY = apiKey;
+      break;
     default:
       // Unknown protocol — pass generic keys, let CLI figure it out
       env.API_KEY = apiKey;
