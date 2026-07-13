@@ -307,6 +307,16 @@ export const getPendingMentionsInputSchema = {
     .describe('When true, include acknowledged mentions for explicit history review.'),
 };
 
+export const checkInboxInputSchema = {
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Required only for persistent agent-key auth; invocation auth uses the current thread.'),
+  limit: z.number().int().min(1).max(20).optional().default(1).describe('Maximum message IDs to return.'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
 export const ackMentionsInputSchema = {
   upToMessageId: z
     .string()
@@ -600,6 +610,21 @@ export async function handleGetPendingMentions(input: { includeAcked?: boolean |
   return callbackGet('/api/callbacks/pending-mentions', {
     ...(input.includeAcked ? { includeAcked: '1' } : {}),
   });
+}
+
+export async function handleCheckInbox(input: {
+  threadId?: string | undefined;
+  limit?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/check-inbox',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
 }
 
 export async function handleAckMentions(input: { upToMessageId: string }): Promise<ToolResult> {
@@ -1263,6 +1288,15 @@ export const callbackTools = [
       'This endpoint requires the same live invocation credentials that created the hold.',
     inputSchema: reviewHeldMessageInputSchema,
     handler: handleReviewHeldMessage,
+  },
+  {
+    name: 'cat_cafe_check_inbox',
+    description:
+      'Check the current thread for content-free unread metadata before loading message bodies. ' +
+      'Returns only unreadCount, senders, messageIds, and hasMore; it never returns message content or changes cursors. ' +
+      'Use cat_cafe_get_thread_context or cat_cafe_fetch_thread_history to read the body on demand.',
+    inputSchema: checkInboxInputSchema,
+    handler: handleCheckInbox,
   },
   {
     name: 'cat_cafe_get_pending_mentions',

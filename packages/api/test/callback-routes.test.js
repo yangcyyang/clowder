@@ -34,6 +34,7 @@ describe('Callback Routes', () => {
   let taskStore;
   let backlogStore;
   let featIndexProvider;
+  let deliveryCursorStore;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
@@ -43,12 +44,16 @@ describe('Callback Routes', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { DeliveryCursorStore } = await import(
+      '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'
+    );
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     threadStore = new ThreadStore();
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
+    deliveryCursorStore = new DeliveryCursorStore();
     socketManager = createMockSocketManager();
     evidenceStore = {
       search: async () => [],
@@ -80,6 +85,7 @@ describe('Callback Routes', () => {
       evidenceStore,
       reflectionService,
       markerQueue,
+      deliveryCursorStore,
     };
     if (backlogStore !== undefined) {
       options.backlogStore = backlogStore;
@@ -611,6 +617,58 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.mentions.length, 0);
+  });
+
+  test('GET check-inbox returns unread metadata without message bodies or side effects', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const secret = 'SECRET-INBOX-BODY-MUST-NOT-LEAK';
+    const visible = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: secret,
+      mentions: [],
+      timestamp: Date.now(),
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'own output',
+      mentions: [],
+      timestamp: Date.now() + 1,
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'heartbeat',
+      origin: 'progress',
+      mentions: [],
+      timestamp: Date.now() + 2,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/check-inbox',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.unreadCount, 1);
+    assert.deepEqual(body.messageIds, [visible.id]);
+    assert.deepEqual(body.senders, ['user-1']);
+    assert.ok(!response.body.includes(secret));
+    const { estimateTokens } = await import('../dist/utils/token-counter.js');
+    assert.ok(estimateTokens(response.body) < 50, `inbox response should stay under 50 tokens: ${response.body}`);
+    assert.equal(await deliveryCursorStore.getCursor('user-1', 'opus', 'default'), undefined);
+    assert.equal(await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', 'default'), undefined);
+
+    const repeated = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/check-inbox',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.deepEqual(JSON.parse(repeated.body), body, 'check-inbox must be a repeatable pure read');
   });
 
   // ---- GET /api/callbacks/thread-context ----

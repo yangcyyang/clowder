@@ -1329,6 +1329,16 @@ export interface IncrementalContextResult {
   historyGovernanceQualityIssues?: readonly HistorySummaryQualityIssue[];
   /** Slock-like Agent Inbox snapshot for latest user intent in the current surface. */
   intentSnapshot?: AgentIntentSnapshot;
+  /** F004 Phase 2: prompt carries only a content-free unread notification. */
+  contentFreeInbox?: ContentFreeInbox;
+}
+
+export interface ContentFreeInbox {
+  threadId: string;
+  unreadCount: number;
+  senders: string[];
+  messageIds: string[];
+  hasMore: boolean;
 }
 
 export type AgentIntentType = 'discussion' | 'action' | 'correction' | 'approval' | 'stage-input';
@@ -1514,12 +1524,29 @@ export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefi
  * In that case, appending the raw message would duplicate it in the same prompt.
  */
 export function shouldAppendExplicitCurrentMessage(
-  inc: Pick<IncrementalContextResult, 'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'>,
+  inc: Pick<
+    IncrementalContextResult,
+    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox'
+  >,
   currentUserMessageId: string | undefined,
 ): boolean {
+  if (inc.contentFreeInbox) return false;
   if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
   if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
   return true;
+}
+
+export function selectExplicitPromptMessage(
+  inc: Pick<
+    IncrementalContextResult,
+    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox'
+  >,
+  currentUserMessageId: string | undefined,
+  message: string,
+  a2a?: { directMessageFrom?: CatId; triggerMessageId?: string },
+): string | undefined {
+  if (inc.contentFreeInbox && a2a?.directMessageFrom && a2a.triggerMessageId) return message;
+  return shouldAppendExplicitCurrentMessage(inc, currentUserMessageId) ? message : undefined;
 }
 
 /**
@@ -1949,6 +1976,66 @@ export interface IncrementalContextOptions {
   historyObservation?: HistoryGovernanceObservation;
   /** Test/route override for governance env flags. Defaults to process.env. */
   historyGovernanceEnv?: NodeJS.ProcessEnv;
+  /** F004 Phase 2 canary override. Defaults to CAT_CAFE_CONTENT_FREE_INBOX_THREADS. */
+  contentFreeInboxEnabled?: boolean;
+  /** Current A2A trigger is injected in full and must not also appear as unread. */
+  a2aTriggerMessageId?: string;
+}
+
+export function isContentFreeInboxEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return listMatches(env.CAT_CAFE_CONTENT_FREE_INBOX_THREADS, threadId);
+}
+
+/** Shared unread projection for prompt injection and cat_cafe_check_inbox. */
+export function selectUnreadMessagesForCat(
+  unseen: readonly StoredMessage[],
+  catId: CatId,
+  thinkingMode: 'debug' | 'play' = 'play',
+): StoredMessage[] {
+  const viewer = thinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  return unseen.filter((m) => {
+    if (m.userId === 'system' || m.origin === 'briefing' || m.origin === 'progress') return false;
+    if (!canViewMessage(m, viewer)) return false;
+    if (!m.extra?.crossPost && m.catId !== null && m.catId === catId) return false;
+    if (thinkingMode === 'play' && m.catId !== null && m.origin === 'stream') return false;
+    return true;
+  });
+}
+
+export function buildContentFreeInbox(
+  threadId: string,
+  messages: readonly StoredMessage[],
+  options: { excludeMessageId?: string; maxIds?: number } = {},
+): ContentFreeInbox {
+  const filtered = options.excludeMessageId ? messages.filter((m) => m.id !== options.excludeMessageId) : [...messages];
+  const maxIds = Math.max(1, options.maxIds ?? 20);
+  const page = filtered.slice(-maxIds);
+  return {
+    threadId,
+    unreadCount: filtered.length,
+    senders: [...new Set(page.map((m) => m.catId ?? m.userId))],
+    messageIds: page.map((m) => m.id),
+    hasMore: filtered.length > maxIds,
+  };
+}
+
+/** Hard-capped prompt notification. Full IDs remain available through cat_cafe_check_inbox. */
+export function formatContentFreeInbox(inbox: ContentFreeInbox, maxTokens = 49): string {
+  if (inbox.unreadCount === 0) return '';
+  const senders = inbox.senders.slice(0, 3).join(',');
+  const ids: string[] = [];
+  const suffix = '; use cat_cafe_check_inbox';
+  for (const id of [...inbox.messageIds].reverse()) {
+    const candidateIds = [id, ...ids];
+    const candidate = `[Inbox] unread=${inbox.unreadCount}; from=${senders}; ids=${candidateIds.join(',')}${suffix}`;
+    if (estimateTokens(candidate) >= maxTokens) break;
+    ids.unshift(id);
+  }
+  const text = `[Inbox] unread=${inbox.unreadCount}; from=${senders}; ids=${ids.join(',') || 'check'}${
+    inbox.hasMore || ids.length < inbox.messageIds.length ? ',…' : ''
+  }${suffix}`;
+  if (estimateTokens(text) < maxTokens) return text;
+  return `[Inbox] unread=${inbox.unreadCount}; ids=check; use cat_cafe_check_inbox`;
 }
 
 export async function assembleIncrementalContext(
@@ -1967,38 +2054,39 @@ export async function assembleIncrementalContext(
   const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
   const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
 
+  const effectiveThinkingMode = thinkingMode ?? 'play';
+  const relevant = selectUnreadMessagesForCat(unseen, catId, effectiveThinkingMode);
+
+  const currentMessageFilteredOut = Boolean(
+    currentUserMessageId &&
+      !relevant.some((m) => m.id === currentUserMessageId) &&
+      unseen.some((m) => m.id === currentUserMessageId),
+  );
+  const contentFreeInboxEnabled =
+    options?.contentFreeInboxEnabled ??
+    isContentFreeInboxEnabled(threadId, options?.historyGovernanceEnv ?? process.env);
+  if (contentFreeInboxEnabled) {
+    const inbox = buildContentFreeInbox(threadId, relevant, {
+      ...(options?.a2aTriggerMessageId ? { excludeMessageId: options.a2aTriggerMessageId } : {}),
+    });
+    return {
+      contextText: formatContentFreeInbox(inbox),
+      boundaryId: relevant.at(-1)?.id ?? cursor,
+      includedHistoryCount: 0,
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      contentFreeInbox: inbox,
+    };
+  }
+
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
-  const viewer = (thinkingMode ?? 'play') === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
-  const relevant = unseen.filter((m) => {
-    // System-generated messages (persisted error badges) are display-only — never enter prompt
-    if (m.userId === 'system') return false;
-    // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
-    if (m.origin === 'briefing') return false;
-    // Ack/heartbeat messages are user-visible status, not new conversational input.
-    if (m.origin === 'progress') return false;
-    // F35: Exclude whispers not intended for this cat (play mode only)
-    if (!canViewMessage(m, viewer)) return false;
-    // Exclude own messages (only include user messages and other cats' messages)
-    // F052 fix: exempt cross-posted messages — same catId from another thread must be visible
-    if (!m.extra?.crossPost && m.catId !== null && m.catId === catId) return false;
-    // In play mode, hide other cats' stream (thinking) messages.
-    // Legacy messages (no origin) are visible for backward compatibility —
-    // all new writes are tagged, so untagged = legacy callback data.
-    if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
-    return true;
-  });
+  const viewer = effectiveThinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
   const intentSnapshot = buildAgentIntentSnapshot(relevant, currentUserMessageId);
   const intentSnapshotText = formatAgentIntentSnapshot(intentSnapshot);
 
   // F35 fix: detect when the current message was present but filtered out by visibility
   // (e.g. whisper not intended for this cat). Must NOT fallback-inject in that case.
   // Computed on `unseen` — independent of budget cap (砚砚 review: don't mix budget and visibility semantics).
-  const currentMessageFilteredOut = Boolean(
-    currentUserMessageId &&
-      !relevant.some((m) => m.id === currentUserMessageId) &&
-      unseen.some((m) => m.id === currentUserMessageId),
-  );
-
   // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
   // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
   const batonCandidates = unseen.filter(

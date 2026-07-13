@@ -60,12 +60,11 @@ function resolveExampleHandle(opts: McpCallbackOptions): string {
 export function buildMcpCallbackInstructions(opts: McpCallbackOptions): string {
   const exampleHandle = resolveExampleHandle(opts);
   return `## 协作方式
-@队友: 另起一行写唯一句柄（如 \`${exampleHandle}\`）+ 动作；不要为了 @ 队友调 post-message。
+@队友: 独占一行写唯一句柄（如 \`${exampleHandle}\`）+动作；勿为 @ 调 post-message。
 凭证: \`$CAT_CAFE_INVOCATION_ID\` + \`$CAT_CAFE_CALLBACK_TOKEN\`
-可用工具: post-progress（非终态开工/心跳）/ post-message（正式发布）/ register-pr-tracking / thread-context / fetch-thread-history / message-search / list-threads / feat-index / list-tasks / pending-mentions / create-task / claim-task / update-task / create-rich-block / search-evidence / reflect / retain-memory / request-permission / submit-game-action
+工具: post-progress/post-message/register-pr-tracking/check-inbox/thread-context/fetch-thread-history/message-search/list-threads/feat-index/list-tasks/pending-mentions/create-task/claim-task/update-task/create-rich-block/search-evidence/reflect/retain-memory/request-permission/submit-game-action
 跨 thread: cross-post-message + \`threadId\`
-检索消息: thread-context + \`keyword\` 当前 thread；fetch-thread-history + \`fromMessageId/toMessageId\` 或 \`query\` 按需取原文；message-search + \`q\`/\`catId\` 跨历史。遇到“之前/上次/历史/旧讨论”先检索；摘要缺细节时用 fetch-thread-history，不要猜
-检索 feature: feat-index + \`featId\`/\`query\`
-完整用法: GET \`$CAT_CAFE_API_URL/api/callbacks/instructions\`
-富消息规范: GET \`$CAT_CAFE_API_URL/api/callbacks/rich-block-rules\``;
+检索: [Inbox]→check-inbox→thread-context(\`keyword\`/\`catId\`)或 fetch-thread-history；跨历史 message-search(\`q\`)；feature 用 feat-index。
+文档: \`$CAT_CAFE_API_URL/api/callbacks/instructions\`
+富消息: \`$CAT_CAFE_API_URL/api/callbacks/rich-block-rules\``;
 }

@@ -15,6 +15,7 @@ export {
 export {
   ackMentionsInputSchema,
   callbackTools,
+  checkInboxInputSchema,
   checkPermissionStatusInputSchema,
   claimTaskInputSchema,
   crossPostMessageInputSchema,
@@ -24,6 +25,7 @@ export {
   getThreadCatsInputSchema,
   getThreadContextInputSchema,
   handleAckMentions,
+  handleCheckInbox,
   handleCheckPermissionStatus,
   handleClaimTask,
   handleCrossPostMessage,

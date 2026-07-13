@@ -1513,6 +1513,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_CONTENT_FREE_INBOX_THREADS',
+    defaultValue: '(未设置)',
+    description: 'F004 二期 content-free inbox canary thread allowlist，逗号分隔；* 表示全量',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CAT_CAFE_SUMMARY_COMPACTION_THREADS',
     defaultValue: '(未设置)',
     description:

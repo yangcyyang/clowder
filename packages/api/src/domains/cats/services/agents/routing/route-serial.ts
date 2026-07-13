@@ -110,6 +110,7 @@ import {
   getEffectiveRuntimeContextBudget,
   getService,
   getThreadBootcampMemberCount,
+  isContentFreeInboxEnabled,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   parseCompactBoundarySystemInfo,
@@ -119,7 +120,7 @@ import {
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
-  shouldAppendExplicitCurrentMessage,
+  selectExplicitPromptMessage,
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
@@ -497,6 +498,7 @@ export async function* routeSerial(
             }
           : undefined;
       const a2aTriggerMessageId = worklistEntry.a2aTriggerMessageId.get(catId);
+      const contentFreeInboxEnabled = isContentFreeInboxEnabled(threadId);
       const streamReplyTo = a2aTriggerMessageId ?? options.replyToMessageId;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
@@ -601,7 +603,7 @@ export async function* routeSerial(
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(directMessageFrom ? { directMessageFrom } : {}),
         ...(directMessageFrom && a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
-        ...(directMessageFrom && a2aTriggerMessageId && streamReplyPreview?.content
+        ...(directMessageFrom && a2aTriggerMessageId && streamReplyPreview?.content && !contentFreeInboxEnabled
           ? { a2aTriggerContent: streamReplyPreview.content }
           : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
@@ -695,6 +697,8 @@ export async function* routeSerial(
             contextBudget: effectiveContextBudget,
             canonicalFeatureId: loadFullContext ? sopStageHint?.featureId : undefined,
             threadTitle: routeThread?.title ?? undefined,
+            contentFreeInboxEnabled,
+            ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
             ...(historyObservation ? { historyObservation } : {}),
           },
         );
@@ -776,7 +780,11 @@ export async function* routeSerial(
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
         // Defensive guard: if the current message ID is already present anywhere in
         // the assembled context text, do not append the raw message again.
-        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
+        const explicitMessage = selectExplicitPromptMessage(inc, currentUserMessageId, message, {
+          ...(directMessageFrom ? { directMessageFrom } : {}),
+          ...(a2aTriggerMessageId ? { triggerMessageId: a2aTriggerMessageId } : {}),
+        });
+        if (explicitMessage) parts.push(explicitMessage);
         prompt = parts.join('\n\n---\n\n');
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits

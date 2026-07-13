@@ -17,6 +17,10 @@ import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/R
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import {
+  buildContentFreeInbox,
+  selectUnreadMessagesForCat,
+} from '../domains/cats/services/agents/routing/route-helpers.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
@@ -266,6 +270,11 @@ const featIndexQuerySchema = z.object({
 const pendingMentionsQuerySchema = z.object({
   // Accept both scalar and repeated query params (Fastify may surface string[]).
   includeAcked: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+const checkInboxQuerySchema = z.object({
+  threadId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
 });
 
 const ackMentionsSchema = z.object({
@@ -1546,6 +1555,39 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
       })),
     };
+  });
+
+  app.get('/api/callbacks/check-inbox', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = checkInboxQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query parameters' };
+    }
+    if (!deliveryCursorStore) {
+      reply.status(501);
+      return { error: 'Inbox unavailable (no cursor store)' };
+    }
+
+    const threadResult = await resolvePrincipalThread(principal, parsed.data.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+    const effectiveThreadId = threadResult.threadId;
+    const cursor = await deliveryCursorStore.getCursor(principal.userId, principal.catId, effectiveThreadId);
+    const unseen = await messageStore.getByThreadAfter(effectiveThreadId, cursor, undefined, principal.userId);
+    const thread = await Promise.resolve(threadStore?.get(effectiveThreadId)).catch(() => null);
+    const relevant = selectUnreadMessagesForCat(unseen, principal.catId, thread?.thinkingMode ?? 'play');
+    const inbox = buildContentFreeInbox(effectiveThreadId, relevant, {
+      maxIds: parsed.data.limit ?? 1,
+      ...(principal.kind === 'invocation' && request.callbackAuth?.a2aTriggerMessageId
+        ? { excludeMessageId: request.callbackAuth.a2aTriggerMessageId }
+        : {}),
+    });
+    return inbox;
   });
 
   // #77: POST /api/callbacks/ack-mentions — explicit ack with 4-way validation

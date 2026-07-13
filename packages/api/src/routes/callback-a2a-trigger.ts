@@ -21,6 +21,7 @@ import {
 } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { persistA2APendingNotice } from '../domains/cats/services/agents/routing/route-helpers.js';
 import {
   getWorklist,
   hasWorklist,
@@ -32,7 +33,6 @@ import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { persistA2APendingNotice } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -488,6 +488,9 @@ export async function triggerA2AInvocation(
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
         parentInvocationId: createResult.invocationId,
+        directMessageFrom: triggerMessage.catId ?? getDefaultCatId(),
+        a2aTriggerMessageId: triggerMessage.id,
+        replyToMessageId: triggerMessage.id,
         callerTraceContext: opts.callerTraceContext,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.

@@ -253,6 +253,26 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handleCheckInbox requests content-free unread metadata', async () => {
+    const { handleCheckInbox } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ threadId: 'thread-1', unreadCount: 1, senders: ['user-1'], messageIds: ['m1'] }),
+      };
+    };
+
+    const result = await handleCheckInbox({ limit: 3 });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/check-inbox'));
+    assert.ok(capturedUrl.includes('limit=3'));
+    assert.ok(!result.content[0].text.includes('message content'));
+  });
+
   test('handleGetThreadContext calls API with limit', async () => {
     const { handleGetThreadContext } = await import('../dist/tools/callback-tools.js');
 

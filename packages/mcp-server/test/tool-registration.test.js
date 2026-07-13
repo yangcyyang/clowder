@@ -17,6 +17,7 @@ const EXPECTED_TOOLS = [
   'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_review_held_message',
+  'cat_cafe_check_inbox',
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
@@ -103,6 +104,7 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_post_progress',
   'cat_cafe_post_message',
   'cat_cafe_review_held_message',
+  'cat_cafe_check_inbox',
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
@@ -449,6 +451,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
       if (
         !names.includes('cat_cafe_post_progress') ||
         !names.includes('cat_cafe_post_message') ||
+        !names.includes('cat_cafe_check_inbox') ||
         !names.includes('cat_cafe_get_thread_context')
       ) {
         console.error(JSON.stringify(names.sort()));

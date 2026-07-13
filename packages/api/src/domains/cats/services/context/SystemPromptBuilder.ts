@@ -320,7 +320,7 @@ const PROVIDER_LABELS: Record<string, string> = {
  * Slock-like tool menu: one-line hints only. Detailed docs are pulled on demand.
  */
 const TOOL_QUERY_GUIDE_SECTION = `## 上下文查询指南（按需拉取）
-- thread 历史只给最近窗口；需要更多时用 cat_cafe_get_thread_context。
+- [Inbox] 无正文；先 cat_cafe_check_inbox，再 cat_cafe_get_thread_context。
 - 历史证据/项目文档/refs 用 cat_cafe_search_evidence；不要预设已知道全部背景。
 - session 接续用 cat_cafe_list_session_chain + cat_cafe_read_session_digest。
 - 需要富呈现用 rich block 工具；规则不确定再查 cat_cafe_get_rich_block_rules。
