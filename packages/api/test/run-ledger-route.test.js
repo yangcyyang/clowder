@@ -195,6 +195,27 @@ describe('run ledger route', () => {
     await app.close();
   });
 
+  test('classifies permission cancellation as a tool failure instead of a user cancellation', async () => {
+    const records = [
+      makeInvocation({
+        id: 'inv-permission-cancelled',
+        status: 'failed',
+        phase: 'done',
+        error: 'permission_cancelled: Grok 终端工具权限未获批准',
+      }),
+    ];
+    const app = await buildApp({ records, messages: [], traceStore: { query: () => [] } });
+
+    const res = await app.inject({ method: 'GET', url: '/api/run-ledger/inv-permission-cancelled' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.summary.status, 'failed');
+    assert.equal(body.summary.failureClass, 'tool_failed');
+    assert.equal(body.events.at(-1).data.failureClass, 'tool_failed');
+
+    await app.close();
+  });
+
   test('surfaces compact boundary task events without leaking raw control data', async () => {
     const records = [
       makeInvocation({

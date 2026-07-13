@@ -476,6 +476,7 @@ export interface StreamingOutboundHookLike {
   ): Promise<void>;
   onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
   onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
+  onStreamFailure?(threadId: string, errorText: string, invocationId: string): Promise<void>;
   onStreamHold?(threadId: string, invocationId: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
@@ -1979,6 +1980,8 @@ export class QueueProcessor {
         isCompleteMessageDeliveryEnabled() || isOutputGateEnabledForTargets(targetCats);
       const completedSocketTurnIndices = new Set<number>();
       const tokenUsageAggregates = new Map<string, TokenUsageAggregate>();
+      let terminalErrorCode: string | undefined;
+      let terminalErrorText: string | undefined;
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -2441,9 +2444,16 @@ export class QueueProcessor {
         if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
+        if (msg.type === 'error' && typeof msg.error === 'string') {
+          terminalErrorText = msg.error;
+        }
+        if (msg.type === 'done' && typeof msg.errorCode === 'string') {
+          terminalErrorCode = msg.errorCode;
+          terminalErrorText ??= msg.errorCode;
+        }
 
         // F088 fix: collect per-turn content for outbound delivery
-        if (msg.type === 'done' && msg.catId) {
+        if (msg.type === 'done' && msg.catId && !msg.errorCode) {
           if (persistenceContext.richBlocks) {
             const turn = outboundTurns[outboundTurns.length - 1];
             if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
@@ -2520,7 +2530,7 @@ export class QueueProcessor {
           break;
         }
 
-        if (completeMessageDeliveryEnabled && msg.type === 'done' && msg.catId) {
+        if (completeMessageDeliveryEnabled && msg.type === 'done' && msg.catId && !msg.errorCode) {
           for (let i = 0; i < outboundTurns.length; i++) {
             if (completedSocketTurnIndices.has(i)) continue;
             const turn = outboundTurns[i];
@@ -2557,6 +2567,31 @@ export class QueueProcessor {
         }
         await invocationRecordStore.update(invocationId, { status: 'canceled', phase: 'done' });
         finalStatus = controller.signal.reason === 'user_cancel' ? 'canceled_by_user' : 'canceled';
+        return finalStatus;
+      }
+
+      if (terminalErrorCode) {
+        if (this.deps.streamingHook?.onStreamFailure) {
+          if (streamStartPromise) {
+            const STREAM_START_TIMEOUT_MS = 5000;
+            await Promise.race([
+              streamStartPromise,
+              new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS).unref()),
+            ]);
+          }
+          await this.deps.streamingHook
+            .onStreamFailure(threadId, terminalErrorText ?? 'Provider reported a terminal failure', invocationId)
+            .catch((err) => {
+              log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamFailure failed');
+            });
+        }
+        await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
+        await invocationRecordStore.update(invocationId, {
+          status: 'failed',
+          phase: 'done',
+          error: `${terminalErrorCode}: ${terminalErrorText ?? 'Provider reported a terminal failure'}`,
+        });
+        finalStatus = 'failed';
         return finalStatus;
       }
 

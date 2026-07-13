@@ -591,6 +591,9 @@ function classifyFailure(error: string | undefined): NonNullable<RunLedgerSummar
   const value = (error ?? '').toLowerCase();
   if (value.includes('process_restart')) return 'process_restart';
   if (value.includes('timeout') || value.includes('timed out')) return 'runtime_hung';
+  if (value.includes('permission_cancelled') || (value.includes('permission') && value.includes('cancel'))) {
+    return 'tool_failed';
+  }
   if (value.includes('cancel')) return 'user_canceled';
   if (value.includes('budget')) return 'budget_exhausted';
   if (value.includes('tool')) return 'tool_failed';

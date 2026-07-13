@@ -629,5 +629,76 @@ describe('StreamingOutboundHook', () => {
       assert.equal(deleteCalls.length, 1, 'slow fallback success must still clean late placeholder');
       assert.deepEqual(deleteCalls[0], { msgId: 'ph-slow-success', chatId: 'chat1' });
     });
+
+    it('onStreamFailure replaces an active partial placeholder with the visible failure', async () => {
+      const { hook, adapter } = createHook({ updateIntervalMs: 0, minDeltaChars: 0 });
+      await hook.onStreamStart('thread-1', undefined, 'inv-failed');
+      await hook.onStreamChunk('thread-1', 'partial answer', 'inv-failed');
+      await hook.onStreamFailure('thread-1', '⚠️ 工具权限未获批准，本轮未完成。', 'inv-failed');
+
+      assert.equal(adapter._calls.editMessage.at(-1).text, '⚠️ 工具权限未获批准，本轮未完成。');
+      assert.equal(adapter._calls.finalizeStreamCard.length, 0);
+      assert.equal(adapter._calls.deleteMessage.length, 0);
+    });
+
+    it('onStreamFailure wins when placeholder creation completes after the failure', async () => {
+      let resolvePlaceholder;
+      const editCalls = [];
+      const adapter = {
+        connectorId: 'telegram',
+        sendReply: async () => {},
+        sendPlaceholder: async () =>
+          new Promise((resolve) => {
+            resolvePlaceholder = resolve;
+          }),
+        editMessage: async (chatId, msgId, text) => editCalls.push({ chatId, msgId, text }),
+      };
+      const adapters = new Map([['telegram', adapter]]);
+      const bindingStore = createBindingStore([
+        { connectorId: 'telegram', externalChatId: 'chat1', threadId: 'thread-1', userId: 'u1', createdAt: Date.now() },
+      ]);
+      const hook = new StreamingOutboundHook({ bindingStore, adapters, log: makeLog() });
+
+      const startPromise = hook.onStreamStart('thread-1', undefined, 'inv-failed');
+      await hook.onStreamFailure('thread-1', 'permission failed', 'inv-failed');
+      resolvePlaceholder('ph-failed-late');
+      await startPromise;
+
+      assert.deepEqual(editCalls, [{ chatId: 'chat1', msgId: 'ph-failed-late', text: 'permission failed' }]);
+    });
+
+    it('does not retain a failure tombstone after a completed start found no binding', async () => {
+      let bindings = [];
+      const editCalls = [];
+      const adapter = {
+        connectorId: 'telegram',
+        sendReply: async () => {},
+        sendPlaceholder: async () => 'ph-after-empty-start',
+        editMessage: async (chatId, msgId, text) => editCalls.push({ chatId, msgId, text }),
+      };
+      const hook = new StreamingOutboundHook({
+        bindingStore: {
+          ...createBindingStore([]),
+          getByThread: async () => bindings,
+        },
+        adapters: new Map([['telegram', adapter]]),
+        log: makeLog(),
+      });
+
+      await hook.onStreamStart('thread-1', undefined, 'inv-no-binding');
+      await hook.onStreamFailure('thread-1', 'stale failure', 'inv-no-binding');
+      bindings = [
+        {
+          connectorId: 'telegram',
+          externalChatId: 'chat1',
+          threadId: 'thread-1',
+          userId: 'u1',
+          createdAt: Date.now(),
+        },
+      ];
+      await hook.onStreamStart('thread-1', undefined, 'inv-no-binding');
+
+      assert.deepEqual(editCalls, [], 'a completed empty start must not leave a failure for a later start');
+    });
   });
 });

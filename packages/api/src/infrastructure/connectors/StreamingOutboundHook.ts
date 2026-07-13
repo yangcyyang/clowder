@@ -38,6 +38,9 @@ export class StreamingOutboundHook {
   private readonly pendingInlineCleanup = new Map<string, StreamingSession[]>();
   private readonly pendingChunks = new Map<string, string>();
   private readonly endedBeforeStart = new Map<string, EndedBeforeStart>();
+  /** A terminal failure can win before asynchronous placeholder creation completes. */
+  private readonly failedBeforeStart = new Map<string, string>();
+  private readonly pendingStarts = new Set<string>();
   private readonly lateStartedCleanup = new Map<string, StreamingSession[]>();
   /** Hold can win before the asynchronous placeholder creation completes. */
   private readonly heldBeforeStart = new Set<string>();
@@ -130,6 +133,19 @@ export class StreamingOutboundHook {
     }
   }
 
+  private async markSessionsFailed(sessions: StreamingSession[], errorText: string): Promise<void> {
+    for (const session of sessions) {
+      const adapter = this.opts.adapters.get(session.connectorId);
+      if (!adapter || !session.platformMessageId) continue;
+      try {
+        await adapter.clearInlinePlaceholder?.(session.externalChatId, session.platformMessageId);
+        await adapter.editMessage(session.externalChatId, session.platformMessageId, errorText);
+      } catch (err) {
+        this.opts.log.warn({ err, connectorId: session.connectorId }, '[StreamingOutbound] mark failure failed');
+      }
+    }
+  }
+
   async onStreamStart(
     threadId: string,
     catId?: CatId,
@@ -137,6 +153,20 @@ export class StreamingOutboundHook {
     senderHint?: { id: string; name?: string },
   ): Promise<void> {
     const key = this.scopeKey(threadId, invocationId);
+    this.pendingStarts.add(key);
+    try {
+      await this.startStream(key, threadId, catId, senderHint);
+    } finally {
+      this.pendingStarts.delete(key);
+    }
+  }
+
+  private async startStream(
+    key: string,
+    threadId: string,
+    catId?: CatId,
+    senderHint?: { id: string; name?: string },
+  ): Promise<void> {
     const bindings = await this.opts.bindingStore.getByThread(threadId);
     const sessions: StreamingSession[] = [];
 
@@ -170,7 +200,18 @@ export class StreamingOutboundHook {
 
     if (sessions.length === 0) {
       this.clearEndedBeforeStart(key);
+      this.failedBeforeStart.delete(key);
       this.heldBeforeStart.delete(key);
+      return;
+    }
+
+    const failureText = this.failedBeforeStart.get(key);
+    if (failureText !== undefined) {
+      this.failedBeforeStart.delete(key);
+      this.heldBeforeStart.delete(key);
+      this.pendingChunks.delete(key);
+      this.clearEndedBeforeStart(key);
+      await this.markSessionsFailed(sessions, failureText);
       return;
     }
 
@@ -239,8 +280,39 @@ export class StreamingOutboundHook {
     await this.markSessionsHeld(sessions);
   }
 
+  /** Replace a partial connector placeholder with an honest terminal failure. */
+  async onStreamFailure(threadId: string, errorText: string, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    this.pendingChunks.delete(key);
+    this.clearEndedBeforeStart(key);
+    this.heldBeforeStart.delete(key);
+
+    const sessions = [
+      ...(this.sessions.get(key) ?? []),
+      ...(this.pendingCleanup.get(key) ?? []),
+      ...(this.pendingInlineCleanup.get(key) ?? []),
+      ...(this.lateStartedCleanup.get(key) ?? []),
+    ];
+    this.sessions.delete(key);
+    this.pendingCleanup.delete(key);
+    this.pendingInlineCleanup.delete(key);
+    this.lateStartedCleanup.delete(key);
+
+    if (sessions.length === 0) {
+      if (this.pendingStarts.has(key)) {
+        this.failedBeforeStart.set(key, errorText);
+      } else {
+        this.failedBeforeStart.delete(key);
+      }
+      return;
+    }
+    this.failedBeforeStart.delete(key);
+    await this.markSessionsFailed(sessions, errorText);
+  }
+
   async onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void> {
     const key = this.scopeKey(threadId, invocationId);
+    this.failedBeforeStart.delete(key);
     const sessions = this.sessions.get(key);
     if (!sessions) {
       this.pendingChunks.delete(key);

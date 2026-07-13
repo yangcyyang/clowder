@@ -194,12 +194,15 @@ export class GrokAgentService implements AgentService {
       'streaming-json',
       '--model',
       this.model,
-      // Headless `default` waits for an interactive approval and cancels tool calls.
+      // Keep unlisted side-effect tools behind the permission gate; explicit allow rules below stay headless-safe.
       '--permission-mode',
-      'auto',
+      'default',
       // The isolated GROK_HOME exposes only Cat Cafe's MCP server; approve that namespace explicitly.
       '--allow',
       'MCPTool(cat-cafe-clowder-runtime__*)',
+      // Grok names the runtime tool `run_terminal_command`, but permission rules use the Bash alias.
+      '--allow',
+      'Bash',
     ];
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -262,6 +265,7 @@ export class GrokAgentService implements AgentService {
 
     let thought = '';
     let emittedSession = Boolean(options?.sessionId);
+    let terminalErrorCode: string | undefined;
     const flushThought = (): AgentMessage | null => {
       if (!thought) return null;
       const message: AgentMessage = {
@@ -335,6 +339,18 @@ export class GrokAgentService implements AgentService {
         if (event.kind === 'end') {
           const thinkingMessage = flushThought();
           if (thinkingMessage) yield thinkingMessage;
+          const stopReason = event.stopReason?.trim().toLowerCase();
+          if (stopReason?.includes('cancel') && !options?.signal?.aborted && !terminalErrorCode) {
+            terminalErrorCode = 'permission_cancelled';
+            yield {
+              type: 'error',
+              catId: this.catId,
+              error: 'Grok 工具权限未获批准或确认超时，本轮未完成；此前文本可能不完整。',
+              errorCode: terminalErrorCode,
+              metadata,
+              timestamp: Date.now(),
+            };
+          }
           if (event.sessionId) {
             metadata.sessionId = event.sessionId;
             if (!emittedSession) {
@@ -352,7 +368,13 @@ export class GrokAgentService implements AgentService {
       }
       const thinkingMessage = flushThought();
       if (thinkingMessage) yield thinkingMessage;
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      yield {
+        type: 'done',
+        catId: this.catId,
+        ...(terminalErrorCode ? { errorCode: terminalErrorCode } : {}),
+        metadata,
+        timestamp: Date.now(),
+      };
     } catch (error) {
       yield {
         type: 'error',

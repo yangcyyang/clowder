@@ -2384,6 +2384,118 @@ describe('QueueProcessor', () => {
       }
     });
 
+    it('provider terminal error marks the queued invocation failed without delivering partial text as completed', async () => {
+      const previous = process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY;
+      process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY = '1';
+      try {
+        const outboundHook = { deliver: mock.fn(async () => {}) };
+        const streamingHook = {
+          onStreamStart: mock.fn(async () => {}),
+          onStreamChunk: mock.fn(async () => {}),
+          onStreamEnd: mock.fn(async () => {}),
+          onStreamFailure: mock.fn(async () => {}),
+          cleanupPlaceholders: mock.fn(async () => {}),
+        };
+        const hookDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* () {
+              yield { type: 'text', catId: 'grok', content: '收到，开始执行。', timestamp: 1000 };
+              yield {
+                type: 'error',
+                catId: 'grok',
+                error: 'Grok 终端工具权限未获批准，本轮未完成。',
+                errorCode: 'permission_cancelled',
+                timestamp: 1001,
+              };
+              yield {
+                type: 'done',
+                catId: 'grok',
+                errorCode: 'permission_cancelled',
+                timestamp: 1002,
+              };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+          outboundHook,
+          streamingHook,
+          threadMetaLookup: mock.fn(async () => undefined),
+        });
+        const hookProcessor = new QueueProcessor(hookDeps);
+        const entry = enqueueEntry(hookDeps.queue, { targetCats: ['grok'] });
+        hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+        await hookProcessor.processNext('t1', 'u1');
+        await waitFor(() =>
+          hookDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'failed'),
+        );
+
+        const failedUpdate = hookDeps.invocationRecordStore.update.mock.calls.find(
+          (call) => call.arguments[1]?.status === 'failed',
+        );
+        assert.match(failedUpdate.arguments[1].error, /permission_cancelled/);
+        assert.equal(
+          hookDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'succeeded'),
+          false,
+        );
+        assert.equal(outboundHook.deliver.mock.calls.length, 0, 'partial text must not be delivered as a final reply');
+        assert.equal(streamingHook.onStreamFailure.mock.calls.length, 1);
+        assert.deepEqual(streamingHook.onStreamFailure.mock.calls[0].arguments, [
+          't1',
+          'Grok 终端工具权限未获批准，本轮未完成。',
+          'inv-stub',
+        ]);
+        assert.equal(streamingHook.onStreamEnd.mock.calls.length, 0);
+
+        const broadcasts = hookDeps.socketManager.broadcastAgentMessage.mock.calls.map((call) => call.arguments[0]);
+        assert.ok(
+          broadcasts.some((message) => message.type === 'error' && message.errorCode === 'permission_cancelled'),
+        );
+        assert.equal(
+          broadcasts.some((message) => message.type === 'text' && message.textMode === 'replace'),
+          false,
+          'failed turn must not receive a completed replacement text',
+        );
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY;
+        } else {
+          process.env.CAT_CAFE_COMPLETE_MESSAGE_DELIVERY = previous;
+        }
+      }
+    });
+
+    it('non-terminal error.errorCode does not fail a provider turn that later completes', async () => {
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'error',
+              catId: 'antigravity',
+              error: 'One tool call failed; continuing.',
+              errorCode: 'tool_error',
+              timestamp: 1001,
+            };
+            yield { type: 'text', catId: 'antigravity', content: 'Recovered answer', timestamp: 1002 };
+            yield { type: 'done', catId: 'antigravity', timestamp: 1003 };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+      const entry = enqueueEntry(hookDeps.queue, { targetCats: ['antigravity'] });
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() =>
+        hookDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'succeeded'),
+      );
+
+      assert.equal(
+        hookDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'failed'),
+        false,
+      );
+    });
+
     it('codex output gate defaults on and broadcasts sanitized final answer only', async () => {
       const previous = process.env.CAT_CAFE_CODEX_OUTPUT_GATE;
       delete process.env.CAT_CAFE_CODEX_OUTPUT_GATE;

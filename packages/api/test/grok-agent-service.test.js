@@ -67,10 +67,13 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   assert.ok(spawnOptions.args.includes('grok-4.5'));
   const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
   assert.ok(permissionModeIndex >= 0);
-  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'auto');
-  const allowIndex = spawnOptions.args.indexOf('--allow');
-  assert.ok(allowIndex >= 0);
-  assert.equal(spawnOptions.args[allowIndex + 1], 'MCPTool(cat-cafe-clowder-runtime__*)');
+  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'default');
+  const allowedTools = spawnOptions.args.flatMap((value, index, args) =>
+    value === '--allow' && args[index + 1] ? [args[index + 1]] : [],
+  );
+  assert.deepEqual(allowedTools, ['MCPTool(cat-cafe-clowder-runtime__*)', 'Bash']);
+  assert.equal(spawnOptions.args.includes('--always-approve'), false);
+  assert.equal(spawnOptions.args.includes('bypassPermissions'), false);
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
   assert.equal(spawnOptions.env.CUSTOM_ENV, 'enabled');
 });
@@ -117,6 +120,69 @@ test('surfaces streaming error events without exposing the Grok API key', async 
   );
   assert.match(messages[0].error, /Authentication failed/);
   assert.doesNotMatch(messages[0].error, new RegExp(apiKey));
+});
+
+test('marks a non-aborted cancelled Grok turn as a visible permission failure', async () => {
+  async function* spawnCliOverride() {
+    yield { type: 'text', data: '收到，开始执行。' };
+    yield { type: 'end', stopReason: 'Cancelled', sessionId: 'grok-cancelled-session' };
+  }
+
+  const service = new GrokAgentService({ model: 'grok-4.5' });
+  const messages = await collect(service.invoke('Write a file', { spawnCliOverride }));
+
+  assert.deepEqual(
+    messages.map((message) => message.type),
+    ['text', 'error', 'session_init', 'done'],
+  );
+  assert.equal(messages[1].errorCode, 'permission_cancelled');
+  assert.match(messages[1].error, /权限|取消/);
+  assert.equal(messages.at(-1).errorCode, 'permission_cancelled');
+});
+
+test('still emits the permission failure when another stream error precedes cancellation', async () => {
+  async function* spawnCliOverride() {
+    yield {
+      __cliError: true,
+      exitCode: 1,
+      signal: null,
+      message: 'transient stream diagnostic',
+      command: 'grok',
+    };
+    yield { type: 'end', stopReason: 'Cancelled' };
+  }
+
+  const service = new GrokAgentService({ model: 'grok-4.5' });
+  const messages = await collect(service.invoke('Write a file', { spawnCliOverride }));
+
+  const permissionErrors = messages.filter(
+    (message) => message.type === 'error' && message.errorCode === 'permission_cancelled',
+  );
+  assert.equal(permissionErrors.length, 1);
+  assert.match(permissionErrors[0].error, /权限|取消/);
+  assert.equal(messages.at(-1).errorCode, 'permission_cancelled');
+});
+
+test('does not misclassify an AbortSignal cancellation as a permission failure', async () => {
+  const controller = new AbortController();
+  controller.abort('user_cancel');
+  async function* spawnCliOverride() {
+    yield { type: 'end', stopReason: 'Cancelled' };
+  }
+
+  const service = new GrokAgentService({ model: 'grok-4.5' });
+  const messages = await collect(
+    service.invoke('Stop', {
+      signal: controller.signal,
+      spawnCliOverride,
+    }),
+  );
+
+  assert.deepEqual(
+    messages.map((message) => message.type),
+    ['done'],
+  );
+  assert.equal(messages[0].errorCode, undefined);
 });
 
 test('subscription mode removes an inherited XAI_API_KEY from the child environment', async () => {
