@@ -165,6 +165,17 @@ export interface PendingContinuationEntry {
   createdAt: number;
 }
 
+/**
+ * F004: token returned by the persistent history-critical seal claim.
+ * `previousWatermark` lets callers restore the exact prior state when the
+ * downstream SessionSealer CAS rejects the seal.
+ */
+export interface HistoryCriticalSealClaim {
+  claimed: boolean;
+  watermark: string;
+  previousWatermark?: string;
+}
+
 /** F088 Phase G: Connector Hub thread state for IM command isolation. */
 export interface ConnectorHubStateV1 {
   v: 1;
@@ -360,6 +371,14 @@ export interface IThreadStore {
     catId: string,
     userId: string,
   ): PendingContinuationEntry | null | Promise<PendingContinuationEntry | null>;
+  /** Claim a summary watermark once per thread+cat before history-critical seal. */
+  claimHistoryCriticalSeal(
+    threadId: string,
+    catId: string,
+    watermark: string,
+  ): HistoryCriticalSealClaim | Promise<HistoryCriticalSealClaim>;
+  /** Roll back a claim only when it is still the current watermark. */
+  rollbackHistoryCriticalSeal(threadId: string, catId: string, claim: HistoryCriticalSealClaim): void | Promise<void>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
@@ -378,6 +397,7 @@ const MAX_THREADS = 100;
  * In-memory thread store with LRU eviction.
  */
 export class ThreadStore implements IThreadStore {
+  private readonly historyCriticalSealWatermarks = new Map<string, string>();
   private threads: Map<string, Thread> = new Map();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
   private participantActivity: Map<
@@ -781,6 +801,28 @@ export class ThreadStore implements IThreadStore {
     return entry;
   }
 
+  claimHistoryCriticalSeal(threadId: string, catId: string, watermark: string): HistoryCriticalSealClaim {
+    if (!this.get(threadId)) return { claimed: false, watermark };
+    const key = `${threadId}:${catId}`;
+    const previousWatermark = this.historyCriticalSealWatermarks.get(key);
+    if (previousWatermark && previousWatermark >= watermark) {
+      return { claimed: false, watermark, previousWatermark };
+    }
+    this.historyCriticalSealWatermarks.set(key, watermark);
+    return { claimed: true, watermark, ...(previousWatermark ? { previousWatermark } : {}) };
+  }
+
+  rollbackHistoryCriticalSeal(threadId: string, catId: string, claim: HistoryCriticalSealClaim): void {
+    if (!claim.claimed) return;
+    const key = `${threadId}:${catId}`;
+    if (this.historyCriticalSealWatermarks.get(key) !== claim.watermark) return;
+    if (claim.previousWatermark) {
+      this.historyCriticalSealWatermarks.set(key, claim.previousWatermark);
+    } else {
+      this.historyCriticalSealWatermarks.delete(key);
+    }
+  }
+
   updateLastActive(threadId: string): void {
     const thread = this.get(threadId);
     if (thread) {
@@ -796,6 +838,7 @@ export class ThreadStore implements IThreadStore {
     // Cloud Codex R3 P2 fix: Clean up activity entries to prevent memory leak
     this.clearActivityForThread(threadId);
     this.clearMentionRoutingFeedbackForThread(threadId);
+    this.clearHistoryCriticalSealWatermarksForThread(threadId);
     return this.threads.delete(threadId);
   }
 
@@ -847,6 +890,13 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  private clearHistoryCriticalSealWatermarksForThread(threadId: string): void {
+    const prefix = `${threadId}:`;
+    for (const key of this.historyCriticalSealWatermarks.keys()) {
+      if (key.startsWith(prefix)) this.historyCriticalSealWatermarks.delete(key);
+    }
+  }
+
   /** Current thread count (for testing) */
   get size(): number {
     return this.threads.size;
@@ -861,6 +911,7 @@ export class ThreadStore implements IThreadStore {
           // Cloud Codex R3 P2 fix: Clean up activity before evicting
           this.clearActivityForThread(key);
           this.clearMentionRoutingFeedbackForThread(key);
+          this.clearHistoryCriticalSealWatermarksForThread(key);
           this.threads.delete(key);
           evicted = true;
           break;

@@ -18,6 +18,28 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
   let createRedisClient;
   let redis;
   let store;
+
+  it('claims and rolls back history-critical watermarks atomically', async () => {
+    const thread = await store.create('user-critical', 'Critical seal');
+    assert.equal((await store.claimHistoryCriticalSeal('missing', 'codex', 'msg-1')).claimed, false);
+
+    const [first, duplicate] = await Promise.all([
+      store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1'),
+      store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1'),
+    ]);
+    assert.equal([first, duplicate].filter((claim) => claim.claimed).length, 1);
+
+    const second = await store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2');
+    assert.deepEqual(second, { claimed: true, watermark: 'msg-2', previousWatermark: 'msg-1' });
+    const third = await store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-3');
+    await store.rollbackHistoryCriticalSeal(thread.id, 'codex', second);
+    assert.equal((await store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-3')).claimed, false);
+    await store.rollbackHistoryCriticalSeal(thread.id, 'codex', third);
+    await store.rollbackHistoryCriticalSeal(thread.id, 'codex', second);
+    assert.equal((await store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1')).claimed, false);
+    const reloadedStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    assert.equal((await reloadedStore.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2')).claimed, true);
+  });
   let connected = false;
   const threadDetailKey = (threadId) => `thread:${threadId}`;
   const threadParticipantsKey = (threadId) => `thread:${threadId}:participants`;

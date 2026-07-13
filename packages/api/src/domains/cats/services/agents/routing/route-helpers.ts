@@ -20,6 +20,7 @@ const log = createModuleLogger('context-transport');
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import type { IThreadHistorySummaryStore, ThreadHistorySummarySegment } from '../../../../memory/index.js';
+import { hasRequiredSummaryRecallFields } from '../../../../memory/SummaryRecallContract.js';
 import { formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
@@ -32,7 +33,6 @@ import {
   type StoredToolEvent,
   type ThreadAppendWatermark,
 } from '../../stores/ports/MessageStore.js';
-import { hasRequiredSummaryRecallFields } from '../../../../memory/SummaryRecallContract.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
@@ -111,6 +111,13 @@ export interface HistoryGovernanceThresholds {
   criticalRatio: number;
   recentMessages: number;
   criticalRecentMessages: number;
+}
+
+export interface HistoryCriticalSealIntent {
+  reason: 'history_budget_critical';
+  watermark: string;
+  historyBudgetRatio: number;
+  criticalRatio: number;
 }
 
 export interface HistoryGovernanceDecision {
@@ -273,6 +280,39 @@ export function getHistoryGovernanceThresholds(env: NodeJS.ProcessEnv = process.
       'CAT_CAFE_HISTORY_GOVERNANCE_CRITICAL_RECENT_MESSAGES',
       HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS.criticalRecentMessages,
     ),
+  };
+}
+
+/**
+ * F004: Build a post-publication seal intent for summary-active history.
+ * Provider context thresholds remain independent; this only reacts to the
+ * history-governance budget and requires a durable summary watermark.
+ */
+export function buildHistoryCriticalSealIntent(input: {
+  historyObservation?: HistoryGovernanceObservation;
+  historySummary?: HistorySummaryObservation;
+  historyGovernanceDegraded?: boolean;
+  toolPolicy: ToolPolicy;
+  env?: NodeJS.ProcessEnv;
+}): HistoryCriticalSealIntent | null {
+  const thresholds = getHistoryGovernanceThresholds(input.env);
+  const watermark = input.historySummary?.watermarkMessageId;
+  const historyBudgetRatio = input.historyObservation?.historyBudgetRatio ?? 0;
+  if (
+    input.toolPolicy === 'minimal' ||
+    input.historyGovernanceDegraded ||
+    input.historyObservation?.historyGovernanceDegraded ||
+    input.historySummary?.mode !== 'summary-active' ||
+    !watermark ||
+    historyBudgetRatio < thresholds.criticalRatio
+  ) {
+    return null;
+  }
+  return {
+    reason: 'history_budget_critical',
+    watermark,
+    historyBudgetRatio,
+    criticalRatio: thresholds.criticalRatio,
   };
 }
 

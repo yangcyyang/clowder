@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { AGENT_MEMORY_MAX_CHARS, getAgentMemoryDir, getAgentMemoryPath } from './AgentMemoryStore.js';
@@ -8,7 +8,9 @@ export const MEMORY_AUTO_WRITE_MIN_INTERVAL_MS = 60_000;
 const MAX_SUMMARY_CHARS = 500;
 const MAX_RECENT_VALIDATION_ITEMS = 20;
 
-const lastWriteAtByCat = new Map<string, number>();
+const lastWriteAtByMemoryPath = new Map<string, number>();
+const writeLockByMemoryPath = new Map<string, Promise<void>>();
+let tempFileSequence = 0;
 
 export interface AgentMemoryInvocationSummary {
   catId: string;
@@ -31,6 +33,7 @@ export interface AgentMemoryAutoWriterOptions {
   projectRoot?: string;
   now?: () => number;
   minIntervalMs?: number;
+  force?: boolean;
 }
 
 interface ParsedMemory {
@@ -53,7 +56,9 @@ function trimOneLine(input: string, maxChars: number): string {
 function buildInvocationSummary(summary: AgentMemoryInvocationSummary): string {
   const text = trimOneLine(summary.assistantText ?? '', MAX_SUMMARY_CHARS);
   if (!text) return '';
-  const taskHint = summary.currentUserMessageId ? `message ${summary.currentUserMessageId}` : `thread ${summary.threadId}`;
+  const taskHint = summary.currentUserMessageId
+    ? `message ${summary.currentUserMessageId}`
+    : `thread ${summary.threadId}`;
   return `${taskHint} / invocation ${summary.invocationId}: ${text}`;
 }
 
@@ -154,8 +159,43 @@ function renderMemory(parsed: ParsedMemory): string {
     chunks.push(`## ${section.heading.trim()}`);
     chunks.push(section.body.trim());
   }
-  const rendered = `${chunks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
-  return rendered.length > AGENT_MEMORY_MAX_CHARS ? `${rendered.slice(0, AGENT_MEMORY_MAX_CHARS - 40)}\n\n[Agent Memory 内容过长，已截断]\n` : rendered;
+  const rendered = `${chunks
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()}\n`;
+  return rendered.length > AGENT_MEMORY_MAX_CHARS
+    ? `${rendered.slice(0, AGENT_MEMORY_MAX_CHARS - 40)}\n\n[Agent Memory 内容过长，已截断]\n`
+    : rendered;
+}
+
+async function withMemoryWriteLock<T>(memoryPath: string, operation: () => Promise<T>): Promise<T> {
+  const previous = writeLockByMemoryPath.get(memoryPath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  writeLockByMemoryPath.set(memoryPath, current);
+
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (writeLockByMemoryPath.get(memoryPath) === current) {
+      writeLockByMemoryPath.delete(memoryPath);
+    }
+  }
+}
+
+async function writeFileAtomically(path: string, content: string): Promise<void> {
+  const tempPath = `${path}.${process.pid}.${tempFileSequence++}.tmp`;
+  try {
+    await writeFile(tempPath, content, 'utf-8');
+    await rename(tempPath, path);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 export function updateAgentMemoryContent(oldContent: string, summary: AgentMemoryInvocationSummary): string {
@@ -182,10 +222,6 @@ export async function autoUpdateAgentMemory(
 
   const now = options.now?.() ?? Date.now();
   const minIntervalMs = options.minIntervalMs ?? MEMORY_AUTO_WRITE_MIN_INTERVAL_MS;
-  const lastWriteAt = lastWriteAtByCat.get(summary.catId) ?? 0;
-  if (now - lastWriteAt < minIntervalMs) {
-    return { status: 'skipped', reason: 'rate_limited' };
-  }
 
   const delivery = buildInvocationSummary({ ...summary, completedAt: now });
   if (!delivery) {
@@ -195,20 +231,29 @@ export async function autoUpdateAgentMemory(
   const projectRoot = options.projectRoot ?? findMonorepoRoot();
   const memoryDir = getAgentMemoryDir(projectRoot);
   const memoryPath = getAgentMemoryPath(summary.catId, projectRoot);
-  const oldContent = existsSync(memoryPath) ? await readFile(memoryPath, 'utf-8') : '';
-  const nextContent = updateAgentMemoryContent(oldContent, { ...summary, completedAt: now });
+  return withMemoryWriteLock(memoryPath, async () => {
+    const lastWriteAt = lastWriteAtByMemoryPath.get(memoryPath) ?? 0;
+    if (!options.force && now - lastWriteAt < minIntervalMs) {
+      return { status: 'skipped', reason: 'rate_limited' };
+    }
 
-  await mkdir(memoryDir, { recursive: true });
-  await writeFile(memoryPath, nextContent, 'utf-8');
-  lastWriteAtByCat.set(summary.catId, now);
+    const oldContent = existsSync(memoryPath) ? await readFile(memoryPath, 'utf-8') : '';
+    const nextContent = updateAgentMemoryContent(oldContent, { ...summary, completedAt: now });
 
-  return {
-    status: 'updated',
-    path: join(memoryDir, basename(memoryPath)),
-    content: nextContent,
-  };
+    await mkdir(memoryDir, { recursive: true });
+    await writeFileAtomically(memoryPath, nextContent);
+    lastWriteAtByMemoryPath.set(memoryPath, now);
+
+    return {
+      status: 'updated',
+      path: join(memoryDir, basename(memoryPath)),
+      content: nextContent,
+    };
+  });
 }
 
 export function resetAgentMemoryAutoWriterForTests(): void {
-  lastWriteAtByCat.clear();
+  lastWriteAtByMemoryPath.clear();
+  writeLockByMemoryPath.clear();
+  tempFileSequence = 0;
 }

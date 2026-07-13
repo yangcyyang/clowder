@@ -7,6 +7,37 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('ThreadStore', () => {
+  test('claims each history-critical watermark once and rolls back exact state', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Critical seal');
+
+    assert.equal(store.claimHistoryCriticalSeal('missing', 'codex', 'msg-1').claimed, false);
+    const first = store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1');
+    assert.equal(first.claimed, true);
+    assert.equal(store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1').claimed, false);
+
+    const second = store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2');
+    assert.deepEqual(second, { claimed: true, watermark: 'msg-2', previousWatermark: 'msg-1' });
+    const third = store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-3');
+    store.rollbackHistoryCriticalSeal(thread.id, 'codex', second);
+    assert.equal(store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-3').claimed, false);
+    store.rollbackHistoryCriticalSeal(thread.id, 'codex', third);
+    assert.equal(store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2').claimed, false);
+
+    const retry = store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-3');
+    assert.equal(retry.claimed, true);
+    store.rollbackHistoryCriticalSeal(thread.id, 'codex', retry);
+    store.rollbackHistoryCriticalSeal(thread.id, 'codex', second);
+    assert.equal(store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-1').claimed, false);
+    assert.equal(store.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2').claimed, true);
+
+    store.delete(thread.id);
+    assert.equal(store.historyCriticalSealWatermarks.size, 0);
+    const recreated = store.create('user-1', 'Recreated');
+    assert.equal(store.claimHistoryCriticalSeal(recreated.id, 'codex', 'msg-1').claimed, true);
+  });
+
   test('create() returns a thread with generated id', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 

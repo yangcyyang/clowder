@@ -41,6 +41,7 @@ import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadSto
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { finalizeHistoryCriticalPublication } from '../invocation/HistoryCriticalSeal.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import {
   buildMcpCallbackInstructions,
@@ -59,11 +60,17 @@ import { sanitizeAgentVisibleOutput } from './agent-output-sanitizer.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
-import type { HistorySummaryObservation, RouteOptions, RouteStrategyDeps } from './route-helpers.js';
+import type {
+  HistoryCriticalSealIntent,
+  HistorySummaryObservation,
+  RouteOptions,
+  RouteStrategyDeps,
+} from './route-helpers.js';
 import {
   appendCompactBoundaryTaskEvent,
   assembleIncrementalContext,
   buildContextUsageWarning,
+  buildHistoryCriticalSealIntent,
   buildHistoryGovernanceObservation,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
@@ -310,6 +317,8 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+  const catHistoryCriticalSealIntent = new Map<string, HistoryCriticalSealIntent>();
+  const catContinuityCapsule = new Map<string, ReturnType<typeof buildCapsuleFromRouteState>>();
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -419,6 +428,7 @@ export async function* routeParallel(
         mode: 'parallel',
         a2aEnabled: false,
       });
+      catContinuityCapsule.set(catId as string, continuityCapsule);
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
@@ -670,6 +680,15 @@ export async function* routeParallel(
           ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
           : {}),
       });
+      const historyCriticalSealIntent = buildHistoryCriticalSealIntent({
+        ...(runtimeHistoryObservation ? { historyObservation: runtimeHistoryObservation } : {}),
+        ...(historySummary ? { historySummary } : {}),
+        ...(runtimeHistoryGovernanceDegraded !== undefined
+          ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
+          : {}),
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+      });
+      if (historyCriticalSealIntent) catHistoryCriticalSealIntent.set(catId as string, historyCriticalSealIntent);
 
       return invokeSingleCat(deps.invocationDeps, {
         catId,
@@ -689,6 +708,7 @@ export async function* routeParallel(
         toolPolicy: resolvedToolPolicy.toolPolicy,
         toolPolicySource: resolvedToolPolicy.source,
         contextBudget: runtimeContextBudget,
+        ...(historyCriticalSealIntent ? { deferMemoryWriteback: true } : {}),
       });
     }),
   );
@@ -719,6 +739,59 @@ export async function* routeParallel(
   const catCallbackMessageId = new Map<string, string>();
   const catCallbackHoldId = new Map<string, string>();
   const catCallbackReplayed = new Set<string>();
+
+  const finalizePublishedHistoryCriticalSeal = async (
+    catId: string,
+    publishedMessageId: string | undefined,
+    fallbackAssistantText = '',
+    invocationId?: string,
+    requirePersistedContent = false,
+  ): Promise<AgentMessage | null> => {
+    const intent = catHistoryCriticalSealIntent.get(catId);
+    const continuityCapsule = catContinuityCapsule.get(catId);
+    if (!intent || !continuityCapsule || !publishedMessageId) return null;
+    let assistantText = fallbackAssistantText;
+    try {
+      const publishedMessage = await deps.messageStore.getById(publishedMessageId);
+      if (requirePersistedContent && !publishedMessage) {
+        log.error(
+          { threadId, catId, invocationId, publishedMessageId },
+          'parallel history-critical callback message reload returned no canonical content; deferring seal',
+        );
+        return null;
+      }
+      assistantText = publishedMessage?.content ?? fallbackAssistantText;
+    } catch (err) {
+      if (requirePersistedContent) {
+        log.error(
+          { threadId, catId, invocationId, publishedMessageId, err },
+          'parallel history-critical callback message reload failed; deferring seal',
+        );
+        return null;
+      }
+      log.warn(
+        { threadId, catId, invocationId, publishedMessageId, err },
+        'parallel history-critical published message reload failed; using route output fallback',
+      );
+    }
+    try {
+      return await finalizeHistoryCriticalPublication({
+        deps: deps.invocationDeps,
+        intent,
+        userId,
+        catId: catId as CatId,
+        threadId,
+        ...(invocationId ? { invocationId } : {}),
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
+        assistantText,
+        ...(routeThread?.projectPath ? { projectPath: routeThread.projectPath } : {}),
+        continuityCapsule,
+      });
+    } catch (err) {
+      log.error({ threadId, catId, invocationId, err }, 'parallel history-critical post-publication seal failed');
+      return null;
+    }
+  };
   const catCallbackExposureEvents = new Map<string, AgentMessage[]>();
   // Full ordinary tool payloads remain private until that cat receives a
   // published verdict. This mirrors the serial route's publication epoch.
@@ -1142,6 +1215,16 @@ export async function* routeParallel(
             },
             'Parallel stream publication skipped — callback already reached a terminal disposition',
           );
+          if (callbackDisposition === 'published' && callbackMessageId && !catCallbackReplayed.has(msg.catId)) {
+            const sealInfo = await finalizePublishedHistoryCriticalSeal(
+              msg.catId,
+              callbackMessageId,
+              '',
+              ownInvId,
+              true,
+            );
+            if (sealInfo) yield sealInfo;
+          }
           if (callbackDisposition === 'held') {
             yield {
               type: 'system_info',
@@ -1235,6 +1318,13 @@ export async function* routeParallel(
                   for (const sibling of targetCats) freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
                 }
                 if (!egress.replayed) {
+                  const sealInfo = await finalizePublishedHistoryCriticalSeal(
+                    msg.catId,
+                    egress.message.id,
+                    storedContent,
+                    ownInvId,
+                  );
+                  if (sealInfo) yield sealInfo;
                   const releasableToolEvents = [
                     ...(catFreshnessToolExposureEvents.get(msg.catId) ?? []),
                     ...(catCallbackExposureEvents.get(msg.catId) ?? []),
@@ -1292,7 +1382,14 @@ export async function* routeParallel(
                 } as AgentMessage;
               }
             } else {
-              await deps.messageStore.append(outboundDraft);
+              const stored = await deps.messageStore.append(outboundDraft);
+              const sealInfo = await finalizePublishedHistoryCriticalSeal(
+                msg.catId,
+                stored.id,
+                storedContent,
+                ownInvId,
+              );
+              if (sealInfo) yield sealInfo;
               for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
               catCallbackExposureEvents.delete(msg.catId);
               // F088-P3: Stash rich blocks for outbound delivery
@@ -1399,6 +1496,13 @@ export async function* routeParallel(
                       freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);
                   }
                   if (!egress.replayed) {
+                    const sealInfo = await finalizePublishedHistoryCriticalSeal(
+                      msg.catId,
+                      egress.message.id,
+                      '',
+                      ownInvId,
+                    );
+                    if (sealInfo) yield sealInfo;
                     const releasableToolEvents = [
                       ...(catFreshnessToolExposureEvents.get(msg.catId) ?? []),
                       ...(catCallbackExposureEvents.get(msg.catId) ?? []),
@@ -1444,7 +1548,9 @@ export async function* routeParallel(
                   } as AgentMessage;
                 }
               } else {
-                await deps.messageStore.append(outboundDraft);
+                const stored = await deps.messageStore.append(outboundDraft);
+                const sealInfo = await finalizePublishedHistoryCriticalSeal(msg.catId, stored.id, '', ownInvId);
+                if (sealInfo) yield sealInfo;
                 for (const callbackEvent of catCallbackExposureEvents.get(msg.catId) ?? []) yield callbackEvent;
                 catCallbackExposureEvents.delete(msg.catId);
                 // F088-P3: Stash rich blocks for outbound delivery (no-text branch)

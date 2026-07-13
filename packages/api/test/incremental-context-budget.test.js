@@ -6,6 +6,7 @@ const {
   assembleIncrementalContext,
   __resetHistoryGovernanceDecisionStateForTests,
   buildAgentStageGate,
+  buildHistoryCriticalSealIntent,
   buildHistoryGovernanceObservation,
   resolveHistoryGovernanceDecision,
   buildRuntimeContextBudgetSnapshot,
@@ -27,6 +28,66 @@ function structuredSummary(extra = '') {
     .filter(Boolean)
     .join('\n');
 }
+
+describe('history critical seal intent', () => {
+  const observation = {
+    historyMode: 'observe',
+    historyFullTokens: 90_000,
+    historyBudgetRatio: 0.9,
+    historyGovernanceDegraded: false,
+  };
+  const summary = {
+    mode: 'summary-active',
+    tokens: 900,
+    segmentIds: ['segment-1'],
+    messageCount: 80,
+    watermarkMessageId: 'msg-090',
+  };
+
+  test('starts only at the critical ratio with an active summary watermark', () => {
+    assert.equal(
+      buildHistoryCriticalSealIntent({
+        historyObservation: { ...observation, historyBudgetRatio: 0.89 },
+        historySummary: summary,
+        toolPolicy: 'standard',
+      }),
+      null,
+    );
+    assert.deepEqual(
+      buildHistoryCriticalSealIntent({
+        historyObservation: observation,
+        historySummary: summary,
+        toolPolicy: 'standard',
+      }),
+      {
+        reason: 'history_budget_critical',
+        watermark: 'msg-090',
+        historyBudgetRatio: 0.9,
+        criticalRatio: 0.9,
+      },
+    );
+  });
+
+  test('rejects shadow, degraded, minimal, and watermark-free inputs', () => {
+    const variants = [
+      { historySummary: { ...summary, mode: 'shadow-summary' } },
+      { historyGovernanceDegraded: true },
+      { toolPolicy: 'minimal' },
+      { historySummary: { ...summary, watermarkMessageId: undefined } },
+    ];
+    for (const variant of variants) {
+      assert.equal(
+        buildHistoryCriticalSealIntent({
+          historyObservation: observation,
+          historySummary: summary,
+          toolPolicy: 'standard',
+          ...variant,
+        }),
+        null,
+      );
+    }
+  });
+});
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   test('injects Agent Inbox Snapshot with latest correction intent', async () => {

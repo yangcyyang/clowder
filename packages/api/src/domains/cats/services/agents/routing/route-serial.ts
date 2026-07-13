@@ -71,6 +71,7 @@ import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/Streamin
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { finalizeHistoryCriticalPublication } from '../invocation/HistoryCriticalSeal.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import {
   buildMcpCallbackInstructions,
@@ -105,6 +106,7 @@ import {
   appendCompactBoundaryTaskEvent,
   assembleIncrementalContext,
   buildContextUsageWarning,
+  buildHistoryCriticalSealIntent,
   buildHistoryGovernanceObservation,
   buildRuntimeContextBudgetSnapshot,
   createLeakedToolCallStreamStripper,
@@ -919,6 +921,14 @@ export async function* routeSerial(
           ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
           : {}),
       });
+      const historyCriticalSealIntent = buildHistoryCriticalSealIntent({
+        ...(runtimeHistoryObservation ? { historyObservation: runtimeHistoryObservation } : {}),
+        ...(historySummary ? { historySummary } : {}),
+        ...(runtimeHistoryGovernanceDegraded !== undefined
+          ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
+          : {}),
+        toolPolicy: resolvedToolPolicy.toolPolicy,
+      });
 
       let textContent = '';
       const thinkingChunks: string[] = [];
@@ -1010,6 +1020,7 @@ export async function* routeSerial(
           toolPolicy: resolvedToolPolicy.toolPolicy,
           toolPolicySource: resolvedToolPolicy.source,
           contextBudget: runtimeContextBudget,
+          ...(historyCriticalSealIntent ? { deferMemoryWriteback: true } : {}),
         })) {
           // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
           if (signal?.aborted) break;
@@ -1329,6 +1340,59 @@ export async function* routeSerial(
       let freshnessHoldStatus: 'held' | 'needs_attention' | undefined;
       let freshnessEgressReplayed = false;
       let releaseBufferedText = false;
+
+      const finalizePublishedHistoryCriticalSeal = async function* (
+        publishedMessageId: string | undefined,
+        fallbackAssistantText = '',
+        requirePersistedContent = false,
+      ): AsyncGenerator<AgentMessage> {
+        if (!historyCriticalSealIntent || !publishedMessageId || freshnessEgressReplayed) return;
+        if (freshnessEgressDisposition === 'held' || freshnessEgressDisposition === 'discarded') return;
+        let assistantText = fallbackAssistantText;
+        try {
+          const publishedMessage = await deps.messageStore.getById(publishedMessageId);
+          if (requirePersistedContent && !publishedMessage) {
+            log.error(
+              { threadId, catId: catId as string, invocationId: ownInvocationId, publishedMessageId },
+              'history-critical callback message reload returned no canonical content; deferring seal',
+            );
+            return;
+          }
+          assistantText = publishedMessage?.content ?? fallbackAssistantText;
+        } catch (err) {
+          if (requirePersistedContent) {
+            log.error(
+              { threadId, catId: catId as string, invocationId: ownInvocationId, publishedMessageId, err },
+              'history-critical callback message reload failed; deferring seal',
+            );
+            return;
+          }
+          log.warn(
+            { threadId, catId: catId as string, invocationId: ownInvocationId, publishedMessageId, err },
+            'history-critical published message reload failed; using route output fallback',
+          );
+        }
+        try {
+          const sealInfo = await finalizeHistoryCriticalPublication({
+            deps: deps.invocationDeps,
+            intent: historyCriticalSealIntent,
+            userId,
+            catId,
+            threadId,
+            ...(ownInvocationId ? { invocationId: ownInvocationId } : {}),
+            ...(currentUserMessageId ? { currentUserMessageId } : {}),
+            assistantText,
+            ...(routeThread?.projectPath ? { projectPath: routeThread.projectPath } : {}),
+            continuityCapsule,
+          });
+          if (sealInfo) yield sealInfo;
+        } catch (err) {
+          log.error(
+            { threadId, catId: catId as string, invocationId: ownInvocationId, err },
+            'history-critical post-publication seal failed',
+          );
+        }
+      };
 
       // F22: Consume MCP-buffered rich blocks BEFORE the text/empty branch —
       // blocks must be persisted even when the cat emits no text (cloud Codex P1).
@@ -1683,6 +1747,12 @@ export async function* routeSerial(
         } else if (deps.freshnessGate) {
           pendingPublishedRoutingEffects.length = 0;
         }
+
+        yield* finalizePublishedHistoryCriticalSeal(
+          storedMsgId ?? callbackPostMessageId,
+          storedContent,
+          Boolean(callbackPostMessageId && !storedMsgId),
+        );
 
         if (
           !incrementalMode &&
@@ -2145,6 +2215,12 @@ export async function* routeSerial(
             }
           }
 
+          yield* finalizePublishedHistoryCriticalSeal(
+            callbackPostMessageId ?? storedRichMessageId,
+            '',
+            Boolean(callbackPostMessageId),
+          );
+
           if (
             deps.freshnessGate &&
             freshnessEgressDisposition === 'published' &&
@@ -2182,6 +2258,10 @@ export async function* routeSerial(
             pendingFreshnessToolExposureEvents.length = 0;
             pendingCallbackExposureEvents.length = 0;
           }
+        }
+
+        if (!shouldPersistNoTextMessage && callbackDisposition === 'published' && !callbackReplayed) {
+          yield* finalizePublishedHistoryCriticalSeal(callbackPostMessageId, '', true);
         }
 
         if (shouldPersistSilentNotice) {

@@ -16,6 +16,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
+  HistoryCriticalSealClaim,
   IThreadStore,
   MentionActionabilityMode,
   PendingContinuationEntry,
@@ -605,6 +606,50 @@ export class RedisThreadStore implements IThreadStore {
     } catch {
       return null;
     }
+  }
+
+  async claimHistoryCriticalSeal(
+    threadId: string,
+    catId: string,
+    watermark: string,
+  ): Promise<HistoryCriticalSealClaim> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `historyCriticalSeal:${catId}`;
+    const previous = (await this.redis.eval(
+      `if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return {0, ''} end
+       local current = redis.call('HGET', KEYS[1], ARGV[1])
+       if current and current >= ARGV[2] then return {0, current} end
+       redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+       return {1, current or ''}`,
+      1,
+      key,
+      field,
+      watermark,
+    )) as [number, string];
+    const claimed = Number(previous?.[0] ?? 0) === 1;
+    const previousWatermark = previous?.[1] || undefined;
+    return { claimed, watermark, ...(previousWatermark ? { previousWatermark } : {}) };
+  }
+
+  async rollbackHistoryCriticalSeal(threadId: string, catId: string, claim: HistoryCriticalSealClaim): Promise<void> {
+    if (!claim.claimed) return;
+    const key = ThreadKeys.detail(threadId);
+    const field = `historyCriticalSeal:${catId}`;
+    await this.redis.eval(
+      `local current = redis.call('HGET', KEYS[1], ARGV[1])
+       if current ~= ARGV[2] then return 0 end
+       if ARGV[3] ~= '' then
+         redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+       else
+         redis.call('HDEL', KEYS[1], ARGV[1])
+       end
+       return 1`,
+      1,
+      key,
+      field,
+      claim.watermark,
+      claim.previousWatermark ?? '',
+    );
   }
 
   async updateBubbleDisplay(

@@ -343,6 +343,8 @@ export interface InvocationParams {
     summarySegmentId?: string;
     historyGovernanceDegraded?: boolean;
   };
+  /** Route layer will perform a mandatory post-publication memory writeback. */
+  readonly deferMemoryWriteback?: boolean;
 }
 
 /**
@@ -2443,7 +2445,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     }
 
-    if (!freshnessProtected && otelStatus === 'ok' && assistantTextForMemory.trim()) {
+    if (!freshnessProtected && !params.deferMemoryWriteback && otelStatus === 'ok' && assistantTextForMemory.trim()) {
       autoUpdateAgentMemory({
         catId,
         invocationId,
