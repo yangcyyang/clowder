@@ -9,10 +9,10 @@ import { promisify } from 'node:util';
 const execAsync = promisify(exec);
 
 export interface DetectedClient {
-  /** Client ID — the CLI tool identity (claude, codex, gemini, opencode, dare, kimi) */
-  client: 'claude' | 'codex' | 'gemini' | 'opencode' | 'dare' | 'kimi';
+  /** Client ID — the CLI tool identity (claude, codex, gemini, opencode, dare, kimi, grok) */
+  client: 'claude' | 'codex' | 'gemini' | 'opencode' | 'dare' | 'kimi' | 'grok';
   /** Provider key matching ClientValue in hub-cat-editor (anthropic, openai, etc.) */
-  provider: 'anthropic' | 'openai' | 'google' | 'opencode' | 'dare' | 'kimi';
+  provider: 'anthropic' | 'openai' | 'google' | 'opencode' | 'dare' | 'kimi' | 'xai';
   /** Human-readable label */
   label: string;
   /** CLI binary name */
@@ -75,6 +75,14 @@ const CLI_SPECS: CliSpec[] = [
     cli: 'kimi',
     versionCmd: 'kimi --version',
     envKey: 'MOONSHOT_API_KEY',
+  },
+  {
+    client: 'grok',
+    provider: 'xai',
+    label: 'Grok',
+    cli: 'grok',
+    versionCmd: 'grok --version',
+    envKey: 'XAI_API_KEY',
   },
 ];
 

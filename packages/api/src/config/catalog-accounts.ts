@@ -21,6 +21,7 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'codex',
   'gemini',
   'kimi',
+  'grok',
   'dare',
   'opencode',
   'anthropic',
@@ -30,6 +31,7 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'builtin_openai',
   'builtin_google',
   'builtin_kimi',
+  'builtin_grok',
   'builtin_dare',
   'builtin_opencode',
 ]);

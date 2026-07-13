@@ -2464,11 +2464,11 @@ describe('QueueProcessor', () => {
       }
     });
 
-    it('agent output gate defaults on for claude/gemini/kimi targets and preserves lifecycle broadcasts', async () => {
+    it('agent output gate defaults on for claude/gemini/kimi/grok targets and preserves lifecycle broadcasts', async () => {
       const previous = process.env.CAT_CAFE_AGENT_OUTPUT_GATE;
       delete process.env.CAT_CAFE_AGENT_OUTPUT_GATE;
       try {
-        for (const catId of ['opus', 'gemini', 'kimi']) {
+        for (const catId of ['opus', 'gemini', 'kimi', 'grok']) {
           const hookDeps = stubDeps({
             router: {
               routeExecution: mock.fn(async function* () {

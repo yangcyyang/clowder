@@ -282,10 +282,20 @@ function isCodexRuntimeCat(catId: string): boolean {
 function isAgentOutputGateRuntimeCat(catId: string): boolean {
   const config = catRegistry.tryGet(catId)?.config;
   const command = config?.cli?.command?.toLowerCase();
-  if (command === 'claude' || command === 'codex' || command === 'gemini' || command === 'kimi') return true;
+  if (command === 'claude' || command === 'codex' || command === 'gemini' || command === 'kimi' || command === 'grok') {
+    return true;
+  }
 
   const clientId = config?.clientId?.toLowerCase();
-  if (clientId === 'anthropic' || clientId === 'openai' || clientId === 'google' || clientId === 'kimi') return true;
+  if (
+    clientId === 'anthropic' ||
+    clientId === 'openai' ||
+    clientId === 'google' ||
+    clientId === 'kimi' ||
+    clientId === 'grok'
+  ) {
+    return true;
+  }
 
   // Fallback for bootstrapping/tests before runtime config is registered.
   return (
@@ -298,7 +308,8 @@ function isAgentOutputGateRuntimeCat(catId: string): boolean {
     catId === 'spark' ||
     catId === 'gemini' ||
     catId === 'gemini25' ||
-    catId === 'kimi'
+    catId === 'kimi' ||
+    catId === 'grok'
   );
 }
 

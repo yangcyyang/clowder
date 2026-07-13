@@ -63,6 +63,10 @@ describe('First-Run Quest Routes', () => {
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.clients));
     assert.ok(body.clients.length > 0);
+    const grok = body.clients.find((client) => client.client === 'grok');
+    assert.ok(grok, 'first-run client detection should include Grok');
+    assert.equal(grok.provider, 'xai');
+    assert.equal(grok.cli, 'grok');
     // Each client has required fields
     for (const c of body.clients) {
       assert.ok(typeof c.client === 'string');
