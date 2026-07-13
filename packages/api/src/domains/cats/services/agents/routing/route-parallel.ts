@@ -42,7 +42,11 @@ import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
-import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
+import {
+  buildMcpCallbackInstructions,
+  hasRuntimeNativeMcpBridge,
+  needsMcpInjection,
+} from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
@@ -331,7 +335,8 @@ export async function* routeParallel(
       const teammates = targetCats.filter((id) => id !== catId);
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only.
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
-      const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
+      const mcpAvailable =
+        (catConfig?.mcpSupport ?? false) && !!mcpServerPath && hasRuntimeNativeMcpBridge(catConfig?.clientId);
       // F129: Load active pack blocks (best-effort)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
       if (loadStandardContext && deps.packStore) {

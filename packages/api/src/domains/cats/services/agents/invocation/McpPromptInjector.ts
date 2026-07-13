@@ -28,6 +28,18 @@ export interface McpCallbackOptions {
 }
 
 /**
+ * Whether Clowder wires native MCP into this provider's runtime invocation.
+ *
+ * Grok can load MCP configuration on its own, but GrokAgentService does not
+ * inject a deterministic Cat Cafe config yet. Treating its catalog capability
+ * as an active bridge suppresses the HTTP callback fallback and leaves the cat
+ * without task/collaboration tools.
+ */
+export function hasRuntimeNativeMcpBridge(clientId?: string): boolean {
+  return clientId !== 'grok';
+}
+
+/**
  * Check if a cat needs MCP prompt injection (HTTP callback fallback).
  *
  * F041: Now checks if MCP is *actually available* (config + server path exist),

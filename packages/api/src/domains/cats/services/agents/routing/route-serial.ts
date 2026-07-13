@@ -72,7 +72,11 @@ import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
-import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
+import {
+  buildMcpCallbackInstructions,
+  hasRuntimeNativeMcpBridge,
+  needsMcpInjection,
+} from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { readAgentMemoryForPrompt } from '../memory/AgentMemoryStore.js';
 import { readLessonsForPrompt } from '../memory/LessonStore.js';
@@ -527,7 +531,8 @@ export async function* routeSerial(
         }
       }
       // MCP write callbacks remain per-message; static identity only carries a short pull-context guide.
-      const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
+      const mcpAvailable =
+        (catConfig?.mcpSupport ?? false) && !!mcpServerPath && hasRuntimeNativeMcpBridge(catConfig?.clientId);
       // F129: Load active pack blocks (best-effort, failure does not block invocation)
       let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
       if (loadStandardContext && deps.packStore) {
