@@ -15,7 +15,10 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
-import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
+import {
+  buildA2AIdempotencyKey,
+  PENDING_MENTION_TTL_MS,
+} from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
@@ -28,7 +31,8 @@ import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { persistA2APendingNotice } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -45,10 +49,16 @@ export interface A2ATriggerDeps {
   invocationTracker?: InvocationTracker;
   deliveryCursorStore?: DeliveryCursorStore;
   queueProcessor?: QueueProcessorLike;
+  messageStore?: IMessageStore;
   /** F122B: InvocationQueue for agent-sourced entries */
   invocationQueue?: Pick<
     InvocationQueue,
-    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'backfillMessageId' | 'list'
+    | 'enqueue'
+    | 'countAgentEntriesForThread'
+    | 'backfillMessageId'
+    | 'list'
+    | 'persistEntry'
+    | 'hasQueuedOrProcessingForCat'
   >;
   log: FastifyBaseLogger;
 }
@@ -115,6 +125,9 @@ export async function enqueueA2ATargets(
       createdAt?: number;
     }> = [];
     for (const catId of targetCats) {
+      const wasBusy =
+        deps.invocationTracker?.has(threadId, catId) === true ||
+        deps.invocationQueue.hasQueuedOrProcessingForCat?.(threadId, catId) === true;
       // Guard 1: A2A depth limit — re-check per target to prevent multi-target overflow
       const currentDepth = deps.invocationQueue.countAgentEntriesForThread(threadId);
       if (currentDepth >= MAX_A2A_DEPTH) {
@@ -124,13 +137,8 @@ export async function enqueueA2ATargets(
         );
         break;
       }
-      // Guard 2: Duplicate detection — skip cats already queued as agent entries
-      if (deps.invocationQueue.hasQueuedAgentForCat(threadId, catId)) {
-        log.info({ threadId, triggerMessageId, catId }, '[F122B] A2A callback: skipping duplicate agent entry for cat');
-        continue;
-      }
-      // Guard 3 (F167 Phase D cloud Codex P1): streak check fires here — after
-      // depth + dedup — so a would-be-skipped target never mutates the counter.
+      // Exact idempotency below replaces the old per-cat coarse dedup. Different
+      // mention messages targeting the same busy cat must all remain pending.
       // Callback path has no tool_use stream → fail-closed on hadSubstantiveToolCall
       // (routing tool ≠ work). outputLength from content still exempts long-form MCP.
       if (canTrackStreak && streakEntry) {
@@ -170,11 +178,22 @@ export async function enqueueA2ATargets(
           targetCatId: catId,
         }),
         content: opts.content,
+        messageEnvelope: {
+          messageId: triggerMessageId,
+          senderType: 'agent',
+          content: opts.content,
+          mentions: [...opts.triggerMessage.mentions],
+          timestamp: opts.triggerMessage.timestamp,
+        },
         source: 'agent',
+        sourceCategory: 'a2a',
         targetCats: [catId],
         intent: 'execute',
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
+        a2aTriggerMessageId: triggerMessageId,
+        pendingMentionId: buildA2AIdempotencyKey({ triggerMessageId, callerCatId, targetCatId: catId }),
+        expiresAt: Date.now() + PENDING_MENTION_TTL_MS,
         callerTraceContext: dispatchTraceContext,
         freshnessProtected: opts.freshnessProtected,
       });
@@ -188,6 +207,18 @@ export async function enqueueA2ATargets(
         enqueued.push(catId);
         if (result.entry) {
           deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
+          await deps.invocationQueue.persistEntry?.(result.entry);
+          if (wasBusy && result.entry.expiresAt && deps.messageStore) {
+            await persistA2APendingNotice(
+              { messageStore: deps.messageStore, socketManager: deps.socketManager },
+              {
+                threadId,
+                targetCatId: catId,
+                queueEntryId: result.entry.id,
+                expiresAt: result.entry.expiresAt,
+              },
+            );
+          }
         }
       }
     }

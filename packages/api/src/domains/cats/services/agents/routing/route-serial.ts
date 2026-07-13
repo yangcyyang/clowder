@@ -1782,14 +1782,8 @@ export async function* routeSerial(
               const queueTargets: CatId[] = [];
               for (const nextCat of a2aMentions) {
                 if (worklistEntry.a2aCount >= maxDepth) break;
-                if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-                  log.info(
-                    { threadId, catId: nextCat, fromCat: catId },
-                    'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
-                  );
-                  await emitA2ABlockedNotice([nextCat], 'active_or_queued');
-                  continue;
-                }
+                // Busy targets are admitted to the canonical durable queue. Exact
+                // message idempotency prevents replays without dropping new mentions.
                 const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
                 const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
                   hadSubstantiveToolCall,

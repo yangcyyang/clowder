@@ -169,6 +169,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.status !== undefined) pairs.push('status', input.status);
     if (input.phase !== undefined) pairs.push('phase', input.phase);
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
+    if (input.userMessageIds !== undefined) pairs.push('userMessageIds', JSON.stringify(input.userMessageIds));
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
 
@@ -295,11 +296,13 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const errorValue = data.error;
     const hasError = errorValue !== undefined && errorValue !== '';
     const usageByCat = safeParseObject(data.usageByCat);
+    const userMessageIds = safeParseArray(data.userMessageIds);
     return {
       id: data.id!,
       threadId: data.threadId!,
       userId: data.userId!,
       userMessageId: data.userMessageId === '' ? null : data.userMessageId!,
+      ...(userMessageIds.length > 0 ? { userMessageIds } : {}),
       ...(data.callerCatId ? { callerCatId: data.callerCatId as CatId } : {}),
       ...(data.a2aTriggerMessageId ? { a2aTriggerMessageId: data.a2aTriggerMessageId } : {}),
       targetCats: safeParseArray(data.targetCats) as CatId[],

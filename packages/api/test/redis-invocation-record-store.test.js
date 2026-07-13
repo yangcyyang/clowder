@@ -163,6 +163,23 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(after.userMessageId, 'msg-456');
   });
 
+  it('update() persists and hydrates userMessageIds batch audit trail', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-batch',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'redis-batch-audit-key',
+    });
+
+    await store.update(invocationId, {
+      userMessageIds: ['msg-1', 'msg-2', 'msg-3', 'msg-4'],
+    });
+
+    const record = await store.get(invocationId);
+    assert.deepEqual(record.userMessageIds, ['msg-1', 'msg-2', 'msg-3', 'msg-4']);
+  });
+
   it('update() sets error on failed status', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-1',

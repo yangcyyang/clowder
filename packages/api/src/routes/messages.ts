@@ -21,7 +21,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
-import { buildA2AIdempotencyKey } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
+import {
+  buildA2AIdempotencyKey,
+  PENDING_MENTION_TTL_MS,
+} from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -35,7 +38,10 @@ import type {
   ConsumedContinuationToken,
   SessionContinuationCoordinator,
 } from '../domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
-import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
+import {
+  persistA2APendingNotice,
+  type PersistenceContext,
+} from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
   accumulateTextParts,
@@ -114,6 +120,22 @@ const ORPHAN_DRAFT_CLEANUP_GRACE_MS = Math.max(
   0,
   Number(process.env.CAT_CAFE_ORPHAN_DRAFT_CLEANUP_GRACE_MS) || DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS,
 );
+
+const DEFAULT_MESSAGE_BATCH_WINDOW_MS = 10_000;
+
+export function resolveMessageBatchWindowMs(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(env.CAT_CAFE_MESSAGE_BATCH_WINDOW_MS);
+  if (!Number.isFinite(configured)) return DEFAULT_MESSAGE_BATCH_WINDOW_MS;
+  return Math.min(10_000, Math.max(5_000, Math.trunc(configured)));
+}
+
+export function isMessageBatchCanaryThread(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.CAT_CAFE_MESSAGE_BATCHING_THREADS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .includes(threadId);
+}
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -602,10 +624,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         (opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false)
       );
     })();
-    const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
+    // Design four canary: eligible messages enter the same queue even while idle,
+    // so the first message can own a fixed 5–10s batching window. Structured
+    // overrides and complex/whisper payloads remain hard bypasses.
+    const batchEligible =
+      isMessageBatchCanaryThread(resolvedThreadId) &&
+      deliveryMode !== 'immediate' &&
+      deliveryMode !== 'force' &&
+      whisperVisibility !== 'whisper' &&
+      !validatedReplyTo &&
+      !contentBlocks?.length;
+    const mode = deliveryMode ?? (hasActive || batchEligible ? 'queue' : 'immediate');
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
 
-    if (mode === 'queue' && hasActive && opts.invocationQueue) {
+    if (mode === 'queue' && (hasActive || batchEligible) && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
@@ -658,7 +690,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
           const queueEntryId = enqueueResult.entry?.id;
           if (queueEntryId) {
-            opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
+            opts.invocationQueue.backfillMessageEnvelope(resolvedThreadId, userId, queueEntryId, {
+              messageId: userMessage.id,
+              senderType: 'user',
+              content: userMessage.content,
+              mentions: [...userMessage.mentions],
+              timestamp: userMessage.timestamp,
+            });
           }
           void deliverWebUserMessageToConnector(resolvedThreadId, content, userMessage.id, opts, log, {
             visibility: whisperVisibility,
@@ -678,7 +716,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         queue: opts.invocationQueue.list(resolvedThreadId, userId),
         action: enqueueResult.outcome,
       });
-      if (isParallelDispatchEnabled()) {
+      if (batchEligible && opts.queueProcessor) {
+        opts.queueProcessor.scheduleUserBatchFlush({
+          threadId: resolvedThreadId,
+          userId,
+          targetCats,
+          intent: intent.intent,
+          windowMs: resolveMessageBatchWindowMs(),
+        });
+      } else if (isParallelDispatchEnabled()) {
         void opts.queueProcessor?.processNext(resolvedThreadId, userId).catch((err) => {
           log.error({ err, threadId: resolvedThreadId, userId }, 'Parallel dispatch after enqueue failed');
         });
@@ -1062,7 +1108,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                     }) => {
                       const enqueued: CatId[] = [];
                       for (const targetCat of handoff.targetCats) {
-                        if (opts.invocationQueue?.hasActiveOrQueuedAgentForCat(handoff.threadId, targetCat)) continue;
+                        const wasBusy =
+                          opts.invocationTracker?.has(handoff.threadId, targetCat) === true ||
+                          opts.invocationQueue?.hasQueuedOrProcessingForCat(handoff.threadId, targetCat) === true;
+                        const pendingMentionId = handoff.triggerMessageId
+                          ? buildA2AIdempotencyKey({
+                              triggerMessageId: handoff.triggerMessageId,
+                              callerCatId: handoff.callerCatId,
+                              targetCatId: targetCat,
+                            })
+                          : undefined;
                         const result = opts.invocationQueue?.enqueue({
                           threadId: handoff.threadId,
                           userId: handoff.userId,
@@ -1076,6 +1131,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                               }
                             : {}),
                           content: handoff.content,
+                          messageEnvelope: handoff.triggerMessageId
+                            ? {
+                                messageId: handoff.triggerMessageId,
+                                senderType: 'agent',
+                                content: handoff.content,
+                                mentions: [targetCat],
+                                timestamp: Date.now(),
+                              }
+                            : undefined,
                           source: 'agent',
                           sourceCategory: 'a2a',
                           targetCats: [targetCat],
@@ -1083,6 +1147,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                           autoExecute: true,
                           callerCatId: handoff.callerCatId,
                           a2aTriggerMessageId: handoff.triggerMessageId,
+                          pendingMentionId,
+                          expiresAt: pendingMentionId ? Date.now() + PENDING_MENTION_TTL_MS : undefined,
                           freshnessProtected: handoff.freshnessProtected,
                         });
                         if (result?.outcome !== 'enqueued' || !result.entry) continue;
@@ -1093,6 +1159,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                             result.entry.id,
                             handoff.triggerMessageId,
                           );
+                        }
+                        await opts.invocationQueue?.persistEntry(result.entry);
+                        if (wasBusy && result.entry.expiresAt) {
+                          await persistA2APendingNotice(opts, {
+                            threadId: handoff.threadId,
+                            targetCatId: targetCat,
+                            queueEntryId: result.entry.id,
+                            expiresAt: result.entry.expiresAt,
+                          });
                         }
                         enqueued.push(targetCat);
                       }

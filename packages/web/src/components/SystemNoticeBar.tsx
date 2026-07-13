@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from './hub-icons';
 import { MarkdownContent } from './MarkdownContent';
 
@@ -33,10 +35,29 @@ interface SystemNoticeBarProps {
 }
 
 export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
+  const [wakeState, setWakeState] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const source = message.source;
   if (!source) return null;
 
   const tone = getNoticeTone(source.meta);
+  const queueEntryId = typeof source.meta?.queueEntryId === 'string' ? source.meta.queueEntryId : undefined;
+  const threadId = typeof source.meta?.threadId === 'string' ? source.meta.threadId : undefined;
+  const canWakeNow = source.connector === 'a2a-pending' && queueEntryId && threadId;
+
+  const wakeNow = async () => {
+    if (!canWakeNow || wakeState === 'working') return;
+    setWakeState('working');
+    try {
+      const response = await apiFetch(`/api/threads/${threadId}/queue/${queueEntryId}/steer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'immediate' }),
+      });
+      setWakeState(response.ok ? 'done' : 'error');
+    } catch {
+      setWakeState('error');
+    }
+  };
 
   return (
     <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
@@ -54,6 +75,22 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
             </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
+              {canWakeNow ? (
+                <button
+                  type="button"
+                  onClick={wakeNow}
+                  disabled={wakeState === 'working' || wakeState === 'done'}
+                  className="mt-1.5 border border-cafe-border px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                >
+                  {wakeState === 'working'
+                    ? '正在唤醒…'
+                    : wakeState === 'done'
+                      ? '已唤醒'
+                      : wakeState === 'error'
+                        ? '重试立即唤醒'
+                        : '立即唤醒'}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

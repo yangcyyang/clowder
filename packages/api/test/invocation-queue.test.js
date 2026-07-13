@@ -94,6 +94,65 @@ describe('InvocationQueue', () => {
     assert.equal(queue.list('t1', 'u1')[0].content, 'first');
   });
 
+  it('persists and restores a non-expired pending mention in the canonical queue', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()].map((saved) => structuredClone(saved));
+      },
+    };
+    const source = new InvocationQueue(persistence);
+    const result = source.enqueue(
+      entry({
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+        pendingMentionId: 'a2a:msg-1:opus:codex',
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      }),
+    );
+    await source.persistEntry(result.entry);
+
+    const restored = new InvocationQueue(persistence);
+    const summary = await restored.restorePersistedEntries();
+    assert.equal(summary.restored, 1);
+    assert.deepEqual(summary.threadIds, ['t1']);
+    assert.equal(restored.list('t1', 'u1')[0].pendingMentionId, 'a2a:msg-1:opus:codex');
+  });
+
+  it('drops expired pending mentions during restore', async () => {
+    const expired = {
+      ...entry({ source: 'agent', autoExecute: true }),
+      id: 'expired-entry',
+      messageId: 'msg-expired',
+      mergedMessageIds: [],
+      status: 'queued',
+      createdAt: 1,
+      priority: 'normal',
+      pendingMentionId: 'expired',
+      expiresAt: 100,
+    };
+    let deleted = false;
+    const restored = new InvocationQueue({
+      async save() {},
+      async delete(id) {
+        deleted = id === expired.id;
+      },
+      async list() {
+        return [expired];
+      },
+    });
+    const summary = await restored.restorePersistedEntries(100);
+    assert.equal(summary.restored, 0);
+    assert.equal(deleted, true);
+  });
+
   // ── F175: no merge — every entry is independent ──
 
   it('same-source same-target entries are independent (F175 no merge)', () => {

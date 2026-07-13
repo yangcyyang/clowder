@@ -83,4 +83,25 @@ describe('SystemNoticeBar', () => {
     expect(html).not.toMatch(/text-\[#[0-9A-Fa-f]{3,6}\]/);
     expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);
   });
+
+  it('renders an immediate wake control for durable A2A pending notices', () => {
+    const html = renderNotice({
+      content: '@codex 已排队，目标空闲后自动唤醒。',
+      timestamp: Date.now(),
+      source: {
+        connector: 'a2a-pending',
+        label: '交接已排队',
+        icon: 'info',
+        meta: {
+          noticeTone: 'info',
+          threadId: 'thread-1',
+          queueEntryId: 'entry-1',
+        },
+      },
+    });
+
+    expect(html).toContain('立即唤醒');
+    expect(html).toContain('button');
+    expect(html).not.toContain('请稍后手动重试');
+  });
 });

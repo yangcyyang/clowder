@@ -26,14 +26,18 @@ import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../ty
 import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
 import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
-import { freshnessPersistenceEgress, type PersistenceContext } from '../routing/route-helpers.js';
+import {
+  freshnessPersistenceEgress,
+  persistA2APendingNotice,
+  type PersistenceContext,
+} from '../routing/route-helpers.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
   flattenTextParts,
   flattenTurnTextParts,
 } from '../text-aggregation.js';
-import { buildA2AIdempotencyKey } from './a2a-idempotency.js';
+import { buildA2AIdempotencyKey, PENDING_MENTION_TTL_MS } from './a2a-idempotency.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -47,6 +51,7 @@ import type {
   FreshnessReviewQueueMetadata,
   InvocationQueue,
   QueueEntry,
+  QueueMessageEnvelope,
 } from './InvocationQueue.js';
 import type {
   ConsumedContinuationToken,
@@ -525,6 +530,23 @@ export type FreshnessReviewEnqueueOutcome =
   | 'skipped_terminal'
   | 'queue_full';
 
+/** Build one prompt payload without erasing the identity of any source message. */
+export function formatMessageEnvelopeBatch(envelopes: readonly QueueMessageEnvelope[]): string {
+  return [
+    `[批量投递 - ${envelopes.length} 条消息]`,
+    ...envelopes.map(
+      (envelope, index) =>
+        `\n[消息 ${index + 1}]\n${JSON.stringify({
+          messageId: envelope.messageId,
+          senderType: envelope.senderType,
+          content: envelope.content,
+          mentions: envelope.mentions,
+          timestamp: envelope.timestamp,
+        })}`,
+    ),
+  ].join('\n');
+}
+
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
@@ -541,6 +563,8 @@ export class QueueProcessor {
   private continuationWindows = new Map<string, number[]>();
   /** Private held draft bodies keyed by queue entry id; never exposed in queue_updated. */
   private freshnessReviewPayloads = new Map<string, FreshnessReviewPayload>();
+  /** Fixed-window user batches; later messages join without extending the first deadline. */
+  private userBatchTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private fastLaneRouter = new FastLaneRouter();
   private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
@@ -549,6 +573,57 @@ export class QueueProcessor {
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
     this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+  }
+
+  private static userBatchKey(input: {
+    threadId: string;
+    userId: string;
+    targetCats: readonly string[];
+    intent: string;
+  }): string {
+    return JSON.stringify([input.threadId, input.userId, [...input.targetCats].sort(), input.intent]);
+  }
+
+  /** Arm only after append + envelope backfill have succeeded. */
+  scheduleUserBatchFlush(input: {
+    threadId: string;
+    userId: string;
+    targetCats: readonly string[];
+    intent: string;
+    windowMs: number;
+  }): { scheduled: boolean } {
+    const key = QueueProcessor.userBatchKey(input);
+    if (this.userBatchTimers.has(key)) return { scheduled: false };
+    const timer = setTimeout(() => {
+      this.userBatchTimers.delete(key);
+      void this.processNext(input.threadId, input.userId).catch((err) => {
+        this.deps.log.error(
+          { err, threadId: input.threadId, userId: input.userId },
+          '[QueueProcessor] user batch flush failed',
+        );
+      });
+    }, input.windowMs);
+    timer.unref?.();
+    this.userBatchTimers.set(key, timer);
+    return { scheduled: true };
+  }
+
+  private clearUserBatchTimers(threadId: string, userId: string): void {
+    for (const [key, timer] of this.userBatchTimers) {
+      try {
+        const [queuedThreadId, queuedUserId] = JSON.parse(key) as [string, string];
+        if (queuedThreadId !== threadId || queuedUserId !== userId) continue;
+      } catch {
+        continue;
+      }
+      clearTimeout(timer);
+      this.userBatchTimers.delete(key);
+    }
+  }
+
+  dispose(): void {
+    for (const timer of this.userBatchTimers.values()) clearTimeout(timer);
+    this.userBatchTimers.clear();
   }
 
   private async appendA2AHandoffTaskEvent(params: {
@@ -1396,6 +1471,7 @@ export class QueueProcessor {
     threadId: string,
     userId: string,
   ): Promise<{ started: boolean; entry?: QueueEntry; entries?: QueueEntry[] }> {
+    this.clearUserBatchTimers(threadId, userId);
     // Clear all paused slots for this thread (manual resume clears all)
     this.clearPause(threadId);
     if (isParallelDispatchEnabled()) {
@@ -1597,6 +1673,9 @@ export class QueueProcessor {
     const batchedEntryIds: string[] = [];
     const batchedMessageIds: string[] = [];
     let content = entry.content;
+    const batchEnvelopes: QueueMessageEnvelope[] = [];
+    let batchHasUnenvelopedContent = !entry.messageEnvelope;
+    if (entry.messageEnvelope) batchEnvelopes.push(structuredClone(entry.messageEnvelope));
 
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
@@ -1641,12 +1720,16 @@ export class QueueProcessor {
 
       // F175: user-message batching — collect adjacent matching entries
       // Placed after idempotency check so batched entries aren't dropped on duplicate
-      if (entry.source === 'user') {
-        const batch = queue.collectUserBatch(threadId, userId);
+      if (entry.source === 'user' || entry.sourceCategory === 'a2a') {
+        const batch =
+          entry.source === 'user'
+            ? queue.collectUserBatch(threadId, userId)
+            : queue.collectA2ABatch(threadId, userId, entry.targetCats);
         const sortedTargets = [...entry.targetCats].sort();
         const matching = batch.filter(
           (e) =>
-            e.source === 'user' &&
+            e.source === entry.source &&
+            (entry.source === 'user' || e.sourceCategory === 'a2a') &&
             e.intent === entry.intent &&
             e.targetCats.length === sortedTargets.length &&
             [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
@@ -1656,6 +1739,12 @@ export class QueueProcessor {
           batchedEntryIds.push(be.id);
           if (be.messageId) batchedMessageIds.push(be.messageId);
           content = content + '\n' + be.content;
+          if (be.messageEnvelope) batchEnvelopes.push(structuredClone(be.messageEnvelope));
+          else batchHasUnenvelopedContent = true;
+        }
+        if (batchEnvelopes.length > 1 && !batchHasUnenvelopedContent) {
+          batchEnvelopes.sort((a, b) => a.timestamp - b.timestamp || a.messageId.localeCompare(b.messageId));
+          content = formatMessageEnvelopeBatch(batchEnvelopes);
         }
       }
 
@@ -1667,6 +1756,9 @@ export class QueueProcessor {
       if (messageId) {
         await invocationRecordStore.update(invocationId, {
           userMessageId: messageId,
+          ...(batchEnvelopes.length > 1
+            ? { userMessageIds: batchEnvelopes.map((envelope) => envelope.messageId) }
+            : {}),
         });
       }
 
@@ -2185,7 +2277,16 @@ export class QueueProcessor {
           }) => {
             const enqueued: import('@cat-cafe/shared').CatId[] = [];
             for (const targetCat of handoff.targetCats) {
-              if (queue.hasActiveOrQueuedAgentForCat(handoff.threadId, targetCat)) continue;
+              const wasBusy =
+                this.deps.invocationTracker.has(handoff.threadId, targetCat) ||
+                queue.hasQueuedOrProcessingForCat(handoff.threadId, targetCat);
+              const pendingMentionId = handoff.triggerMessageId
+                ? buildA2AIdempotencyKey({
+                    triggerMessageId: handoff.triggerMessageId,
+                    callerCatId: handoff.callerCatId,
+                    targetCatId: targetCat,
+                  })
+                : undefined;
               const result = queue.enqueue({
                 threadId: handoff.threadId,
                 userId: handoff.userId,
@@ -2199,6 +2300,15 @@ export class QueueProcessor {
                     }
                   : {}),
                 content: handoff.content,
+                messageEnvelope: handoff.triggerMessageId
+                  ? {
+                      messageId: handoff.triggerMessageId,
+                      senderType: 'agent',
+                      content: handoff.content,
+                      mentions: [targetCat],
+                      timestamp: Date.now(),
+                    }
+                  : undefined,
                 source: 'agent',
                 sourceCategory: 'a2a',
                 targetCats: [targetCat],
@@ -2206,11 +2316,22 @@ export class QueueProcessor {
                 autoExecute: true,
                 callerCatId: handoff.callerCatId,
                 a2aTriggerMessageId: handoff.triggerMessageId,
+                pendingMentionId,
+                expiresAt: pendingMentionId ? Date.now() + PENDING_MENTION_TTL_MS : undefined,
                 freshnessProtected: handoff.freshnessProtected,
               });
               if (result.outcome !== 'enqueued' || !result.entry) continue;
               if (handoff.triggerMessageId) {
                 queue.backfillMessageId(handoff.threadId, handoff.userId, result.entry.id, handoff.triggerMessageId);
+              }
+              await queue.persistEntry(result.entry);
+              if (wasBusy && result.entry.expiresAt) {
+                await persistA2APendingNotice(this.deps, {
+                  threadId: handoff.threadId,
+                  targetCatId: targetCat,
+                  queueEntryId: result.entry.id,
+                  expiresAt: result.entry.expiresAt,
+                });
               }
               await this.appendA2AHandoffTaskEvent({
                 threadId: handoff.threadId,

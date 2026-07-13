@@ -185,6 +185,27 @@ describe('InvocationRecordStore', () => {
     assert.equal(store.get(invocationId).userMessageId, 'msg-123');
   });
 
+  test('update() stores an isolated userMessageIds batch audit trail', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-batch',
+      userId: 'user-1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'batch-audit-key',
+    });
+    const sourceIds = ['msg-1', 'msg-2', 'msg-3', 'msg-4'];
+
+    store.update(invocationId, { userMessageIds: sourceIds });
+    sourceIds.push('mutated-after-update');
+
+    assert.deepEqual(store.get(invocationId).userMessageIds, ['msg-1', 'msg-2', 'msg-3', 'msg-4']);
+  });
+
   test('update() sets error on failed status', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

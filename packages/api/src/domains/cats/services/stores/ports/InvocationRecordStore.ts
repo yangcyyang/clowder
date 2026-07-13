@@ -34,6 +34,8 @@ export interface InvocationRecord {
   userId: string;
   /** Associated user message ID (null = message not yet written, needs compensation) */
   userMessageId: string | null;
+  /** All source message IDs when this invocation was formed from a batch. */
+  userMessageIds?: string[];
   /** Agent that handed off this invocation, for A2A recovery after restart. */
   callerCatId?: CatId;
   /** Persisted message that triggered this A2A invocation. */
@@ -78,6 +80,8 @@ export interface UpdateInvocationInput {
   status?: InvocationStatus;
   phase?: InvocationPhase;
   userMessageId?: string | null;
+  /** Full source-message audit trail for batched delivery. */
+  userMessageIds?: string[];
   error?: string;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
   expectedStatus?: InvocationStatus;
@@ -191,6 +195,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (input.status !== undefined) record.status = input.status;
     if (input.phase !== undefined) record.phase = input.phase;
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
+    if (input.userMessageIds !== undefined) record.userMessageIds = [...input.userMessageIds];
     if (input.error !== undefined) record.error = input.error;
     if (input.usageByCat !== undefined) {
       record.usageByCat = input.usageByCat;

@@ -45,6 +45,15 @@ export interface FreshnessReviewPayload extends FreshnessReviewQueueMetadata {
   deltaMessages?: readonly FreshnessReviewDeltaMessage[];
 }
 
+/** One independently addressable message inside a coalesced invocation. */
+export interface QueueMessageEnvelope {
+  messageId: string;
+  senderType: 'user' | 'agent' | 'connector';
+  content: string;
+  mentions: string[];
+  timestamp: number;
+}
+
 export interface QueueEntry {
   id: string;
   threadId: string;
@@ -53,6 +62,8 @@ export interface QueueEntry {
   idempotencyKey?: string;
   content: string;
   messageId: string | null;
+  /** Original message metadata retained when multiple entries share one invocation. */
+  messageEnvelope?: QueueMessageEnvelope;
   mergedMessageIds: string[];
   source: 'user' | 'connector' | 'agent';
   targetCats: string[];
@@ -85,6 +96,10 @@ export interface QueueEntry {
   suggestedSkill?: string;
   /** F153: caller trace context for cross-route A2A propagation */
   callerTraceContext?: CallerTraceContext;
+  /** Durable pending-mention record linked to this A2A queue entry. */
+  pendingMentionId?: string;
+  /** Logical expiry for pending handoffs (default contract: seven days). */
+  expiresAt?: number;
 }
 
 export interface EnqueueResult {
@@ -93,6 +108,12 @@ export interface EnqueueResult {
   queuePosition?: number;
   /** True when enqueue returned an existing active entry by idempotency key. */
   deduped?: boolean;
+}
+
+export interface InvocationQueuePersistence {
+  save(entry: QueueEntry): Promise<void>;
+  delete(entryId: string): Promise<void>;
+  list(): Promise<QueueEntry[]>;
 }
 
 const MAX_QUEUE_DEPTH = 5;
@@ -109,6 +130,43 @@ export class InvocationQueue {
 
   /** Original content per entryId at enqueue time, for rollbackEnqueue */
   private originalContents = new Map<string, string>();
+
+  constructor(private readonly persistence?: InvocationQueuePersistence) {}
+
+  /** Durable admission barrier used by A2A paths before they report enqueue success. */
+  async persistEntry(entry: QueueEntry): Promise<void> {
+    if (!this.persistence) return;
+    const current = this.findEntry(entry.threadId, entry.userId, entry.id) ?? entry;
+    await this.persistence.save(structuredClone(current));
+  }
+
+  /** Restore non-expired A2A entries after process restart. */
+  async restorePersistedEntries(now = Date.now()): Promise<{ restored: number; threadIds: string[] }> {
+    if (!this.persistence) return { restored: 0, threadIds: [] };
+    const entries = await this.persistence.list();
+    const threadIds = new Set<string>();
+    let restored = 0;
+    for (const persisted of entries) {
+      if (persisted.expiresAt !== undefined && persisted.expiresAt <= now) {
+        await this.persistence.delete(persisted.id);
+        continue;
+      }
+      const q = this.getOrCreate(this.scopeKey(persisted.threadId, persisted.userId));
+      if (q.some((entry) => entry.id === persisted.id || (persisted.idempotencyKey && entry.idempotencyKey === persisted.idempotencyKey))) {
+        continue;
+      }
+      const restoredEntry: QueueEntry = {
+        ...structuredClone(persisted),
+        status: 'queued',
+        processingStartedAt: undefined,
+      };
+      q.push(restoredEntry);
+      this.originalContents.set(restoredEntry.id, restoredEntry.content);
+      threadIds.add(restoredEntry.threadId);
+      restored++;
+    }
+    return { restored, threadIds: [...threadIds] };
+  }
 
   private scopeKey(threadId: string, userId: string): string {
     return `${threadId}:${userId}`;
@@ -177,6 +235,9 @@ export class InvocationQueue {
       | 'position'
       | 'suggestedSkill'
       | 'callerTraceContext'
+      | 'messageEnvelope'
+      | 'pendingMentionId'
+      | 'expiresAt'
     > & {
       autoExecute?: boolean;
       callerCatId?: string;
@@ -184,6 +245,9 @@ export class InvocationQueue {
       priority?: 'urgent' | 'normal';
       suggestedSkill?: string;
       callerTraceContext?: CallerTraceContext;
+      messageEnvelope?: QueueMessageEnvelope;
+      pendingMentionId?: string;
+      expiresAt?: number;
     },
   ): EnqueueResult {
     const key = this.scopeKey(input.threadId, input.userId);
@@ -222,6 +286,7 @@ export class InvocationQueue {
       idempotencyKey: input.idempotencyKey,
       content: input.content,
       messageId: null,
+      messageEnvelope: input.messageEnvelope ? structuredClone(input.messageEnvelope) : undefined,
       mergedMessageIds: [],
       source: input.source,
       targetCats: [...input.targetCats],
@@ -244,6 +309,8 @@ export class InvocationQueue {
       freshnessReview: input.freshnessReview ? structuredClone(input.freshnessReview) : undefined,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
+      pendingMentionId: input.pendingMentionId,
+      expiresAt: input.expiresAt,
       position: undefined,
     };
     q.push(entry);
@@ -263,7 +330,23 @@ export class InvocationQueue {
   /** Backfill messageId on a new entry (null → value). */
   backfillMessageId(threadId: string, userId: string, entryId: string, messageId: string): void {
     const e = this.findEntry(threadId, userId, entryId);
-    if (e) e.messageId = messageId;
+    if (e) {
+      e.messageId = messageId;
+      if (e.messageEnvelope) e.messageEnvelope.messageId = messageId;
+    }
+  }
+
+  /** Attach the persisted message envelope after enqueue-before-write succeeds. */
+  backfillMessageEnvelope(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    envelope: QueueMessageEnvelope,
+  ): void {
+    const e = this.findEntry(threadId, userId, entryId);
+    if (!e) return;
+    e.messageId = envelope.messageId;
+    e.messageEnvelope = structuredClone(envelope);
   }
 
   /** Rollback an enqueued entry — remove entirely. */
@@ -276,7 +359,9 @@ export class InvocationQueue {
   dequeue(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q || q.length === 0) return null;
-    return q.shift()!;
+    const removed = q.shift()!;
+    if (removed.pendingMentionId) void this.persistence?.delete(removed.id);
+    return removed;
   }
 
   /** Look at the first entry without removing. */
@@ -293,7 +378,9 @@ export class InvocationQueue {
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
 
-    return q.splice(idx, 1)[0] ?? null;
+    const removed = q.splice(idx, 1)[0] ?? null;
+    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    return removed;
   }
 
   /** Shallow copy of all entries sorted by dequeue priority (comparator order). */
@@ -317,6 +404,7 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
+      if (e.pendingMentionId) void this.persistence?.delete(e.id);
     }
     this.queues.delete(key);
     return q;
@@ -414,7 +502,9 @@ export class InvocationQueue {
     if (idx === -1) return null;
     this.originalContents.delete(entryId);
 
-    return q.splice(idx, 1)[0] ?? null;
+    const removed = q.splice(idx, 1)[0] ?? null;
+    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    return removed;
   }
 
   // ── Cross-user methods (system-level only) ──
@@ -462,7 +552,9 @@ export class InvocationQueue {
       if (idx !== -1) {
         this.originalContents.delete(entryId);
 
-        return q.splice(idx, 1)[0] ?? null;
+        const removed = q.splice(idx, 1)[0] ?? null;
+        if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+        return removed;
       }
     }
     return null;
@@ -480,10 +572,18 @@ export class InvocationQueue {
 
   /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
   listAutoExecute(threadId: string): QueueEntry[] {
+    const now = Date.now();
     const result: QueueEntry[] = [];
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const e of q) {
+      for (let index = q.length - 1; index >= 0; index--) {
+        const e = q[index]!;
+        if (e.expiresAt !== undefined && e.expiresAt <= now) {
+          q.splice(index, 1);
+          this.originalContents.delete(e.id);
+          void this.persistence?.delete(e.id);
+          continue;
+        }
         if (e.status !== 'queued' || !e.autoExecute) continue;
         result.push({ ...e });
       }
@@ -697,6 +797,23 @@ export class InvocationQueue {
       batch.push({ ...e });
     }
     return batch;
+  }
+
+  /** Collect already-pending A2A mentions for the same target into the next invocation. */
+  collectA2ABatch(threadId: string, userId: string, targetCats: readonly string[]): QueueEntry[] {
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) return [];
+    const expectedTargets = sorted([...targetCats]);
+    return q
+      .filter(
+        (entry) =>
+          entry.status === 'queued' &&
+          entry.source === 'agent' &&
+          entry.sourceCategory === 'a2a' &&
+          arraysEqual(sorted(entry.targetCats), expectedTargets),
+      )
+      .sort(InvocationQueue.compareEntries)
+      .map((entry) => ({ ...entry }));
   }
 
   /** #555: Whether a specific cat has any queued or processing entries in this thread (any source).

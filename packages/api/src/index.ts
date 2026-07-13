@@ -36,6 +36,7 @@ import { FreshnessHoldExpiryScheduler } from './domains/cats/services/agents/fre
 import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
+import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/invocation/RedisInvocationQueuePersistence.js';
 import {
   InvocationRegistry,
   selectInvocationBackendKind,
@@ -1341,7 +1342,7 @@ async function main(): Promise<void> {
   });
 
   // F39: Message queue delivery
-  const invocationQueue = new InvocationQueue();
+  const invocationQueue = new InvocationQueue(redis ? new RedisInvocationQueuePersistence(redis) : undefined);
   const sessionContinuationCoordinator = new SessionContinuationCoordinator({
     threadStore: {
       getMemberSessionStrategy: (threadId, catId, userId) =>
@@ -1369,6 +1370,18 @@ async function main(): Promise<void> {
     log: app.log,
     catSupervisor,
     sessionContinuationCoordinator,
+  });
+  const restoredQueue = await invocationQueue.restorePersistedEntries();
+  if (restoredQueue.restored > 0) {
+    app.log.info(restoredQueue, '[InvocationQueue] restored durable pending mentions');
+    for (const threadId of restoredQueue.threadIds) {
+      void queueProcessor.tryAutoExecute(threadId).catch((err) => {
+        app.log.error({ err, threadId }, '[InvocationQueue] restored pending mention auto-execute failed');
+      });
+    }
+  }
+  app.addHook('onClose', async () => {
+    queueProcessor.dispose();
   });
   socketManager.setQueueProcessor(queueProcessor);
 

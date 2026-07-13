@@ -64,6 +64,7 @@ function buildDeps(overrides = {}) {
       clearPause: mock.fn(),
       onInvocationComplete: mock.fn(async () => {}),
       enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
+      scheduleUserBatchFlush: mock.fn(() => ({ scheduled: true })),
     },
     threadStore: {
       get: mock.fn(async () => ({
@@ -91,6 +92,43 @@ describe('POST /api/messages deliveryMode', () => {
 
   afterEach(async () => {
     if (app) await app.close();
+    delete process.env.CAT_CAFE_MESSAGE_BATCHING_THREADS;
+    delete process.env.CAT_CAFE_MESSAGE_BATCH_WINDOW_MS;
+  });
+
+  it('clamps the fixed batch window to the 5-10 second contract', async () => {
+    const { resolveMessageBatchWindowMs } = await import('../dist/routes/messages.js');
+
+    assert.equal(resolveMessageBatchWindowMs({ CAT_CAFE_MESSAGE_BATCH_WINDOW_MS: '1000' }), 5000);
+    assert.equal(resolveMessageBatchWindowMs({ CAT_CAFE_MESSAGE_BATCH_WINDOW_MS: '7500' }), 7500);
+    assert.equal(resolveMessageBatchWindowMs({ CAT_CAFE_MESSAGE_BATCH_WINDOW_MS: '20000' }), 10000);
+    assert.equal(resolveMessageBatchWindowMs({ CAT_CAFE_MESSAGE_BATCH_WINDOW_MS: 'invalid' }), 10000);
+  });
+
+  it('canary thread persists four idle messages as independent queued envelopes', async () => {
+    process.env.CAT_CAFE_MESSAGE_BATCHING_THREADS = 'thread-1';
+    process.env.CAT_CAFE_MESSAGE_BATCH_WINDOW_MS = '10000';
+    let sequence = 0;
+    deps.messageStore.append.mock.mockImplementation(async (msg) => ({ id: `msg-${++sequence}`, ...msg }));
+
+    for (let index = 1; index <= 4; index++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/messages',
+        headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+        payload: { content: `短消息 ${index}`, threadId: 'thread-1' },
+      });
+      assert.equal(res.statusCode, 202);
+    }
+
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0, 'window must not invoke early');
+    const queued = deps.invocationQueue.list('thread-1', 'user-1');
+    assert.equal(queued.length, 4);
+    assert.deepEqual(
+      queued.map((entry) => entry.messageEnvelope?.messageId),
+      ['msg-1', 'msg-2', 'msg-3', 'msg-4'],
+    );
+    assert.equal(deps.queueProcessor.scheduleUserBatchFlush.mock.calls.length, 4);
   });
 
   it('explicit mention to a free cat executes while another cat is active in the same thread', async () => {

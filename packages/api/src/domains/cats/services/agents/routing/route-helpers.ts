@@ -1160,7 +1160,10 @@ export async function persistA2ARoutingBlockedNotice(
   } as const;
   const targetHandle = `@${args.targetCatId}`;
   const reasonText = A2A_BLOCKED_REASON_TEXT[args.reason];
-  const content = `[交接提醒]: ${targetHandle} 未自动触发：${reasonText}。` + `可稍后重试，或手动 ${targetHandle}。`;
+  const content =
+    args.reason === 'active_or_queued'
+      ? `[交接提醒]: ${targetHandle} 已排队，目标空闲后自动唤醒。`
+      : `[交接提醒]: ${targetHandle} 未触发：${reasonText}。`;
 
   try {
     const stored = await deps.messageStore.append({
@@ -1190,6 +1193,52 @@ export async function persistA2ARoutingBlockedNotice(
     );
     return false;
   }
+}
+
+export async function persistA2APendingNotice(
+  deps: Pick<RouteStrategyDeps, 'messageStore' | 'socketManager'>,
+  args: {
+    threadId: string;
+    targetCatId: string;
+    queueEntryId: string;
+    expiresAt: number;
+  },
+): Promise<void> {
+  const timestamp = Date.now();
+  const content = `@${args.targetCatId} 已排队，目标空闲后自动唤醒。`;
+  const source = {
+    connector: 'a2a-pending',
+    label: '交接已排队',
+    icon: 'info',
+    meta: {
+      presentation: 'system_notice',
+      noticeTone: 'info',
+      threadId: args.threadId,
+      targetCatId: args.targetCatId,
+      queueEntryId: args.queueEntryId,
+      expiresAt: args.expiresAt,
+    },
+  } as const;
+  const stored = await deps.messageStore.append({
+    userId: 'system',
+    catId: null,
+    threadId: args.threadId,
+    content,
+    mentions: [],
+    timestamp,
+    source,
+    idempotencyKey: `a2a-pending:${args.queueEntryId}`,
+  });
+  deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+    threadId: args.threadId,
+    message: {
+      id: stored.id,
+      type: 'connector',
+      content: stored.content,
+      source: stored.source,
+      timestamp: stored.timestamp,
+    },
+  });
 }
 
 export async function persistSilentCompletionNotice(

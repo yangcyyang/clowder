@@ -2890,6 +2890,110 @@ describe('QueueProcessor', () => {
       assert.equal(calledContent, 'msg-a\nmsg-b\nmsg-c', 'content should be combined');
     });
 
+    it('fixed canary window turns four idle envelopes into one invocation', async () => {
+      const base = Date.now();
+      for (let index = 0; index < 4; index++) {
+        const queued = enqueueEntry(deps.queue, {
+          content: `msg-${index + 1}`,
+          messageEnvelope: {
+            messageId: `message-${index + 1}`,
+            senderType: 'user',
+            content: `msg-${index + 1}`,
+            mentions: ['opus'],
+            timestamp: base + index,
+          },
+        });
+        deps.queue.backfillMessageId('t1', 'u1', queued.id, `message-${index + 1}`);
+        processor.scheduleUserBatchFlush({
+          threadId: 't1',
+          userId: 'u1',
+          targetCats: ['opus'],
+          intent: 'execute',
+          windowMs: 10,
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.equal(deps.router.routeExecution.mock.calls.length, 1);
+      const payload = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.match(payload, /^\[批量投递 - 4 条消息\]/);
+      for (let index = 1; index <= 4; index++) {
+        assert.match(payload, new RegExp(`"messageId":"message-${index}"`));
+      }
+      const auditUpdate = deps.invocationRecordStore.update.mock.calls.find(
+        (call) => call.arguments[1]?.userMessageIds,
+      );
+      assert.deepEqual(auditUpdate?.arguments[1].userMessageIds, [
+        'message-1',
+        'message-2',
+        'message-3',
+        'message-4',
+      ]);
+      processor.dispose();
+    });
+
+    it('coalesces multiple already-pending A2A mentions for one busy target', async () => {
+      for (let index = 1; index <= 2; index++) {
+        enqueueEntry(deps.queue, {
+          source: 'agent',
+          sourceCategory: 'a2a',
+          autoExecute: true,
+          callerCatId: 'codex',
+          content: `handoff-${index}`,
+          messageEnvelope: {
+            messageId: `agent-message-${index}`,
+            senderType: 'agent',
+            content: `handoff-${index}`,
+            mentions: ['opus'],
+            timestamp: Date.now() + index,
+          },
+        });
+      }
+
+      await processor.tryAutoExecute('t1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+
+      assert.equal(deps.router.routeExecution.mock.calls.length, 1);
+      const payload = deps.router.routeExecution.mock.calls[0].arguments[1];
+      assert.match(payload, /^\[批量投递 - 2 条消息\]/);
+      assert.match(payload, /"messageId":"agent-message-1"/);
+      assert.match(payload, /"messageId":"agent-message-2"/);
+    });
+
+    it('never drops legacy unenveloped content when adjacent entries have envelopes', async () => {
+      enqueueEntry(deps.queue, { content: 'legacy-primary' });
+      enqueueEntry(deps.queue, {
+        content: 'enveloped-second',
+        messageEnvelope: {
+          messageId: 'message-2',
+          senderType: 'user',
+          content: 'enveloped-second',
+          mentions: ['opus'],
+          timestamp: Date.now(),
+        },
+      });
+      enqueueEntry(deps.queue, {
+        content: 'enveloped-third',
+        messageEnvelope: {
+          messageId: 'message-3',
+          senderType: 'user',
+          content: 'enveloped-third',
+          mentions: ['opus'],
+          timestamp: Date.now() + 1,
+        },
+      });
+
+      await processor.processNext('t1', 'u1');
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+
+      assert.equal(
+        deps.router.routeExecution.mock.calls[0].arguments[1],
+        'legacy-primary\nenveloped-second\nenveloped-third',
+        'mixed legacy/new batches must fail closed instead of emitting a partial envelope batch',
+      );
+    });
+
     it('marks all batched entries as processing', async () => {
       enqueueEntry(deps.queue, { content: 'a' });
       enqueueEntry(deps.queue, { content: 'b' });
