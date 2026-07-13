@@ -71,7 +71,7 @@ export class GrokAgentService implements AgentService {
       '--model',
       this.model,
       '--permission-mode',
-      'default',
+      'auto',
     ];
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
