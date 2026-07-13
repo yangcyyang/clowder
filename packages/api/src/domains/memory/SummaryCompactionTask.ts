@@ -238,7 +238,7 @@ export async function processThread(
         seg.relatedSegmentIds ? JSON.stringify(seg.relatedSegmentIds) : null,
         seg.candidates ? JSON.stringify(seg.candidates) : null,
         modelId,
-        'g2-thread-abstract-v1',
+        'g2-thread-abstract-v2',
         now,
       );
     }

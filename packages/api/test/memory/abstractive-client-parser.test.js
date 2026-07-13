@@ -95,4 +95,29 @@ Updated several files for the memory system.
     assert.equal(parseNaturalLanguageOutput('   ', baseInput), null);
     assert.equal(parseNaturalLanguageOutput('short', baseInput), null);
   });
+
+  it('preserves the four recall fields required by delivery-only context', async () => {
+    const { parseNaturalLanguageOutput } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+
+    const text = `# F004 context governance
+
+## 当前状态/任务 (Current status)
+截至 msg-5，delivery-only 正在 canary 验证。
+
+## 已确认决策/约束 (Decision/constraint)
+只在 single-target serial route 启用。
+
+## 下一步 (Next action)
+验证 active prompt 不含 raw history window。
+
+## 风险/锚点 (Risk/anchor)
+摘要可能遗漏细节；需要时回看 msg-1..msg-5 原文。`;
+
+    const result = parseNaturalLanguageOutput(text, baseInput);
+    const summary = result?.segments[0]?.summary ?? '';
+    assert.match(summary, /当前状态\/任务/);
+    assert.match(summary, /已确认决策\/约束/);
+    assert.match(summary, /下一步/);
+    assert.match(summary, /风险\/锚点/);
+  });
 });

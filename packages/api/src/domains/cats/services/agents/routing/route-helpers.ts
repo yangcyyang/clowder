@@ -32,6 +32,7 @@ import {
   type StoredToolEvent,
   type ThreadAppendWatermark,
 } from '../../stores/ports/MessageStore.js';
+import { hasRequiredSummaryRecallFields } from '../../../../memory/SummaryRecallContract.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
@@ -164,12 +165,6 @@ const HISTORY_GOVERNANCE_DEFAULT_THRESHOLDS: HistoryGovernanceThresholds = {
 const activeSummaryWatermarks = new Map<string, string>();
 const SECRET_LIKE_CONTENT_RE =
   /\b(?:sk|ghp|gho|xox[abprs])-[A-Za-z0-9_-]{8,}\b|Bearer\s+[A-Za-z0-9._~+/=-]{6,}|\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)\b\s*[:=]\s*[^\s,;}]+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
-const SUMMARY_SMOKE_PATTERNS = [
-  /当前(?:状态|任务)|正在推进|current\s+status/i,
-  /决策|约束|已确认|decision|constraint/i,
-  /下一步|next\s+action/i,
-  /风险|不确定|锚点|回看原文|risk|anchor/i,
-];
 
 export function getContextPressureLevel(ratio: number): 'none' | 'caution' | 'high' | 'critical' {
   if (ratio >= 0.95) return 'critical';
@@ -393,7 +388,7 @@ export function validateThreadHistorySummaryQuality(input: {
     if (!/范围|Scope:/i.test(summaryText)) {
       issues.push('summary_missing_structure');
     }
-    if (!SUMMARY_SMOKE_PATTERNS.every((pattern) => pattern.test(summaryText))) {
+    if (!hasRequiredSummaryRecallFields(summaryText)) {
       issues.push('summary_recall_failed');
     }
   }

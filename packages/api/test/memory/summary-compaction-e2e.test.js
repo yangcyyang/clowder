@@ -119,6 +119,7 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(segments.length, 1);
     assert.equal(segments[0].level, 1); // L1
     assert.ok(segments[0].summary.includes('memory architecture'));
+    assert.equal(segments[0].prompt_version, 'g2-thread-abstract-v2');
 
     // Verify evidence_docs.summary updated (read model)
     const doc = db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread');

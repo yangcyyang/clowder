@@ -30,7 +30,7 @@ describe('Agent-backed abstractive summary client', () => {
       yield {
         type: 'text',
         content:
-          '# Codex 摘要 worker 最小闭环\n\n确认先只让摘要器处理 canary thread，并通过异步 worker 执行，失败时不阻塞主聊天。\n\n## Durable Knowledge\n\n[decision!] 摘要 worker 先限制在 canary thread — 降低误开全量摘要的风险',
+          '# Codex 摘要 worker 最小闭环\n\n## 当前状态/任务 (Current status)\n摘要器正在 canary thread 验证。\n\n## 已确认决策/约束 (Decision/constraint)\n只通过异步 worker 执行，失败时不阻塞主聊天。\n\n## 下一步 (Next action)\n验证结构化摘要能被 delivery-only 消费。\n\n## 风险/锚点 (Risk/anchor)\n若摘要缺少细节，回看 msg-1..msg-2。\n\n## Durable Knowledge\n\n[decision!] 摘要 worker 先限制在 canary thread — 降低误开全量摘要的风险',
       };
       yield { type: 'done' };
     }
@@ -48,13 +48,54 @@ describe('Agent-backed abstractive summary client', () => {
 
     assert.equal(calls.length, 1);
     assert.match(calls[0].prompt, /Summarize the following thread messages/);
+    assert.match(calls[0].prompt, /message_id=msg-1/);
+    assert.match(calls[0].prompt, /message_id=msg-2/);
     assert.match(calls[0].options.systemPrompt, /You are a thread summarizer/);
+    assert.match(calls[0].options.systemPrompt, /当前状态\/任务 \(Current status\)/);
+    assert.match(calls[0].options.systemPrompt, /未从输入确认/);
     assert.equal(result?.segments.length, 1);
     assert.equal(result?.segments[0].topicLabel, 'Codex 摘要 worker 最小闭环');
     assert.equal(result?.segments[0].fromMessageId, 'msg-1');
     assert.equal(result?.segments[0].toMessageId, 'msg-2');
     assert.equal(result?.segments[0].candidates?.[0].kind, 'decision');
     assert.equal(result?.segments[0].candidates?.[0].confidence, 'explicit');
+  });
+
+  it('fails open instead of storing a legacy prose summary without recall fields', async () => {
+    const { createAgentAbstractiveClient } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+    const errors = [];
+
+    async function* invokeAgent() {
+      yield {
+        type: 'text',
+        content: '# Legacy summary\n\nDiscussed the work and agreed to continue with the canary.',
+      };
+    }
+
+    const client = createAgentAbstractiveClient(invokeAgent, {
+      info() {},
+      error(message) {
+        errors.push(message);
+      },
+    });
+
+    assert.equal(await client(input), null);
+    assert.match(errors.join('\n'), /missing required recall fields/);
+  });
+
+  it('rejects canonical labels when a required field has no value', async () => {
+    const { createAgentAbstractiveClient } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+
+    async function* invokeAgent() {
+      yield {
+        type: 'text',
+        content:
+          '# Incomplete\n\n## 当前状态/任务 (Current status)\n\n## 已确认决策/约束 (Decision/constraint)\n已确认 canary。\n\n## 下一步 (Next action)\n继续验证。\n\n## 风险/锚点 (Risk/anchor)\n回看 msg-1..msg-2。',
+      };
+    }
+
+    const client = createAgentAbstractiveClient(invokeAgent, { info() {}, error() {} });
+    assert.equal(await client(input), null);
   });
 
   it('fails open when the agent reports an error', async () => {

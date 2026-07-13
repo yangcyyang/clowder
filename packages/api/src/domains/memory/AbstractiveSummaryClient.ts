@@ -7,6 +7,8 @@
  * 铲屎官原话："我们就不能让他返回自然语言直接帮他加格式吗？格式就是程序加。"
  */
 
+import { hasCanonicalSummaryRecallFields } from './SummaryRecallContract.js';
+
 export interface AbstractiveInput {
   previousSummary: string | null;
   messages: Array<{ id: string; content: string; catId?: string; timestamp: number }>;
@@ -89,11 +91,25 @@ const SYSTEM_PROMPT = `You are a thread summarizer for Clowder AI, an AI-collabo
 
 IMPORTANT: You are a SUMMARIZER, not a conversation participant. Do NOT respond to the messages — summarize them.
 
-Given a batch of thread messages, write a summary using this format:
+Given a batch of thread messages, write a summary using this exact format:
 
 # Title of what was discussed
 
-A 200-400 character summary of what was discussed, what was decided, risks, and next steps.
+## 当前状态/任务 (Current status)
+
+The status as of the newest message_id included in this batch.
+
+## 已确认决策/约束 (Decision/constraint)
+
+Only decisions or constraints supported by the input.
+
+## 下一步 (Next action)
+
+The next action supported by the input.
+
+## 风险/锚点 (Risk/anchor)
+
+Risks, uncertainty, and the exact input message_id or message_id range to inspect for details.
 
 ## Durable Knowledge (if any)
 
@@ -104,7 +120,12 @@ A 200-400 character summary of what was discussed, what was decided, risks, and 
 
 Rules:
 - The # title line is REQUIRED
-- The summary paragraph is REQUIRED (200-400 chars, after the title)
+- All four recall sections are REQUIRED and together should be 200-400 characters
+- Use the exact bilingual section labels above; do not rename or merge them
+- Use only facts present in Previous Summary or Messages; never invent status, decisions, next steps, risks, or anchors
+- If a field is absent, write "未从输入确认" / "Not confirmed by input" instead of guessing
+- Treat Current status as the state at the summary watermark, not as knowledge of later messages
+- Risk/anchor may cite only message_id values supplied in the input
 - [decision], [lesson], [method] tags are OPTIONAL — only include if there's genuinely durable knowledge
 - Add ! suffix (e.g. [decision!]) ONLY when the human/CVO explicitly confirmed the decision or lesson in the conversation
 - Do NOT extract brainstorm branches, temporary TODOs, or session-local context
@@ -159,7 +180,7 @@ function buildUserPrompt(input: AbstractiveInput): string {
     const speaker = msg.catId ?? 'user';
     const time = new Date(msg.timestamp).toISOString().slice(0, 19);
     const content = msg.content.length > MAX_MSG_CHARS ? `${msg.content.slice(0, MAX_MSG_CHARS)}...` : msg.content;
-    const line = `[${time}] [${speaker}]: ${content}`;
+    const line = `[message_id=${msg.id}] [${time}] [${speaker}]: ${content}`;
     totalChars += line.length;
     if (totalChars > MAX_TOTAL_CHARS) {
       parts.push(`[... ${input.messages.length} total messages, truncated]`);
@@ -205,12 +226,16 @@ export function parseNaturalLanguageOutput(text: string, input: AbstractiveInput
   const summaryText =
     candidateStart > titleEnd ? text.slice(titleEnd, candidateStart).trim() : text.slice(titleEnd).trim();
 
-  // Clean up summary: remove markdown headers, keep plain text
+  // Preserve recall section labels as plain-text fields. The delivery-only
+  // consumer validates these labels before replacing raw history.
   const summary = summaryText
     .split('\n')
-    .filter((l) => !l.startsWith('#'))
-    .join(' ')
-    .replace(/\s+/g, ' ')
+    .map((line) => {
+      const heading = line.match(/^#{1,6}\s+(.+)$/);
+      return heading ? `${heading[1].trim()}：` : line.trim().replace(/[ \t]+/g, ' ');
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, 800);
 
@@ -360,6 +385,10 @@ export function createAbstractiveClient(
         logger.error(`[abstractive-client] failed to parse output: ${text.slice(0, 150)}`);
         return null;
       }
+      if (!result.segments.every((segment) => hasCanonicalSummaryRecallFields(segment.summary))) {
+        logger.error('[abstractive-client] missing required recall fields; refusing to store summary');
+        return null;
+      }
 
       logger.info(
         `[abstractive-client] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
@@ -436,6 +465,12 @@ export function createAgentAbstractiveClient(
       const result = parseNaturalLanguageOutput(text, input);
       if (!result) {
         logger.error(`[abstractive-client:${providerId}] failed to parse output: ${text.slice(0, 150)}`);
+        return null;
+      }
+      if (!result.segments.every((segment) => hasCanonicalSummaryRecallFields(segment.summary))) {
+        logger.error(
+          `[abstractive-client:${providerId}] missing required recall fields; refusing to store summary`,
+        );
         return null;
       }
 
