@@ -10,12 +10,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 describe('McpPromptInjector', () => {
-  it('reports no runtime-native MCP bridge for Grok until GrokAgentService injects one', async () => {
+  it('reports a runtime-native MCP bridge for Grok', async () => {
     const { hasRuntimeNativeMcpBridge } = await import(
       '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
     );
 
-    assert.equal(hasRuntimeNativeMcpBridge('grok'), false);
+    assert.equal(hasRuntimeNativeMcpBridge('grok'), true);
     assert.equal(hasRuntimeNativeMcpBridge('anthropic'), true);
   });
 
