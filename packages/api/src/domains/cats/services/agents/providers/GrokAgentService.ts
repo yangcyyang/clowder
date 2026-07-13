@@ -197,6 +197,9 @@ export class GrokAgentService implements AgentService {
       // Headless `default` waits for an interactive approval and cancels tool calls.
       '--permission-mode',
       'auto',
+      // The isolated GROK_HOME exposes only Cat Cafe's MCP server; approve that namespace explicitly.
+      '--allow',
+      'MCPTool(cat-cafe-clowder-runtime__*)',
     ];
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);

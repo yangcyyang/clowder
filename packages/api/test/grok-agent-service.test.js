@@ -68,6 +68,9 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
   assert.ok(permissionModeIndex >= 0);
   assert.equal(spawnOptions.args[permissionModeIndex + 1], 'auto');
+  const allowIndex = spawnOptions.args.indexOf('--allow');
+  assert.ok(allowIndex >= 0);
+  assert.equal(spawnOptions.args[allowIndex + 1], 'MCPTool(cat-cafe-clowder-runtime__*)');
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
   assert.equal(spawnOptions.env.CUSTOM_ENV, 'enabled');
 });
