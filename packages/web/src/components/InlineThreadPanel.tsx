@@ -12,10 +12,14 @@ import {
   type WheelEvent,
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { isCommandInvocation } from '@/hooks/useChatCommands';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import type { CatStatusType } from '@/stores/chat-types';
+import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { compressImage } from '@/utils/compressImage';
+import { RESET_CONTEXT_CONFIRMATION, resetThreadContext } from '@/utils/reset-thread-context';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage } from './ChatMessage';
@@ -25,7 +29,6 @@ import { MentionPicker } from './MentionPicker';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref } from './ThreadSidebar/thread-navigation';
 import { ResizeHandle } from './workspace/ResizeHandle';
-import { compressImage } from '@/utils/compressImage';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 520;
 const THREAD_PANEL_MIN_WIDTH = 420;
@@ -237,7 +240,10 @@ export function InlineThreadTaskStatusCard({ task }: { task?: TaskItem }) {
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-[var(--cafe-text-muted)]">任务目标</div>
-          <div className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--cafe-text)]" title={task.title}>
+          <div
+            className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--cafe-text)]"
+            title={task.title}
+          >
             {task.title}
           </div>
         </div>
@@ -406,29 +412,32 @@ export function InlineThreadPanel({
     latestMessagesRef.current = messages;
   }, [messages]);
 
-  const loadMessages = useCallback(async (options?: { showLoading?: boolean }) => {
-    if (options?.showLoading !== false) setLoading(true);
+  const loadMessages = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (options?.showLoading !== false) setLoading(true);
 
-    try {
-      const res = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=60`);
-      if (!res.ok) return [];
-      const data = (await res.json()) as { messages?: ChatMessageData[] };
-      const normalized = (data.messages ?? []).map((message) => normalizeInlineThreadMessage(message));
-      if (mountedRef.current) {
-        latestMessagesRef.current = normalized;
-        setMessages(normalized);
+      try {
+        const res = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=60`);
+        if (!res.ok) return [];
+        const data = (await res.json()) as { messages?: ChatMessageData[] };
+        const normalized = (data.messages ?? []).map((message) => normalizeInlineThreadMessage(message));
+        if (mountedRef.current) {
+          latestMessagesRef.current = normalized;
+          setMessages(normalized);
+        }
+        return normalized;
+      } catch {
+        if (mountedRef.current) {
+          latestMessagesRef.current = [];
+          setMessages([]);
+        }
+        return [];
+      } finally {
+        if (mountedRef.current && options?.showLoading !== false) setLoading(false);
       }
-      return normalized;
-    } catch {
-      if (mountedRef.current) {
-        latestMessagesRef.current = [];
-        setMessages([]);
-      }
-      return [];
-    } finally {
-      if (mountedRef.current && options?.showLoading !== false) setLoading(false);
-    }
-  }, [threadId]);
+    },
+    [threadId],
+  );
 
   const loadQueueRuntime = useCallback(async () => {
     try {
@@ -469,7 +478,8 @@ export function InlineThreadPanel({
         const runtimeStillActive = active.length > 0;
         const timedOutWithoutRuntime = elapsed >= 60_000 && !runtimeStillActive;
         const hardTimedOut = elapsed >= 5 * 60_000;
-        if ((hasNewCompleteMessage && !runtimeStillActive) || timedOutWithoutRuntime || hardTimedOut) stopReplyPolling();
+        if ((hasNewCompleteMessage && !runtimeStillActive) || timedOutWithoutRuntime || hardTimedOut)
+          stopReplyPolling();
       });
     }, 2000);
   }, [loadMessages, loadQueueRuntime, stopReplyPolling]);
@@ -594,6 +604,22 @@ export function InlineThreadPanel({
       if (isUnsafeInlineThreadTarget(threadId, sourceMessage)) {
         throw new Error('Thread 未创建成功，已阻止把回复写入主频道');
       }
+      if (isCommandInvocation(content, '/reset-context')) {
+        if (content !== '/reset-context' || images.length > 0) {
+          throw new Error('用法：/reset-context');
+        }
+        await resetThreadContext(threadId);
+        setInput('');
+        closeSlashPicker();
+        useToastStore.getState().addToast({
+          type: 'success',
+          title: '上下文已重置',
+          message: RESET_CONTEXT_CONFIRMATION,
+          duration: 6000,
+          threadId,
+        });
+        return;
+      }
       const res = await apiFetch(
         '/api/messages',
         images.length > 0
@@ -634,6 +660,7 @@ export function InlineThreadPanel({
     }
   }, [
     closeMentionPicker,
+    closeSlashPicker,
     input,
     images,
     isPreparingImages,
@@ -648,35 +675,38 @@ export function InlineThreadPanel({
     threadId,
   ]);
 
-  const addImages = useCallback(async (candidates: File[]) => {
-    const capacity = MAX_THREAD_IMAGES - images.length;
-    if (capacity <= 0) {
-      setSendError(`每条消息最多 ${MAX_THREAD_IMAGES} 张图片`);
-      return;
-    }
+  const addImages = useCallback(
+    async (candidates: File[]) => {
+      const capacity = MAX_THREAD_IMAGES - images.length;
+      if (capacity <= 0) {
+        setSendError(`每条消息最多 ${MAX_THREAD_IMAGES} 张图片`);
+        return;
+      }
 
-    setIsPreparingImages(true);
-    try {
-      const accepted: File[] = [];
-      let rejected = 0;
-      for (const file of candidates) {
-        if (accepted.length >= capacity) break;
-        if (!THREAD_IMAGE_TYPES.has(file.type) || file.size > MAX_THREAD_IMAGE_BYTES) {
-          rejected += 1;
-          continue;
+      setIsPreparingImages(true);
+      try {
+        const accepted: File[] = [];
+        let rejected = 0;
+        for (const file of candidates) {
+          if (accepted.length >= capacity) break;
+          if (!THREAD_IMAGE_TYPES.has(file.type) || file.size > MAX_THREAD_IMAGE_BYTES) {
+            rejected += 1;
+            continue;
+          }
+          accepted.push(await compressImage(file));
         }
-        accepted.push(await compressImage(file));
+        if (rejected > 0 || candidates.length > capacity) {
+          setSendError(`仅支持 PNG、JPEG、GIF、WebP，单张不超过 10MB，最多 ${MAX_THREAD_IMAGES} 张`);
+        } else {
+          setSendError(null);
+        }
+        if (accepted.length > 0) setImages((current) => [...current, ...accepted].slice(0, MAX_THREAD_IMAGES));
+      } finally {
+        setIsPreparingImages(false);
       }
-      if (rejected > 0 || candidates.length > capacity) {
-        setSendError(`仅支持 PNG、JPEG、GIF、WebP，单张不超过 10MB，最多 ${MAX_THREAD_IMAGES} 张`);
-      } else {
-        setSendError(null);
-      }
-      if (accepted.length > 0) setImages((current) => [...current, ...accepted].slice(0, MAX_THREAD_IMAGES));
-    } finally {
-      setIsPreparingImages(false);
-    }
-  }, [images.length]);
+    },
+    [images.length],
+  );
 
   const handleImageSelect = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -851,7 +881,14 @@ export function InlineThreadPanel({
               aria-label="搜索 Thread"
               title="搜索 Thread"
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="7" cy="7" r="4" />
                 <path d="m10.2 10.2 3 3" />
               </svg>
@@ -861,7 +898,14 @@ export function InlineThreadPanel({
               onClick={handleViewInChannel}
               className="slock-header-action slock-header-action--label"
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
                 <path d="M6 4H4.25A1.25 1.25 0 0 0 3 5.25v6.5C3 12.44 3.56 13 4.25 13h6.5c.69 0 1.25-.56 1.25-1.25V10" />
                 <path d="M9 3h4v4" />
                 <path d="m8 8 5-5" />
@@ -875,7 +919,14 @@ export function InlineThreadPanel({
               aria-label="关闭 Thread 面板"
               title="关闭 Thread 面板"
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
             </button>
@@ -884,7 +935,14 @@ export function InlineThreadPanel({
         {searchOpen && (
           <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2">
             <div className="flex min-w-0 flex-1 items-center gap-2 border-2 border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] px-2 py-1">
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="7" cy="7" r="4" />
                 <path d="m10.2 10.2 3 3" />
               </svg>
@@ -898,7 +956,9 @@ export function InlineThreadPanel({
                 aria-label="搜索当前 Thread"
               />
               <span className="flex-shrink-0 font-mono text-[11px] text-[var(--cafe-text-muted)]">
-                {searchQuery.trim() ? `${searchHits.length === 0 ? 0 : activeSearchIndex + 1}/${searchHits.length}` : '0/0'}
+                {searchQuery.trim()
+                  ? `${searchHits.length === 0 ? 0 : activeSearchIndex + 1}/${searchHits.length}`
+                  : '0/0'}
               </span>
             </div>
             <button
@@ -943,7 +1003,10 @@ export function InlineThreadPanel({
                 key={item.catId}
                 className="flex min-w-0 items-center gap-2 rounded-[var(--slock-radius-lg)] border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1.5 text-xs"
               >
-                <span className="h-2 w-2 flex-shrink-0 rounded-full animate-pulse" style={{ backgroundColor: item.color }} />
+                <span
+                  className="h-2 w-2 flex-shrink-0 rounded-full animate-pulse"
+                  style={{ backgroundColor: item.color }}
+                />
                 <span className="min-w-0 flex-1 truncate font-semibold text-[var(--cafe-text)]">{item.label}</span>
                 <span className={`flex-shrink-0 font-medium ${THREAD_STATUS_TONE[item.status]}`}>
                   {THREAD_STATUS_LABELS[item.status]}
@@ -977,7 +1040,9 @@ export function InlineThreadPanel({
           </div>
           <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
             <div>Beginning of replies</div>
-            <div className="mt-1">{replyMessages.length} {replyMessages.length === 1 ? 'reply' : 'replies'}</div>
+            <div className="mt-1">
+              {replyMessages.length} {replyMessages.length === 1 ? 'reply' : 'replies'}
+            </div>
           </div>
           {loading ? (
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
@@ -992,7 +1057,9 @@ export function InlineThreadPanel({
                   key={msg.id}
                   data-inline-thread-message-id={msg.id}
                   className={`transition-colors ${
-                    isActiveHit ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-1 py-1' : ''
+                    isActiveHit
+                      ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-1 py-1'
+                      : ''
                   }`}
                 >
                   <ChatMessage
@@ -1009,7 +1076,10 @@ export function InlineThreadPanel({
 
         <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-4">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
-          <ImagePreview files={images} onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))} />
+          <ImagePreview
+            files={images}
+            onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))}
+          />
           <input
             ref={imageInputRef}
             type="file"
@@ -1054,7 +1124,14 @@ export function InlineThreadPanel({
               aria-label={sending ? '发送中' : '发送 Thread 回复'}
               title={sending ? '发送中...' : '发送'}
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
                 <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
               </svg>
             </button>
@@ -1071,7 +1148,9 @@ export function InlineThreadPanel({
               >
                 ▧
               </button>
-              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">⌘</span>
+              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">
+                ⌘
+              </span>
             </div>
             <span className="text-[11px] text-[var(--cafe-text-muted)]">Enter 发送 · Shift+Enter 换行</span>
           </div>

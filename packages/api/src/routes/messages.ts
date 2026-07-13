@@ -39,8 +39,8 @@ import type {
   SessionContinuationCoordinator,
 } from '../domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
-  persistA2APendingNotice,
   type PersistenceContext,
+  persistA2APendingNotice,
 } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
@@ -649,6 +649,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         intent: intent.intent,
       });
 
+      if (enqueueResult.outcome === 'resetting') {
+        reply.status(409);
+        return { error: '上下文正在重置，请稍后重试', code: 'CONTEXT_RESET_BUSY' };
+      }
+
       // Queue full → 429, no message written (no ghost message)
       if (enqueueResult.outcome === 'full') {
         opts.socketManager.emitToUser(userId, 'queue_full_warning', {
@@ -788,6 +793,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               targetCats,
               intent: intent.intent,
             });
+            if (enqueueResult.outcome === 'resetting') {
+              reply.status(409);
+              return { error: '上下文正在重置，请稍后重试', code: 'CONTEXT_RESET_BUSY' };
+            }
             if (enqueueResult.outcome === 'full') {
               opts.socketManager.emitToUser(userId, 'queue_full_warning', {
                 threadId: resolvedThreadId,

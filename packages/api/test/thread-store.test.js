@@ -7,6 +7,32 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('ThreadStore', () => {
+  test('advances a per-user reset epoch and clears only that users pending capsules', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Reset boundary');
+    store.setPendingContinuation(thread.id, 'codex', 'user-1', { capsule: { value: 'old' }, createdAt: 1 });
+    store.setPendingContinuation(thread.id, 'codex', 'user-2', { capsule: { value: 'keep' }, createdAt: 2 });
+
+    const first = store.advanceContextResetBoundary(thread.id, 'user-1', {
+      resetAtMessageId: 'msg-010',
+      resetAt: 100,
+      resetBy: 'user-1',
+    });
+    const second = store.advanceContextResetBoundary(thread.id, 'user-1', {
+      resetAtMessageId: 'msg-020',
+      resetAt: 200,
+      resetBy: 'user-1',
+    });
+
+    assert.equal(first.contextEpoch, 1);
+    assert.equal(second.contextEpoch, 2);
+    assert.deepEqual(store.getContextResetBoundary(thread.id, 'user-1'), second);
+    assert.equal(store.consumePendingContinuation(thread.id, 'codex', 'user-1'), null);
+    assert.equal(store.consumePendingContinuation(thread.id, 'codex', 'user-2')?.capsule.value, 'keep');
+    assert.equal(store.getContextResetBoundary(thread.id, 'user-2'), null);
+  });
+
   test('claims each history-critical watermark once and rolls back exact state', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const store = new ThreadStore();

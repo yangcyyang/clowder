@@ -90,6 +90,38 @@ describe('history critical seal intent', () => {
 });
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
+  test('uses the durable reset boundary as the floor for raw history and summary reads', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadStore = new ThreadStore();
+    threadStore.get('default');
+    const old = messageStore.append(mockMsg({ threadId: 'default', content: 'RESET-OLD-SENTINEL' }));
+    threadStore.advanceContextResetBoundary('default', 'user-1', {
+      resetAtMessageId: old.id,
+      resetAt: Date.now(),
+      resetBy: 'user-1',
+    });
+    const latest = messageStore.append(mockMsg({ threadId: 'default', content: 'RESET-NEW-SENTINEL' }));
+    const summaryCalls = [];
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.invocationDeps.threadStore = threadStore;
+    deps.threadHistorySummaryStore = {
+      async listLatestByThread(threadId, limit, afterMessageId) {
+        summaryCalls.push({ threadId, limit, afterMessageId });
+        return [];
+      },
+    };
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'default', 'opus', latest.id, 'play', {
+      historySummaryEnabled: true,
+    });
+
+    assert.equal(result.contextText.includes('RESET-OLD-SENTINEL'), false);
+    assert.equal(result.contextText.includes('RESET-NEW-SENTINEL'), true);
+    assert.ok(summaryCalls.every((call) => call.afterMessageId === old.id));
+  });
+
   test('injects Agent Inbox Snapshot with latest correction intent', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();

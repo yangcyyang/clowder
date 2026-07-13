@@ -42,8 +42,8 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
       autoExecute: true,
     });
 
-    if (result.outcome === 'full') {
-      log.warn({ threadId, catId, gameWake: true }, '[F101] wakeCat: queue full');
+    if (result.outcome !== 'enqueued') {
+      log.warn({ threadId, catId, gameWake: true, outcome: result.outcome }, '[F101] wakeCat: enqueue blocked');
       return;
     }
 

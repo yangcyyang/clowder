@@ -16,6 +16,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
+  ContextResetBoundaryV1,
   HistoryCriticalSealClaim,
   IThreadStore,
   MentionActionabilityMode,
@@ -603,6 +604,59 @@ export class RedisThreadStore implements IThreadStore {
     if (!raw) return null;
     try {
       return JSON.parse(raw) as PendingContinuationEntry;
+    } catch {
+      return null;
+    }
+  }
+
+  async advanceContextResetBoundary(
+    threadId: string,
+    userId: string,
+    input: { resetAtMessageId?: string; resetAt: number; resetBy: string },
+  ): Promise<ContextResetBoundaryV1 | null> {
+    const key = ThreadKeys.detail(threadId);
+    const raw = (await this.redis.eval(
+      `if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return '' end
+       local epoch = redis.call('HINCRBY', KEYS[1], ARGV[2], 1)
+       local boundary = {v=1, contextEpoch=epoch, resetAt=tonumber(ARGV[4]), resetBy=ARGV[5]}
+       if ARGV[3] ~= '' then boundary.resetAtMessageId = ARGV[3] end
+       local encoded = cjson.encode(boundary)
+       redis.call('HSET', KEYS[1], ARGV[1], encoded)
+       local suffix = ':' .. ARGV[6]
+       local fields = redis.call('HKEYS', KEYS[1])
+       for _, field in ipairs(fields) do
+         if string.sub(field, 1, 9) == 'pendCont:' and string.sub(field, -string.len(suffix)) == suffix then
+           redis.call('HDEL', KEYS[1], field)
+         end
+       end
+       return encoded`,
+      1,
+      key,
+      `contextReset:${userId}`,
+      `contextEpoch:${userId}`,
+      input.resetAtMessageId ?? '',
+      String(input.resetAt),
+      input.resetBy,
+      userId,
+    )) as string;
+    if (!raw) return null;
+    let boundary: ContextResetBoundaryV1;
+    try {
+      boundary = JSON.parse(raw) as ContextResetBoundaryV1;
+    } catch {
+      return null;
+    }
+    // reset 边界属于线程的耐久状态；保留策略失败必须向上抛出，不能伪装成 404。
+    await this.applyKeyRetention([key]);
+    return boundary;
+  }
+
+  async getContextResetBoundary(threadId: string, userId: string): Promise<ContextResetBoundaryV1 | null> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `contextReset:${userId}`);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as ContextResetBoundaryV1;
+      return parsed?.v === 1 && Number.isFinite(parsed.contextEpoch) && Number.isFinite(parsed.resetAt) ? parsed : null;
     } catch {
       return null;
     }

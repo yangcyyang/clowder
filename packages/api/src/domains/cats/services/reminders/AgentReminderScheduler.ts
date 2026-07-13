@@ -40,7 +40,11 @@ export function startAgentReminderScheduler(deps: AgentReminderSchedulerDeps): (
     try {
       const due = await deps.store.due();
       for (const reminder of due) {
+        let releaseMutation = () => {};
         try {
+          const mutationGuard = deps.invocationQueue.guardCallbackMutation(reminder.threadId);
+          if (!mutationGuard.acquired) continue;
+          releaseMutation = mutationGuard.release;
           const thread = await deps.threadStore.get(reminder.threadId);
           const userId = thread?.createdBy ?? 'system';
           const content = `⏰ 提醒到期：${reminder.message}\n\n目标 Agent：@${reminder.catId}`;
@@ -76,12 +80,14 @@ export function startAgentReminderScheduler(deps: AgentReminderSchedulerDeps): (
             sourceCategory: 'scheduled',
             idempotencyKey: `reminder:${reminder.id}`,
           });
-          if (enqueueResult.outcome !== 'full') {
+          if (enqueueResult.outcome === 'enqueued') {
             await deps.queueProcessor.tryAutoExecute(reminder.threadId);
           }
           await deps.store.markFired(reminder.id);
         } catch (err) {
           deps.log.warn({ err, reminderId: reminder.id }, '[reminder] failed to fire reminder');
+        } finally {
+          releaseMutation();
         }
       }
     } catch (err) {

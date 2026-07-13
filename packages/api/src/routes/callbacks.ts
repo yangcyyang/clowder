@@ -6,11 +6,14 @@
 import { randomUUID } from 'node:crypto';
 import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
 import { catRegistry, createCatId, normalizeRichBlock } from '@cat-cafe/shared';
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type {
+  InvocationRecord,
+  InvocationRegistry,
+} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
@@ -477,6 +480,52 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
   });
 
+  const callbackMutationGuards = new WeakMap<FastifyRequest, Map<string, () => void>>();
+  const acquireCallbackMutation = (request: FastifyRequest, threadId: string): boolean => {
+    if (!opts.invocationQueue) return true;
+    const held = callbackMutationGuards.get(request) ?? new Map<string, () => void>();
+    if (held.has(threadId)) return true;
+    const guard = opts.invocationQueue.guardCallbackMutation(threadId);
+    if (!guard.acquired) return false;
+    held.set(threadId, guard.release);
+    callbackMutationGuards.set(request, held);
+    return true;
+  };
+  const releaseCallbackMutations = (request: FastifyRequest): void => {
+    const held = callbackMutationGuards.get(request);
+    if (!held) return;
+    callbackMutationGuards.delete(request);
+    for (const release of held.values()) release();
+  };
+  app.addHook('onResponse', async (request) => releaseCallbackMutations(request));
+  app.addHook('onError', async (request) => releaseCallbackMutations(request));
+
+  const invocationPredatesReset = async (record: InvocationRecord, targetThreadId: string): Promise<boolean> => {
+    if (!threadStore || typeof threadStore.getContextResetBoundary !== 'function') return false;
+    const boundary = await Promise.resolve(threadStore.getContextResetBoundary(targetThreadId, record.userId));
+    return Boolean(boundary && record.createdAt < boundary.resetAt);
+  };
+
+  // A completed invocation token may remain valid for hours. Reset turns its
+  // creation timestamp into a hard auth epoch so delayed callbacks cannot
+  // republish pre-reset work under a newer message ID.
+  app.addHook('preHandler', async (request, reply) => {
+    const record = request.callbackAuth;
+    if (!record || !threadStore) return;
+    const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+    if (await invocationPredatesReset(record, record.threadId)) {
+      if (mutating) {
+        reply.status(200).send({ status: 'stale_ignored', code: 'CONTEXT_RESET_STALE' });
+        return;
+      }
+      reply.status(409).send({ error: 'Invocation predates context reset', code: 'CONTEXT_RESET_STALE' });
+      return;
+    }
+    if (mutating && !acquireCallbackMutation(request, record.threadId)) {
+      reply.status(200).send({ status: 'stale_ignored', code: 'CONTEXT_RESET_STALE' });
+    }
+  });
+
   app.post('/api/callbacks/post-progress', async (request, reply) => {
     const principal = requireCallbackPrincipal(request, reply);
     if (!principal) return;
@@ -519,6 +568,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       effectiveThreadId = principal.threadId;
       effectiveInvocationId = principal.parentInvocationId ?? principal.invocationId;
+    }
+    if (principal.kind === 'invocation' && (await invocationPredatesReset(request.callbackAuth!, effectiveThreadId))) {
+      return { status: 'stale_ignored', code: 'CONTEXT_RESET_STALE', clientMessageId };
+    }
+    if (!acquireCallbackMutation(request, effectiveThreadId)) {
+      return { status: 'stale_ignored', code: 'CONTEXT_RESET_STALE', clientMessageId };
     }
 
     let validatedReplyTo: string | undefined;
@@ -632,6 +687,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return { error: threadResult.error };
       }
       const effectiveThreadId = threadResult.threadId;
+      if (!acquireCallbackMutation(request, effectiveThreadId)) {
+        return { status: 'stale_ignored', code: 'CONTEXT_RESET_STALE' };
+      }
       const { content, replyTo, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
 
       if (clientMessageId && agentKeyRegistry) {
@@ -864,6 +922,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return { error: scoped.error };
       }
       effectiveThreadId = scoped.threadId;
+    }
+    if (await invocationPredatesReset(record, effectiveThreadId)) {
+      return {
+        status: 'stale_ignored',
+        code: 'CONTEXT_RESET_STALE',
+        replyTo,
+        ...(clientMessageId ? { clientMessageId } : {}),
+      };
+    }
+    if (!acquireCallbackMutation(request, effectiveThreadId)) {
+      return {
+        status: 'stale_ignored',
+        code: 'CONTEXT_RESET_STALE',
+        replyTo,
+        ...(clientMessageId ? { clientMessageId } : {}),
+      };
     }
 
     const freshnessProtected = Boolean(
@@ -1538,16 +1612,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // #77: Use mention ack cursor to filter already-processed mentions
     const catId = createCatId(record.catId);
-    const lastAckId = deliveryCursorStore
+    const storedAckId = deliveryCursorStore
       ? await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId)
       : undefined;
+    const resetBoundary = threadStore
+      ? await Promise.resolve(threadStore.getContextResetBoundary(record.threadId, record.userId))
+      : null;
+    const lastAckId =
+      resetBoundary?.resetAtMessageId && (!storedAckId || resetBoundary.resetAtMessageId > storedAckId)
+        ? resetBoundary.resetAtMessageId
+        : storedAckId;
 
     const rawMentions = shouldIncludeAcked
       ? await messageStore.getRecentMentionsFor(record.catId, 20, record.userId, record.threadId)
       : await messageStore.getMentionsFor(record.catId, 20, record.userId, record.threadId, lastAckId);
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
-    const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
+    const mentions = rawMentions.filter(
+      (m) =>
+        canViewMessage(m, mentionViewer) && (!resetBoundary?.resetAtMessageId || m.id > resetBoundary.resetAtMessageId),
+    );
     return {
       mentions: mentions.map((item) => ({
         id: item.id,
@@ -1579,8 +1663,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: threadResult.error };
     }
     const effectiveThreadId = threadResult.threadId;
-    const cursor = await deliveryCursorStore.getCursor(principal.userId, principal.catId, effectiveThreadId);
-    const unseen = await messageStore.getByThreadAfter(effectiveThreadId, cursor, undefined, principal.userId);
+    const storedCursor = await deliveryCursorStore.getCursor(principal.userId, principal.catId, effectiveThreadId);
+    const resetBoundary = threadStore
+      ? await Promise.resolve(threadStore.getContextResetBoundary(effectiveThreadId, principal.userId))
+      : null;
+    const cursor =
+      resetBoundary?.resetAtMessageId && (!storedCursor || resetBoundary.resetAtMessageId > storedCursor)
+        ? resetBoundary.resetAtMessageId
+        : storedCursor;
+    const rawUnseen = await messageStore.getByThreadAfter(effectiveThreadId, cursor, undefined, principal.userId);
+    const unseen = resetBoundary?.resetAtMessageId
+      ? rawUnseen.filter((message) => message.id > resetBoundary.resetAtMessageId!)
+      : rawUnseen;
     const thread = await Promise.resolve(threadStore?.get(effectiveThreadId)).catch(() => null);
     const relevant = selectUnreadMessagesForCat(unseen, principal.catId, thread?.thinkingMode ?? 'play');
     const pageCursor = parsed.data.cursor ? decodeContentFreeInboxCursor(parsed.data.cursor) : undefined;
@@ -1707,6 +1801,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const principalCatId = principal.kind === 'invocation' ? principal.catId : principal.catId;
     const principalUserId = principal.userId;
+    const resetBoundary = threadStore
+      ? await Promise.resolve(threadStore.getContextResetBoundary(effectiveThreadId, principalUserId))
+      : null;
+    const resetAtMessageId = resetBoundary?.resetAtMessageId;
     // F148 Phase B (AC-B2): tokenize keyword for relevance scoring
     const keywordTerms = keyword ? tokenizeKeyword(keyword) : [];
 
@@ -1724,6 +1822,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // it must never promote an agent to the all-seeing user viewer for whispers.
     const viewer = { type: 'cat' as const, catId: createCatId(principalCatId) };
     const matchesExtraFilters = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+      if (resetAtMessageId && item.id <= resetAtMessageId) return false;
       // F148 Phase E (AC-E2): briefing messages are non-routing, never enter cat context
       if (item.origin === 'briefing') return false;
       if (filterCatId) {
@@ -1939,6 +2038,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const safeMaxTokens = Math.min(maxTokens ?? configuredTokenCap, configuredTokenCap);
     const principalCatId = principal.catId;
     const principalUserId = principal.userId;
+    const resetBoundary = threadStore
+      ? await Promise.resolve(threadStore.getContextResetBoundary(effectiveThreadId, principalUserId))
+      : null;
+    const resetAtMessageId = resetBoundary?.resetAtMessageId;
 
     let needsPlayFilter = false;
     if (threadStore) {
@@ -1951,6 +2054,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const viewer = { type: 'cat' as const, catId: createCatId(principalCatId) };
     const queryTerms = query ? tokenizeKeyword(query) : [];
     const isVisibleForFetch = (item: StoredMessage): boolean => {
+      if (resetAtMessageId && item.id <= resetAtMessageId) return false;
       if (item.origin === 'briefing') return false;
       if (!canViewMessage(item, viewer)) return false;
       const isOtherCat = item.catId && item.catId !== principalCatId;
@@ -1970,7 +2074,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const fetchMessageById = async (messageId: string): Promise<StoredMessage | null> => {
       const msg = await messageStore.getById(messageId);
-      if (!msg || !isOwnThreadMessage(msg)) return null;
+      if (!msg || !isOwnThreadMessage(msg) || (resetAtMessageId && msg.id <= resetAtMessageId)) return null;
       return msg;
     };
 
@@ -2175,11 +2279,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return item.catId === filterCatId;
     };
 
-    const rawMatches = recentMessages
+    const visibleCandidates = recentMessages.filter((item) => {
+      if (!isMessageVisibleToPrincipalUser(item, principalUserId)) return false;
+      if (!canViewMessage(item, viewer)) return false;
+      if (effectiveThreadId && item.threadId !== effectiveThreadId) return false;
+      return true;
+    });
+    const boundaryByThread = new Map<string, string | undefined>();
+    if (threadStore) {
+      await Promise.all(
+        [...new Set(visibleCandidates.map((item) => item.threadId))].map(async (threadId) => {
+          const boundary = await Promise.resolve(threadStore.getContextResetBoundary(threadId, principalUserId));
+          boundaryByThread.set(threadId, boundary?.resetAtMessageId);
+        }),
+      );
+    }
+
+    const rawMatches = visibleCandidates
       .filter((item) => {
-        if (!isMessageVisibleToPrincipalUser(item, principalUserId)) return false;
-        if (!canViewMessage(item, viewer)) return false;
-        if (effectiveThreadId && item.threadId !== effectiveThreadId) return false;
+        const resetAtMessageId = boundaryByThread.get(item.threadId);
+        if (resetAtMessageId && item.id <= resetAtMessageId) return false;
         if (item.origin === 'briefing') return false;
         if (!matchesAuthorFilter(item)) return false;
         if (!item.content?.trim()) return false;

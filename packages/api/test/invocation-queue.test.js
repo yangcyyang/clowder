@@ -45,6 +45,31 @@ describe('InvocationQueue', () => {
     assert.equal(queue.dequeue('t1', 'u1'), null);
   });
 
+  it('context reset guard rejects enqueue and refuses acquisition while work is pending', () => {
+    const guard = queue.guardContextReset('t1');
+    assert.equal(guard.acquired, true);
+    assert.deepEqual(queue.enqueue(entry()), { outcome: 'resetting' });
+    guard.release();
+
+    queue.enqueue(entry());
+    assert.equal(queue.guardContextReset('t1').acquired, false);
+    queue.clear('t1', 'u1');
+    assert.equal(queue.guardContextReset('t1').acquired, true);
+  });
+
+  it('linearizes callback mutations against context reset', () => {
+    const callback = queue.guardCallbackMutation('t1');
+    assert.equal(callback.acquired, true);
+    assert.equal(queue.guardContextReset('t1').acquired, false);
+    callback.release();
+
+    const reset = queue.guardContextReset('t1');
+    assert.equal(reset.acquired, true);
+    assert.equal(queue.guardCallbackMutation('t1').acquired, false);
+    reset.release();
+    assert.equal(queue.guardCallbackMutation('t1').acquired, true);
+  });
+
   it('remove specific entry by id', () => {
     const r = queue.enqueue(entry());
     const removed = queue.remove('t1', 'u1', r.entry.id);

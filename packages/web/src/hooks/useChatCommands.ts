@@ -3,7 +3,9 @@
 import { useCallback, useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { RESET_CONTEXT_CONFIRMATION, resetThreadContext } from '@/utils/reset-thread-context';
 import { getUserId } from '@/utils/userId';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,7 +152,7 @@ export function useChatCommands() {
   }, [cats]);
 
   const processCommand = useCallback(
-    async (input: string, overrideThreadId?: string): Promise<boolean> => {
+    async (input: string, overrideThreadId?: string, options?: { hasPayload?: boolean }): Promise<boolean> => {
       const trimmed = input.trim();
       /** Resolve effective threadId — override (from split-pane) or store default */
       const getThreadId = () => overrideThreadId ?? useChatStore.getState().currentThreadId;
@@ -163,6 +165,46 @@ export function useChatCommands() {
           timestamp: Date.now(),
         });
       };
+      if (isCommandInvocation(trimmed, '/reset-context')) {
+        if (trimmed !== '/reset-context' || options?.hasPayload) {
+          useToastStore.getState().addToast({
+            type: 'error',
+            title: '命令格式错误',
+            message: '用法：/reset-context',
+            duration: 5000,
+          });
+          return true;
+        }
+        const threadId = getThreadId();
+        if (!threadId) {
+          useToastStore.getState().addToast({
+            type: 'error',
+            title: '重置失败',
+            message: '当前没有可重置的线程',
+            duration: 5000,
+          });
+          return true;
+        }
+        try {
+          await resetThreadContext(threadId);
+          useToastStore.getState().addToast({
+            type: 'success',
+            title: '上下文已重置',
+            message: RESET_CONTEXT_CONFIRMATION,
+            duration: 6000,
+            threadId,
+          });
+        } catch (err) {
+          useToastStore.getState().addToast({
+            type: 'error',
+            title: '重置失败',
+            message: err instanceof Error ? err.message : '未知错误',
+            duration: 6000,
+            threadId,
+          });
+        }
+        return true;
+      }
       // /help — open settings to skills section
       if (trimmed === '/help') {
         window.location.assign('/settings?s=skills');

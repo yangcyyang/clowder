@@ -679,6 +679,7 @@ export async function* routeSerial(
             },
             catId,
             threadId,
+            userId,
           );
           if (bootstrap) {
             bootstrapContext = bootstrap.text;

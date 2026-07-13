@@ -194,6 +194,11 @@ export class ConnectorInvokeTrigger {
       ...(suggestedSkill ? { suggestedSkill } : {}),
     });
 
+    if (result.outcome === 'resetting') {
+      log.info({ threadId, catId, userId }, '[ConnectorInvokeTrigger] Context reset in progress, retry later');
+      return 'full';
+    }
+
     if (result.outcome === 'full') {
       socketManager.emitToUser(userId, 'queue_full_warning', {
         threadId,

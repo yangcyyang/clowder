@@ -36,7 +36,6 @@ import { FreshnessHoldExpiryScheduler } from './domains/cats/services/agents/fre
 import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
-import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/invocation/RedisInvocationQueuePersistence.js';
 import {
   InvocationRegistry,
   selectInvocationBackendKind,
@@ -47,6 +46,7 @@ import type {
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/invocation/RedisInvocationQueuePersistence.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
   resolveAcpBootstrapArgs,
@@ -951,8 +951,12 @@ async function main(): Promise<void> {
             limit,
             'default-user',
           );
-          return buildSummaryCompactionBatch(msgs);
+          return buildSummaryCompactionBatch(
+            afterMessageId ? msgs.filter((message) => message.id > afterMessageId) : msgs,
+          );
         },
+        getContextResetBoundary: async (threadId) =>
+          await Promise.resolve(threadStore.getContextResetBoundary(threadId, 'default-user')),
         generateAbstractive,
         getThreadAllowlist: getSummaryThreadAllowlist,
         // Re-embed thread after abstractive summary update (semantic search uses vectors)
@@ -1701,6 +1705,8 @@ async function main(): Promise<void> {
     memoryStore,
     deliveryCursorStore,
     invocationTracker,
+    invocationQueue,
+    resetContextSessions: (userId, threadId) => router.resetContextSessions(userId, threadId),
     draftStore,
     taskProgressStore,
     backlogStore,

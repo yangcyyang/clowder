@@ -597,8 +597,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     emitOtelLog('INFO', 'invocation_started', { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' }, invocationSpan);
 
     let sessionId: string | undefined;
+    let authoritativeSessionCreatedAt: number | undefined;
+    let contextResetBoundary: Awaited<ReturnType<IThreadStore['getContextResetBoundary']>> = null;
+    let contextResetBoundaryReadFailed = false;
+    if (deps.threadStore) {
+      try {
+        contextResetBoundary = await preflightRace(
+          Promise.resolve(deps.threadStore.getContextResetBoundary(threadId, userId)),
+          'getContextResetBoundary',
+          signal,
+        );
+      } catch {
+        contextResetBoundaryReadFailed = true;
+      }
+    }
     try {
-      sessionId = await preflightRace(sessionManager.get(userId, catId, threadId), 'sessionManager.get', signal);
+      sessionId = contextResetBoundaryReadFailed
+        ? undefined
+        : await preflightRace(
+            sessionManager.get(userId, catId, threadId, contextResetBoundary?.resetAt),
+            'sessionManager.get',
+            signal,
+          );
     } catch (err) {
       // Redis read failure or preflight timeout — continue without session
       log.warn({ catId, threadId, invocationId, err }, 'Session get failed (timeout or Redis), proceeding without');
@@ -639,6 +659,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             // Chain exists but no active session → previous was sealed; don't resume
             sessionId = undefined;
           } else if (activeRec.cliSessionId) {
+            authoritativeSessionCreatedAt = activeRec.createdAt;
             // F118 AC-C6: Overflow circuit breaker — too many consecutive restore failures (#86)
             // Note: time-based "stale" check removed — idle sessions are healthy,
             // only repeated restore failures indicate a toxic session.
@@ -681,6 +702,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // corruption is not.
         sessionId = undefined;
       }
+    }
+
+    if (
+      contextResetBoundaryReadFailed ||
+      (sessionChainActive &&
+        contextResetBoundary &&
+        (!authoritativeSessionCreatedAt || authoritativeSessionCreatedAt < contextResetBoundary.resetAt))
+    ) {
+      sessionId = undefined;
     }
 
     // Claude budget gate: high-history threads must not resume a huge hidden CLI session.

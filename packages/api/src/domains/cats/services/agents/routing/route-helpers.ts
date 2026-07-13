@@ -589,10 +589,11 @@ export function formatThreadHistorySummary(
 export async function readThreadHistorySummaryForContext(
   store: IThreadHistorySummaryStore | undefined,
   threadId: string,
+  afterMessageId?: string,
 ): Promise<FormattedThreadHistorySummary | undefined> {
   if (!store) return undefined;
   try {
-    const segments = await store.listLatestByThread(threadId, MAX_THREAD_HISTORY_SUMMARY_SEGMENTS);
+    const segments = await store.listLatestByThread(threadId, MAX_THREAD_HISTORY_SUMMARY_SEGMENTS, afterMessageId);
     return formatThreadHistorySummary(segments);
   } catch (err) {
     log.warn({ err, threadId }, 'history summary formatter failed to read summary_segments');
@@ -2228,6 +2229,7 @@ async function tryAssembleDeliveryOnlyContext(input: {
   currentUserMessageId: string | undefined;
   thinkingMode: 'debug' | 'play';
   options: IncrementalContextOptions | undefined;
+  resetAtMessageId?: string;
 }): Promise<DeliveryOnlyAttempt> {
   if (!input.currentUserMessageId) {
     return { ok: false, issue: 'missing_trigger', summarySegmentIds: [], qualityIssues: [] };
@@ -2236,7 +2238,9 @@ async function tryAssembleDeliveryOnlyContext(input: {
   // Canary guard must inspect the complete delivered thread, not an arbitrary recent cap:
   // one older unrevealed whisper is enough to make existing summary provenance unsafe.
   const allMessages = await Promise.resolve(
-    input.deps.messageStore.getByThreadAfter(input.threadId, undefined, undefined, input.userId),
+    input.deps.messageStore.getByThreadAfter(input.threadId, input.resetAtMessageId, undefined, input.userId),
+  ).then((messages) =>
+    input.resetAtMessageId ? messages.filter((message) => message.id > input.resetAtMessageId!) : messages,
   );
   if (
     allMessages.some(
@@ -2246,7 +2250,11 @@ async function tryAssembleDeliveryOnlyContext(input: {
     return { ok: false, issue: 'unrevealed_whisper', summarySegmentIds: [], qualityIssues: [] };
   }
 
-  const summary = await readThreadHistorySummaryForContext(input.deps.threadHistorySummaryStore, input.threadId);
+  const summary = await readThreadHistorySummaryForContext(
+    input.deps.threadHistorySummaryStore,
+    input.threadId,
+    input.resetAtMessageId,
+  );
   if (!summary) {
     return { ok: false, issue: 'missing_summary', summarySegmentIds: [], qualityIssues: ['empty_summary'] };
   }
@@ -2321,7 +2329,7 @@ async function tryAssembleDeliveryOnlyContext(input: {
   }
 
   const triggerQueryContent = input.options?.deliveryOnlyTriggerContent ?? trigger.content;
-  let anchors = selectAnchors(anchorCandidates, deliveryOnlyQueryTerms(triggerQueryContent), 3, {
+  const anchors = selectAnchors(anchorCandidates, deliveryOnlyQueryTerms(triggerQueryContent), 3, {
     ensurePrimacy: false,
   });
   const renderAnchorLines = () => formatAnchors(anchors, budget.maxContentLengthPerMsg);
@@ -2369,7 +2377,14 @@ export async function assembleIncrementalContext(
   }
 
   const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
-  const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  const resetBoundary = deps.invocationDeps.threadStore
+    ? await Promise.resolve(deps.invocationDeps.threadStore.getContextResetBoundary(threadId, userId))
+    : null;
+  const resetAtMessageId = resetBoundary?.resetAtMessageId;
+  const effectiveCursor = resetAtMessageId && (!cursor || resetAtMessageId > cursor) ? resetAtMessageId : cursor;
+  const rawUnseen = await fetchAfterCursor(deps.messageStore, threadId, effectiveCursor, userId);
+  // Redis timeline score may move on late delivery; reset is a lexicographic ID floor.
+  const unseen = resetAtMessageId ? rawUnseen.filter((message) => message.id > resetAtMessageId) : rawUnseen;
 
   const effectiveThinkingMode = thinkingMode ?? 'play';
   const relevant = selectUnreadMessagesForCat(unseen, catId, effectiveThinkingMode);
@@ -2391,7 +2406,7 @@ export async function assembleIncrementalContext(
     });
     return {
       contextText: formatContentFreeInbox(inbox),
-      boundaryId: relevant.at(-1)?.id ?? cursor,
+      boundaryId: relevant.at(-1)?.id ?? effectiveCursor,
       includedHistoryCount: 0,
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
@@ -2408,11 +2423,12 @@ export async function assembleIncrementalContext(
       currentUserMessageId,
       thinkingMode: effectiveThinkingMode,
       options,
+      resetAtMessageId,
     });
     if (attempt.ok) {
       return {
         contextText: attempt.contextText,
-        boundaryId: relevant.at(-1)?.id ?? cursor,
+        boundaryId: relevant.at(-1)?.id ?? effectiveCursor,
         includedHistoryCount: attempt.anchorCount,
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
@@ -2538,7 +2554,7 @@ export async function assembleIncrementalContext(
   const historyGovernanceEnv = options?.historyGovernanceEnv ?? process.env;
   const threadHistorySummary =
     (options?.historySummaryEnabled ?? isHistorySummaryShadowEnabled(historyGovernanceEnv))
-      ? await readThreadHistorySummaryForContext(deps.threadHistorySummaryStore, threadId)
+      ? await readThreadHistorySummaryForContext(deps.threadHistorySummaryStore, threadId, resetAtMessageId)
       : undefined;
   const historyGovernanceDecision = resolveHistoryGovernanceDecision({
     threadId,
@@ -2623,7 +2639,7 @@ export async function assembleIncrementalContext(
       currentUserMessageId,
       currentMessageFilteredOut,
       hcConfig,
-      cursor,
+      effectiveCursor,
       options,
       navigationHeader,
       intentSnapshot,
@@ -2636,6 +2652,7 @@ export async function assembleIncrementalContext(
       includedThreadHistorySummary,
       historyGovernanceDegraded,
       historyGovernanceQualityIssues,
+      Boolean(resetBoundary),
     );
   }
 
@@ -2657,10 +2674,10 @@ export async function assembleIncrementalContext(
 
   if (capped.length === 0) {
     const contextText = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
-    return cursor
+    return effectiveCursor
       ? {
           contextText,
-          boundaryId: cursor,
+          boundaryId: effectiveCursor,
           includedHistoryCount: 0,
           includesCurrentUserMessage,
           currentMessageFilteredOut,
@@ -2759,10 +2776,10 @@ export async function assembleIncrementalContext(
 
   if (finalCapped.length === 0) {
     const contextText = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
-    return cursor
+    return effectiveCursor
       ? {
           contextText,
-          boundaryId: cursor,
+          boundaryId: effectiveCursor,
           includedHistoryCount: 0,
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
@@ -2844,6 +2861,7 @@ async function assembleSmartWindowContext(
   threadHistorySummary: FormattedThreadHistorySummary | undefined,
   historyGovernanceDegraded: boolean,
   historyGovernanceQualityIssues: readonly HistorySummaryQualityIssue[],
+  hasContextResetBoundary: boolean,
 ): Promise<IncrementalContextResult> {
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -2958,6 +2976,7 @@ async function assembleSmartWindowContext(
     currentMsg?.content ?? '',
     nonSystemRecent,
     hcConfig,
+    hasContextResetBoundary ? { excludeAnchors: new Set([`thread-${threadId}`]) } : undefined,
   );
 
   // 3.9 Phase D: Build coverage map (AC-D2) — VG-1: only evidence recall titles (not tombstone search hints)

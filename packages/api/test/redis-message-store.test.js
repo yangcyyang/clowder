@@ -419,6 +419,39 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('reset watermark remains the lexicographic max under reverse delivery order', async () => {
+    const base = Date.now();
+    const threadId = 'thread-reset-watermark-score-order';
+    const olderQueued = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'older queued',
+      mentions: [],
+      timestamp: base,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const newerDelivered = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'newer delivered',
+      mentions: [],
+      timestamp: base + 100,
+      threadId,
+    });
+    await store.markDelivered(olderQueued.id, base + 500);
+
+    assert.ok(olderQueued.id < newerDelivered.id);
+    assert.equal(await store.getLatestThreadWatermarkMessageId(threadId), newerDelivered.id);
+    const scoreOrderedAfter = await store.getByThreadAfter(threadId, newerDelivered.id);
+    assert.ok(scoreOrderedAfter.some((message) => message.id === olderQueued.id));
+    assert.deepEqual(
+      scoreOrderedAfter.filter((message) => message.id > newerDelivered.id),
+      [],
+      'reset consumers must apply the lexicographic floor after score-based reads',
+    );
+  });
+
   it('F148: origin=briefing survives append → getById round-trip', async () => {
     const msg = await store.append({
       userId: 'system',

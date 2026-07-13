@@ -335,6 +335,8 @@ export interface IMessageStore {
     limit?: number,
     userId?: string,
   ): StoredMessage[] | Promise<StoredMessage[]>;
+  /** Latest delivered timeline ID, including soft-deleted tombstones, for irreversible context boundaries. */
+  getLatestThreadWatermarkMessageId(threadId: string): string | undefined | Promise<string | undefined>;
   getByThreadBefore(
     threadId: string,
     timestamp: number,
@@ -866,6 +868,15 @@ export class MessageStore {
     }
 
     return matches;
+  }
+
+  getLatestThreadWatermarkMessageId(threadId: string): string | undefined {
+    let latest: string | undefined;
+    for (const msg of this.messages) {
+      if (msg.threadId !== threadId || !isDelivered(msg)) continue;
+      if (!latest || msg.id > latest) latest = msg.id;
+    }
+    return latest;
   }
 
   /**

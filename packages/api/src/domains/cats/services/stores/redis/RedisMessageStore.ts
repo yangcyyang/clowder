@@ -1109,6 +1109,23 @@ export class RedisMessageStore {
     return delivered.filter((m) => m.userId === userId || isSystemUserMessage(m));
   }
 
+  async getLatestThreadWatermarkMessageId(threadId: string): Promise<string | undefined> {
+    const key = MessageKeys.thread(threadId);
+    const chunkSize = 50;
+    let offset = 0;
+    let latest: string | undefined;
+    while (true) {
+      const ids = await this.redis.zrange(key, offset, offset + chunkSize - 1);
+      if (ids.length === 0) return latest;
+      const messages = await this.hydrateMessages(ids, { includeDeleted: true });
+      for (const message of messages) {
+        if (isDelivered(message) && (!latest || message.id > latest)) latest = message.id;
+      }
+      if (ids.length < chunkSize) return latest;
+      offset += chunkSize;
+    }
+  }
+
   async getByThreadBefore(
     threadId: string,
     timestamp: number,

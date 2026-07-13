@@ -51,6 +51,8 @@ vi.mock('@/stores/chatStore', () => {
 });
 
 import { useChatCommands } from '@/hooks/useChatCommands';
+import { useToastStore } from '@/stores/toastStore';
+import { RESET_CONTEXT_CONFIRMATION } from '@/utils/reset-thread-context';
 
 /**
  * Thin component that extracts processCommand and invokes it
@@ -59,10 +61,12 @@ import { useChatCommands } from '@/hooks/useChatCommands';
 function CommandRunner({
   input,
   overrideThreadId,
+  hasPayload,
   onDone,
 }: {
   input: string;
   overrideThreadId?: string;
+  hasPayload?: boolean;
   onDone: (result: boolean) => void;
 }) {
   const { processCommand } = useChatCommands();
@@ -71,8 +75,8 @@ function CommandRunner({
   useEffect(() => {
     if (called.current) return;
     called.current = true;
-    processCommand(input, overrideThreadId).then(onDone);
-  }, [input, overrideThreadId, onDone, processCommand]);
+    processCommand(input, overrideThreadId, { hasPayload }).then(onDone);
+  }, [hasPayload, input, overrideThreadId, onDone, processCommand]);
 
   return null;
 }
@@ -91,6 +95,7 @@ describe('processCommand overrideThreadId (P1-2 R2)', () => {
 
   beforeEach(() => {
     mockApiFetch.mockReset();
+    useToastStore.setState({ toasts: [] });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -159,5 +164,65 @@ describe('processCommand overrideThreadId (P1-2 R2)', () => {
     const callArgs = mockApiFetch.mock.calls[0];
     const body = JSON.parse(callArgs[1].body as string);
     expect(body.threadId).toBe('store-current-thread');
+  });
+
+  it('/reset-context uses override thread and emits only the exact local confirmation', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true });
+    let result: boolean | undefined;
+    await act(async () => {
+      root.render(
+        React.createElement(CommandRunner, {
+          input: '/reset-context',
+          overrideThreadId: 'split-reset-thread',
+          onDone: (r: boolean) => {
+            result = r;
+          },
+        }),
+      );
+    });
+
+    expect(result).toBe(true);
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/threads/split-reset-thread/reset-context',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: 'success', message: RESET_CONTEXT_CONFIRMATION, threadId: 'split-reset-thread' }),
+    ]);
+  });
+
+  it('/reset-context rejects arguments locally without calling the API', async () => {
+    let result: boolean | undefined;
+    await act(async () => {
+      root.render(
+        React.createElement(CommandRunner, {
+          input: '/reset-context now',
+          onDone: (r: boolean) => {
+            result = r;
+          },
+        }),
+      );
+    });
+    expect(result).toBe(true);
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(useToastStore.getState().toasts[0]?.message).toBe('用法：/reset-context');
+  });
+
+  it('/reset-context rejects image or attachment payloads locally', async () => {
+    let result: boolean | undefined;
+    await act(async () => {
+      root.render(
+        React.createElement(CommandRunner, {
+          input: '/reset-context',
+          hasPayload: true,
+          onDone: (r: boolean) => {
+            result = r;
+          },
+        }),
+      );
+    });
+    expect(result).toBe(true);
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(useToastStore.getState().toasts[0]?.message).toBe('用法：/reset-context');
   });
 });

@@ -12,11 +12,11 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { readProjectHandoffIndexesForBootstrap } from '../agents/memory/ProjectProgressStore.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
-import { readProjectHandoffIndexesForBootstrap } from '../agents/memory/ProjectProgressStore.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
 
@@ -69,6 +69,7 @@ export async function buildSessionBootstrap(
   opts: SessionBootstrapOptions,
   catId: CatId,
   threadId: string,
+  userId?: string,
 ): Promise<BootstrapContext | null> {
   const { sessionChainStore, transcriptReader } = opts;
 
@@ -76,7 +77,16 @@ export async function buildSessionBootstrap(
   const chain = await sessionChainStore.getChain(catId, threadId);
   // Include both 'sealed' and 'sealing' — a sealing session has passed threshold
   // and its transcript is being flushed; its digest is available for bootstrap (R6 P1-2)
-  const sealedSessions = chain.filter((s) => s.status === 'sealed' || s.status === 'sealing');
+  const resetBoundary =
+    userId && opts.threadStore
+      ? await Promise.resolve(opts.threadStore.getContextResetBoundary(threadId, userId))
+      : null;
+  const sealedSessions = chain.filter(
+    (s) =>
+      (s.status === 'sealed' || s.status === 'sealing') &&
+      (!resetBoundary || s.createdAt >= resetBoundary.resetAt) &&
+      (!userId || s.userId === userId),
+  );
 
   // No sealed sessions → first session, no prior context to inject
   if (sealedSessions.length === 0) {
@@ -268,7 +278,13 @@ export async function buildSessionBootstrap(
   }
 
   const text =
-    identitySection + projectHandoffSection + threadMemorySection + recallSection + digestSection + taskSection + toolsSection;
+    identitySection +
+    projectHandoffSection +
+    threadMemorySection +
+    recallSection +
+    digestSection +
+    taskSection +
+    toolsSection;
 
   return {
     text,

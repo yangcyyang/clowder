@@ -441,7 +441,10 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
 
 /** Minimal interface for evidence store search — matches IEvidenceStore.search signature */
 interface EvidenceSearchable {
-  search(query: string, options?: Record<string, unknown>): Promise<Array<{ title: string; summary?: string }>>;
+  search(
+    query: string,
+    options?: Record<string, unknown>,
+  ): Promise<Array<{ anchor?: string; title: string; summary?: string }>>;
 }
 
 /**
@@ -455,6 +458,7 @@ export async function recallEvidence(
   currentUserMessage: string,
   recentMessages: readonly StoredMessage[],
   config: HierarchicalContextConfig,
+  options?: { excludeAnchors?: ReadonlySet<string> },
 ): Promise<string[]> {
   if (!evidenceStore) return [];
 
@@ -479,7 +483,10 @@ export async function recallEvidence(
     );
 
     const hits = await Promise.race([searchPromise, timeoutPromise]);
-    return hits.slice(0, config.maxEvidenceHits).map((hit) => `[Evidence: ${hit.title}] ${hit.summary ?? ''}`.trim());
+    return hits
+      .filter((hit) => !hit.anchor || !options?.excludeAnchors?.has(hit.anchor))
+      .slice(0, config.maxEvidenceHits)
+      .map((hit) => `[Evidence: ${hit.title}] ${hit.summary ?? ''}`.trim());
   } catch {
     // Fail-open: timeout or any error → return empty
     return [];

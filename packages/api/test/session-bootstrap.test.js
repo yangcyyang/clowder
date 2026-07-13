@@ -59,6 +59,36 @@ describe('SessionBootstrap', () => {
       assert.equal(result, null);
     });
 
+    it('does not bootstrap a sealed session created before the users reset boundary', async () => {
+      const store = createMockSessionChainStore([
+        {
+          id: 'sess-old',
+          catId: 'opus',
+          threadId: 'thread-reset',
+          userId: 'user-1',
+          status: 'sealed',
+          seq: 0,
+          createdAt: 100,
+        },
+      ]);
+      const reader = createMockTranscriptReader({
+        'sess-old': { recentMessages: [{ role: 'assistant', content: 'OLD-DIGEST-SENTINEL' }] },
+      });
+      const threadStore = {
+        getContextResetBoundary() {
+          return { v: 1, contextEpoch: 1, resetAt: 200, resetBy: 'user-1' };
+        },
+      };
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader, threadStore },
+        'opus',
+        'thread-reset',
+        'user-1',
+      );
+      assert.equal(result, null);
+    });
+
     it('returns bootstrap when no active session but sealed sessions exist (post-seal gap)', async () => {
       // P1-2 fix: after seal, active pointer is cleared but bootstrap should still work
       const store = createMockSessionChainStore([

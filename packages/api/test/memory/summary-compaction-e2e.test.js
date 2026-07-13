@@ -137,6 +137,145 @@ describe('SummaryCompaction e2e', () => {
     assert.ok(candidates[0].title.includes('YAML'));
   });
 
+  it('starts after a reset boundary and never carries the pre-reset summary forward', async () => {
+    db.prepare('UPDATE evidence_docs SET summary = ? WHERE anchor = ?').run(
+      'OLD_SENTINEL must not survive reset',
+      'thread-test-thread',
+    );
+    const postResetMessages = [
+      { id: 'msg-003', content: 'POST_RESET_ONLY', catId: 'opus', timestamp: Date.now() - 20 * 60 * 1000 },
+    ];
+    const requestedAfter = [];
+    let modelInput;
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getContextResetBoundary: async () => ({ contextEpoch: 1, resetAtMessageId: 'msg-002', resetAt: 2 }),
+      getMessagesAfterWatermark: async (_threadId, afterMessageId) => {
+        requestedAfter.push(afterMessageId);
+        return makeBatch(postResetMessages);
+      },
+      generateAbstractive: async (input) => {
+        modelInput = input;
+        return {
+          segments: [
+            {
+              summary: 'POST_RESET_SUMMARY',
+              topicKey: 'post-reset',
+              topicLabel: 'Post Reset',
+              boundaryReason: 'context reset',
+              boundaryConfidence: 'high',
+              fromMessageId: 'msg-003',
+              toMessageId: 'msg-003',
+              messageCount: 1,
+            },
+          ],
+        };
+      },
+      logger: { info: () => {}, error: () => {} },
+    };
+
+    const result = await processThread(
+      {
+        thread_id: 'test-thread',
+        last_summarized_message_id: 'msg-001',
+        pending_message_count: 25,
+        pending_token_count: 2000,
+        pending_signal_flags: 0,
+        summary_type: 'abstractive',
+        last_abstractive_at: null,
+        abstractive_token_count: null,
+        carry_over: 0,
+      },
+      deps,
+      SUMMARY_CONFIG_OVERRIDE,
+    );
+
+    assert.equal(result, true);
+    assert.equal(requestedAfter[0], 'msg-002');
+    assert.equal(modelInput.previousSummary, null);
+    assert.deepEqual(modelInput.messages.map((message) => message.content), ['POST_RESET_ONLY']);
+    const segment = db.prepare('SELECT summary FROM summary_segments WHERE thread_id = ?').get('test-thread');
+    assert.equal(segment.summary, 'POST_RESET_SUMMARY');
+    const doc = db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread');
+    assert.equal(doc.summary, 'POST_RESET_SUMMARY');
+    assert.ok(!JSON.stringify({ modelInput, segment, doc }).includes('OLD_SENTINEL'));
+  });
+
+  it('discards a generated result when reset advances during the model call', async () => {
+    const postResetBoundary = { contextEpoch: 1, resetAtMessageId: 'msg-002', resetAt: 2 };
+    let boundary = null;
+    let releaseModel;
+    let signalModelStarted;
+    const modelStarted = new Promise((resolve) => {
+      signalModelStarted = resolve;
+    });
+    const modelRelease = new Promise((resolve) => {
+      releaseModel = resolve;
+    });
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getContextResetBoundary: async () => boundary,
+      getMessagesAfterWatermark: async () =>
+        makeBatch([{ id: 'msg-001', content: 'OLD_MODEL_INPUT', catId: 'opus', timestamp: 1 }]),
+      generateAbstractive: async () => {
+        signalModelStarted();
+        await modelRelease;
+        return {
+          segments: [
+            {
+              summary: 'STALE_GENERATED_SUMMARY',
+              topicKey: 'stale',
+              topicLabel: 'Stale',
+              boundaryReason: 'old generation',
+              boundaryConfidence: 'high',
+              fromMessageId: 'msg-001',
+              toMessageId: 'msg-001',
+              messageCount: 1,
+            },
+          ],
+        };
+      },
+      logger: { info: () => {}, error: () => {} },
+    };
+    const state = {
+      thread_id: 'test-thread',
+      last_summarized_message_id: null,
+      pending_message_count: 25,
+      pending_token_count: 2000,
+      pending_signal_flags: 0,
+      summary_type: 'concat',
+      last_abstractive_at: null,
+      abstractive_token_count: null,
+      carry_over: 0,
+    };
+
+    const processing = processThread(state, deps, SUMMARY_CONFIG_OVERRIDE);
+    await modelStarted;
+    boundary = postResetBoundary;
+    releaseModel();
+    assert.equal(await processing, false);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM summary_segments').get().n, 0);
+    assert.equal(
+      db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread').summary,
+      'Old concat summary',
+    );
+    assert.equal(
+      db.prepare('SELECT last_summarized_message_id FROM summary_state WHERE thread_id = ?').get('test-thread')
+        .last_summarized_message_id,
+      null,
+    );
+  });
+
   it('creates evidence_docs read model when the thread row is missing', async () => {
     db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run('thread-test-thread');
     const msgs = makeMsgs(25);

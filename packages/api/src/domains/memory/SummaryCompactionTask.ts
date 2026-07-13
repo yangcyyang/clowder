@@ -48,9 +48,7 @@ export function buildSummaryCompactionBatch(messages: readonly StoredMessage[]):
       timestamp: message.timestamp,
     })),
     scannedThroughMessageId: messages.at(-1)?.id ?? null,
-    excludedPrivateCount: messages.filter(
-      (message) => message.visibility === 'whisper' && !message.revealedAt,
-    ).length,
+    excludedPrivateCount: messages.filter((message) => message.visibility === 'whisper' && !message.revealedAt).length,
   };
 }
 
@@ -67,6 +65,10 @@ export interface SummaryCompactionDeps {
     afterMessageId: string | null,
     limit: number,
   ) => Promise<SummaryCompactionBatch>;
+  /** Per-user reset boundary. Compaction currently owns the default-user read model. */
+  getContextResetBoundary?: (
+    threadId: string,
+  ) => Promise<{ contextEpoch: number; resetAtMessageId?: string; resetAt: number } | null>;
   /** Call Opus API to generate abstractive summary + candidates */
   generateAbstractive: (input: {
     previousSummary: string | null;
@@ -154,9 +156,25 @@ export async function processThread(
   const lastActivity = await deps.getThreadLastActivity(state.thread_id);
   if (!isEligible(state, lastActivity, config)) return false;
 
-  // Get messages after watermark
-  const batch = await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200);
-  const { messages, scannedThroughMessageId, excludedPrivateCount } = batch;
+  const resetBoundary = await deps.getContextResetBoundary?.(state.thread_id);
+  const resetAtMessageId = resetBoundary?.resetAtMessageId;
+  const watermarkPredatesReset = Boolean(
+    resetAtMessageId && (!state.last_summarized_message_id || state.last_summarized_message_id <= resetAtMessageId),
+  );
+
+  // reset 后从 durable boundary 开始扫描，不能把 reset 前 watermark 或摘要带入新批次。
+  const scanAfterMessageId =
+    watermarkPredatesReset && resetAtMessageId ? resetAtMessageId : state.last_summarized_message_id;
+  const batch = await deps.getMessagesAfterWatermark(state.thread_id, scanAfterMessageId, 200);
+  // Defensive floor: Redis score can move on late delivery, while reset semantics use sortable IDs.
+  const messages = resetAtMessageId
+    ? batch.messages.filter((message) => message.id > resetAtMessageId)
+    : batch.messages;
+  const scannedThroughMessageId =
+    batch.scannedThroughMessageId && (!resetAtMessageId || batch.scannedThroughMessageId > resetAtMessageId)
+      ? batch.scannedThroughMessageId
+      : (messages.at(-1)?.id ?? null);
+  const { excludedPrivateCount } = batch;
   if (!scannedThroughMessageId) return false;
 
   // 全部消息都被过滤时也推进扫描水位；绝不调用摘要模型，也不生成空摘要段。
@@ -187,7 +205,7 @@ export async function processThread(
 
   // Call Opus API
   const result = await deps.generateAbstractive({
-    previousSummary: evidenceRow?.summary ?? null,
+    previousSummary: watermarkPredatesReset ? null : (evidenceRow?.summary ?? null),
     messages,
     threadId: state.thread_id,
   });
@@ -195,6 +213,19 @@ export async function processThread(
   if (!result) {
     deps.logger.info(`[summary-compaction] thread ${state.thread_id}: Opus returned null (fail-open)`);
     return false;
+  }
+
+  // generation token：模型运行期间发生 reset 时，旧结果必须在任何持久化前被丢弃。
+  if (deps.getContextResetBoundary) {
+    const currentBoundary = await deps.getContextResetBoundary(state.thread_id);
+    if (
+      currentBoundary?.contextEpoch !== resetBoundary?.contextEpoch ||
+      currentBoundary?.resetAt !== resetBoundary?.resetAt ||
+      currentBoundary?.resetAtMessageId !== resetBoundary?.resetAtMessageId
+    ) {
+      deps.logger.info(`[summary-compaction] thread ${state.thread_id}: reset boundary changed, discard stale result`);
+      return false;
+    }
   }
 
   // Dual-write: INSERT segments + UPDATE evidence_docs
@@ -256,13 +287,7 @@ export async function processThread(
          source_hash = excluded.source_hash,
          updated_at = excluded.updated_at`,
       )
-      .run(
-        `thread-${state.thread_id}`,
-        `Thread ${state.thread_id}`,
-        mergedSummary,
-        `abstractive-${Date.now()}`,
-        now,
-      );
+      .run(`thread-${state.thread_id}`, `Thread ${state.thread_id}`, mergedSummary, `abstractive-${Date.now()}`, now);
 
     // 3. UPDATE summary_state watermark (carry_over = 0, will be set to 1 below if backlog remains)
     deps.db

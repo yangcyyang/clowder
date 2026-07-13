@@ -141,4 +141,71 @@ describe('InlineThreadPanel image upload', () => {
     expect(paste.defaultPrevented).toBe(true);
     expect(container.querySelector('img[alt="pasted.png"]')).toBeTruthy();
   });
+
+  it('handles the exact reset command without posting a chat message', async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(InlineThreadPanel, {
+          threadId: 'thread-branch',
+          parentThreadId: 'thread-parent',
+          sourceMessage,
+          parentThreadTitle: 'Parent',
+          onClose: vi.fn(),
+        }),
+      );
+      await Promise.resolve();
+    });
+    apiFetchMock.mockClear();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, '/reset-context');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      (container.querySelector('button[aria-label="发送 Thread 回复"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/threads/thread-branch/reset-context', expect.objectContaining({ method: 'POST' }));
+    expect(
+      apiFetchMock.mock.calls.some(
+        ([url, init]) => url === '/api/messages' && (init as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(false);
+  });
+
+  it('sends a reset-like prefix as an ordinary message', async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(InlineThreadPanel, {
+          threadId: 'thread-branch',
+          parentThreadId: 'thread-parent',
+          sourceMessage,
+          parentThreadTitle: 'Parent',
+          onClose: vi.fn(),
+        }),
+      );
+      await Promise.resolve();
+    });
+    apiFetchMock.mockClear();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, '/reset-contextual');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      (container.querySelector('button[aria-label="发送 Thread 回复"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    const post = apiFetchMock.mock.calls.find(
+      ([url, init]) => url === '/api/messages' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(JSON.parse(String((post?.[1] as RequestInit).body)).content).toBe('/reset-contextual');
+    expect(apiFetchMock.mock.calls.some(([url]) => String(url).includes('/reset-context'))).toBe(false);
+  });
 });

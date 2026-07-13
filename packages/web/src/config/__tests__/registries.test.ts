@@ -34,6 +34,11 @@ describe('command-registry', () => {
     expect(names).toContain('/help');
     expect(names).toContain('/config');
     expect(names).toContain('/signals');
+    expect(names).toContain('/reset-context');
+  });
+
+  it('/reset-context is web-only and is not exposed to connectors', () => {
+    expect(COMMANDS.find((command) => command.name === '/reset-context')).toMatchObject({ surface: 'web' });
   });
 
   // F142-B: surface + source fields

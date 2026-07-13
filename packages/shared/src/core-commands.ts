@@ -64,6 +64,14 @@ export const CORE_COMMANDS: readonly SlashCommandDefinition[] = [
     surface: 'web',
     source: 'core',
   },
+  {
+    name: '/reset-context',
+    usage: '/reset-context',
+    description: '重置当前线程的 Agent 对话上下文（保留历史与工作区）',
+    category: 'memory',
+    surface: 'web',
+    source: 'core',
+  },
   // --- knowledge ---
   {
     name: '/evidence',

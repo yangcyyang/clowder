@@ -25,7 +25,7 @@ interface SummarySegmentRow {
 }
 
 export interface IThreadHistorySummaryStore {
-  listLatestByThread(threadId: string, limit?: number): Promise<ThreadHistorySummarySegment[]>;
+  listLatestByThread(threadId: string, limit?: number, afterMessageId?: string): Promise<ThreadHistorySummarySegment[]>;
 }
 
 function mapRow(row: SummarySegmentRow): ThreadHistorySummarySegment {
@@ -45,7 +45,11 @@ function mapRow(row: SummarySegmentRow): ThreadHistorySummarySegment {
 export class SqliteThreadHistorySummaryStore implements IThreadHistorySummaryStore {
   constructor(private readonly db: Database.Database) {}
 
-  async listLatestByThread(threadId: string, limit = 4): Promise<ThreadHistorySummarySegment[]> {
+  async listLatestByThread(
+    threadId: string,
+    limit = 4,
+    afterMessageId?: string,
+  ): Promise<ThreadHistorySummarySegment[]> {
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 12);
     const rows = this.db
       .prepare(
@@ -53,10 +57,11 @@ export class SqliteThreadHistorySummaryStore implements IThreadHistorySummarySto
                 summary, generated_at, model_id, prompt_version
            FROM summary_segments
           WHERE thread_id = ?
+            AND (? IS NULL OR from_message_id > ?)
           ORDER BY generated_at DESC, id DESC
           LIMIT ?`,
       )
-      .all(threadId, safeLimit) as SummarySegmentRow[];
+      .all(threadId, afterMessageId ?? null, afterMessageId ?? null, safeLimit) as SummarySegmentRow[];
 
     return rows.reverse().map(mapRow);
   }

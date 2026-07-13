@@ -103,7 +103,7 @@ export interface QueueEntry {
 }
 
 export interface EnqueueResult {
-  outcome: 'enqueued' | 'full';
+  outcome: 'enqueued' | 'full' | 'resetting';
   entry?: QueueEntry;
   queuePosition?: number;
   /** True when enqueue returned an existing active entry by idempotency key. */
@@ -127,6 +127,8 @@ export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sou
 export class InvocationQueue {
   private readonly log = createModuleLogger('invocation-queue');
   private queues = new Map<string, QueueEntry[]>();
+  private readonly contextResettingThreads = new Set<string>();
+  private readonly callbackMutationsByThread = new Map<string, number>();
 
   /** Original content per entryId at enqueue time, for rollbackEnqueue */
   private originalContents = new Map<string, string>();
@@ -152,7 +154,13 @@ export class InvocationQueue {
         continue;
       }
       const q = this.getOrCreate(this.scopeKey(persisted.threadId, persisted.userId));
-      if (q.some((entry) => entry.id === persisted.id || (persisted.idempotencyKey && entry.idempotencyKey === persisted.idempotencyKey))) {
+      if (
+        q.some(
+          (entry) =>
+            entry.id === persisted.id ||
+            (persisted.idempotencyKey && entry.idempotencyKey === persisted.idempotencyKey),
+        )
+      ) {
         continue;
       }
       const restoredEntry: QueueEntry = {
@@ -250,6 +258,9 @@ export class InvocationQueue {
       expiresAt?: number;
     },
   ): EnqueueResult {
+    if (this.contextResettingThreads.has(input.threadId)) {
+      return { outcome: 'resetting' };
+    }
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
 
@@ -337,12 +348,7 @@ export class InvocationQueue {
   }
 
   /** Attach the persisted message envelope after enqueue-before-write succeeds. */
-  backfillMessageEnvelope(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    envelope: QueueMessageEnvelope,
-  ): void {
+  backfillMessageEnvelope(threadId: string, userId: string, entryId: string, envelope: QueueMessageEnvelope): void {
     const e = this.findEntry(threadId, userId, entryId);
     if (!e) return;
     e.messageId = envelope.messageId;
@@ -872,6 +878,44 @@ export class InvocationQueue {
       if (q.some((e) => e.status === 'queued')) return true;
     }
     return false;
+  }
+
+  /**
+   * Linearization guard for /reset-context. Once acquired, enqueue is rejected
+   * until cleanup completes; queued/processing work prevents acquisition.
+   */
+  guardContextReset(threadId: string): { acquired: boolean; release: () => void } {
+    if (this.contextResettingThreads.has(threadId) || (this.callbackMutationsByThread.get(threadId) ?? 0) > 0) {
+      return { acquired: false, release: () => {} };
+    }
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      if (q.some((entry) => entry.status === 'queued' || entry.status === 'processing')) {
+        return { acquired: false, release: () => {} };
+      }
+    }
+    this.contextResettingThreads.add(threadId);
+    return {
+      acquired: true,
+      release: () => this.contextResettingThreads.delete(threadId),
+    };
+  }
+
+  /** Shared admission lock for callback mutations and context reset. */
+  guardCallbackMutation(threadId: string): { acquired: boolean; release: () => void } {
+    if (this.contextResettingThreads.has(threadId)) return { acquired: false, release: () => {} };
+    this.callbackMutationsByThread.set(threadId, (this.callbackMutationsByThread.get(threadId) ?? 0) + 1);
+    let released = false;
+    return {
+      acquired: true,
+      release: () => {
+        if (released) return;
+        released = true;
+        const remaining = (this.callbackMutationsByThread.get(threadId) ?? 1) - 1;
+        if (remaining <= 0) this.callbackMutationsByThread.delete(threadId);
+        else this.callbackMutationsByThread.set(threadId, remaining);
+      },
+    };
   }
 
   /** F185 AC-6: Whether any non-agent entry (user or connector) is queued for this thread. */

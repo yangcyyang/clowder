@@ -73,13 +73,13 @@ export function useSendMessage(activeThreadId?: string) {
       const hasAttachments = Boolean(attachments && attachments.length > 0);
       const isQueueSend = deliveryMode === 'queue';
 
+      const wasCommand = await processCommand(content, threadId, { hasPayload: hasImages || hasAttachments });
+      if (wasCommand) return undefined;
+
       // Queue sends don't reset refs — cat is still streaming
       if (!isQueueSend) resetRefs();
       setUploadError(null);
       setUploadStatus(hasImages || hasAttachments ? 'uploading' : 'idle');
-
-      const wasCommand = await processCommand(content, threadId);
-      if (wasCommand) return undefined;
 
       const clientMessageId = createClientId();
       const optimisticMessageId = `user-${clientMessageId}`;
@@ -154,7 +154,7 @@ export function useSendMessage(activeThreadId?: string) {
           removeThreadMessage(threadId, optimisticMessageId);
           setThreadLoading(threadId, false);
           setThreadHasActiveInvocation(threadId, false);
-            return true;
+          return true;
         }
         if (body?.status !== 'queued' || isQueueSend) return false;
         // Slock-style UX: normal sends remain visible immediately even if the

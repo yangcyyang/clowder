@@ -40,6 +40,58 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     const reloadedStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
     assert.equal((await reloadedStore.claimHistoryCriticalSeal(thread.id, 'codex', 'msg-2')).claimed, true);
   });
+
+  it('persists per-user reset epochs and atomically clears only matching capsules', async () => {
+    const thread = await store.create('user-reset', 'Reset boundary');
+    await store.setPendingContinuation(thread.id, 'codex', 'user-reset', { capsule: { value: 'old' }, createdAt: 1 });
+    await store.setPendingContinuation(thread.id, 'codex', 'other-user', { capsule: { value: 'keep' }, createdAt: 2 });
+
+    const first = await store.advanceContextResetBoundary(thread.id, 'user-reset', {
+      resetAtMessageId: 'msg-010',
+      resetAt: 100,
+      resetBy: 'user-reset',
+    });
+    const reloaded = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const second = await reloaded.advanceContextResetBoundary(thread.id, 'user-reset', {
+      resetAtMessageId: 'msg-020',
+      resetAt: 200,
+      resetBy: 'user-reset',
+    });
+
+    assert.equal(first.contextEpoch, 1);
+    assert.equal(second.contextEpoch, 2);
+    assert.deepEqual(await reloaded.getContextResetBoundary(thread.id, 'user-reset'), second);
+    assert.equal(await reloaded.consumePendingContinuation(thread.id, 'codex', 'user-reset'), null);
+    assert.equal((await reloaded.consumePendingContinuation(thread.id, 'codex', 'other-user'))?.capsule.value, 'keep');
+  });
+
+  it('keeps reset epochs atomic and refreshes thread retention', async () => {
+    assert.equal(
+      await store.advanceContextResetBoundary('missing-thread', 'user-reset', {
+        resetAt: 1,
+        resetBy: 'user-reset',
+      }),
+      null,
+    );
+
+    const thread = await store.create('user-reset', 'Concurrent reset boundary');
+    await redis.expire(threadDetailKey(thread.id), 2);
+    const resets = await Promise.all(
+      [1, 2, 3].map((epoch) =>
+        store.advanceContextResetBoundary(thread.id, 'user-reset', {
+          resetAtMessageId: `msg-00${epoch}`,
+          resetAt: epoch,
+          resetBy: 'user-reset',
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      resets.map((boundary) => boundary.contextEpoch).sort((a, b) => a - b),
+      [1, 2, 3],
+    );
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 2);
+  });
   let connected = false;
   const threadDetailKey = (threadId) => `thread:${threadId}`;
   const threadParticipantsKey = (threadId) => `thread:${threadId}:participants`;

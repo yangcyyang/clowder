@@ -306,6 +306,42 @@ export class AgentRouter {
     this.rebuildRuntimeCaches(agentRegistry);
   }
 
+  /** Clear provider resume pointers and seal this user's active chains after a durable reset boundary exists. */
+  async resetContextSessions(userId: string, threadId: string): Promise<{ cleared: number; sealed: number }> {
+    const records = this.sessionChainStore ? await this.sessionChainStore.getChainByThread(threadId) : [];
+    const catIds = new Set<string>([
+      ...catRegistry.getAllIds(),
+      ...records.filter((record) => record.userId === userId).map((record) => String(record.catId)),
+    ]);
+    let cleared = 0;
+    const failures: unknown[] = [];
+    for (const catId of catIds) {
+      try {
+        await this.sessionManager.delete(userId, catId as CatId, threadId);
+        cleared++;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
+    let sealed = 0;
+    if (this.sessionSealer) {
+      for (const record of records) {
+        if (record.userId !== userId || record.status !== 'active') continue;
+        try {
+          const result = await this.sessionSealer.requestSeal({ sessionId: record.id, reason: 'context_reset' });
+          if (!result.accepted) continue;
+          sealed++;
+          await this.sessionSealer.finalize({ sessionId: record.id });
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'Context reset session cleanup failed');
+    return { cleared, sealed };
+  }
+
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
     return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
   }

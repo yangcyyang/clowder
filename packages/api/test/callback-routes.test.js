@@ -35,6 +35,7 @@ describe('Callback Routes', () => {
   let backlogStore;
   let featIndexProvider;
   let deliveryCursorStore;
+  let invocationQueue;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
@@ -47,6 +48,9 @@ describe('Callback Routes', () => {
     const { DeliveryCursorStore } = await import(
       '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'
     );
+    const { InvocationQueue } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
+    );
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
@@ -54,6 +58,7 @@ describe('Callback Routes', () => {
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
     deliveryCursorStore = new DeliveryCursorStore();
+    invocationQueue = new InvocationQueue();
     socketManager = createMockSocketManager();
     evidenceStore = {
       search: async () => [],
@@ -86,6 +91,7 @@ describe('Callback Routes', () => {
       reflectionService,
       markerQueue,
       deliveryCursorStore,
+      invocationQueue,
     };
     if (backlogStore !== undefined) {
       options.backlogStore = backlogStore;
@@ -407,6 +413,17 @@ describe('Callback Routes', () => {
     const threadA = await threadStore.create('user-1', 'thread-a');
     const threadB = await threadStore.create('user-1', 'thread-b');
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
+    const append = messageStore.append.bind(messageStore);
+    messageStore.append = (input) => {
+      if (input.content === 'cross-thread hello') {
+        assert.equal(
+          invocationQueue.guardContextReset(threadB.id).acquired,
+          false,
+          'target thread reset must be excluded while callback append is in flight',
+        );
+      }
+      return append(input);
+    };
 
     const response = await app.inject({
       method: 'POST',
@@ -428,6 +445,30 @@ describe('Callback Routes', () => {
     assert.equal(threadAMessages.length, 0);
     assert.equal(threadBMessages.length, 1);
     assert.equal(threadBMessages[0].content, 'cross-thread hello');
+  });
+
+  test('POST post-message ignores an invocation that predates the target thread reset', async () => {
+    const app = await createApp();
+    const threadA = await threadStore.create('user-1', 'thread-a');
+    const threadB = await threadStore.create('user-1', 'thread-b');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
+    const record = await registry.getRecord(invocationId);
+    threadStore.advanceContextResetBoundary(threadB.id, 'user-1', {
+      resetAtMessageId: '9999999999999999-999999-reset',
+      resetAt: record.createdAt + 1,
+      resetBy: 'user-1',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: threadB.id, content: 'STALE_CROSS_THREAD_OUTPUT' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(response.body).status, 'stale_ignored');
+    assert.equal(messageStore.getByThread(threadB.id, 20, 'user-1').length, 0);
   });
 
   test('POST post-message routes cross-paragraph @mention (no keyword gate)', async () => {
@@ -763,6 +804,67 @@ describe('Callback Routes', () => {
     assert.equal(body.messages.length, 2);
     assert.equal(body.messages[0].content, 'Message 1');
     assert.equal(body.messages[1].content, 'Reply 1');
+  });
+
+  test('reset boundary hides old history from every callback history surface', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    threadStore.get('default');
+    const old = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'RESET-CALLBACK-OLD',
+      mentions: ['opus'],
+      timestamp: 1,
+    });
+    threadStore.advanceContextResetBoundary('default', 'user-1', {
+      resetAtMessageId: old.id,
+      resetAt: 2,
+      resetBy: 'user-1',
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'RESET-CALLBACK-NEW',
+      mentions: ['opus'],
+      timestamp: 3,
+    });
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const context = await app.inject({ method: 'GET', url: '/api/callbacks/thread-context', headers });
+    assert.equal(context.statusCode, 200);
+    assert.deepEqual(JSON.parse(context.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+
+    const inbox = await app.inject({ method: 'GET', url: '/api/callbacks/check-inbox', headers });
+    assert.equal(inbox.statusCode, 200);
+    assert.equal(JSON.parse(inbox.body).unreadCount, 1);
+
+    const recent = await app.inject({ method: 'GET', url: '/api/callbacks/fetch-thread-history', headers });
+    assert.equal(recent.statusCode, 200);
+    assert.deepEqual(JSON.parse(recent.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+
+    const explicitOld = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/fetch-thread-history?fromMessageId=${old.id}`,
+      headers,
+    });
+    assert.equal(explicitOld.statusCode, 404);
+
+    const mentions = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions?includeAcked=true',
+      headers,
+    });
+    assert.equal(mentions.statusCode, 200);
+    assert.deepEqual(JSON.parse(mentions.body).mentions.map((mention) => mention.message), ['RESET-CALLBACK-NEW']);
+
+    const search = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/message-search?q=RESET-CALLBACK',
+      headers,
+    });
+    assert.equal(search.statusCode, 200);
+    assert.deepEqual(JSON.parse(search.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
   });
 
   test('GET thread-context respects limit parameter', async () => {

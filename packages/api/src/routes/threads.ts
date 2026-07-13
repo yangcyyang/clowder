@@ -11,6 +11,7 @@ import type { CatId } from '@cat-cafe/shared';
 import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
@@ -18,7 +19,7 @@ import type { IBacklogStore } from '../domains/cats/services/stores/ports/Backlo
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
 import type {
@@ -28,10 +29,7 @@ import type {
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import {
-  auditDangerousActionBestEffort,
-  requireDangerousActionConfirmation,
-} from '../utils/dangerous-action-guard.js';
+import { auditDangerousActionBestEffort, requireDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
@@ -50,6 +48,10 @@ export interface ThreadsRoutesOptions {
   deliveryCursorStore?: DeliveryCursorStore;
   /** Optional: protect active invocations from thread deletion (#35) */
   invocationTracker?: InvocationTracker;
+  /** F004: blocks queued/processing admission while a reset is linearized. */
+  invocationQueue?: Pick<InvocationQueue, 'guardContextReset'>;
+  /** F004: clears provider resume pointers and seals active session chains. */
+  resetContextSessions?: (userId: string, threadId: string) => Promise<{ cleared: number; sealed: number }>;
   /** #80: cascade delete streaming drafts */
   draftStore?: IDraftStore;
   /** F045: per-cat task progress snapshot store (Redis-backed when available) */
@@ -238,8 +240,15 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Invalid request body', details: parseResult.error.issues };
     }
 
-    const { userId: legacyUserId, title, projectPath, preferredCats, participatingCats, pinned, backlogItemId } =
-      parseResult.data;
+    const {
+      userId: legacyUserId,
+      title,
+      projectPath,
+      preferredCats,
+      participatingCats,
+      pinned,
+      backlogItemId,
+    } = parseResult.data;
     const userId = resolveUserId(request, { fallbackUserId: legacyUserId });
     if (!userId) {
       reply.status(401);
@@ -549,6 +558,93 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     return updated;
+  });
+
+  // F004: User-only context reset. Audit history and durable workspace/memory remain intact.
+  app.post<{ Params: { id: string } }>('/api/threads/:id/reset-context', async (request, reply) => {
+    const { id } = request.params;
+    const hasCallbackCredential = Boolean(
+      request.callbackAuth ||
+        request.headers['x-agent-key-secret'] ||
+        request.headers['x-callback-token'] ||
+        request.headers['x-invocation-id'],
+    );
+    // v1 is a browser/user action only. Header-only CLI/callback callers are not human principals.
+    if (!request.headers.origin || hasCallbackCredential) {
+      reply.status(hasCallbackCredential ? 403 : 401);
+      return { error: 'User principal required', code: 'USER_PRINCIPAL_REQUIRED' };
+    }
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required', code: 'IDENTITY_REQUIRED' };
+    }
+    if (!messageStore || !opts.deliveryCursorStore || !opts.invocationTracker || !opts.invocationQueue) {
+      reply.status(501);
+      return { error: 'Context reset dependencies unavailable', code: 'CONTEXT_RESET_UNAVAILABLE' };
+    }
+
+    const thread = await threadStore.get(id);
+    if (!thread || thread.deletedAt) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+    if (thread.createdBy !== userId && thread.createdBy !== 'system') {
+      reply.status(403);
+      return { error: 'Access denied' };
+    }
+
+    const invocationGuard = opts.invocationTracker.guardDelete(id);
+    const hasMMDispatches = getMultiMentionOrchestrator().hasActiveDispatches(id);
+    if (!invocationGuard.acquired || hasMMDispatches) {
+      if (invocationGuard.acquired) invocationGuard.release();
+      reply.status(409);
+      return { error: '猫猫正在工作中', code: 'CONTEXT_RESET_BUSY' };
+    }
+    const queueGuard = opts.invocationQueue.guardContextReset(id);
+    if (!queueGuard.acquired) {
+      invocationGuard.release();
+      reply.status(409);
+      return { error: '猫猫正在工作或队列中', code: 'CONTEXT_RESET_BUSY' };
+    }
+
+    try {
+      // +1ms creates a strict generation cut: pre-guard tokens/sessions cannot share the reset timestamp.
+      const resetAt = Date.now() + 1;
+      const latestMessageId = await messageStore.getLatestThreadWatermarkMessageId(id);
+      // A synthetic sortable watermark keeps an empty/retained-summary thread reset-safe too.
+      const resetMarkerId = generateSortableId(resetAt);
+      const resetAtMessageId = latestMessageId && latestMessageId > resetMarkerId ? latestMessageId : resetMarkerId;
+      const boundary = await threadStore.advanceContextResetBoundary(id, userId, {
+        resetAtMessageId,
+        resetAt,
+        resetBy: userId,
+      });
+      if (!boundary) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
+
+      const sessionResult = opts.resetContextSessions
+        ? await opts.resetContextSessions(userId, id)
+        : { cleared: 0, sealed: 0 };
+      if (resetAtMessageId) {
+        const cursorCats = new Set<CatId>([
+          ...catRegistry.getAllIds(),
+          ...thread.participants,
+          ...(thread.preferredCats ?? []),
+          ...(thread.participatingCats ?? []),
+        ] as CatId[]);
+        for (const catId of cursorCats) {
+          await opts.deliveryCursorStore.ackCursor(userId, catId, id, resetAtMessageId);
+          await opts.deliveryCursorStore.ackMentionCursor(userId, catId, id, resetAtMessageId);
+        }
+      }
+      return { ok: true, boundary, sessions: sessionResult };
+    } finally {
+      queueGuard.release();
+      invocationGuard.release();
+    }
   });
 
   // DELETE /api/threads/:id - 删除对话 (with cascade delete)

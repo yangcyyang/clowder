@@ -453,6 +453,7 @@ export async function* routeParallel(
             },
             catId,
             threadId,
+            userId,
           );
           if (bootstrap) {
             bootstrapCtx = bootstrap.text;

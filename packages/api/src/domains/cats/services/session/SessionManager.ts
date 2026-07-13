@@ -18,7 +18,18 @@ const MAX_SESSIONS = 1000;
 export class SessionManager {
   private readonly sessionStore: SessionStore | null;
   /** In-memory fallback when no Redis SessionStore is provided */
-  private readonly sessions: Map<string, string> = new Map();
+  private readonly sessions: Map<string, { sessionId: string; storedAt: number }> = new Map();
+
+  private static encodePointer(sessionId: string, storedAt: number): string {
+    return `cc-session-v1:${storedAt}:${sessionId}`;
+  }
+
+  private static decodePointer(value: string): { sessionId: string; storedAt?: number } {
+    const match = /^cc-session-v1:(\d+):(.*)$/s.exec(value);
+    if (!match) return { sessionId: value };
+    const [, storedAt, sessionId] = match;
+    return { sessionId: sessionId ?? '', storedAt: Number(storedAt) };
+  }
 
   constructor(sessionStore?: SessionStore) {
     this.sessionStore = sessionStore ?? null;
@@ -29,8 +40,9 @@ export class SessionManager {
    * Uses Redis SessionStore when available, falls back to in-memory Map.
    */
   async store(userId: string, catId: CatId, threadId: string, sessionId: string): Promise<void> {
+    const storedAt = Date.now();
     if (this.sessionStore) {
-      await this.sessionStore.setSessionId(userId, catId, threadId, sessionId);
+      await this.sessionStore.setSessionId(userId, catId, threadId, SessionManager.encodePointer(sessionId, storedAt));
       return;
     }
 
@@ -49,20 +61,26 @@ export class SessionManager {
       }
     }
 
-    this.sessions.set(key, sessionId);
+    this.sessions.set(key, { sessionId, storedAt });
   }
 
   /**
    * Get stored session ID for user + cat + thread combination.
    * Uses Redis SessionStore when available, falls back to in-memory Map.
    */
-  async get(userId: string, catId: CatId, threadId: string): Promise<string | undefined> {
+  async get(userId: string, catId: CatId, threadId: string, minStoredAt?: number): Promise<string | undefined> {
     if (this.sessionStore) {
       const result = await this.sessionStore.getSessionId(userId, catId, threadId);
-      return result ?? undefined;
+      if (!result) return undefined;
+      const pointer = SessionManager.decodePointer(result);
+      if (minStoredAt !== undefined && (pointer.storedAt === undefined || pointer.storedAt < minStoredAt))
+        return undefined;
+      return pointer.sessionId;
     }
 
-    return this.sessions.get(`${userId}:${catId}:${threadId}`);
+    const pointer = this.sessions.get(`${userId}:${catId}:${threadId}`);
+    if (!pointer || (minStoredAt !== undefined && pointer.storedAt < minStoredAt)) return undefined;
+    return pointer.sessionId;
   }
 
   /**

@@ -165,6 +165,15 @@ export interface PendingContinuationEntry {
   createdAt: number;
 }
 
+/** F004: Per-user durable boundary for an explicit thread context reset. */
+export interface ContextResetBoundaryV1 {
+  v: 1;
+  contextEpoch: number;
+  resetAtMessageId?: string;
+  resetAt: number;
+  resetBy: string;
+}
+
 /**
  * F004: token returned by the persistent history-critical seal claim.
  * `previousWatermark` lets callers restore the exact prior state when the
@@ -371,6 +380,16 @@ export interface IThreadStore {
     catId: string,
     userId: string,
   ): PendingContinuationEntry | null | Promise<PendingContinuationEntry | null>;
+  /** Persist a new reset epoch and atomically drop this user's pending capsules. */
+  advanceContextResetBoundary(
+    threadId: string,
+    userId: string,
+    input: { resetAtMessageId?: string; resetAt: number; resetBy: string },
+  ): ContextResetBoundaryV1 | null | Promise<ContextResetBoundaryV1 | null>;
+  getContextResetBoundary(
+    threadId: string,
+    userId: string,
+  ): ContextResetBoundaryV1 | null | Promise<ContextResetBoundaryV1 | null>;
   /** Claim a summary watermark once per thread+cat before history-critical seal. */
   claimHistoryCriticalSeal(
     threadId: string,
@@ -398,6 +417,7 @@ const MAX_THREADS = 100;
  */
 export class ThreadStore implements IThreadStore {
   private readonly historyCriticalSealWatermarks = new Map<string, string>();
+  private readonly contextResetBoundaries = new Map<string, ContextResetBoundaryV1>();
   private threads: Map<string, Thread> = new Map();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
   private participantActivity: Map<
@@ -801,6 +821,36 @@ export class ThreadStore implements IThreadStore {
     return entry;
   }
 
+  advanceContextResetBoundary(
+    threadId: string,
+    userId: string,
+    input: { resetAtMessageId?: string; resetAt: number; resetBy: string },
+  ): ContextResetBoundaryV1 | null {
+    const thread = this.get(threadId);
+    if (!thread) return null;
+    const key = `${threadId}:${userId}`;
+    const boundary: ContextResetBoundaryV1 = {
+      v: 1,
+      contextEpoch: (this.contextResetBoundaries.get(key)?.contextEpoch ?? 0) + 1,
+      ...(input.resetAtMessageId ? { resetAtMessageId: input.resetAtMessageId } : {}),
+      resetAt: input.resetAt,
+      resetBy: input.resetBy,
+    };
+    this.contextResetBoundaries.set(key, boundary);
+    if (thread.pendingContinuation) {
+      const suffix = `:${userId}`;
+      for (const pendingKey of Object.keys(thread.pendingContinuation)) {
+        if (pendingKey.endsWith(suffix)) delete thread.pendingContinuation[pendingKey];
+      }
+      if (Object.keys(thread.pendingContinuation).length === 0) delete thread.pendingContinuation;
+    }
+    return boundary;
+  }
+
+  getContextResetBoundary(threadId: string, userId: string): ContextResetBoundaryV1 | null {
+    return this.contextResetBoundaries.get(`${threadId}:${userId}`) ?? null;
+  }
+
   claimHistoryCriticalSeal(threadId: string, catId: string, watermark: string): HistoryCriticalSealClaim {
     if (!this.get(threadId)) return { claimed: false, watermark };
     const key = `${threadId}:${catId}`;
@@ -894,6 +944,9 @@ export class ThreadStore implements IThreadStore {
     const prefix = `${threadId}:`;
     for (const key of this.historyCriticalSealWatermarks.keys()) {
       if (key.startsWith(prefix)) this.historyCriticalSealWatermarks.delete(key);
+    }
+    for (const key of this.contextResetBoundaries.keys()) {
+      if (key.startsWith(prefix)) this.contextResetBoundaries.delete(key);
     }
   }
 

@@ -84,7 +84,7 @@ interface RecoveryQueue {
     priority: 'urgent';
     callerCatId?: CatId;
     a2aTriggerMessageId?: string;
-  }): { outcome: 'enqueued' | 'full'; entry?: { id: string }; deduped?: boolean };
+  }): { outcome: 'enqueued' | 'full' | 'resetting'; entry?: { id: string }; deduped?: boolean };
   backfillMessageId?(threadId: string, userId: string, entryId: string, messageId: string): void;
 }
 
