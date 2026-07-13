@@ -148,4 +148,33 @@ describe('invocationCostPanel', () => {
       historyFullTokensBeforeGate: 180000,
     });
   });
+
+  it('reads diagnostic-only deliveryOnly usage and keeps degradation sticky', () => {
+    const summaries = readTaskUsageSummaries(
+      task([
+        {
+          ts: new Date().toISOString(),
+          catId: 'codex',
+          type: 'usage',
+          data: { deliveryOnlyMode: 'degraded', deliveryOnlyDegradedIssue: 'missing_summary' },
+        },
+        {
+          ts: new Date().toISOString(),
+          catId: 'codex',
+          type: 'usage',
+          data: { deliveryOnlyMode: 'active' },
+        },
+      ]),
+    );
+
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatchObject({
+      deliveryOnlyMode: 'degraded',
+      deliveryOnlyDegradedIssue: 'missing_summary',
+    });
+    expect(summarizeTaskUsage(summaries)).toMatchObject({
+      deliveryOnlyMode: 'degraded',
+      deliveryOnlyDegradedIssue: 'missing_summary',
+    });
+  });
 });

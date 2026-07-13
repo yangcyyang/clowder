@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 19;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -173,7 +173,10 @@ CREATE TABLE IF NOT EXISTS summary_state (
   carry_over INTEGER NOT NULL DEFAULT 0,
   summary_type TEXT NOT NULL DEFAULT 'concat',
   last_abstractive_at TEXT,
-  abstractive_token_count INTEGER
+  abstractive_token_count INTEGER,
+  invalid_format_batch_key TEXT,
+  invalid_format_streak INTEGER NOT NULL DEFAULT 0,
+  invalid_format_latched INTEGER NOT NULL DEFAULT 0
 );
 `;
 
@@ -520,6 +523,20 @@ export function applyMigrations(db: Database.Database): void {
       db.exec('ALTER TABLE edges ADD COLUMN created_at TEXT');
     } catch {}
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(18, new Date().toISOString());
+  }
+
+  // V19: F004 Phase 2 — persistent invalid-summary streak and one-shot alert latch
+  if (currentVersion < 19) {
+    try {
+      db.exec('ALTER TABLE summary_state ADD COLUMN invalid_format_batch_key TEXT');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE summary_state ADD COLUMN invalid_format_streak INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    try {
+      db.exec('ALTER TABLE summary_state ADD COLUMN invalid_format_latched INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(19, new Date().toISOString());
   }
 }
 

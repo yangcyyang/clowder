@@ -67,4 +67,31 @@ describe('TaskCard', () => {
     const html = renderToStaticMarkup(<TaskCard task={makeTask({ status: 'doing' })} onStatusChange={vi.fn()} />);
     expect(html).toContain('border-l-cafe-crosspost');
   });
+
+  it('shows diagnostic-only deliveryOnly degradation when the cost panel flag is off', async () => {
+    const previous = process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL;
+    process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL = '';
+    const task = makeTask({
+      events: [
+        {
+          ts: new Date().toISOString(),
+          catId: 'opus' as CatId,
+          type: 'usage',
+          data: {
+            deliveryOnlyMode: 'degraded',
+            deliveryOnlyDegradedIssue: 'missing_summary',
+          },
+        },
+      ],
+    });
+
+    try {
+      const { TaskCard } = await import('../TaskCard');
+      const html = renderToStaticMarkup(<TaskCard task={task} onStatusChange={vi.fn()} />);
+      expect(html).toContain('⚠ deliveryOnly 降级 · missing_summary');
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL;
+      else process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL = previous;
+    }
+  });
 });

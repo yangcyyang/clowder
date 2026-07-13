@@ -23,6 +23,8 @@ function makeInvocation(overrides = {}) {
         cacheReadTokens: 5,
         cacheCreationTokens: 2,
         costUsd: 0.0123,
+        deliveryOnlyMode: 'degraded',
+        deliveryOnlyDegradedIssue: 'missing_summary',
       },
     },
     ...overrides,
@@ -63,7 +65,13 @@ function makeTask(overrides = {}) {
         ts: new Date(NOW + 1_500).toISOString(),
         catId: 'codex',
         type: 'usage',
-        data: { provider: 'openai', inputTokens: 100, outputTokens: 20 },
+        data: {
+          provider: 'openai',
+          inputTokens: 100,
+          outputTokens: 20,
+          deliveryOnlyMode: 'degraded',
+          deliveryOnlyDegradedIssue: 'missing_summary',
+        },
       },
     ],
     ...overrides,
@@ -152,6 +160,8 @@ describe('run ledger route', () => {
     assert.equal(body.sources.trace, false);
     assert.match(body.degraded.reason, /trace/);
     assert.equal(body.summary.usage.inputTokens, 100);
+    assert.equal(body.summary.usage.deliveryOnlyMode, 'degraded');
+    assert.equal(body.summary.usage.deliveryOnlyDegradedIssue, 'missing_summary');
 
     const serialized = JSON.stringify(body);
     assert.equal(serialized.includes('正文不应该'), false);
@@ -197,6 +207,16 @@ describe('run ledger route', () => {
       makeTask({
         events: [
           {
+            ts: new Date(NOW + 1_400).toISOString(),
+            catId: 'codex',
+            invocationId: 'inv-compact',
+            type: 'usage',
+            data: {
+              deliveryOnlyMode: 'degraded',
+              deliveryOnlyDegradedIssue: 'missing_summary',
+            },
+          },
+          {
             ts: new Date(NOW + 1_500).toISOString(),
             catId: 'codex',
             invocationId: 'inv-compact',
@@ -217,8 +237,12 @@ describe('run ledger route', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     const compactEvent = body.events.find((event) => event.type === 'compact_boundary');
+    const usageEvent = body.events.find((event) => event.type === 'usage_recorded');
 
     assert.ok(compactEvent);
+    assert.ok(usageEvent);
+    assert.equal(usageEvent.data.deliveryOnlyMode, 'degraded');
+    assert.equal(usageEvent.data.deliveryOnlyDegradedIssue, 'missing_summary');
     assert.equal(compactEvent.actor, 'codex');
     assert.equal(compactEvent.data.boundary, 'compact_boundary');
     assert.equal(compactEvent.data.source, 'provider');
@@ -242,6 +266,8 @@ describe('run ledger route', () => {
     assert.equal(body.count, 1);
     assert.equal(body.ledgers[0].invocationId, 'inv-1');
     assert.equal(body.ledgers[0].taskId, 'task-1');
+    assert.equal(body.ledgers[0].usage.deliveryOnlyMode, 'degraded');
+    assert.equal(body.ledgers[0].usage.deliveryOnlyDegradedIssue, 'missing_summary');
 
     await app.close();
   });

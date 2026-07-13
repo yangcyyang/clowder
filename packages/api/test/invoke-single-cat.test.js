@@ -711,6 +711,50 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(usageInfos.length, 0, 'should not yield invocation_usage when no usage data');
   });
 
+  it('F004: emits diagnostic-only invocation_usage for deliveryOnly degradation', async () => {
+    const noUsageService = {
+      async *invoke() {
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const msgs = await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'opus',
+        service: noUsageService,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-delivery-only-usage',
+        isLastCat: true,
+        contextBudget: {
+          surface: 'thread',
+          threadId: 'thread-delivery-only-usage',
+          toolPolicy: 'standard',
+          toolPolicySource: 'agent-default',
+          mode: 'serial',
+          estimatedTokens: 100,
+          historyMessages: 3,
+          loadedBlocks: ['current-message'],
+          skippedBlocks: [],
+          governanceTier: 'operational',
+          governanceEstimatedTokens: 0,
+          governanceSourceInjected: false,
+          usesFullHistory: false,
+          maxPromptTokens: 1000,
+          maxContextTokens: 500,
+          deliveryOnlyMode: 'degraded',
+          deliveryOnlyDegradedIssue: 'missing_summary',
+        },
+      }),
+    );
+    const payloads = msgs
+      .filter((message) => message.type === 'system_info')
+      .map((message) => JSON.parse(message.content))
+      .filter((payload) => payload.type === 'invocation_usage');
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].usage.deliveryOnlyMode, 'degraded');
+    assert.equal(payloads[0].usage.deliveryOnlyDegradedIssue, 'missing_summary');
+  });
+
   it('F24: creates SessionRecord on session_init when sessionChainStore provided', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

@@ -2033,6 +2033,8 @@ describe('QueueProcessor', () => {
                   historyFullTokens: 12_000,
                   historyBudgetRatio: 0.6,
                   historyGovernanceDegraded: false,
+                  deliveryOnlyMode: 'degraded',
+                  deliveryOnlyDegradedIssue: 'missing_summary',
                   sourceBreakdown: {
                     totalEstimatedTokens: 1000,
                     sources: [
@@ -2072,6 +2074,8 @@ describe('QueueProcessor', () => {
       assert.equal(event.data.historyFullTokens, 12_000);
       assert.equal(event.data.historyBudgetRatio, 0.6);
       assert.equal(event.data.historyGovernanceDegraded, false);
+      assert.equal(event.data.deliveryOnlyMode, 'degraded');
+      assert.equal(event.data.deliveryOnlyDegradedIssue, 'missing_summary');
       assert.deepEqual(event.data.sourceBreakdown, {
         totalEstimatedTokens: 1000,
         sources: [
@@ -2081,6 +2085,62 @@ describe('QueueProcessor', () => {
       });
       assert.ok(Math.abs(event.data.costUsd - 0.00045) < 1e-10);
       assert.equal(usageDeps.socketManager.broadcastToRoom.mock.calls.at(-1).arguments[1], 'task_updated');
+      const succeededUpdate = usageDeps.invocationRecordStore.update.mock.calls
+        .map((call) => call.arguments[1])
+        .find((input) => input.status === 'succeeded');
+      assert.equal(succeededUpdate.usageByCat.opus.deliveryOnlyMode, 'degraded');
+      assert.equal(succeededUpdate.usageByCat.opus.deliveryOnlyDegradedIssue, 'missing_summary');
+    });
+
+    it('preserves diagnostic-only deliveryOnly usage with zero provider tokens', async () => {
+      const sourceTask = { id: 'task-source', threadId: 't1', taskThreadId: 't1', events: [] };
+      const updatedTasks = [];
+      const usageDeps = stubDeps({
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const updated = { ...sourceTask, events: [...(input.events ?? [])] };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'text',
+              catId: 'opus',
+              content: 'done',
+              timestamp: Date.now(),
+              metadata: {
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                usage: {
+                  deliveryOnlyMode: 'degraded',
+                  deliveryOnlyDegradedIssue: 'missing_summary',
+                },
+              },
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const usageProcessor = new QueueProcessor(usageDeps);
+      enqueueEntry(usageDeps.queue, { userId: 'u1', targetCats: ['opus'] });
+
+      await usageProcessor.processNext('t1', 'u1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const event = updatedTasks[0].events[0];
+      assert.equal(event.type, 'usage');
+      assert.equal(event.data.totalTokens, 0);
+      assert.equal(event.data.deliveryOnlyMode, 'degraded');
+      assert.equal(event.data.deliveryOnlyDegradedIssue, 'missing_summary');
+      const succeededUpdate = usageDeps.invocationRecordStore.update.mock.calls
+        .map((call) => call.arguments[1])
+        .find((input) => input.status === 'succeeded');
+      assert.equal(succeededUpdate.usageByCat.opus.deliveryOnlyMode, 'degraded');
     });
   });
 

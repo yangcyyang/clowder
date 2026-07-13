@@ -35,6 +35,13 @@ export interface PromptSourceBreakdown {
 }
 
 export type HistoryGovernanceMode = 'observe' | 'shadow-summary' | 'summary-active';
+export type DeliveryOnlyMode = 'active' | 'degraded';
+export type DeliveryOnlyDegradedIssue =
+  | 'missing_trigger'
+  | 'missing_summary'
+  | 'summary_quality_failed'
+  | 'summary_budget_exhausted'
+  | 'unrevealed_whisper';
 
 /** F8: Token usage data from CLI invocations.
  *  inputTokens = TOTAL input (normalised across providers).
@@ -66,6 +73,8 @@ export interface TokenUsage {
   /** Primary summary segment used for history summary injection. */
   summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
+  deliveryOnlyMode?: DeliveryOnlyMode;
+  deliveryOnlyDegradedIssue?: DeliveryOnlyDegradedIssue;
   /** True when the Claude resume budget gate dropped a large prior CLI session. */
   budgetGateTriggered?: boolean;
   /** Full history estimate before the gate forced a fresh/cropped invocation. */
@@ -530,6 +539,8 @@ export interface CatInvocationInfo {
     historyBudgetRatio?: number;
     summarySegmentId?: string;
     historyGovernanceDegraded?: boolean;
+    deliveryOnlyMode?: DeliveryOnlyMode;
+    deliveryOnlyDegradedIssue?: DeliveryOnlyDegradedIssue;
   };
   durationMs?: number;
   startedAt?: number;

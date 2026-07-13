@@ -61,6 +61,45 @@ describe('AgentStatusIndicator', () => {
     expect(getAgentStatusLabel('streaming', 'tool_calling')).toBe('正在执行工具');
   });
 
+  it('shows deliveryOnly degradation from the live invocation context', () => {
+    const html = renderToStaticMarkup(
+      <AgentStatusIndicator
+        threadId="thread-1"
+        activeInvocations={{
+          'inv-delivery-only': {
+            catId: 'gpt52',
+            mode: 'execute',
+            startedAt: Date.now() - 1000,
+            contextBudget: {
+              surface: 'thread',
+              threadId: 'thread-1',
+              toolPolicy: 'standard',
+              toolPolicySource: 'agent-default',
+              mode: 'serial',
+              estimatedTokens: 1200,
+              historyMessages: 4,
+              loadedBlocks: ['history'],
+              skippedBlocks: [],
+              governanceTier: 'core',
+              governanceEstimatedTokens: 100,
+              governanceSourceInjected: false,
+              usesFullHistory: true,
+              maxPromptTokens: 10000,
+              maxContextTokens: 12000,
+              deliveryOnlyMode: 'degraded',
+              deliveryOnlyDegradedIssue: 'missing_summary',
+            },
+          },
+        }}
+        catStatuses={{ gpt52: 'streaming' }}
+        catInvocations={{}}
+        getCatById={getCatById}
+      />,
+    );
+
+    expect(html).toContain('⚠ deliveryOnly · missing_summary');
+  });
+
   it('ignores stale cat status when invocation slot is not present', () => {
     const html = renderToStaticMarkup(
       <AgentStatusIndicator

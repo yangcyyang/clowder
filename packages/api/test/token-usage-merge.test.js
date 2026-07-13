@@ -92,4 +92,24 @@ describe('F8: mergeTokenUsage', () => {
     assert.equal(result.summarySegmentId, 'seg-001');
     assert.equal(result.historyGovernanceDegraded, true);
   });
+
+  it('keeps deliveryOnly degradation sticky across aggregated turns', () => {
+    const activeThenDegraded = mergeTokenUsage(
+      { deliveryOnlyMode: 'active' },
+      { deliveryOnlyMode: 'degraded', deliveryOnlyDegradedIssue: 'missing_summary' },
+    );
+    assert.equal(activeThenDegraded.deliveryOnlyMode, 'degraded');
+    assert.equal(activeThenDegraded.deliveryOnlyDegradedIssue, 'missing_summary');
+
+    const degradedThenActive = mergeTokenUsage(activeThenDegraded, { deliveryOnlyMode: 'active' });
+    assert.equal(degradedThenActive.deliveryOnlyMode, 'degraded');
+    assert.equal(degradedThenActive.deliveryOnlyDegradedIssue, 'missing_summary');
+
+    const newerDegraded = mergeTokenUsage(degradedThenActive, {
+      deliveryOnlyMode: 'degraded',
+      deliveryOnlyDegradedIssue: 'summary_budget_exhausted',
+    });
+    assert.equal(newerDegraded.deliveryOnlyMode, 'degraded');
+    assert.equal(newerDegraded.deliveryOnlyDegradedIssue, 'summary_budget_exhausted');
+  });
 });

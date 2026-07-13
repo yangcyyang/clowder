@@ -22,6 +22,7 @@ interface AgentStatusRow {
   startedAt: number;
   status?: CatStatusType;
   phase?: InvocationPhase;
+  contextBudget?: CatInvocationInfo['contextBudget'];
 }
 
 function formatElapsed(startedAt: number, now: number): string {
@@ -88,6 +89,7 @@ function buildRows({
       startedAt: slot.startedAt ?? catInvocations[slot.catId]?.startedAt ?? now,
       status: catStatuses[slot.catId],
       phase: slot.phase ?? catInvocations[slot.catId]?.phase,
+      contextBudget: slot.contextBudget ?? catInvocations[slot.catId]?.contextBudget,
     });
   }
 
@@ -133,6 +135,10 @@ export function AgentStatusIndicator({
     >
       {rows.map((row) => {
         const statusLabel = getAgentStatusLabel(row.status, row.phase);
+        const deliveryOnlyWarning =
+          row.contextBudget?.deliveryOnlyMode === 'degraded'
+            ? `⚠ deliveryOnly · ${row.contextBudget.deliveryOnlyDegradedIssue ?? 'unknown'}`
+            : null;
         return (
           <span
             key={row.catId}
@@ -141,6 +147,9 @@ export function AgentStatusIndicator({
             <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: row.color }} />
             <span className="font-medium text-[var(--cafe-text)]">{row.label}</span>
             <span className="text-[var(--cafe-text-muted)]">{statusLabel}</span>
+            {deliveryOnlyWarning && (
+              <span className="text-conn-amber-text [overflow-wrap:anywhere]">{deliveryOnlyWarning}</span>
+            )}
             <span className="tabular-nums text-[var(--cafe-text-muted)]">{formatElapsed(row.startedAt, now)}</span>
             <button
               type="button"

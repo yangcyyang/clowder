@@ -207,6 +207,13 @@ describe('SummaryCompaction e2e', () => {
   });
 
   it('discards a generated result when reset advances during the model call', async () => {
+    db.prepare(
+      `UPDATE summary_state SET
+       invalid_format_batch_key = 'old-epoch-key',
+       invalid_format_streak = 2,
+       invalid_format_latched = 1
+       WHERE thread_id = 'test-thread'`,
+    ).run();
     const postResetBoundary = { contextEpoch: 1, resetAtMessageId: 'msg-002', resetAt: 2 };
     let boundary = null;
     let releaseModel;
@@ -274,6 +281,47 @@ describe('SummaryCompaction e2e', () => {
         .last_summarized_message_id,
       null,
     );
+    const failureState = db
+      .prepare('SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?')
+      .get('test-thread');
+    assert.equal(failureState.invalid_format_batch_key, null);
+    assert.equal(failureState.invalid_format_streak, 0);
+    assert.equal(failureState.invalid_format_latched, 0);
+  });
+
+  it('clears a stale invalid-format latch when reset leaves no post-reset batch', async () => {
+    db.prepare(
+      `UPDATE summary_state SET
+       invalid_format_batch_key = 'old-epoch-key',
+       invalid_format_streak = 3,
+       invalid_format_latched = 1
+       WHERE thread_id = 'test-thread'`,
+    ).run();
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getContextResetBoundary: async () => ({ contextEpoch: 1, resetAtMessageId: 'msg-999', resetAt: 2 }),
+      getMessagesAfterWatermark: async () => makeBatch([], 0, null),
+      generateAbstractive: async () => {
+        throw new Error('must not generate without a post-reset batch');
+      },
+      logger: { info: () => {}, error: () => {} },
+    };
+    const state = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
+
+    assert.equal(await processThread(state, deps, SUMMARY_CONFIG_OVERRIDE), false);
+    const failureState = db
+      .prepare('SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?')
+      .get('test-thread');
+    assert.deepEqual(failureState, {
+      invalid_format_batch_key: null,
+      invalid_format_streak: 0,
+      invalid_format_latched: 0,
+    });
   });
 
   it('creates evidence_docs read model when the thread row is missing', async () => {

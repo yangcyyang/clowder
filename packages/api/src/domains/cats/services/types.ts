@@ -20,6 +20,14 @@ export interface PromptSourceBreakdown {
   sources: PromptSourceBreakdownItem[];
 }
 
+export type DeliveryOnlyMode = 'active' | 'degraded';
+export type DeliveryOnlyDegradedIssue =
+  | 'missing_trigger'
+  | 'missing_summary'
+  | 'summary_quality_failed'
+  | 'summary_budget_exhausted'
+  | 'unrevealed_whisper';
+
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
  *  so that the field has the same semantics regardless of provider.
@@ -57,6 +65,10 @@ export interface TokenUsage {
   summarySegmentId?: string;
   /** True when the history governance observation had to fall back/degrade. */
   historyGovernanceDegraded?: boolean;
+  /** Whether this invocation used delivery-only context or safely degraded to bounded history. */
+  deliveryOnlyMode?: DeliveryOnlyMode;
+  /** Guard failure that forced delivery-only to degrade. */
+  deliveryOnlyDegradedIssue?: DeliveryOnlyDegradedIssue;
   /** True when the Claude resume budget gate dropped a large prior CLI session. */
   budgetGateTriggered?: boolean;
   /** Full history estimate before the gate forced a fresh/cropped invocation. */
@@ -112,6 +124,14 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
   if (incoming.summarySegmentId != null) result.summarySegmentId = incoming.summarySegmentId;
   if (incoming.historyGovernanceDegraded != null) {
     result.historyGovernanceDegraded = incoming.historyGovernanceDegraded;
+  }
+  if (incoming.deliveryOnlyMode === 'degraded') {
+    result.deliveryOnlyMode = 'degraded';
+    if (incoming.deliveryOnlyDegradedIssue) {
+      result.deliveryOnlyDegradedIssue = incoming.deliveryOnlyDegradedIssue;
+    }
+  } else if (incoming.deliveryOnlyMode === 'active' && result.deliveryOnlyMode !== 'degraded') {
+    result.deliveryOnlyMode = 'active';
   }
   if (incoming.budgetGateTriggered != null) {
     result.budgetGateTriggered = incoming.budgetGateTriggered;

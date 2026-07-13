@@ -875,6 +875,7 @@ async function main(): Promise<void> {
               const codexSummaryService = new CodexAgentService({ catId, model });
               return createAgentAbstractiveClient(codexSummaryService.invoke.bind(codexSummaryService), summaryLogger, {
                 providerId: 'codex-cli',
+                modelId: `codex-cli:${catId}:${model}`,
                 workingDirectory: findMonorepoRoot(process.cwd()),
                 callbackEnv: {
                   CAT_CAFE_AGENT_OUTPUT_GATE: '1',
@@ -890,6 +891,7 @@ async function main(): Promise<void> {
                 const piSummaryService = new PiAgentService({ catId, model });
                 return createAgentAbstractiveClient(piSummaryService.invoke.bind(piSummaryService), summaryLogger, {
                   providerId: 'pi-cli',
+                  modelId: `pi-cli:${catId}:${model}`,
                   workingDirectory: findMonorepoRoot(process.cwd()),
                   callbackEnv: {
                     CAT_CAFE_AGENT_OUTPUT_GATE: '1',

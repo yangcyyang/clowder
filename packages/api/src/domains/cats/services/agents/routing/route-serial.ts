@@ -694,6 +694,7 @@ export async function* routeSerial(
       let historySummary: HistorySummaryObservation | undefined;
       let runtimeHistoryObservation = historyObservation;
       let runtimeHistoryGovernanceDegraded: boolean | undefined;
+      let deliveryOnlyObservation: import('./route-helpers.js').DeliveryOnlyContextObservation | undefined;
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
@@ -743,6 +744,7 @@ export async function* routeSerial(
               ? (history?.length ?? 0)
               : 0;
         historySummary = inc.historySummary;
+        deliveryOnlyObservation = inc.deliveryOnly;
         runtimeHistoryGovernanceDegraded = Boolean(
           historyObservation?.historyGovernanceDegraded || inc.historyGovernanceDegraded,
         );
@@ -921,6 +923,7 @@ export async function* routeSerial(
         ...(runtimeHistoryGovernanceDegraded !== undefined
           ? { historyGovernanceDegraded: runtimeHistoryGovernanceDegraded }
           : {}),
+        ...(deliveryOnlyObservation ? { deliveryOnly: deliveryOnlyObservation } : {}),
       });
       const historyCriticalSealIntent = buildHistoryCriticalSealIntent({
         ...(runtimeHistoryObservation ? { historyObservation: runtimeHistoryObservation } : {}),

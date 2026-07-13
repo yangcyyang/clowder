@@ -35,7 +35,8 @@ import {
 } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
-import type { AgentMessage, AgentService } from '../../types.js';
+import type { AgentMessage, AgentService, DeliveryOnlyDegradedIssue } from '../../types.js';
+export type { DeliveryOnlyDegradedIssue } from '../../types.js';
 import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import type { FreshnessReviewPayload } from '../invocation/InvocationQueue.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
@@ -81,6 +82,8 @@ export interface RuntimeContextBudgetSnapshot {
   historyBudgetRatio?: number;
   summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
+  deliveryOnlyMode?: 'active' | 'degraded';
+  deliveryOnlyDegradedIssue?: DeliveryOnlyDegradedIssue;
 }
 
 export interface HistoryGovernanceObservation {
@@ -720,6 +723,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   historyObservation?: HistoryGovernanceObservation;
   historySummary?: HistorySummaryObservation;
   historyGovernanceDegraded?: boolean;
+  deliveryOnly?: DeliveryOnlyContextObservation;
 }): RuntimeContextBudgetSnapshot {
   const loadedBlocks = ['current-message', 'static-identity'];
   loadedBlocks.push(input.governanceTier === 'core' ? 'governance-core' : 'governance-operational');
@@ -787,6 +791,14 @@ export function buildRuntimeContextBudgetSnapshot(input: {
           historyGovernanceDegraded: Boolean(
             input.historyObservation?.historyGovernanceDegraded || input.historyGovernanceDegraded,
           ),
+        }
+      : {}),
+    ...(input.deliveryOnly
+      ? {
+          deliveryOnlyMode: input.deliveryOnly.mode,
+          ...(input.deliveryOnly.degradedIssue
+            ? { deliveryOnlyDegradedIssue: input.deliveryOnly.degradedIssue }
+            : {}),
         }
       : {}),
   };
@@ -1371,18 +1383,11 @@ export interface IncrementalContextResult {
   deliveryOnly?: DeliveryOnlyContextObservation;
 }
 
-export type DeliveryOnlyDegradationIssue =
-  | 'missing_trigger'
-  | 'missing_summary'
-  | 'summary_quality_failed'
-  | 'summary_budget_exhausted'
-  | 'unrevealed_whisper';
-
 export interface DeliveryOnlyContextObservation {
   mode: 'active' | 'degraded';
   anchorCount: number;
   summarySegmentIds: readonly string[];
-  degradedIssue?: DeliveryOnlyDegradationIssue;
+  degradedIssue?: DeliveryOnlyDegradedIssue;
 }
 
 export interface ContentFreeInbox {
@@ -2206,7 +2211,7 @@ interface DeliveryOnlyAttemptSuccess {
 
 interface DeliveryOnlyAttemptFailure {
   ok: false;
-  issue: DeliveryOnlyDegradationIssue;
+  issue: DeliveryOnlyDegradedIssue;
   summarySegmentIds: readonly string[];
   qualityIssues: readonly HistorySummaryQualityIssue[];
 }
@@ -2462,9 +2467,7 @@ export async function assembleIncrementalContext(
     );
     return {
       ...fallback,
-      degradation: [`⚠️ deliveryOnly 已降级: ${attempt.issue}；已回退到常规增量上下文`, fallback.degradation]
-        .filter(Boolean)
-        .join('\n'),
+      ...(fallback.degradation ? { degradation: fallback.degradation } : {}),
       historyGovernanceDegraded: true,
       ...(attempt.qualityIssues.length > 0 ? { historyGovernanceQualityIssues: attempt.qualityIssues } : {}),
       deliveryOnly: {

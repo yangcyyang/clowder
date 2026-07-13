@@ -236,7 +236,8 @@ function isMeaningfulTokenUsage(usage: TokenUsage): boolean {
     (usage.cacheReadTokens ?? 0) > 0 ||
     (usage.cacheCreationTokens ?? 0) > 0 ||
     Number.isFinite(usage.costUsd) ||
-    usage.budgetGateTriggered === true
+    usage.budgetGateTriggered === true ||
+    usage.deliveryOnlyMode != null
   );
 }
 
@@ -933,6 +934,12 @@ export class QueueProcessor {
                 ...(aggregate.usage.summarySegmentId ? { summarySegmentId: aggregate.usage.summarySegmentId } : {}),
                 ...(aggregate.usage.historyGovernanceDegraded != null
                   ? { historyGovernanceDegraded: aggregate.usage.historyGovernanceDegraded }
+                  : {}),
+                ...(aggregate.usage.deliveryOnlyMode
+                  ? { deliveryOnlyMode: aggregate.usage.deliveryOnlyMode }
+                  : {}),
+                ...(aggregate.usage.deliveryOnlyDegradedIssue
+                  ? { deliveryOnlyDegradedIssue: aggregate.usage.deliveryOnlyDegradedIssue }
                   : {}),
                 ...(aggregate.usage.budgetGateTriggered != null
                   ? { budgetGateTriggered: aggregate.usage.budgetGateTriggered }
@@ -2565,6 +2572,13 @@ export class QueueProcessor {
       await invocationRecordStore.update(invocationId, {
         status: 'succeeded',
         phase: 'done',
+        ...(tokenUsageAggregates.size > 0
+          ? {
+              usageByCat: Object.fromEntries(
+                Array.from(tokenUsageAggregates, ([catId, aggregate]) => [catId, aggregate.usage]),
+              ),
+            }
+          : {}),
       });
 
       finalStatus = 'succeeded';

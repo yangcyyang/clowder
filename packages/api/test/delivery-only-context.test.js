@@ -196,7 +196,7 @@ describe('F004 Phase 2 deliveryOnly context', () => {
       );
       assert.equal(result.historyGovernanceDegraded, true);
       assert.ok(result.contextText.includes(`trigger-${variant}`), 'fallback must retain normal raw history');
-      assert.ok(result.degradation?.includes('deliveryOnly 已降级'));
+      assert.ok(!result.degradation?.includes('deliveryOnly 已降级'));
       if (variant === 'missing') {
         const degradedA2A = selectExplicitPromptMessage(result, messages.at(-1).id, 'DEGRADED-A2A-ROUTE-PAYLOAD', {
           directMessageFrom: 'codex',
@@ -270,6 +270,8 @@ describe('F004 Phase 2 deliveryOnly context', () => {
     });
     assert.equal(exhausted.deliveryOnly?.mode, 'degraded');
     assert.equal(exhausted.deliveryOnly?.degradedIssue, 'summary_budget_exhausted');
+    assert.ok(!exhausted.degradation?.includes('deliveryOnly 已降级'));
+    assert.match(exhausted.degradation ?? '', /增量上下文.*预算/);
     assert.ok(exhausted.contextText.includes('[对话历史增量'), 'too-large summary must restore bounded normal history');
     assert.ok(exhausted.contextText.includes('trigger-'), 'too-large summary must never degrade to a naked trigger');
   });

@@ -6,6 +6,8 @@ import { formatCost, formatTokenCount } from './status-helpers';
 
 interface MetadataBadgeProps {
   metadata: ChatMessageMetadata;
+  /** Main-chat fallback: show only the actionable warning, without provider/model/token details. */
+  warningOnly?: boolean;
 }
 
 function cachePercent(input?: number, cacheRead?: number): number | null {
@@ -13,12 +15,22 @@ function cachePercent(input?: number, cacheRead?: number): number | null {
   return Math.round((cacheRead / input) * 100);
 }
 
-export function MetadataBadge({ metadata }: MetadataBadgeProps) {
+export function MetadataBadge({ metadata, warningOnly = false }: MetadataBadgeProps) {
   const [expanded, setExpanded] = useState(false);
 
   // Read usage from message metadata (message-scoped, not per-cat aggregate)
   const usage = metadata.usage;
   const runtimeWarnings = metadata.runtimeWarnings ?? [];
+  const deliveryOnlyWarning =
+    usage?.deliveryOnlyMode === 'degraded'
+      ? `⚠ deliveryOnly 降级 · ${usage.deliveryOnlyDegradedIssue ?? 'unknown'}`
+      : null;
+
+  if (warningOnly) {
+    return deliveryOnlyWarning ? (
+      <span className="text-left text-conn-amber-text [overflow-wrap:anywhere]">{deliveryOnlyWarning}</span>
+    ) : null;
+  }
 
   const hasTokens = usage && (usage.inputTokens != null || usage.outputTokens != null || usage.totalTokens != null);
   const cachePct = usage ? cachePercent(usage.inputTokens, usage.cacheReadTokens) : null;
@@ -71,6 +83,12 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
       {runtimeWarnings.length > 0 && (
         <span className="ml-1 text-conn-amber-text">
           <span className="text-cafe-muted"> · </span>⚠ {runtimeWarnings.length}
+        </span>
+      )}
+
+      {deliveryOnlyWarning && (
+        <span className="ml-1 basis-full text-left text-conn-amber-text [overflow-wrap:anywhere]">
+          {deliveryOnlyWarning}
         </span>
       )}
 

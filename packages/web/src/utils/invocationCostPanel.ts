@@ -28,6 +28,13 @@ export interface InvocationUsageSummary {
   historyBudgetRatio?: number;
   summarySegmentId?: string;
   historyGovernanceDegraded?: boolean;
+  deliveryOnlyMode?: 'active' | 'degraded';
+  deliveryOnlyDegradedIssue?:
+    | 'missing_trigger'
+    | 'missing_summary'
+    | 'summary_quality_failed'
+    | 'summary_budget_exhausted'
+    | 'unrevealed_whisper';
   budgetGateTriggered?: boolean;
   historyFullTokensBeforeGate?: number;
 }
@@ -50,6 +57,16 @@ function asString(value: unknown): string | undefined {
 
 function asHistoryMode(value: unknown): HistoryGovernanceMode | undefined {
   return value === 'observe' || value === 'shadow-summary' || value === 'summary-active' ? value : undefined;
+}
+
+function asDeliveryOnlyIssue(value: unknown): InvocationUsageSummary['deliveryOnlyDegradedIssue'] {
+  return value === 'missing_trigger' ||
+    value === 'missing_summary' ||
+    value === 'summary_quality_failed' ||
+    value === 'summary_budget_exhausted' ||
+    value === 'unrevealed_whisper'
+    ? value
+    : undefined;
 }
 
 function readSourceBreakdown(value: unknown): PromptSourceBreakdown | undefined {
@@ -128,6 +145,11 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
   if (typeof data.historyGovernanceDegraded === 'boolean') {
     summary.historyGovernanceDegraded = data.historyGovernanceDegraded;
   }
+  if (data.deliveryOnlyMode === 'active' || data.deliveryOnlyMode === 'degraded') {
+    summary.deliveryOnlyMode = data.deliveryOnlyMode;
+  }
+  const deliveryOnlyDegradedIssue = asDeliveryOnlyIssue(data.deliveryOnlyDegradedIssue);
+  if (deliveryOnlyDegradedIssue) summary.deliveryOnlyDegradedIssue = deliveryOnlyDegradedIssue;
   if (typeof data.budgetGateTriggered === 'boolean') {
     summary.budgetGateTriggered = data.budgetGateTriggered;
   }
@@ -151,6 +173,8 @@ function readUsageEvent(event: TaskEvent): InvocationUsageSummary | null {
     summary.historyBudgetRatio != null ||
     summary.summarySegmentId != null ||
     summary.historyGovernanceDegraded != null ||
+    summary.deliveryOnlyMode != null ||
+    summary.deliveryOnlyDegradedIssue != null ||
     summary.budgetGateTriggered != null ||
     summary.historyFullTokensBeforeGate != null;
   return hasSignal ? summary : null;
@@ -180,6 +204,14 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
     if (event.summarySegmentId != null) total.summarySegmentId = event.summarySegmentId;
     if (event.historyGovernanceDegraded != null) {
       total.historyGovernanceDegraded = event.historyGovernanceDegraded;
+    }
+    if (event.deliveryOnlyMode === 'degraded') {
+      total.deliveryOnlyMode = 'degraded';
+      if (event.deliveryOnlyDegradedIssue) {
+        total.deliveryOnlyDegradedIssue = event.deliveryOnlyDegradedIssue;
+      }
+    } else if (event.deliveryOnlyMode === 'active' && total.deliveryOnlyMode !== 'degraded') {
+      total.deliveryOnlyMode = 'active';
     }
     if (event.budgetGateTriggered != null) {
       total.budgetGateTriggered = total.budgetGateTriggered === true || event.budgetGateTriggered;

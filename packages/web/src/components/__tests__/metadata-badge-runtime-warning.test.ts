@@ -26,4 +26,36 @@ describe('MetadataBadge runtime warnings', () => {
 
     expect(html).toContain('⚠ 1');
   });
+
+  it('renders the structured deliveryOnly degradation beside message metadata', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MetadataBadge, {
+        metadata: {
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          usage: {
+            deliveryOnlyMode: 'degraded',
+            deliveryOnlyDegradedIssue: 'missing_summary',
+          },
+        },
+      }),
+    );
+
+    expect(html).toContain('⚠ deliveryOnly 降级 · missing_summary');
+    expect(html).toContain('text-conn-amber-text');
+    expect(html).toContain('overflow-wrap:anywhere');
+  });
+
+  it('does not render a warning for active deliveryOnly', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MetadataBadge, {
+        metadata: {
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          usage: { deliveryOnlyMode: 'active' },
+        },
+      }),
+    );
+    expect(html).not.toContain('deliveryOnly 降级');
+  });
 });

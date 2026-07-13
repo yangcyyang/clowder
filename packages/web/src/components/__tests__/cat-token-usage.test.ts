@@ -22,6 +22,19 @@ describe('F8: CatTokenUsage (dynamic redesign)', () => {
     expect(html).toBe('');
   });
 
+  it('renders a diagnostic-only deliveryOnly degradation without token fields', () => {
+    const html = render('opus', {
+      deliveryOnlyMode: 'degraded',
+      deliveryOnlyDegradedIssue: 'summary_budget_exhausted',
+    });
+    expect(html).toContain('⚠ deliveryOnly 降级 · summary_budget_exhausted');
+    expect(html).toContain('overflow-wrap:anywhere');
+  });
+
+  it('keeps active deliveryOnly silent when there are no token fields', () => {
+    expect(render('opus', { deliveryOnlyMode: 'active' })).toBe('');
+  });
+
   it('renders token counts with arrows for opus-style usage', () => {
     const html = render('opus', {
       inputTokens: 39270,

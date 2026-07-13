@@ -131,7 +131,7 @@ import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, DeliveryOnlyDegradedIssue } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import { completeCapsuleForSeal, type RouteStateContinuityCapsule } from './CollaborationContinuityCapsule.js';
 import type { ResumeFailureKind } from './invoke-helpers.js';
@@ -342,6 +342,8 @@ export interface InvocationParams {
     historyBudgetRatio?: number;
     summarySegmentId?: string;
     historyGovernanceDegraded?: boolean;
+    deliveryOnlyMode?: 'active' | 'degraded';
+    deliveryOnlyDegradedIssue?: DeliveryOnlyDegradedIssue;
   };
   /** Route layer will perform a mandatory post-publication memory writeback. */
   readonly deferMemoryWriteback?: boolean;
@@ -1637,14 +1639,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
 
-        // F8: Push token usage for frontend cost/token display
+        const hasRuntimeContextUsage = Boolean(
+          params.contextBudget?.historyMode ||
+            params.contextBudget?.historyGovernanceDegraded !== undefined ||
+            params.contextBudget?.deliveryOnlyMode ||
+            budgetGateUsage,
+        );
+        if (hasRuntimeContextUsage && !msg.metadata) {
+          msg.metadata = { provider: provider ?? 'unknown', model: 'unknown', usage: {} };
+        } else if (hasRuntimeContextUsage && msg.metadata && !msg.metadata.usage) {
+          msg.metadata.usage = {};
+        }
+
+        // F8: Push token usage and structured runtime diagnostics for frontend/ledger display.
         if (msg.metadata?.usage) {
           if (promptSourceBreakdown && !msg.metadata.usage.sourceBreakdown) {
             msg.metadata.usage = { ...msg.metadata.usage, sourceBreakdown: promptSourceBreakdown };
           }
           if (
             params.contextBudget &&
-            (params.contextBudget.historyMode || params.contextBudget.historyGovernanceDegraded !== undefined)
+            (params.contextBudget.historyMode ||
+              params.contextBudget.historyGovernanceDegraded !== undefined ||
+              params.contextBudget.deliveryOnlyMode)
           ) {
             msg.metadata.usage = {
               ...msg.metadata.usage,
@@ -1663,6 +1679,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 : {}),
               ...(params.contextBudget.historyGovernanceDegraded !== undefined
                 ? { historyGovernanceDegraded: params.contextBudget.historyGovernanceDegraded }
+                : {}),
+              ...(params.contextBudget.deliveryOnlyMode
+                ? { deliveryOnlyMode: params.contextBudget.deliveryOnlyMode }
+                : {}),
+              ...(params.contextBudget.deliveryOnlyDegradedIssue
+                ? { deliveryOnlyDegradedIssue: params.contextBudget.deliveryOnlyDegradedIssue }
                 : {}),
             };
           }

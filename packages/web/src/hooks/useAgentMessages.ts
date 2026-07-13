@@ -191,6 +191,18 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
   const summarySegmentId = typeof parsed.summarySegmentId === 'string' ? parsed.summarySegmentId : undefined;
   const historyGovernanceDegraded =
     typeof parsed.historyGovernanceDegraded === 'boolean' ? parsed.historyGovernanceDegraded : undefined;
+  const deliveryOnlyMode =
+    parsed.deliveryOnlyMode === 'active' || parsed.deliveryOnlyMode === 'degraded'
+      ? parsed.deliveryOnlyMode
+      : undefined;
+  const deliveryOnlyDegradedIssue =
+    parsed.deliveryOnlyDegradedIssue === 'missing_trigger' ||
+    parsed.deliveryOnlyDegradedIssue === 'missing_summary' ||
+    parsed.deliveryOnlyDegradedIssue === 'summary_quality_failed' ||
+    parsed.deliveryOnlyDegradedIssue === 'summary_budget_exhausted' ||
+    parsed.deliveryOnlyDegradedIssue === 'unrevealed_whisper'
+      ? parsed.deliveryOnlyDegradedIssue
+      : undefined;
 
   return {
     surface: 'thread',
@@ -214,6 +226,8 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     ...(historyBudgetRatio != null ? { historyBudgetRatio } : {}),
     ...(summarySegmentId ? { summarySegmentId } : {}),
     ...(historyGovernanceDegraded != null ? { historyGovernanceDegraded } : {}),
+    ...(deliveryOnlyMode ? { deliveryOnlyMode } : {}),
+    ...(deliveryOnlyDegradedIssue ? { deliveryOnlyDegradedIssue } : {}),
   };
 }
 

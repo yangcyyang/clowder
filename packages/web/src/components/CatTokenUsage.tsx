@@ -54,8 +54,9 @@ function formatMonthDay(tsMs: number): string {
 export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProps) {
   const hasDetailed = usage.inputTokens != null || usage.outputTokens != null;
   const hasTotalOnly = !hasDetailed && usage.totalTokens != null;
+  const deliveryOnlyWarning = usage.deliveryOnlyMode === 'degraded';
 
-  if (!hasDetailed && !hasTotalOnly) return null;
+  if (!hasDetailed && !hasTotalOnly && !deliveryOnlyWarning) return null;
 
   const textColor = CAT_TEXT_COLORS[catId] ?? 'text-cafe-secondary';
   const cachePct = cachePercent(usage);
@@ -99,6 +100,12 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
           </span>
         )}
       </div>
+
+      {deliveryOnlyWarning && (
+        <div className="text-[10px] text-conn-amber-text [overflow-wrap:anywhere]">
+          ⚠ deliveryOnly 降级 · {usage.deliveryOnlyDegradedIssue ?? 'unknown'}
+        </div>
+      )}
 
       {/* Cache bar */}
       {cachePct > 0 && (

@@ -19,6 +19,9 @@ interface SummaryStateRow {
   last_abstractive_at: string | null;
   abstractive_token_count: number | null;
   carry_over: number;
+  invalid_format_batch_key: string | null;
+  invalid_format_streak: number;
+  invalid_format_latched: number;
 }
 
 interface ThreadLastActivity {

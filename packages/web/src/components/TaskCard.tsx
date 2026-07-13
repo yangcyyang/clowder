@@ -118,6 +118,11 @@ function UsageChip({ usage }: { usage: InvocationUsageSummary }) {
             : ''}
         </span>
       )}
+      {usage.deliveryOnlyMode === 'degraded' && (
+        <span className="rounded-full border border-conn-amber-text/40 bg-conn-amber-bg/40 px-1.5 py-0.5 text-conn-amber-text [overflow-wrap:anywhere]">
+          ⚠ deliveryOnly 降级 · {usage.deliveryOnlyDegradedIssue ?? 'unknown'}
+        </span>
+      )}
       {usageRisk && (
         <span
           className="rounded-full border border-conn-red-text/40 bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
@@ -163,6 +168,11 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
             {usage.historyFullTokensBeforeGate != null
               ? ` · 裁剪前历史约 ${formatTokenCount(usage.historyFullTokensBeforeGate)}`
               : ''}
+          </span>
+        )}
+        {usage.deliveryOnlyMode === 'degraded' && (
+          <span className="col-span-2 text-conn-amber-text [overflow-wrap:anywhere]">
+            ⚠ deliveryOnly 降级 · {usage.deliveryOnlyDegradedIssue ?? 'unknown'}
           </span>
         )}
       </div>
@@ -374,7 +384,10 @@ export function TaskCard({
   const status = task.status as TaskStatus;
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.todo;
   const showCostPanel = isInvocationCostPanelEnabled();
-  const usageEvents = showCostPanel ? readTaskUsageSummaries(task) : [];
+  const allUsageEvents = readTaskUsageSummaries(task);
+  const showUsagePanel =
+    showCostPanel || allUsageEvents.some((usage) => usage.deliveryOnlyMode === 'degraded');
+  const usageEvents = showUsagePanel ? allUsageEvents : [];
   const usageTotal = summarizeTaskUsage(usageEvents);
 
   return (
@@ -404,7 +417,7 @@ export function TaskCard({
         </button>
       </div>
 
-      {showCostPanel && usageTotal && <UsageChip usage={usageTotal} />}
+      {showUsagePanel && usageTotal && <UsageChip usage={usageTotal} />}
 
       {/* Expanded details */}
       {expanded && (
@@ -413,7 +426,7 @@ export function TaskCard({
           <p className="text-[10px] text-cafe-muted mt-1">
             {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? '铲屎官' : task.createdBy}
           </p>
-          {showCostPanel && usageEvents.length > 0 && (
+          {showUsagePanel && usageEvents.length > 0 && (
             <div className="mt-2 space-y-1.5">
               <p className="text-[10px] font-semibold text-cafe-muted">Invocation 成本明细</p>
               {usageEvents.map((usage, index) => (

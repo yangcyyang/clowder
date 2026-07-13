@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { isSummaryCompactionEligibleMessage } from '../cats/services/stores/visibility.js';
-import { getAbstractiveSummaryModelId } from './AbstractiveSummaryClient.js';
+import {
+  type AbstractiveGenerationOutcome,
+  type AbstractiveInput,
+  SUMMARY_PROMPT_VERSION,
+} from './AbstractiveSummaryClient.js';
 import { hasHighValueSignal, SUMMARY_CONFIG } from './summary-config.js';
 
 interface SummaryStateRow {
@@ -14,6 +19,9 @@ interface SummaryStateRow {
   last_abstractive_at: string | null;
   abstractive_token_count: number | null;
   carry_over: number; // 1 = has backlog from previous batch, bypasses cooldown
+  invalid_format_batch_key: string | null;
+  invalid_format_streak: number;
+  invalid_format_latched: number;
 }
 
 interface ThreadLastActivity {
@@ -70,24 +78,7 @@ export interface SummaryCompactionDeps {
     threadId: string,
   ) => Promise<{ contextEpoch: number; resetAtMessageId?: string; resetAt: number } | null>;
   /** Call Opus API to generate abstractive summary + candidates */
-  generateAbstractive: (input: {
-    previousSummary: string | null;
-    messages: SummaryCompactionMessage[];
-    threadId: string;
-  }) => Promise<{
-    segments: Array<{
-      summary: string;
-      topicKey: string;
-      topicLabel: string;
-      boundaryReason: string;
-      boundaryConfidence: 'high' | 'medium' | 'low';
-      fromMessageId: string;
-      toMessageId: string;
-      messageCount: number;
-      relatedSegmentIds?: string[];
-      candidates?: unknown[];
-    }>;
-  } | null>;
+  generateAbstractive: (input: AbstractiveInput) => Promise<AbstractiveGenerationOutcome>;
   /** Re-embed a thread after summary update (for semantic search). Optional — fail-open. */
   reEmbed?: (anchor: string, text: string) => Promise<void>;
   /** H-3: Submit durable candidate to MarkerQueue for knowledge emergence pipeline. Optional — fail-open. */
@@ -105,6 +96,126 @@ export interface SummaryCompactionDeps {
   getThreadAllowlist?: () => ReadonlySet<string> | null;
   /** Logger */
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
+}
+
+export class SummaryInvalidFormatAlertError extends Error {
+  constructor(threadId: string) {
+    super(`[summary-compaction] thread ${threadId}: invalid summary format persisted for 3 runs`);
+    this.name = 'SummaryInvalidFormatAlertError';
+  }
+}
+
+function sameResetBoundary(
+  initial: Awaited<ReturnType<NonNullable<SummaryCompactionDeps['getContextResetBoundary']>>> | null | undefined,
+  current: Awaited<ReturnType<NonNullable<SummaryCompactionDeps['getContextResetBoundary']>>> | null | undefined,
+): boolean {
+  return (
+    current?.contextEpoch === initial?.contextEpoch &&
+    current?.resetAt === initial?.resetAt &&
+    current?.resetAtMessageId === initial?.resetAtMessageId
+  );
+}
+
+function buildInvalidFormatBatchKey(input: {
+  threadId: string;
+  scanAfterMessageId: string | null;
+  scannedThroughMessageId: string;
+  previousSummary: string | null;
+  messages: readonly SummaryCompactionMessage[];
+  excludedPrivateCount: number;
+  identity: AbstractiveGenerationOutcome['identity'];
+}): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        threadId: input.threadId,
+        scanAfterMessageId: input.scanAfterMessageId,
+        scannedThroughMessageId: input.scannedThroughMessageId,
+        previousSummary: input.previousSummary,
+        excludedPrivateCount: input.excludedPrivateCount,
+        messages: input.messages.map((message) => ({
+          id: message.id,
+          catId: message.catId,
+          timestamp: message.timestamp,
+          contentHash: createHash('sha256').update(message.content).digest('hex'),
+        })),
+        identity: input.identity,
+      }),
+    )
+    .digest('hex');
+}
+
+function normalizeGenerationOutcome(value: unknown): AbstractiveGenerationOutcome {
+  if (value && typeof value === 'object' && 'kind' in value && 'identity' in value) {
+    return value as AbstractiveGenerationOutcome;
+  }
+  const identity: AbstractiveGenerationOutcome['identity'] = {
+    providerId: 'anthropic-api',
+    modelId: 'legacy-injected-summary-client',
+    promptVersion: SUMMARY_PROMPT_VERSION,
+  };
+  if (value && typeof value === 'object' && Array.isArray((value as { segments?: unknown }).segments)) {
+    return {
+      kind: 'ok',
+      result: value as Extract<AbstractiveGenerationOutcome, { kind: 'ok' }>['result'],
+      attempts: 1,
+      identity,
+    };
+  }
+  return { kind: 'provider_error', attempts: 1, identity, detail: 'legacy client returned null' };
+}
+
+function resetInvalidFormatStateForBatch(db: Database.Database, threadId: string, batchKey: string): void {
+  db.prepare(
+    `UPDATE summary_state SET
+       invalid_format_batch_key = ?,
+       invalid_format_streak = 0,
+       invalid_format_latched = 0
+     WHERE thread_id = ? AND COALESCE(invalid_format_batch_key, '') <> ?`,
+  ).run(batchKey, threadId, batchKey);
+}
+
+function clearInvalidFormatState(db: Database.Database, threadId: string): void {
+  db.prepare(
+    `UPDATE summary_state SET
+       invalid_format_batch_key = NULL,
+       invalid_format_streak = 0,
+       invalid_format_latched = 0
+     WHERE thread_id = ?`,
+  ).run(threadId);
+}
+
+function recordInvalidFormatRun(
+  db: Database.Database,
+  threadId: string,
+  batchKey: string,
+): { streak: number; shouldAlert: boolean; latched: boolean } {
+  const tx = db.transaction(() => {
+    const current = db
+      .prepare(
+        `SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched
+         FROM summary_state WHERE thread_id = ?`,
+      )
+      .get(threadId) as
+      | { invalid_format_batch_key: string | null; invalid_format_streak: number; invalid_format_latched: number }
+      | undefined;
+    if (!current) return { streak: 0, shouldAlert: false, latched: false };
+
+    const sameBatch = current.invalid_format_batch_key === batchKey;
+    const wasLatched = sameBatch && current.invalid_format_latched === 1;
+    const streak = sameBatch ? current.invalid_format_streak + 1 : 1;
+    const shouldAlert = !wasLatched && streak >= 3;
+    const latched = wasLatched || shouldAlert;
+    db.prepare(
+      `UPDATE summary_state SET
+         invalid_format_batch_key = ?,
+         invalid_format_streak = ?,
+         invalid_format_latched = ?
+       WHERE thread_id = ?`,
+    ).run(batchKey, streak, latched ? 1 : 0, threadId);
+    return { streak, shouldAlert, latched };
+  });
+  return tx();
 }
 
 /** Check eligibility rule (KD-43 unified): quietWindow AND (count OR tokens OR signal) AND (cooldown OR signal-bypass) */
@@ -175,7 +286,10 @@ export async function processThread(
       ? batch.scannedThroughMessageId
       : (messages.at(-1)?.id ?? null);
   const { excludedPrivateCount } = batch;
-  if (!scannedThroughMessageId) return false;
+  if (!scannedThroughMessageId) {
+    if (watermarkPredatesReset) clearInvalidFormatState(deps.db, state.thread_id);
+    return false;
+  }
 
   // 全部消息都被过滤时也推进扫描水位；绝不调用摘要模型，也不生成空摘要段。
   if (messages.length === 0) {
@@ -186,7 +300,10 @@ export async function processThread(
          pending_message_count = 0,
          pending_token_count = 0,
          pending_signal_flags = 0,
-         carry_over = 0
+         carry_over = 0,
+         invalid_format_batch_key = NULL,
+         invalid_format_streak = 0,
+         invalid_format_latched = 0
          WHERE thread_id = ?`,
       )
       .run(scannedThroughMessageId, state.thread_id);
@@ -203,30 +320,52 @@ export async function processThread(
     .prepare('SELECT summary FROM evidence_docs WHERE anchor = ?')
     .get(`thread-${state.thread_id}`) as { summary: string | null } | undefined;
 
-  // Call Opus API
-  const result = await deps.generateAbstractive({
-    previousSummary: watermarkPredatesReset ? null : (evidenceRow?.summary ?? null),
-    messages,
-    threadId: state.thread_id,
-  });
+  const previousSummary = watermarkPredatesReset ? null : (evidenceRow?.summary ?? null);
+  const outcome = normalizeGenerationOutcome(
+    await deps.generateAbstractive({
+      previousSummary,
+      messages,
+      threadId: state.thread_id,
+    }),
+  );
 
-  if (!result) {
-    deps.logger.info(`[summary-compaction] thread ${state.thread_id}: Opus returned null (fail-open)`);
-    return false;
-  }
-
-  // generation token：模型运行期间发生 reset 时，旧结果必须在任何持久化前被丢弃。
+  // generation token：模型运行期间发生 reset 时，旧结果必须在摘要或失败状态持久化前被丢弃。
   if (deps.getContextResetBoundary) {
     const currentBoundary = await deps.getContextResetBoundary(state.thread_id);
-    if (
-      currentBoundary?.contextEpoch !== resetBoundary?.contextEpoch ||
-      currentBoundary?.resetAt !== resetBoundary?.resetAt ||
-      currentBoundary?.resetAtMessageId !== resetBoundary?.resetAtMessageId
-    ) {
+    if (!sameResetBoundary(resetBoundary, currentBoundary)) {
+      clearInvalidFormatState(deps.db, state.thread_id);
       deps.logger.info(`[summary-compaction] thread ${state.thread_id}: reset boundary changed, discard stale result`);
       return false;
     }
   }
+
+  const batchKey = buildInvalidFormatBatchKey({
+    threadId: state.thread_id,
+    scanAfterMessageId,
+    scannedThroughMessageId,
+    previousSummary,
+    messages,
+    excludedPrivateCount,
+    identity: outcome.identity,
+  });
+
+  if (outcome.kind !== 'ok') {
+    resetInvalidFormatStateForBatch(deps.db, state.thread_id, batchKey);
+    if (outcome.kind === 'invalid_format') {
+      const invalidState = recordInvalidFormatRun(deps.db, state.thread_id, batchKey);
+      if (invalidState.shouldAlert) throw new SummaryInvalidFormatAlertError(state.thread_id);
+      deps.logger.info(
+        `[summary-compaction] thread ${state.thread_id}: invalid format run ${invalidState.streak}${invalidState.latched ? ' (alert latched)' : ''}`,
+      );
+      return false;
+    }
+    deps.logger.info(
+      `[summary-compaction] thread ${state.thread_id}: ${outcome.kind} (attempts=${outcome.attempts}, fail-open)`,
+    );
+    return false;
+  }
+
+  const result = outcome.result;
 
   // Dual-write: INSERT segments + UPDATE evidence_docs
   const now = new Date().toISOString();
@@ -240,7 +379,7 @@ export async function processThread(
   }));
   const mergedSummary = segments.map((s) => s.summary).join('\n\n');
   const totalTokens = mergedSummary.length / 4;
-  const modelId = getAbstractiveSummaryModelId();
+  const modelId = outcome.identity.modelId;
 
   const insertSegment = deps.db.prepare(`
     INSERT INTO summary_segments
@@ -269,7 +408,7 @@ export async function processThread(
         seg.relatedSegmentIds ? JSON.stringify(seg.relatedSegmentIds) : null,
         seg.candidates ? JSON.stringify(seg.candidates) : null,
         modelId,
-        'g2-thread-abstract-v2',
+        outcome.identity.promptVersion,
         now,
       );
     }
@@ -300,7 +439,10 @@ export async function processThread(
         carry_over = 0,
         summary_type = 'abstractive',
         last_abstractive_at = ?,
-        abstractive_token_count = ?
+        abstractive_token_count = ?,
+        invalid_format_batch_key = NULL,
+        invalid_format_streak = 0,
+        invalid_format_latched = 0
        WHERE thread_id = ?`,
       )
       .run(scannedThroughMessageId, now, Math.round(totalTokens), state.thread_id);

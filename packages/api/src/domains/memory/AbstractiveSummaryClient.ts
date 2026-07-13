@@ -42,6 +42,30 @@ export interface AbstractiveResult {
   segments: TopicSegment[];
 }
 
+export type AbstractiveFailureKind =
+  | 'invalid_format'
+  | 'provider_unavailable'
+  | 'provider_error'
+  | 'empty_response'
+  | 'timeout';
+
+export interface SummaryGenerationIdentity {
+  providerId: SummaryProviderId;
+  modelId: string;
+  promptVersion: typeof SUMMARY_PROMPT_VERSION;
+}
+
+export type AbstractiveGenerationOutcome =
+  | { kind: 'ok'; result: AbstractiveResult; attempts: 1 | 2; identity: SummaryGenerationIdentity }
+  | {
+      kind: AbstractiveFailureKind;
+      attempts: 0 | 1 | 2;
+      identity: SummaryGenerationIdentity;
+      detail?: string;
+    };
+
+export const SUMMARY_PROMPT_VERSION = 'g2-thread-abstract-v2';
+
 export type SummaryProviderId = 'anthropic-api' | 'codex-cli' | 'pi-cli';
 export const DEFAULT_PI_SUMMARY_MODEL = 'mimo/mimo-v2.5-pro-ultraspeed';
 
@@ -82,6 +106,12 @@ export function getSummaryProviderId(env: NodeJS.ProcessEnv = process.env): Summ
 function getAgentSummaryTimeoutMs(providerId: string, env: NodeJS.ProcessEnv = process.env): number {
   const envKey = providerId === 'pi-cli' ? 'CAT_CAFE_SUMMARY_PI_TIMEOUT_MS' : 'CAT_CAFE_SUMMARY_CODEX_TIMEOUT_MS';
   const parsed = Number.parseInt(env[envKey] ?? '', 10);
+  if (!Number.isFinite(parsed)) return 90_000;
+  return Math.min(300_000, Math.max(15_000, parsed));
+}
+
+function getApiSummaryTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.CAT_CAFE_SUMMARY_API_TIMEOUT_MS ?? '', 10);
   if (!Number.isFinite(parsed)) return 90_000;
   return Math.min(300_000, Math.max(15_000, parsed));
 }
@@ -190,6 +220,70 @@ function buildUserPrompt(input: AbstractiveInput): string {
   }
 
   return parts.join('\n');
+}
+
+function buildRepairPrompt(originalPrompt: string, invalidOutput: string): string {
+  return [
+    originalPrompt,
+    '',
+    '## Format Repair',
+    'The previous response was rejected because it did not satisfy the exact summary format.',
+    'Repair the response using only the original input. Return the complete summary, not an explanation.',
+    'All four required recall sections must have a non-empty value.',
+    '',
+    '## Rejected Response',
+    invalidOutput.slice(0, 12_000),
+  ].join('\n');
+}
+
+type TextGenerationOutcome =
+  | { kind: 'ok'; text: string }
+  | { kind: Exclude<AbstractiveFailureKind, 'invalid_format'>; detail?: string };
+
+function parseGeneratedSummary(text: string, input: AbstractiveInput): AbstractiveResult | null {
+  const result = parseNaturalLanguageOutput(text, input);
+  if (!result) return null;
+  return result.segments.every((segment) => hasCanonicalSummaryRecallFields(segment.summary)) ? result : null;
+}
+
+async function generateWithSingleRepair(
+  input: AbstractiveInput,
+  requestText: (prompt: string) => Promise<TextGenerationOutcome>,
+  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
+  logPrefix: string,
+  identity: SummaryGenerationIdentity,
+): Promise<AbstractiveGenerationOutcome> {
+  const originalPrompt = buildUserPrompt(input);
+  const first = await requestText(originalPrompt);
+  if (first.kind !== 'ok') return { ...first, attempts: 1, identity };
+
+  const firstResult = parseGeneratedSummary(first.text, input);
+  if (firstResult) {
+    logger.info(
+      `${logPrefix} parsed: "${firstResult.segments[0]?.topicLabel}" (${firstResult.segments[0]?.summary.length} chars, ${firstResult.segments[0]?.candidates?.length ?? 0} candidates)`,
+    );
+    return { kind: 'ok', result: firstResult, attempts: 1, identity };
+  }
+
+  logger.info(`${logPrefix} invalid format; attempting one repair`);
+  const repaired = await requestText(buildRepairPrompt(originalPrompt, first.text));
+  if (repaired.kind !== 'ok') return { ...repaired, attempts: 2, identity };
+
+  const repairedResult = parseGeneratedSummary(repaired.text, input);
+  if (!repairedResult) {
+    logger.info(`${logPrefix} repair still invalid`);
+    return {
+      kind: 'invalid_format',
+      attempts: 2,
+      identity,
+      detail: 'repair output still violates recall contract',
+    };
+  }
+
+  logger.info(
+    `${logPrefix} repaired and parsed: "${repairedResult.segments[0]?.topicLabel}" (${repairedResult.segments[0]?.summary.length} chars, ${repairedResult.segments[0]?.candidates?.length ?? 0} candidates)`,
+  );
+  return { kind: 'ok', result: repairedResult, attempts: 2, identity };
 }
 
 // ─── Parse natural language output into structured segments ─────
@@ -341,64 +435,69 @@ function buildSingleSegment(
 export function createAbstractiveClient(
   resolveProfile: () => Promise<ProviderProfile | null>,
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
-): (input: AbstractiveInput) => Promise<AbstractiveResult | null> {
-  return async (input: AbstractiveInput): Promise<AbstractiveResult | null> => {
+): (input: AbstractiveInput) => Promise<AbstractiveGenerationOutcome> {
+  return async (input: AbstractiveInput): Promise<AbstractiveGenerationOutcome> => {
+    const identity: SummaryGenerationIdentity = {
+      providerId: 'anthropic-api',
+      modelId: getAbstractiveSummaryModelId(),
+      promptVersion: SUMMARY_PROMPT_VERSION,
+    };
     const profile = await resolveProfile();
     if (!profile || profile.mode !== 'api_key') {
       logger.info('[abstractive-client] no API key profile, skipping');
-      return null;
+      return { kind: 'provider_unavailable', attempts: 0, identity, detail: 'no API key profile' };
     }
 
-    const userContent = buildUserPrompt(input);
+    const timeoutMs = getApiSummaryTimeoutMs();
+    const deadlineAt = Date.now() + timeoutMs;
+    const requestText = async (userContent: string): Promise<TextGenerationOutcome> => {
+      const controller = new AbortController();
+      const remainingMs = Math.max(1, deadlineAt - Date.now());
+      const timeout = setTimeout(() => controller.abort(), remainingMs);
+      try {
+        const res = await fetch(`${profile.baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'x-api-key': profile.apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: identity.modelId,
+            max_tokens: getAbstractiveSummaryMaxTokens(),
+            system: SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: userContent }],
+          }),
+          signal: controller.signal,
+        });
 
-    try {
-      const res = await fetch(`${profile.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'x-api-key': profile.apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: getAbstractiveSummaryModelId(),
-          max_tokens: getAbstractiveSummaryMaxTokens(),
-          system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: userContent }],
-        }),
-      });
+        if (!res.ok) {
+          const detail = `API error ${res.status}: ${res.statusText}`;
+          logger.error(`[abstractive-client] ${detail}`);
+          return { kind: 'provider_error', detail };
+        }
 
-      if (!res.ok) {
-        logger.error(`[abstractive-client] API error ${res.status}: ${res.statusText}`);
-        return null;
+        const body = (await res.json()) as { content: Array<{ type: string; text?: string }> };
+        const text = body.content?.find((content) => content.type === 'text')?.text?.trim();
+        if (!text) {
+          logger.error('[abstractive-client] no text in response');
+          return { kind: 'empty_response', detail: 'no text in response' };
+        }
+        return { kind: 'ok', text };
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (controller.signal.aborted) {
+          logger.error(`[abstractive-client] timed out after ${timeoutMs}ms`);
+          return { kind: 'timeout', detail };
+        }
+        logger.error(`[abstractive-client] fetch error: ${detail}`);
+        return { kind: 'provider_error', detail };
+      } finally {
+        clearTimeout(timeout);
       }
+    };
 
-      const body = (await res.json()) as { content: Array<{ type: string; text?: string }> };
-      const text = body.content?.find((c) => c.type === 'text')?.text;
-      if (!text) {
-        logger.error('[abstractive-client] no text in response');
-        return null;
-      }
-
-      // Parse natural language output into structured segments
-      const result = parseNaturalLanguageOutput(text, input);
-      if (!result) {
-        logger.error(`[abstractive-client] failed to parse output: ${text.slice(0, 150)}`);
-        return null;
-      }
-      if (!result.segments.every((segment) => hasCanonicalSummaryRecallFields(segment.summary))) {
-        logger.error('[abstractive-client] missing required recall fields; refusing to store summary');
-        return null;
-      }
-
-      logger.info(
-        `[abstractive-client] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
-      );
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error(`[abstractive-client] fetch/parse error: ${msg}`);
-      return null;
-    }
+    return generateWithSingleRepair(input, requestText, logger, '[abstractive-client]', identity);
   };
 }
 
@@ -421,6 +520,7 @@ type SummaryAgentInvoke = (
 
 interface AgentSummaryClientOptions {
   providerId?: string;
+  modelId?: string;
   workingDirectory?: string;
   callbackEnv?: Record<string, string>;
   cliConfigArgs?: readonly string[];
@@ -431,63 +531,57 @@ export function createAgentAbstractiveClient(
   invokeAgent: SummaryAgentInvoke,
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
   options: AgentSummaryClientOptions = {},
-): (input: AbstractiveInput) => Promise<AbstractiveResult | null> {
-  return async (input: AbstractiveInput): Promise<AbstractiveResult | null> => {
-    const userContent = buildUserPrompt(input);
-    const providerId = options.providerId ?? 'agent-cli';
+): (input: AbstractiveInput) => Promise<AbstractiveGenerationOutcome> {
+  return async (input: AbstractiveInput): Promise<AbstractiveGenerationOutcome> => {
+    const providerId = options.providerId ?? 'codex-cli';
     const timeoutMs = options.timeoutMs ?? getAgentSummaryTimeoutMs(providerId);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const chunks: string[] = [];
-
-    try {
-      for await (const event of invokeAgent(userContent, {
-        systemPrompt: SYSTEM_PROMPT,
-        signal: controller.signal,
-        workingDirectory: options.workingDirectory,
-        callbackEnv: options.callbackEnv,
-        cliConfigArgs: options.cliConfigArgs,
-      })) {
-        if (event.type === 'text' && event.content) {
-          chunks.push(event.content);
-        } else if (event.type === 'error') {
-          logger.error(`[abstractive-client:${providerId}] agent error: ${event.error ?? 'unknown error'}`);
-          return null;
+    const deadlineAt = Date.now() + timeoutMs;
+    const identity: SummaryGenerationIdentity = {
+      providerId: providerId === 'pi-cli' ? 'pi-cli' : 'codex-cli',
+      modelId: options.modelId ?? getAbstractiveSummaryModelId(),
+      promptVersion: SUMMARY_PROMPT_VERSION,
+    };
+    const requestText = async (prompt: string): Promise<TextGenerationOutcome> => {
+      const controller = new AbortController();
+      const remainingMs = Math.max(1, deadlineAt - Date.now());
+      const timeout = setTimeout(() => controller.abort(), remainingMs);
+      const chunks: string[] = [];
+      try {
+        for await (const event of invokeAgent(prompt, {
+          systemPrompt: SYSTEM_PROMPT,
+          signal: controller.signal,
+          workingDirectory: options.workingDirectory,
+          callbackEnv: options.callbackEnv,
+          cliConfigArgs: options.cliConfigArgs,
+        })) {
+          if (event.type === 'text' && event.content) {
+            chunks.push(event.content);
+          } else if (event.type === 'error') {
+            const detail = event.error ?? 'unknown error';
+            logger.error(`[abstractive-client:${providerId}] agent error: ${detail}`);
+            return { kind: 'provider_error', detail };
+          }
         }
-      }
 
-      const text = chunks.join('\n').trim();
-      if (!text) {
-        logger.error(`[abstractive-client:${providerId}] no text in response`);
-        return null;
+        const text = chunks.join('\n').trim();
+        if (!text) {
+          logger.error(`[abstractive-client:${providerId}] no text in response`);
+          return { kind: 'empty_response', detail: 'no text in response' };
+        }
+        return { kind: 'ok', text };
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (controller.signal.aborted) {
+          logger.error(`[abstractive-client:${providerId}] timed out after ${timeoutMs}ms`);
+          return { kind: 'timeout', detail };
+        }
+        logger.error(`[abstractive-client:${providerId}] invoke error: ${detail}`);
+        return { kind: 'provider_error', detail };
+      } finally {
+        clearTimeout(timeout);
       }
+    };
 
-      const result = parseNaturalLanguageOutput(text, input);
-      if (!result) {
-        logger.error(`[abstractive-client:${providerId}] failed to parse output: ${text.slice(0, 150)}`);
-        return null;
-      }
-      if (!result.segments.every((segment) => hasCanonicalSummaryRecallFields(segment.summary))) {
-        logger.error(
-          `[abstractive-client:${providerId}] missing required recall fields; refusing to store summary`,
-        );
-        return null;
-      }
-
-      logger.info(
-        `[abstractive-client:${providerId}] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
-      );
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (controller.signal.aborted) {
-        logger.error(`[abstractive-client:${providerId}] timed out after ${timeoutMs}ms`);
-        return null;
-      }
-      logger.error(`[abstractive-client:${providerId}] invoke/parse error: ${msg}`);
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
+    return generateWithSingleRepair(input, requestText, logger, `[abstractive-client:${providerId}]`, identity);
   };
 }

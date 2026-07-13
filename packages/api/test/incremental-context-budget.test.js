@@ -296,6 +296,43 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     assert.ok(snapshot.skippedBlocks.includes('project-progress'));
   });
 
+  test('runtime context budget snapshot exposes structured deliveryOnly diagnostics', () => {
+    const snapshot = buildRuntimeContextBudgetSnapshot({
+      threadId: 'thread-delivery-only',
+      toolPolicy: 'standard',
+      toolPolicySource: 'agent-default',
+      mode: 'serial',
+      prompt: 'trigger',
+      historyCount: 3,
+      includedHistoryCount: 3,
+      loadStandardContext: true,
+      loadFullContext: false,
+      hasPackBlocks: false,
+      hasWorldContext: false,
+      hasSessionBootstrap: false,
+      hasSignalArticles: false,
+      hasAlwaysOnDocs: false,
+      hasSopHint: false,
+      hasGuideContext: false,
+      hasMcpInstructions: false,
+      hasAgentMemory: false,
+      hasLessonsContext: false,
+      governanceTier: 'operational',
+      governanceEstimatedTokens: 0,
+      hasGovernanceSourceContext: false,
+      catBudget: getCatContextBudget('opus'),
+      deliveryOnly: {
+        mode: 'degraded',
+        anchorCount: 0,
+        summarySegmentIds: [],
+        degradedIssue: 'missing_summary',
+      },
+    });
+
+    assert.equal(snapshot.deliveryOnlyMode, 'degraded');
+    assert.equal(snapshot.deliveryOnlyDegradedIssue, 'missing_summary');
+  });
+
   test('runtime context budget snapshot exposes observe-only history governance fields', async () => {
     const budget = getCatContextBudget('opus');
     const messageStore = new MessageStore();

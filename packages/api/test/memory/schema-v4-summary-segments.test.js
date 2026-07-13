@@ -16,6 +16,36 @@ describe('Schema V4: summary_segments + summary_state', () => {
     assert.equal(v, CURRENT_SCHEMA_VERSION, `schema version should be ${CURRENT_SCHEMA_VERSION}, got ${v}`);
   });
 
+  it('migrates an existing V18 summary_state to the V19 invalid-format latch columns', () => {
+    const legacy = new Database(':memory:');
+    legacy.exec(`
+      CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_version (version, applied_at) VALUES (18, datetime('now'));
+      CREATE TABLE summary_state (
+        thread_id TEXT PRIMARY KEY,
+        last_summarized_message_id TEXT,
+        pending_message_count INTEGER NOT NULL DEFAULT 0,
+        pending_token_count INTEGER NOT NULL DEFAULT 0,
+        pending_signal_flags INTEGER NOT NULL DEFAULT 0,
+        carry_over INTEGER NOT NULL DEFAULT 0,
+        summary_type TEXT NOT NULL DEFAULT 'concat',
+        last_abstractive_at TEXT,
+        abstractive_token_count INTEGER
+      );
+      INSERT INTO summary_state (thread_id) VALUES ('legacy-thread');
+    `);
+
+    applyMigrations(legacy);
+    applyMigrations(legacy);
+
+    const row = legacy.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('legacy-thread');
+    assert.equal(row.invalid_format_batch_key, null);
+    assert.equal(row.invalid_format_streak, 0);
+    assert.equal(row.invalid_format_latched, 0);
+    assert.equal(legacy.prepare('SELECT MAX(version) AS v FROM schema_version').get().v, CURRENT_SCHEMA_VERSION);
+    legacy.close();
+  });
+
   it('summary_segments table exists with correct columns', () => {
     const columns = db.prepare("PRAGMA table_info('summary_segments')").all();
     const names = columns.map((c) => c.name);
@@ -50,6 +80,9 @@ describe('Schema V4: summary_segments + summary_state', () => {
     assert.ok(names.includes('summary_type'));
     assert.ok(names.includes('last_abstractive_at'));
     assert.ok(names.includes('abstractive_token_count'));
+    assert.ok(names.includes('invalid_format_batch_key'));
+    assert.ok(names.includes('invalid_format_streak'));
+    assert.ok(names.includes('invalid_format_latched'));
   });
 
   it('can INSERT a summary_segment', () => {

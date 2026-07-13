@@ -272,6 +272,17 @@ export function ChatMessage({
     catRuntimeStatus === 'spawning' || catRuntimeStatus === 'pending' || catRuntimeStatus === 'streaming'
       ? 'active'
       : 'idle';
+  const deliveryOnlyDegraded = message.metadata?.usage?.deliveryOnlyMode === 'degraded';
+  const fullRuntimeMetadataBadge = message.metadata ? (
+    <div className="w-fit rounded-[var(--slock-radius-pill)] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-0.5">
+      <MetadataBadge metadata={message.metadata} />
+    </div>
+  ) : null;
+  const deliveryOnlyMetadataBadge = message.metadata ? (
+    <div className="w-fit rounded-[var(--slock-radius-pill)] border border-conn-amber-text/40 bg-conn-amber-bg/40 px-2 py-0.5">
+      <MetadataBadge metadata={message.metadata} warningOnly />
+    </div>
+  ) : null;
 
   // Slock-like rendering: streaming tokens are buffered in store but hidden from
   // the timeline until the final message arrives. The input area shows typing
@@ -558,11 +569,11 @@ export function ChatMessage({
                 <span>定时提醒</span>
               </div>
             )}
-            {showRuntimeMetadata && message.metadata && (
-              <div className="w-fit rounded-[var(--slock-radius-pill)] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-0.5">
-                <MetadataBadge metadata={message.metadata} />
-              </div>
-            )}
+            {showRuntimeMetadata
+              ? fullRuntimeMetadataBadge
+              : deliveryOnlyDegraded
+                ? deliveryOnlyMetadataBadge
+                : null}
             {message.extra?.crossPost &&
               (() => {
                 const sourceId = message.extra.crossPost?.sourceThreadId;
@@ -593,6 +604,7 @@ export function ChatMessage({
               })()}
           </div>
         )}
+        {deliveryOnlyDegraded && (isAssistantContinuation || !catStyle) && deliveryOnlyMetadataBadge}
         <div
           className={`overflow-visible ${
             catStyle ? (catStyle.font ?? '') : ''

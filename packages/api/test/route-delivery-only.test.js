@@ -21,6 +21,19 @@ function countAnchorLines(prompt) {
   return (prompt.match(/^\[(?:Thread opener|Anchor \d+\/\d+) @/gm) ?? []).length;
 }
 
+function systemInfoPayloads(messages, type) {
+  return messages
+    .filter((message) => message.type === 'system_info')
+    .map((message) => {
+      try {
+        return JSON.parse(message.content);
+      } catch {
+        return null;
+      }
+    })
+    .filter((payload) => payload?.type === type);
+}
+
 function createCapturingService(catId, response = `${catId}-done`) {
   const prompts = [];
   return {
@@ -202,7 +215,7 @@ describe('routeSerial deliveryOnly boundary', () => {
     await withIsolatedEnv({ [DELIVERY_ONLY_ENV]: threadId }, async () => {
       const fixture = await buildRouteFixture({ threadId });
 
-      await runSerial(fixture, ['opus']);
+      const emitted = await runSerial(fixture, ['opus']);
 
       assert.equal(fixture.services.opus.prompts.length, 1);
       const prompt = fixture.services.opus.prompts[0];
@@ -212,6 +225,8 @@ describe('routeSerial deliveryOnly boundary', () => {
       assert.ok(countAnchorLines(prompt) <= 3, 'deliveryOnly 最多携带 3 条锚点');
       assert.ok(!prompt.includes('[对话历史增量'), 'deliveryOnly 不得携带 recent history window');
       assert.ok(!prompt.includes('[Recent Messages]'), 'deliveryOnly 不得携带 summary-active recent section');
+      assert.equal(systemInfoPayloads(emitted, 'invocation_created')[0].contextBudget.deliveryOnlyMode, 'active');
+      assert.equal(systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyMode, 'active');
     });
   });
 
@@ -273,13 +288,31 @@ describe('routeSerial deliveryOnly boundary', () => {
       await withIsolatedEnv({ [DELIVERY_ONLY_ENV]: threadId }, async () => {
         const fixture = await buildRouteFixture({ threadId, summaryKind });
 
-        await runSerial(fixture, ['opus']);
+        const emitted = await runSerial(fixture, ['opus']);
 
         const prompt = fixture.services.opus.prompts[0];
         assert.ok(prompt.includes('[对话历史增量'), '摘要不可用时不能裸投 trigger，必须回退正常 bounded history');
         assert.ok(prompt.includes(fixture.trigger), '降级路径必须保留当前触发消息');
         assert.ok(!prompt.includes('UNSAFE_SUMMARY_SENTINEL'), '质量门失败的摘要不得进入 prompt');
         assert.ok(!prompt.includes('[Thread History Summary]'), '缺失/坏摘要不得伪装为 deliveryOnly active');
+        assert.ok(
+          !emitted.some(
+            (message) =>
+              message.type === 'system_info' && typeof message.content === 'string' && message.content.includes('deliveryOnly 已降级'),
+          ),
+          'deliveryOnly 降级不得生成频道 warning bubble',
+        );
+        const expectedIssue = summaryKind === 'missing' ? 'missing_summary' : 'summary_quality_failed';
+        assert.equal(systemInfoPayloads(emitted, 'invocation_created')[0].contextBudget.deliveryOnlyMode, 'degraded');
+        assert.equal(
+          systemInfoPayloads(emitted, 'invocation_created')[0].contextBudget.deliveryOnlyDegradedIssue,
+          expectedIssue,
+        );
+        assert.equal(systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyMode, 'degraded');
+        assert.equal(
+          systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyDegradedIssue,
+          expectedIssue,
+        );
       });
     });
   }

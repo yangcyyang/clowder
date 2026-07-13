@@ -83,6 +83,8 @@ export interface RunLedgerSummary {
     | 'historyBudgetRatio'
     | 'summarySegmentId'
     | 'historyGovernanceDegraded'
+    | 'deliveryOnlyMode'
+    | 'deliveryOnlyDegradedIssue'
     | 'budgetGateTriggered'
     | 'historyFullTokensBeforeGate'
   >;
@@ -547,6 +549,14 @@ function summarizeUsage(usageByCat: InvocationRecord['usageByCat']): RunLedgerSu
     if (item.historyGovernanceDegraded != null) {
       usage.historyGovernanceDegraded = item.historyGovernanceDegraded;
     }
+    if (item.deliveryOnlyMode === 'degraded') {
+      usage.deliveryOnlyMode = 'degraded';
+      if (item.deliveryOnlyDegradedIssue) {
+        usage.deliveryOnlyDegradedIssue = item.deliveryOnlyDegradedIssue;
+      }
+    } else if (item.deliveryOnlyMode === 'active' && usage.deliveryOnlyMode !== 'degraded') {
+      usage.deliveryOnlyMode = 'active';
+    }
     if (item.budgetGateTriggered != null) usage.budgetGateTriggered = item.budgetGateTriggered;
     if (item.historyFullTokensBeforeGate != null) {
       usage.historyFullTokensBeforeGate = item.historyFullTokensBeforeGate;
@@ -611,6 +621,8 @@ function pickUsageEventData(data: Record<string, unknown>): Record<string, unkno
     'historyBudgetRatio',
     'summarySegmentId',
     'historyGovernanceDegraded',
+    'deliveryOnlyMode',
+    'deliveryOnlyDegradedIssue',
     'budgetGateTriggered',
     'historyFullTokensBeforeGate',
   ];
