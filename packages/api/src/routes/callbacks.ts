@@ -1719,12 +1719,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     let filtered: Awaited<ReturnType<typeof messageStore.getByThread>>;
 
-    // F35: Viewer for whisper filtering.
-    // Debug mode: cats see everything (like 铲屎官) — full transparency for debugging.
-    // Play mode: cats only see whispers addressed to them — game privacy.
-    const viewer = needsPlayFilter
-      ? { type: 'cat' as const, catId: createCatId(principalCatId) }
-      : { type: 'user' as const };
+    // F35: Callback callers are always cats, including debug mode.
+    // thinkingMode only controls whether another cat's origin=stream is hidden;
+    // it must never promote an agent to the all-seeing user viewer for whispers.
+    const viewer = { type: 'cat' as const, catId: createCatId(principalCatId) };
     const matchesExtraFilters = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
       // F148 Phase E (AC-E2): briefing messages are non-routing, never enter cat context
       if (item.origin === 'briefing') return false;
@@ -1948,9 +1946,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
     }
 
-    const viewer = needsPlayFilter
-      ? { type: 'cat' as const, catId: createCatId(principalCatId) }
-      : { type: 'user' as const };
+    // Callback principals are cats in both debug and play modes. Keep whisper
+    // authorization independent from the thinking-stream presentation mode.
+    const viewer = { type: 'cat' as const, catId: createCatId(principalCatId) };
     const queryTerms = query ? tokenizeKeyword(query) : [];
     const isVisibleForFetch = (item: StoredMessage): boolean => {
       if (item.origin === 'briefing') return false;

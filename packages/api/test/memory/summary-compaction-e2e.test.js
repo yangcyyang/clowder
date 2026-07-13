@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 describe('SummaryCompaction e2e', () => {
   let db;
   let processThread;
+  let buildSummaryCompactionBatch;
   const SUMMARY_CONFIG_OVERRIDE = {
     pendingMessageThreshold: 20,
     pendingTokenThreshold: 1500,
@@ -28,6 +29,10 @@ describe('SummaryCompaction e2e', () => {
     }));
   }
 
+  function makeBatch(messages, excludedPrivateCount = 0, scannedThroughMessageId = messages.at(-1)?.id ?? null) {
+    return { messages, scannedThroughMessageId, excludedPrivateCount };
+  }
+
   beforeEach(async () => {
     db = new Database(':memory:');
     const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
@@ -35,6 +40,7 @@ describe('SummaryCompaction e2e', () => {
 
     const mod = await import('../../dist/domains/memory/SummaryCompactionTask.js');
     processThread = mod.processThread;
+    buildSummaryCompactionBatch = mod.buildSummaryCompactionBatch;
 
     // Seed evidence_docs with a thread
     db.prepare(
@@ -60,7 +66,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000, // 20 min idle
       }),
-      getMessagesAfterWatermark: async (_tid, _after, _limit) => msgs,
+      getMessagesAfterWatermark: async (_tid, _after, _limit) => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -141,7 +147,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -185,6 +191,215 @@ describe('SummaryCompaction e2e', () => {
     assert.match(doc.summary, /without an existing evidence row/);
   });
 
+  it('filters private/noise input, includes revealed whisper, and marks every generated segment', async () => {
+    const now = Date.now();
+    const stored = [
+      {
+        id: 'public-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: null,
+        content: 'public decision',
+        mentions: [],
+        timestamp: now - 8,
+        deliveryStatus: 'delivered',
+      },
+      {
+        id: 'queued-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: null,
+        content: 'QUEUED SECRET',
+        mentions: [],
+        timestamp: now - 7,
+        deliveryStatus: 'queued',
+      },
+      {
+        id: 'system-1',
+        threadId: 'test-thread',
+        userId: 'system',
+        catId: 'system',
+        content: 'SYSTEM NOISE',
+        mentions: [],
+        timestamp: now - 6,
+      },
+      {
+        id: 'progress-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'PROGRESS NOISE',
+        mentions: [],
+        timestamp: now - 5,
+        origin: 'progress',
+      },
+      {
+        id: 'briefing-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'BRIEFING NOISE',
+        mentions: [],
+        timestamp: now - 4,
+        origin: 'briefing',
+      },
+      {
+        id: 'revealed-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'revealed decision',
+        mentions: [],
+        timestamp: now - 3,
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+        revealedAt: now - 2,
+      },
+      {
+        id: 'private-1',
+        threadId: 'test-thread',
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'UNREVEALED PRIVATE SECRET',
+        mentions: [],
+        timestamp: now - 1,
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      },
+    ];
+    const safeBatch = buildSummaryCompactionBatch(stored);
+    assert.deepEqual(
+      safeBatch.messages.map((message) => message.id),
+      ['public-1', 'revealed-1'],
+    );
+    assert.equal(safeBatch.scannedThroughMessageId, 'private-1');
+    assert.equal(safeBatch.excludedPrivateCount, 1);
+
+    let modelInput;
+    let getterCalls = 0;
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getMessagesAfterWatermark: async () => (getterCalls++ === 0 ? safeBatch : makeBatch([])),
+      generateAbstractive: async (input) => {
+        modelInput = input.messages;
+        return {
+          segments: [
+            {
+              summary: 'First public segment',
+              topicKey: 'first',
+              topicLabel: 'First',
+              boundaryReason: 'topic change',
+              boundaryConfidence: 'high',
+              fromMessageId: 'public-1',
+              toMessageId: 'public-1',
+              messageCount: 1,
+            },
+            {
+              summary: 'Revealed segment',
+              topicKey: 'revealed',
+              topicLabel: 'Revealed',
+              boundaryReason: 'topic change',
+              boundaryConfidence: 'high',
+              fromMessageId: 'revealed-1',
+              toMessageId: 'revealed-1',
+              messageCount: 1,
+            },
+          ],
+        };
+      },
+      logger: { info: () => {}, error: () => {} },
+    };
+
+    const result = await processThread(
+      {
+        thread_id: 'test-thread',
+        last_summarized_message_id: null,
+        pending_message_count: stored.length,
+        pending_token_count: 2000,
+        pending_signal_flags: 0,
+        summary_type: 'concat',
+        last_abstractive_at: null,
+        abstractive_token_count: null,
+        carry_over: 0,
+      },
+      deps,
+      SUMMARY_CONFIG_OVERRIDE,
+    );
+
+    assert.equal(result, true);
+    assert.deepEqual(
+      modelInput.map((message) => message.content),
+      ['public decision', 'revealed decision'],
+    );
+    assert.ok(!JSON.stringify(modelInput).includes('UNREVEALED PRIVATE SECRET'));
+    const segments = db
+      .prepare('SELECT summary FROM summary_segments WHERE thread_id = ? ORDER BY from_message_id')
+      .all('test-thread');
+    assert.equal(segments.length, 2);
+    for (const segment of segments) {
+      assert.match(segment.summary, /\n\n（部分私密消息未纳入摘要）$/);
+    }
+    const state = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
+    assert.equal(state.last_summarized_message_id, 'private-1', 'watermark follows raw scan, not model input');
+  });
+
+  it('advances through consecutive all-private batches and clears carry-over without invoking the model', async () => {
+    const firstPrivateBatch = makeBatch([], 200, 'private-200');
+    const secondPrivateBatch = makeBatch([], 25, 'private-225');
+    const batches = [
+      firstPrivateBatch,
+      makeBatch([], 1, 'private-201'),
+      secondPrivateBatch,
+      secondPrivateBatch,
+      makeBatch([]),
+    ];
+    let modelCalls = 0;
+    const deps = {
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({
+        threadId: 'test-thread',
+        lastMessageAt: Date.now() - 20 * 60 * 1000,
+      }),
+      getMessagesAfterWatermark: async () => batches.shift() ?? makeBatch([]),
+      generateAbstractive: async () => {
+        modelCalls += 1;
+        return null;
+      },
+      logger: { info: () => {}, error: () => {} },
+    };
+    const initialState = {
+      thread_id: 'test-thread',
+      last_summarized_message_id: null,
+      pending_message_count: 225,
+      pending_token_count: 2000,
+      pending_signal_flags: 0,
+      summary_type: 'concat',
+      last_abstractive_at: null,
+      abstractive_token_count: null,
+      carry_over: 0,
+    };
+
+    assert.equal(await processThread(initialState, deps, SUMMARY_CONFIG_OVERRIDE), true);
+    const afterFirst = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
+    assert.equal(afterFirst.last_summarized_message_id, 'private-200');
+    assert.equal(afterFirst.carry_over, 1);
+    assert.equal(afterFirst.pending_message_count, 25);
+
+    assert.equal(await processThread(afterFirst, deps, SUMMARY_CONFIG_OVERRIDE), true);
+    const afterSecond = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
+    assert.equal(afterSecond.last_summarized_message_id, 'private-225');
+    assert.equal(afterSecond.carry_over, 0);
+    assert.equal(afterSecond.pending_message_count, 0);
+    assert.equal(modelCalls, 0);
+    assert.equal(batches.length, 0);
+  });
+
   it('sets carry_over=1 when messages remain after batch', async () => {
     const batch1 = makeMsgs(200, 1);
     const remaining = makeMsgs(50, 201);
@@ -200,9 +415,9 @@ describe('SummaryCompaction e2e', () => {
       getMessagesAfterWatermark: async (_tid, afterId, _limit) => {
         callCount++;
         // First call: return batch of 200
-        if (callCount === 1) return batch1;
+        if (callCount === 1) return makeBatch(batch1);
         // Second/third call (remaining check): return 50 remaining
-        return remaining;
+        return makeBatch(remaining);
       },
       generateAbstractive: async () => ({
         segments: [
@@ -257,7 +472,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => null,
       logger: { info: () => {}, error: () => {} },
     };
@@ -296,7 +511,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -352,7 +567,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -419,7 +634,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -473,7 +688,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async () => msgs,
+      getMessagesAfterWatermark: async () => makeBatch(msgs),
       generateAbstractive: async () => ({
         segments: [
           {

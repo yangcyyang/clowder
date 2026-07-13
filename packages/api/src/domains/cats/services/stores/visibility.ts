@@ -47,6 +47,21 @@ export function canViewMessage(msg: StoredMessage, viewer: Viewer): boolean {
   return false;
 }
 
+/**
+ * 摘要压缩只能消费已经公开给整条线程的实质消息。
+ *
+ * 这里故意不采用某只猫或用户的 viewer 视角：未 reveal 的 whisper 即使对
+ * 收件猫可见，也不能进入线程级摘要，否则摘要会把私聊内容扩散给所有参与者。
+ */
+export function isSummaryCompactionEligibleMessage(msg: StoredMessage): boolean {
+  if (msg.deliveryStatus && msg.deliveryStatus !== 'delivered') return false;
+  if (msg.deletedAt || msg._tombstone) return false;
+  if (SYSTEM_USER_IDS.has(msg.userId) || msg.catId === 'system') return false;
+  if (msg.origin === 'progress' || msg.origin === 'briefing') return false;
+  if (msg.visibility === 'whisper' && !msg.revealedAt) return false;
+  return true;
+}
+
 const TOOL_TELEMETRY_LINE_RE =
   /(?:执行已完成，但没有返回文本|记录到\s*\d+\s*个工具事件|最后进度：.*(?:command_execution|file_change|mcp:|exit_code))/i;
 const STARTUP_RECOVERY_RE = /运行服务已恢复|已自动接续|process_restart|服务刚重启/i;

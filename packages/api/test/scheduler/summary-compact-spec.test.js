@@ -4,6 +4,11 @@ import Database from 'better-sqlite3';
 
 describe('SummaryCompactionTaskSpec', () => {
   let db;
+  const batch = (messages) => ({
+    messages,
+    scannedThroughMessageId: messages.at(-1)?.id ?? null,
+    excludedPrivateCount: 0,
+  });
 
   beforeEach(async () => {
     db = new Database(':memory:');
@@ -17,7 +22,7 @@ describe('SummaryCompactionTaskSpec', () => {
       db,
       enabled: () => true,
       getThreadLastActivity: async () => null,
-      getMessagesAfterWatermark: async () => [],
+      getMessagesAfterWatermark: async () => batch([]),
       generateAbstractive: async () => null,
       logger: { info: () => {}, error: () => {} },
     });
@@ -40,7 +45,7 @@ describe('SummaryCompactionTaskSpec', () => {
       enabled: () => true,
       // Thread has been quiet for > 10 minutes
       getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
-      getMessagesAfterWatermark: async () => [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      getMessagesAfterWatermark: async () => batch([{ id: 'm1', content: 'hello', timestamp: Date.now() }]),
       generateAbstractive: async () => ({
         segments: [
           {
@@ -77,7 +82,7 @@ describe('SummaryCompactionTaskSpec', () => {
       enabled: () => true,
       getThreadAllowlist: () => new Set(['canary-thread']),
       getThreadLastActivity: async (threadId) => ({ threadId, lastMessageAt: Date.now() - 20 * 60 * 1000 }),
-      getMessagesAfterWatermark: async () => [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      getMessagesAfterWatermark: async () => batch([{ id: 'm1', content: 'hello', timestamp: Date.now() }]),
       generateAbstractive: async () => null,
       logger: { info: () => {}, error: () => {} },
     });
@@ -96,7 +101,7 @@ describe('SummaryCompactionTaskSpec', () => {
       db: new Database(':memory:'),
       enabled: () => true,
       getThreadLastActivity: async () => null,
-      getMessagesAfterWatermark: async () => [],
+      getMessagesAfterWatermark: async () => batch([]),
       generateAbstractive: async () => null,
       logger: { info: () => {}, error: () => {} },
     });

@@ -143,6 +143,43 @@ describe('Callback routes: agent-key auth path', () => {
     assert.ok(Array.isArray(body.messages));
   });
 
+  test('agent-key history readers use the key cat identity for whisper visibility', async () => {
+    messageStore.append({
+      userId: TEST_USER,
+      catId: null,
+      content: 'whisper-for-bengal',
+      mentions: [],
+      visibility: 'whisper',
+      whisperTo: ['bengal'],
+      timestamp: 1,
+      threadId: ownedThreadId,
+    });
+    messageStore.append({
+      userId: TEST_USER,
+      catId: null,
+      content: 'whisper-for-opus-only',
+      mentions: [],
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+      timestamp: 2,
+      threadId: ownedThreadId,
+    });
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+
+    for (const url of [
+      `/api/callbacks/thread-context?threadId=${ownedThreadId}`,
+      `/api/callbacks/fetch-thread-history?threadId=${ownedThreadId}`,
+    ]) {
+      const res = await app.inject({ method: 'GET', url, headers });
+      assert.equal(res.statusCode, 200);
+      const contents = JSON.parse(res.body).messages.map((message) => message.content);
+      assert.deepEqual(contents, ['whisper-for-bengal']);
+      assert.ok(!res.body.includes('whisper-for-opus-only'));
+    }
+  });
+
   // ---- GET /api/callbacks/message-search ----
 
   test('message-search with agent-key finds owned historical messages globally', async () => {

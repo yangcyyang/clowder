@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { isSummaryCompactionEligibleMessage } from '../cats/services/stores/visibility.js';
 import { getAbstractiveSummaryModelId } from './AbstractiveSummaryClient.js';
 import { hasHighValueSignal, SUMMARY_CONFIG } from './summary-config.js';
 
@@ -19,6 +21,39 @@ interface ThreadLastActivity {
   lastMessageAt: number; // epoch ms
 }
 
+export interface SummaryCompactionMessage {
+  id: string;
+  content: string;
+  catId?: string;
+  timestamp: number;
+}
+
+/**
+ * 扫描结果与模型输入分离：watermark 必须覆盖被隐私规则排除的消息，
+ * 否则全 whisper 批次会在每次调度时被无限重扫。
+ */
+export interface SummaryCompactionBatch {
+  messages: SummaryCompactionMessage[];
+  scannedThroughMessageId: string | null;
+  excludedPrivateCount: number;
+}
+
+/** Build the privacy-safe model input while retaining the raw scan cursor. */
+export function buildSummaryCompactionBatch(messages: readonly StoredMessage[]): SummaryCompactionBatch {
+  return {
+    messages: messages.filter(isSummaryCompactionEligibleMessage).map((message) => ({
+      id: message.id,
+      content: message.content,
+      catId: message.catId ?? undefined,
+      timestamp: message.timestamp,
+    })),
+    scannedThroughMessageId: messages.at(-1)?.id ?? null,
+    excludedPrivateCount: messages.filter(
+      (message) => message.visibility === 'whisper' && !message.revealedAt,
+    ).length,
+  };
+}
+
 export interface SummaryCompactionDeps {
   /** SQLite database (evidence.sqlite) */
   db: Database.Database;
@@ -31,11 +66,11 @@ export interface SummaryCompactionDeps {
     threadId: string,
     afterMessageId: string | null,
     limit: number,
-  ) => Promise<Array<{ id: string; content: string; catId?: string; timestamp: number }>>;
+  ) => Promise<SummaryCompactionBatch>;
   /** Call Opus API to generate abstractive summary + candidates */
   generateAbstractive: (input: {
     previousSummary: string | null;
-    messages: Array<{ id: string; content: string; catId?: string; timestamp: number }>;
+    messages: SummaryCompactionMessage[];
     threadId: string;
   }) => Promise<{
     segments: Array<{
@@ -120,8 +155,30 @@ export async function processThread(
   if (!isEligible(state, lastActivity, config)) return false;
 
   // Get messages after watermark
-  const messages = await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200);
-  if (messages.length === 0) return false;
+  const batch = await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200);
+  const { messages, scannedThroughMessageId, excludedPrivateCount } = batch;
+  if (!scannedThroughMessageId) return false;
+
+  // 全部消息都被过滤时也推进扫描水位；绝不调用摘要模型，也不生成空摘要段。
+  if (messages.length === 0) {
+    deps.db
+      .prepare(
+        `UPDATE summary_state SET
+         last_summarized_message_id = ?,
+         pending_message_count = 0,
+         pending_token_count = 0,
+         pending_signal_flags = 0,
+         carry_over = 0
+         WHERE thread_id = ?`,
+      )
+      .run(scannedThroughMessageId, state.thread_id);
+
+    await refreshCarryOver(state.thread_id, scannedThroughMessageId, deps);
+    deps.logger.info(
+      `[summary-compaction] thread ${state.thread_id}: no public messages, watermark → ${scannedThroughMessageId}`,
+    );
+    return true;
+  }
 
   // Get current summary from evidence_docs (read model)
   const evidenceRow = deps.db
@@ -141,9 +198,16 @@ export async function processThread(
   }
 
   // Dual-write: INSERT segments + UPDATE evidence_docs
-  const lastMsg = messages[messages.length - 1]!;
   const now = new Date().toISOString();
-  const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
+  const privateExclusionNotice = '（部分私密消息未纳入摘要）';
+  const segments = result.segments.map((segment) => ({
+    ...segment,
+    summary:
+      excludedPrivateCount > 0 && !segment.summary.trimEnd().endsWith(privateExclusionNotice)
+        ? `${segment.summary.trimEnd()}\n\n${privateExclusionNotice}`
+        : segment.summary,
+  }));
+  const mergedSummary = segments.map((s) => s.summary).join('\n\n');
   const totalTokens = mergedSummary.length / 4;
   const modelId = getAbstractiveSummaryModelId();
 
@@ -157,7 +221,7 @@ export async function processThread(
 
   const tx = deps.db.transaction(() => {
     // 1. INSERT summary_segments (append-only)
-    for (const seg of result.segments) {
+    for (const seg of segments) {
       const segId = `seg-${state.thread_id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       insertSegment.run(
         segId,
@@ -214,7 +278,7 @@ export async function processThread(
         abstractive_token_count = ?
        WHERE thread_id = ?`,
       )
-      .run(lastMsg.id, now, Math.round(totalTokens), state.thread_id);
+      .run(scannedThroughMessageId, now, Math.round(totalTokens), state.thread_id);
   });
 
   tx();
@@ -236,7 +300,7 @@ export async function processThread(
 
   // H-3: Submit durable candidates to MarkerQueue for knowledge emergence pipeline
   if (deps.submitCandidate) {
-    for (const seg of result.segments) {
+    for (const seg of segments) {
       const candidates = (seg.candidates ?? []) as Array<{
         kind: string;
         title: string;
@@ -264,29 +328,39 @@ export async function processThread(
   // P1 R2 fix (砚砚 review): after compaction, check if there are STILL more messages
   // beyond the new watermark. If so, re-populate pending signal so the thread stays
   // in the scheduling pool. Otherwise a delta > 200 messages would silently stall.
+  await refreshCarryOver(state.thread_id, scannedThroughMessageId, deps);
+
+  deps.logger.info(
+    `[summary-compaction] thread ${state.thread_id}: ${segments.length} segment(s), watermark → ${scannedThroughMessageId}`,
+  );
+  return true;
+}
+
+async function refreshCarryOver(
+  threadId: string,
+  scannedThroughMessageId: string,
+  deps: SummaryCompactionDeps,
+): Promise<void> {
   try {
-    const remaining = await deps.getMessagesAfterWatermark(state.thread_id, lastMsg.id, 1);
-    if (remaining.length > 0) {
-      // Re-count actual remaining (up to 200 to avoid scanning everything)
-      const remainingBatch = await deps.getMessagesAfterWatermark(state.thread_id, lastMsg.id, 200);
-      const estimatedTokens = remainingBatch.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
-      // P1 R3 fix: set carry_over=1 so next tick bypasses cooldown for this backlog
-      deps.db
-        .prepare(
-          `UPDATE summary_state SET pending_message_count = ?, pending_token_count = ?, carry_over = 1
-           WHERE thread_id = ?`,
-        )
-        .run(remainingBatch.length, estimatedTokens, state.thread_id);
-      deps.logger.info(
-        `[summary-compaction] thread ${state.thread_id}: ${remainingBatch.length} messages still pending after batch`,
-      );
-    }
+    const remaining = await deps.getMessagesAfterWatermark(threadId, scannedThroughMessageId, 1);
+    if (!remaining.scannedThroughMessageId) return;
+
+    // Re-count actual remaining (up to 200 to avoid scanning everything).
+    const remainingBatch = await deps.getMessagesAfterWatermark(threadId, scannedThroughMessageId, 200);
+    const estimatedTokens = remainingBatch.messages.reduce(
+      (sum, message) => sum + Math.ceil(message.content.length / 4),
+      0,
+    );
+    const pendingCount = remainingBatch.messages.length + remainingBatch.excludedPrivateCount;
+    // carry_over=1 itself绕过 volume gate，因此即使下一批全是系统噪音，也能继续推进水位。
+    deps.db
+      .prepare(
+        `UPDATE summary_state SET pending_message_count = ?, pending_token_count = ?, carry_over = 1
+         WHERE thread_id = ?`,
+      )
+      .run(pendingCount, estimatedTokens, threadId);
+    deps.logger.info(`[summary-compaction] thread ${threadId}: ${pendingCount} messages still pending after batch`);
   } catch {
     // fail-open: worst case is one missed tick, next append will re-trigger
   }
-
-  deps.logger.info(
-    `[summary-compaction] thread ${state.thread_id}: ${result.segments.length} segment(s), watermark → ${lastMsg.id}`,
-  );
-  return true;
 }

@@ -30,7 +30,11 @@ describe('TaskRunnerV2 bootstrap integration', () => {
       db,
       enabled: () => true,
       getThreadLastActivity: async () => null,
-      getMessagesAfterWatermark: async () => [],
+      getMessagesAfterWatermark: async () => ({
+        messages: [],
+        scannedThroughMessageId: null,
+        excludedPrivateCount: 0,
+      }),
       generateAbstractive: async () => null,
       logger: { info: () => {}, error: () => {} },
     });

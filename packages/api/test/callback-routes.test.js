@@ -855,6 +855,162 @@ describe('Callback Routes', () => {
     assert.equal(body.truncated.byTokens, true);
   });
 
+  for (const thinkingMode of ['debug', 'play']) {
+    test(`GET fetch-thread-history enforces whisper recipients in ${thinkingMode} mode for range/query/recent`, async () => {
+      const thread = await threadStore.create('user-1', `Whisper history ${thinkingMode}`);
+      await threadStore.updateThinkingMode(thread.id, thinkingMode);
+      const app = await createApp();
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+      const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+      const stored = [
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: 'privacy-probe public',
+          mentions: [],
+          timestamp: 1,
+          threadId: thread.id,
+        }),
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: 'privacy-probe hidden-for-opus',
+          mentions: [],
+          visibility: 'whisper',
+          whisperTo: ['codex'],
+          timestamp: 2,
+          threadId: thread.id,
+        }),
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: 'privacy-probe addressed-to-opus',
+          mentions: [],
+          visibility: 'whisper',
+          whisperTo: ['opus'],
+          timestamp: 3,
+          threadId: thread.id,
+        }),
+        messageStore.append({
+          userId: 'user-1',
+          catId: 'codex',
+          content: 'privacy-probe other-cat-stream',
+          mentions: [],
+          origin: 'stream',
+          timestamp: 4,
+          threadId: thread.id,
+        }),
+      ];
+
+      const cases = [
+        {
+          mode: 'range',
+          query: `fromMessageId=${stored[0].id}&toMessageId=${stored[3].id}`,
+        },
+        { mode: 'query', query: 'query=privacy-probe' },
+        { mode: 'recent', query: '' },
+      ];
+
+      const expectedBeforeReveal = new Set([
+        'privacy-probe public',
+        'privacy-probe addressed-to-opus',
+        ...(thinkingMode === 'debug' ? ['privacy-probe other-cat-stream'] : []),
+      ]);
+      const expectedAfterReveal = new Set([
+        'privacy-probe public',
+        'privacy-probe hidden-for-opus',
+        'privacy-probe addressed-to-opus',
+        ...(thinkingMode === 'debug' ? ['privacy-probe other-cat-stream'] : []),
+      ]);
+
+      for (const testCase of cases) {
+        const suffix = testCase.query ? `&${testCase.query}` : '';
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/callbacks/fetch-thread-history?limit=20&maxTokens=5000${suffix}`,
+          headers,
+        });
+        assert.equal(response.statusCode, 200);
+        const body = JSON.parse(response.body);
+        assert.equal(body.mode, testCase.mode);
+        assert.deepEqual(new Set(body.messages.map((message) => message.content)), expectedBeforeReveal);
+        assert.ok(!response.body.includes('hidden-for-opus'), `${testCase.mode} leaked a non-recipient whisper`);
+      }
+
+      await messageStore.revealWhispers(thread.id, 'user-1');
+
+      for (const testCase of cases) {
+        const suffix = testCase.query ? `&${testCase.query}` : '';
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/callbacks/fetch-thread-history?limit=20&maxTokens=5000${suffix}`,
+          headers,
+        });
+        assert.equal(response.statusCode, 200);
+        const body = JSON.parse(response.body);
+        assert.equal(body.mode, testCase.mode);
+        assert.deepEqual(new Set(body.messages.map((message) => message.content)), expectedAfterReveal);
+      }
+    });
+
+    test(`GET thread-context enforces whisper recipients in ${thinkingMode} mode and honors reveal`, async () => {
+      const thread = await threadStore.create('user-1', `Whisper context ${thinkingMode}`);
+      await threadStore.updateThinkingMode(thread.id, thinkingMode);
+      const app = await createApp();
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+      const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+      for (const message of [
+        { content: 'context public', timestamp: 1 },
+        {
+          content: 'context hidden-for-opus',
+          visibility: 'whisper',
+          whisperTo: ['codex'],
+          timestamp: 2,
+        },
+        {
+          content: 'context addressed-to-opus',
+          visibility: 'whisper',
+          whisperTo: ['opus'],
+          timestamp: 3,
+        },
+      ]) {
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          mentions: [],
+          threadId: thread.id,
+          ...message,
+        });
+      }
+
+      const beforeReveal = await app.inject({
+        method: 'GET',
+        url: '/api/callbacks/thread-context?limit=20',
+        headers,
+      });
+      assert.equal(beforeReveal.statusCode, 200);
+      assert.deepEqual(
+        JSON.parse(beforeReveal.body).messages.map((message) => message.content),
+        ['context public', 'context addressed-to-opus'],
+      );
+      assert.ok(!beforeReveal.body.includes('hidden-for-opus'));
+
+      await messageStore.revealWhispers(thread.id, 'user-1');
+      const afterReveal = await app.inject({
+        method: 'GET',
+        url: '/api/callbacks/thread-context?limit=20',
+        headers,
+      });
+      assert.equal(afterReveal.statusCode, 200);
+      assert.deepEqual(
+        JSON.parse(afterReveal.body).messages.map((message) => message.content),
+        ['context public', 'context hidden-for-opus', 'context addressed-to-opus'],
+      );
+    });
+  }
+
   test('GET thread-context supports catId filter (cat + user)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

@@ -847,6 +847,7 @@ async function main(): Promise<void> {
   if (process.env.F102_ABSTRACTIVE === 'on' && memoryServices.indexBuilder) {
     try {
       const { createSummaryCompactionTaskSpec } = await import('./domains/memory/SummaryCompactionTaskSpec.js');
+      const { buildSummaryCompactionBatch } = await import('./domains/memory/SummaryCompactionTask.js');
       const { DEFAULT_PI_SUMMARY_MODEL, createAbstractiveClient, createAgentAbstractiveClient, getSummaryProviderId } =
         await import('./domains/memory/AbstractiveSummaryClient.js');
       const parseThreadListEnv = (value: string | undefined): Set<string> | null => {
@@ -950,12 +951,7 @@ async function main(): Promise<void> {
             limit,
             'default-user',
           );
-          return msgs.map((m) => ({
-            id: m.id,
-            content: m.content,
-            catId: m.catId ?? undefined,
-            timestamp: m.timestamp,
-          }));
+          return buildSummaryCompactionBatch(msgs);
         },
         generateAbstractive,
         getThreadAllowlist: getSummaryThreadAllowlist,
