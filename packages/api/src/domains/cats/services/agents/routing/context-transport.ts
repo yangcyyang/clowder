@@ -379,17 +379,30 @@ export function scoreImportance(
 
 /**
  * F148 Phase C: Select top anchors from omitted messages.
- * Guarantees primacy anchor (index 0) is always included (AC-C3).
+ * Guarantees primacy anchor (index 0) by default (AC-C3). Callers selecting
+ * from a post-summary slice may disable primacy so it is not mislabeled as the
+ * real thread opener.
  * Returns anchors sorted by original index (chronological order).
  */
 export function selectAnchors(
   omitted: readonly StoredMessage[],
   queryTerms: string[],
   maxAnchors = 3,
+  options: { ensurePrimacy?: boolean } = {},
 ): ScoredMessage[] {
   if (omitted.length === 0 || maxAnchors <= 0) return [];
 
-  const scored = omitted.map((msg, i) => scoreImportance(msg, i, omitted.length, queryTerms));
+  const ensurePrimacy = options.ensurePrimacy ?? true;
+  const scored = omitted.map((msg, i) => {
+    const scoredMessage = scoreImportance(msg, i, omitted.length, queryTerms);
+    if (ensurePrimacy || !scoredMessage.isPrimacy) return scoredMessage;
+    return {
+      ...scoredMessage,
+      score: scoredMessage.score - scoredMessage.signals.positional,
+      signals: { ...scoredMessage.signals, positional: 0 },
+      isPrimacy: false,
+    };
+  });
   const sorted = [...scored].sort((a, b) => b.score - a.score);
 
   // Take top N
@@ -397,7 +410,7 @@ export function selectAnchors(
 
   // Ensure primacy is included (AC-C3)
   const hasPrimacy = selected.some((s) => s.isPrimacy);
-  if (!hasPrimacy && scored.length > 0) {
+  if (ensurePrimacy && !hasPrimacy && scored.length > 0) {
     const primacy = scored[0]; // index 0 = primacy
     selected.pop(); // remove lowest-scoring from selected
     selected.push(primacy);

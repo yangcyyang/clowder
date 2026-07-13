@@ -1331,6 +1331,22 @@ export interface IncrementalContextResult {
   intentSnapshot?: AgentIntentSnapshot;
   /** F004 Phase 2: prompt carries only a content-free unread notification. */
   contentFreeInbox?: ContentFreeInbox;
+  /** F004 Phase 2: independent invocation used the summary + anchors delivery envelope. */
+  deliveryOnly?: DeliveryOnlyContextObservation;
+}
+
+export type DeliveryOnlyDegradationIssue =
+  | 'missing_trigger'
+  | 'missing_summary'
+  | 'summary_quality_failed'
+  | 'summary_budget_exhausted'
+  | 'unrevealed_whisper';
+
+export interface DeliveryOnlyContextObservation {
+  mode: 'active' | 'degraded';
+  anchorCount: number;
+  summarySegmentIds: readonly string[];
+  degradedIssue?: DeliveryOnlyDegradationIssue;
 }
 
 export interface ContentFreeInbox {
@@ -1534,10 +1550,11 @@ export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefi
 export function shouldAppendExplicitCurrentMessage(
   inc: Pick<
     IncrementalContextResult,
-    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox'
+    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox' | 'deliveryOnly'
   >,
   currentUserMessageId: string | undefined,
 ): boolean {
+  if (inc.deliveryOnly?.mode === 'active') return true;
   if (inc.contentFreeInbox) return false;
   if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
   if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
@@ -1547,12 +1564,16 @@ export function shouldAppendExplicitCurrentMessage(
 export function selectExplicitPromptMessage(
   inc: Pick<
     IncrementalContextResult,
-    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox'
+    'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut' | 'contentFreeInbox' | 'deliveryOnly'
   >,
   currentUserMessageId: string | undefined,
   message: string,
   a2a?: { directMessageFrom?: CatId; triggerMessageId?: string; triggerContent?: string },
 ): string | undefined {
+  if (inc.deliveryOnly && a2a?.directMessageFrom && a2a.triggerMessageId) {
+    return formatA2ATriggerPrompt(message, a2a.triggerMessageId);
+  }
+  if (inc.deliveryOnly?.mode === 'active') return message;
   if (inc.contentFreeInbox && a2a?.directMessageFrom && a2a.triggerMessageId) {
     return formatA2ATriggerPrompt(a2a.triggerContent, a2a.triggerMessageId);
   }
@@ -2031,12 +2052,20 @@ export interface IncrementalContextOptions {
   historyGovernanceEnv?: NodeJS.ProcessEnv;
   /** F004 Phase 2 canary override. Defaults to CAT_CAFE_CONTENT_FREE_INBOX_THREADS. */
   contentFreeInboxEnabled?: boolean;
+  /** F004 Phase 2 route-controlled eligibility. Parallel callers must leave this false/undefined. */
+  deliveryOnlyEnabled?: boolean;
+  /** Full route payload used to rank anchors; may contain a queued message batch. */
+  deliveryOnlyTriggerContent?: string;
   /** Current A2A trigger is injected in full and must not also appear as unread. */
   a2aTriggerMessageId?: string;
 }
 
 export function isContentFreeInboxEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
   return listMatches(env.CAT_CAFE_CONTENT_FREE_INBOX_THREADS, threadId);
+}
+
+export function isDeliveryOnlyEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return listMatches(env.CAT_CAFE_DELIVERY_ONLY_THREADS, threadId);
 }
 
 /** Shared unread projection for prompt injection and cat_cafe_check_inbox. */
@@ -2132,6 +2161,165 @@ export function formatContentFreeInbox(inbox: ContentFreeInbox, maxTokens = 49):
   return `[Inbox] unread=${inbox.unreadCount}; ids=check; use cat_cafe_check_inbox`;
 }
 
+interface DeliveryOnlyAttemptSuccess {
+  ok: true;
+  contextText: string;
+  anchorCount: number;
+  summary: FormattedThreadHistorySummary;
+}
+
+interface DeliveryOnlyAttemptFailure {
+  ok: false;
+  issue: DeliveryOnlyDegradationIssue;
+  summarySegmentIds: readonly string[];
+  qualityIssues: readonly HistorySummaryQualityIssue[];
+}
+
+type DeliveryOnlyAttempt = DeliveryOnlyAttemptSuccess | DeliveryOnlyAttemptFailure;
+
+function deliveryOnlyQueryTerms(content: string): string[] {
+  return sanitizeInjectedContent(content)
+    .toLowerCase()
+    .split(/[^a-zA-Z0-9\u4e00-\u9fff]+/)
+    .filter((term) => term.length >= 3);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: fail-safe guards stay linear and co-located.
+async function tryAssembleDeliveryOnlyContext(input: {
+  deps: RouteStrategyDeps;
+  userId: string;
+  threadId: string;
+  catId: CatId;
+  currentUserMessageId: string | undefined;
+  thinkingMode: 'debug' | 'play';
+  options: IncrementalContextOptions | undefined;
+}): Promise<DeliveryOnlyAttempt> {
+  if (!input.currentUserMessageId) {
+    return { ok: false, issue: 'missing_trigger', summarySegmentIds: [], qualityIssues: [] };
+  }
+
+  // Canary guard must inspect the complete delivered thread, not an arbitrary recent cap:
+  // one older unrevealed whisper is enough to make existing summary provenance unsafe.
+  const allMessages = await Promise.resolve(
+    input.deps.messageStore.getByThreadAfter(input.threadId, undefined, undefined, input.userId),
+  );
+  if (
+    allMessages.some(
+      (message) => message.visibility === 'whisper' && !message.revealedAt && !message.deletedAt && !message._tombstone,
+    )
+  ) {
+    return { ok: false, issue: 'unrevealed_whisper', summarySegmentIds: [], qualityIssues: [] };
+  }
+
+  const summary = await readThreadHistorySummaryForContext(input.deps.threadHistorySummaryStore, input.threadId);
+  if (!summary) {
+    return { ok: false, issue: 'missing_summary', summarySegmentIds: [], qualityIssues: ['empty_summary'] };
+  }
+
+  const summaryWatermark = summary.watermarkMessageId;
+  const trigger = allMessages.find((message) => message.id === input.currentUserMessageId);
+  if (!trigger || !summaryWatermark) {
+    return {
+      ok: false,
+      issue: trigger ? 'summary_quality_failed' : 'missing_trigger',
+      summarySegmentIds: summary.segmentIds,
+      qualityIssues: trigger ? ['summary_missing_structure'] : [],
+    };
+  }
+  if (summaryWatermark >= input.currentUserMessageId) {
+    return {
+      ok: false,
+      issue: 'summary_quality_failed',
+      summarySegmentIds: summary.segmentIds,
+      qualityIssues: ['summary_overlaps_recent_window'],
+    };
+  }
+
+  const visible = selectUnreadMessagesForCat(allMessages, input.catId, input.thinkingMode);
+  const seenIds = new Set<string>();
+  const anchorCandidates = visible
+    .filter(
+      (message) =>
+        isDelivered(message) &&
+        !message.deletedAt &&
+        !message._tombstone &&
+        message.id > summaryWatermark &&
+        message.id < input.currentUserMessageId! &&
+        message.id !== input.currentUserMessageId,
+    )
+    .filter((message) => {
+      if (seenIds.has(message.id)) return false;
+      seenIds.add(message.id);
+      return true;
+    })
+    .map((message) => {
+      const content = sanitizeInjectedContent(digestRichBlocks(message)).trim();
+      return content === message.content ? message : { ...message, content };
+    })
+    .filter((message) => message.content.length > 0);
+
+  // deliveryOnly makes summary mandatory independent of the normal history-ratio threshold.
+  const quality = validateThreadHistorySummaryQuality({
+    summary,
+    mode: 'summary-active',
+    recentMessages: anchorCandidates,
+    recentMessageLimit: Math.max(1, anchorCandidates.length),
+  });
+  if (!quality.ok) {
+    return {
+      ok: false,
+      issue: 'summary_quality_failed',
+      summarySegmentIds: summary.segmentIds,
+      qualityIssues: quality.issues,
+    };
+  }
+
+  const budget = input.options?.contextBudget ?? getCatContextBudget(input.catId as string);
+  const effectiveTokenBudget = input.options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+  if (effectiveTokenBudget <= 0 || estimateTokens(summary.text) > effectiveTokenBudget) {
+    return {
+      ok: false,
+      issue: 'summary_budget_exhausted',
+      summarySegmentIds: summary.segmentIds,
+      qualityIssues: [],
+    };
+  }
+
+  const triggerQueryContent = input.options?.deliveryOnlyTriggerContent ?? trigger.content;
+  let anchors = selectAnchors(anchorCandidates, deliveryOnlyQueryTerms(triggerQueryContent), 3, {
+    ensurePrimacy: false,
+  });
+  const renderAnchorLines = () => formatAnchors(anchors, budget.maxContentLengthPerMsg);
+  let anchorLines = renderAnchorLines();
+  const totalTokens = () => estimateTokens([summary.text, ...anchorLines].join('\n'));
+
+  // Summary is mandatory. Under pressure remove the least valuable optional anchor first.
+  while (anchors.length > 0 && totalTokens() > effectiveTokenBudget) {
+    let lowestScoreIndex = 0;
+    for (let index = 1; index < anchors.length; index++) {
+      if (anchors[index].score < anchors[lowestScoreIndex].score) lowestScoreIndex = index;
+    }
+    anchors.splice(lowestScoreIndex, 1);
+    anchorLines = renderAnchorLines();
+  }
+
+  if (totalTokens() > effectiveTokenBudget) {
+    return {
+      ok: false,
+      issue: 'summary_budget_exhausted',
+      summarySegmentIds: summary.segmentIds,
+      qualityIssues: [],
+    };
+  }
+
+  return {
+    ok: true,
+    contextText: [summary.text, ...anchorLines].join('\n'),
+    anchorCount: anchors.length,
+    summary: { ...summary, mode: 'summary-active' },
+  };
+}
+
 export async function assembleIncrementalContext(
   deps: RouteStrategyDeps,
   userId: string,
@@ -2159,7 +2347,10 @@ export async function assembleIncrementalContext(
   const contentFreeInboxEnabled =
     options?.contentFreeInboxEnabled ??
     isContentFreeInboxEnabled(threadId, options?.historyGovernanceEnv ?? process.env);
-  if (contentFreeInboxEnabled) {
+  // Route strategy owns eligibility: this prevents the env allowlist from changing route-parallel behavior.
+  const deliveryOnlyEnabled = options?.deliveryOnlyEnabled === true;
+  const deliveryOnlyA2ABypassesContentFree = deliveryOnlyEnabled && Boolean(options?.a2aTriggerMessageId);
+  if (contentFreeInboxEnabled && !deliveryOnlyA2ABypassesContentFree) {
     const inbox = buildContentFreeInbox(threadId, relevant, {
       ...(options?.a2aTriggerMessageId ? { excludeMessageId: options.a2aTriggerMessageId } : {}),
     });
@@ -2170,6 +2361,67 @@ export async function assembleIncrementalContext(
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       contentFreeInbox: inbox,
+    };
+  }
+
+  if (deliveryOnlyEnabled) {
+    const attempt = await tryAssembleDeliveryOnlyContext({
+      deps,
+      userId,
+      threadId,
+      catId,
+      currentUserMessageId,
+      thinkingMode: effectiveThinkingMode,
+      options,
+    });
+    if (attempt.ok) {
+      return {
+        contextText: attempt.contextText,
+        boundaryId: relevant.at(-1)?.id ?? cursor,
+        includedHistoryCount: attempt.anchorCount,
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut,
+        historySummary: attempt.summary,
+        historyGovernanceDegraded: false,
+        historyGovernanceQualityIssues: [],
+        deliveryOnly: {
+          mode: 'active',
+          anchorCount: attempt.anchorCount,
+          summarySegmentIds: attempt.summary.segmentIds,
+        },
+      };
+    }
+
+    log.warn(
+      { threadId, catId, issue: attempt.issue, qualityIssues: attempt.qualityIssues },
+      'deliveryOnly guard failed; falling back to normal incremental context',
+    );
+    const fallback = await assembleIncrementalContext(
+      deps,
+      userId,
+      threadId,
+      catId,
+      currentUserMessageId,
+      thinkingMode,
+      {
+        ...options,
+        deliveryOnlyEnabled: false,
+        contentFreeInboxEnabled: false,
+      },
+    );
+    return {
+      ...fallback,
+      degradation: [`⚠️ deliveryOnly 已降级: ${attempt.issue}；已回退到常规增量上下文`, fallback.degradation]
+        .filter(Boolean)
+        .join('\n'),
+      historyGovernanceDegraded: true,
+      ...(attempt.qualityIssues.length > 0 ? { historyGovernanceQualityIssues: attempt.qualityIssues } : {}),
+      deliveryOnly: {
+        mode: 'degraded',
+        anchorCount: 0,
+        summarySegmentIds: attempt.summarySegmentIds,
+        degradedIssue: attempt.issue,
+      },
     };
   }
 

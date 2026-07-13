@@ -1533,6 +1533,14 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CAT_CAFE_DELIVERY_ONLY_THREADS',
+    defaultValue: '(未设置)',
+    description: 'F004 二期 deliveryOnly canary thread allowlist，逗号分隔；* 表示全量',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CAT_CAFE_SUMMARY_COMPACTION_THREADS',
     defaultValue: '(未设置)',
     description:

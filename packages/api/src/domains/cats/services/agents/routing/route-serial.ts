@@ -113,6 +113,7 @@ import {
   getService,
   getThreadBootcampMemberCount,
   isContentFreeInboxEnabled,
+  isDeliveryOnlyEnabled,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   parseCompactBoundarySystemInfo,
@@ -501,6 +502,10 @@ export async function* routeSerial(
           : undefined;
       const a2aTriggerMessageId = worklistEntry.a2aTriggerMessageId.get(catId);
       const contentFreeInboxEnabled = isContentFreeInboxEnabled(threadId);
+      // F004 Phase 2: deliveryOnly is deliberately limited to a truly independent
+      // single-target invocation. Once a serial A2A chain exists, every remaining
+      // hop keeps the normal bounded history window.
+      const deliveryOnlyEnabled = worklist.length === 1 && isDeliveryOnlyEnabled(threadId);
       const streamReplyTo = a2aTriggerMessageId ?? options.replyToMessageId;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
@@ -613,7 +618,11 @@ export async function* routeSerial(
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
         ...(directMessageFrom ? { directMessageFrom } : {}),
         ...(directMessageFrom && a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
-        ...(directMessageFrom && a2aTriggerMessageId && streamReplyPreview?.content && !contentFreeInboxEnabled
+        ...(directMessageFrom &&
+        a2aTriggerMessageId &&
+        streamReplyPreview?.content &&
+        !contentFreeInboxEnabled &&
+        !deliveryOnlyEnabled
           ? { a2aTriggerContent: streamReplyPreview.content }
           : {}),
         ...(pingPongWarning ? { pingPongWarning } : {}),
@@ -690,8 +699,8 @@ export async function* routeSerial(
             .join('\n'),
         );
         const explicitMessageForBudget =
-          contentFreeInboxEnabled && directMessageFrom && a2aTriggerMessageId
-            ? formatA2ATriggerPrompt(a2aTriggerContent, a2aTriggerMessageId)
+          (contentFreeInboxEnabled || deliveryOnlyEnabled) && directMessageFrom && a2aTriggerMessageId
+            ? formatA2ATriggerPrompt(deliveryOnlyEnabled ? message : a2aTriggerContent, a2aTriggerMessageId)
             : message;
         const incMessageTokens = estimateTokens(explicitMessageForBudget);
         const effectiveMaxContextTokens = Math.min(
@@ -712,6 +721,8 @@ export async function* routeSerial(
             canonicalFeatureId: loadFullContext ? sopStageHint?.featureId : undefined,
             threadTitle: routeThread?.title ?? undefined,
             contentFreeInboxEnabled,
+            deliveryOnlyEnabled,
+            ...(deliveryOnlyEnabled ? { deliveryOnlyTriggerContent: message } : {}),
             ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
             ...(historyObservation ? { historyObservation } : {}),
           },
