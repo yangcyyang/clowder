@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -124,4 +133,113 @@ test('subscription mode removes an inherited XAI_API_KEY from the child environm
   );
 
   assert.equal(spawnOptions.env.XAI_API_KEY, null);
+});
+
+test('injects an isolated native MCP config without persisting callback or account secrets', async () => {
+  const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-source-home-'));
+  const mcpServerPath = join(sourceGrokHome, 'mcp-server.js');
+  writeFileSync(mcpServerPath, '// test MCP entry\n');
+  let runtimeHome;
+  let config = '';
+  let bridge = '';
+  let authPath;
+  let runtimeSessions;
+  let configMode;
+  let bridgeMode;
+
+  async function* spawnCliOverride(options) {
+    runtimeHome = options.env.GROK_HOME;
+    authPath = options.env.GROK_AUTH_PATH;
+    if (runtimeHome) {
+      config = readFileSync(join(runtimeHome, 'config.toml'), 'utf8');
+      bridge = readFileSync(join(runtimeHome, 'cat-cafe-mcp-bridge.mjs'), 'utf8');
+      runtimeSessions = realpathSync(join(runtimeHome, 'sessions'));
+      configMode = statSync(join(runtimeHome, 'config.toml')).mode & 0o777;
+      bridgeMode = statSync(join(runtimeHome, 'cat-cafe-mcp-bridge.mjs')).mode & 0o777;
+    }
+
+    yield { type: 'text', data: 'ok' };
+    yield { type: 'end', sessionId: 'grok-native-mcp-session' };
+  }
+
+  try {
+    const service = new GrokAgentService({ model: 'grok-4.5', grokHome: sourceGrokHome, mcpServerPath });
+    await collect(
+      service.invoke('Use a task tool', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-native-mcp',
+          CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+          CAT_CAFE_USER_ID: 'user-1',
+          CAT_CAFE_CAT_ID: 'grok',
+          CAT_CAFE_THREAD_ID: 'thread-1',
+          CAT_CAFE_GROK_PROFILE_MODE: 'api_key',
+          XAI_API_KEY: 'xai-account-secret',
+          ALLOWED_WORKSPACE_DIRS: sourceGrokHome,
+        },
+        spawnCliOverride,
+      }),
+    );
+
+    assert.ok(runtimeHome, 'native MCP invocation should receive an isolated GROK_HOME');
+    assert.match(config, /cat-cafe-clowder-runtime/);
+    assert.match(config, new RegExp(mcpServerPath.replaceAll('\\', '\\\\')));
+    assert.doesNotMatch(config, /callback-secret/);
+    assert.doesNotMatch(config, /xai-account-secret/);
+    assert.match(bridge, /CAT_CAFE_CALLBACK_TOKEN/);
+    assert.match(bridge, /ALLOWED_WORKSPACE_DIRS/);
+    assert.doesNotMatch(bridge, /XAI_API_KEY/);
+    assert.equal(configMode, 0o600);
+    assert.equal(bridgeMode, 0o600);
+    assert.equal(authPath, join(runtimeHome, 'auth.json'));
+    assert.equal(runtimeSessions, realpathSync(join(sourceGrokHome, 'sessions')));
+    assert.equal(existsSync(runtimeHome), false, 'ephemeral Grok home should be removed after invocation');
+  } finally {
+    rmSync(sourceGrokHome, { recursive: true, force: true });
+  }
+});
+
+test('subscription native MCP mode reuses the existing Grok auth and session store', async () => {
+  const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-subscription-home-'));
+  const sourceSessions = join(sourceGrokHome, 'sessions');
+  const sourceAuth = join(sourceGrokHome, 'auth.json');
+  const mcpServerPath = join(sourceGrokHome, 'mcp-server.js');
+  mkdirSync(sourceSessions);
+  writeFileSync(sourceAuth, '{}\n');
+  writeFileSync(mcpServerPath, '// test MCP entry\n');
+  let runtimeHome;
+  let authPath;
+  let xaiApiKey;
+  let runtimeSessions;
+
+  async function* spawnCliOverride(options) {
+    runtimeHome = options.env.GROK_HOME;
+    authPath = options.env.GROK_AUTH_PATH;
+    xaiApiKey = options.env.XAI_API_KEY;
+    if (runtimeHome) runtimeSessions = realpathSync(join(runtimeHome, 'sessions'));
+    yield { type: 'text', data: 'ok' };
+    yield { type: 'end', sessionId: 'grok-subscription-native-mcp-session' };
+  }
+
+  try {
+    const service = new GrokAgentService({ model: 'grok-4.5', grokHome: sourceGrokHome, mcpServerPath });
+    await collect(
+      service.invoke('Continue with tools', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-subscription-mcp',
+          CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+          CAT_CAFE_GROK_PROFILE_MODE: 'subscription',
+        },
+        spawnCliOverride,
+      }),
+    );
+
+    assert.ok(runtimeHome, 'subscription invocation should receive an isolated GROK_HOME');
+    assert.equal(xaiApiKey, null);
+    assert.equal(authPath, sourceAuth);
+    assert.equal(runtimeSessions, realpathSync(sourceSessions));
+  } finally {
+    rmSync(sourceGrokHome, { recursive: true, force: true });
+  }
 });
