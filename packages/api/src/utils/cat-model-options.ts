@@ -18,6 +18,7 @@ const STATIC_PRESETS: Partial<Record<ClientId, CatModelOptionPreset>> = {
   openai: { defaultModel: 'gpt-5.6-sol', models: LOCAL_CLI_MODELS_PROBES.codex.static ?? [] },
   google: { defaultModel: 'gemini-3.1-pro-preview', models: LOCAL_CLI_MODELS_PROBES.gemini.static ?? [] },
   kimi: { defaultModel: 'kimi-code/kimi-for-coding', models: LOCAL_CLI_MODELS_PROBES.kimi.static ?? [] },
+  grok: { defaultModel: 'grok-4.5', models: LOCAL_CLI_MODELS_PROBES.grok.static ?? [] },
   opencode: { defaultModel: 'xiaomi-mimo/mimo-v2.5-pro', models: LOCAL_CLI_MODELS_PROBES.opencode.static ?? [] },
   dare: { defaultModel: 'claude-fable-5', models: ['claude-fable-5'] },
   pi: {

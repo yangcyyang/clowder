@@ -17,6 +17,40 @@ function probeWithIsolatedHome(options) {
 }
 
 describe('probeLocalAgentClis', () => {
+  it('detects grok and parses only model IDs from its human-readable catalog', async () => {
+    const results = await probeWithIsolatedHome({
+      resolveCommand(command) {
+        return command === 'grok' ? '/opt/bin/grok' : null;
+      },
+      async runCommand(_file, args) {
+        if (args[0] === '--version') return { stdout: 'grok 0.2.93', stderr: '' };
+        assert.deepEqual(args, ['models']);
+        return {
+          stdout: [
+            'You are logged in with grok.com.',
+            '',
+            'Default model: grok-4.5',
+            '',
+            'Available models:',
+            '  * grok-4.5 (default)',
+            '  - grok-composer-2.5-fast',
+          ].join('\n'),
+          stderr: '',
+        };
+      },
+    });
+
+    const grok = results.find((item) => item.id === 'grok');
+    assert.equal(grok?.installed, true);
+    assert.equal(grok?.clientId, 'grok');
+    assert.equal(grok?.defaultModel, 'grok-4.5');
+    assert.equal(grok?.modelsStatus, 'ok');
+    assert.deepEqual(grok?.models, [
+      { id: 'grok-4.5', source: 'cli', isDefault: true },
+      { id: 'grok-composer-2.5-fast', source: 'cli' },
+    ]);
+  });
+
   it('only probes the fixed agent CLI allowlist', async () => {
     const resolved = [];
     const executed = [];

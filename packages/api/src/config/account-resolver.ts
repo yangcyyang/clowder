@@ -96,6 +96,8 @@ const BUILTIN_ACCOUNT_MAP: Record<string, BuiltinAccountClient> = {
   builtin_google: 'google',
   kimi: 'kimi',
   builtin_kimi: 'kimi',
+  grok: 'grok',
+  builtin_grok: 'grok',
   dare: 'dare',
   builtin_dare: 'dare',
   opencode: 'opencode',
@@ -221,6 +223,7 @@ function normalizeToClient(clientOrProtocol: string): BuiltinAccountClient | nul
     case 'openai':
     case 'google':
     case 'kimi':
+    case 'grok':
     case 'dare':
     case 'opencode':
       return clientOrProtocol;

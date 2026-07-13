@@ -390,6 +390,12 @@ describe('buildProbeEnv (unit)', () => {
     assert.equal(env.CAT_CAFE_KIMI_BASE_URL, 'https://api.moonshot.cn');
   });
 
+  test('grok: sets XAI_API_KEY', async () => {
+    const { buildProbeEnv } = await import('../dist/routes/first-run-quest.js');
+    const env = buildProbeEnv('grok', 'xai-key');
+    assert.equal(env.XAI_API_KEY, 'xai-key');
+  });
+
   test('unknown protocol: falls back to generic API_KEY', async () => {
     const { buildProbeEnv } = await import('../dist/routes/first-run-quest.js');
     const env = buildProbeEnv('unknown-provider', 'some-key', 'https://custom.api');

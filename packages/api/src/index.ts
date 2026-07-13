@@ -67,6 +67,7 @@ import {
   DareAgentService,
   DeliveryCursorStore,
   GeminiAgentService,
+  GrokAgentService,
   getEventAuditLog,
   KimiAgentService,
   MemoryGovernanceStore,
@@ -1134,6 +1135,9 @@ async function main(): Promise<void> {
         }
         case 'kimi':
           service = new KimiAgentService({ catId });
+          break;
+        case 'grok':
+          service = new GrokAgentService({ catId, cliCommand: config.cli?.command });
           break;
         case 'dare':
           service = new DareAgentService({ catId });

@@ -870,6 +870,106 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it('adopts a scanned Grok CLI with its builtin account and default model', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            providers: [
+              {
+                id: 'grok',
+                provider: 'grok',
+                displayName: 'Grok',
+                name: 'Grok',
+                authType: 'oauth',
+                kind: 'builtin',
+                builtin: true,
+                mode: 'subscription',
+                clientId: 'grok',
+                models: ['grok-4'],
+                hasApiKey: false,
+                createdAt: '2026-07-13T00:00:00.000Z',
+                updatedAt: '2026-07-13T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(jsonResponse({ clients: { grok: { models: ['grok-4'] } } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      if (path === '/api/local-cli-probes') {
+        return Promise.resolve(
+          jsonResponse({
+            clis: [
+              {
+                id: 'grok',
+                label: 'Grok CLI',
+                command: 'grok',
+                clientId: 'grok',
+                defaultModel: 'grok-fallback',
+                models: [{ id: 'grok-4', source: 'config', isDefault: true }],
+                modelsStatus: 'config_only',
+                installed: true,
+                resolvedPath: '/usr/local/bin/grok',
+                version: 'grok 1.0.0',
+                versionStatus: 'ok',
+                authStatus: 'unknown',
+                authStatusReason: '安全模式：不读取凭证文件。',
+                installHint: 'npm install -g @vibe-kit/grok-cli',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-grok' } }, 201));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    const scanButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '扫描本机 CLI 与模型',
+    );
+    await act(async () => {
+      scanButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const adoptGrok = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '用 Grok CLI',
+    );
+    expect(adoptGrok).toBeTruthy();
+    await act(async () => {
+      adoptGrok?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '本地 Grok');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '本机 Grok 执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@grok');
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/cats');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.clientId).toBe('grok');
+    expect(payload.accountRef).toBe('grok');
+    expect(payload.defaultModel).toBe('grok-4');
+  });
+
   it('AC-C2: defaults API-key member aliases to the selected model name', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string) => {

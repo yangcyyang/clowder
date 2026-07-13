@@ -433,6 +433,74 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
+  it('POST /api/cats creates a Grok member with the default CLI when the builtin account exists', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    writeFileSync(
+      join(projectRoot, '.cat-cafe', 'accounts.json'),
+      `${JSON.stringify(
+        {
+          grok: {
+            authType: 'oauth',
+            clientId: 'grok',
+            displayName: 'Grok',
+            models: ['grok-4.5'],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf-8',
+    );
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-grok',
+          name: 'Grok Cat',
+          displayName: 'Grok Cat',
+          avatar: '/avatars/grok.png',
+          color: { primary: '#111827', secondary: '#f3f4f6' },
+          mentionPatterns: ['@runtime-grok'],
+          roleDescription: 'Grok CLI runtime member',
+          clientId: 'grok',
+          accountRef: 'grok',
+          defaultModel: 'grok-4.5',
+        }),
+      });
+
+      assert.equal(createRes.statusCode, 201);
+      const created = JSON.parse(createRes.body).cat;
+      assert.equal(created.clientId, 'grok');
+      assert.equal(created.accountRef, 'grok');
+      assert.equal(created.defaultModel, 'grok-4.5');
+      assert.equal(created.cli.command, 'grok');
+      assert.equal(created.cli.outputFormat, 'streaming-json');
+
+      const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      const variant = catalog.breeds.find((breed) => breed.catId === 'runtime-grok')?.variants?.[0];
+      assert.equal(variant.clientId, 'grok');
+      assert.equal(variant.accountRef, 'grok');
+      assert.equal(variant.defaultModel, 'grok-4.5');
+      assert.equal(variant.cli.command, 'grok');
+      assert.equal(variant.cli.outputFormat, 'streaming-json');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {
     const projectRoot = createMonorepoProjectRoot();
     const staleRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-stale-'));

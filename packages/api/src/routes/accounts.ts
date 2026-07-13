@@ -32,6 +32,7 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   codex: 'openai',
   gemini: 'google',
   kimi: 'kimi',
+  grok: 'grok',
   dare: 'dare',
   opencode: 'opencode',
   // Canonical OAuth IDs (reachable via deriveAccountId slugging display names)
@@ -43,6 +44,7 @@ const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
   builtin_openai: 'openai',
   builtin_google: 'google',
   builtin_kimi: 'kimi',
+  builtin_grok: 'grok',
   builtin_dare: 'dare',
   builtin_opencode: 'opencode',
 };
@@ -133,7 +135,7 @@ const envVarsSchema = z
 const authTypeEnum = z.enum(['oauth', 'api_key']);
 const modeEnum = z.enum(['subscription', 'api_key']);
 /** F171: restrict clientId to known clients — prevents silent data rot when frontend truststhis as enum. */
-const accountClientEnum = z.enum(['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode']);
+const accountClientEnum = z.enum(['anthropic', 'openai', 'google', 'kimi', 'grok', 'dare', 'opencode']);
 
 const projectQuerySchema = z.object({
   projectPath: z.string().optional(),

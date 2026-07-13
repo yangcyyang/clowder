@@ -79,6 +79,7 @@ const clientSchema = z.enum([
   'openai',
   'google',
   'kimi',
+  'grok',
   'dare',
   'antigravity',
   'opencode',
@@ -336,6 +337,8 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
       return { command: 'gemini', outputFormat: 'stream-json' };
     case 'kimi':
       return { command: 'kimi', outputFormat: 'stream-json' };
+    case 'grok':
+      return { command: 'grok', outputFormat: 'streaming-json' };
     case 'dare':
       return { command: 'dare', outputFormat: 'json' };
     case 'opencode':
