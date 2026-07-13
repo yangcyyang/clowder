@@ -56,6 +56,9 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   assert.ok(spawnOptions.args.includes('streaming-json'));
   assert.ok(spawnOptions.args.includes('--model'));
   assert.ok(spawnOptions.args.includes('grok-4.5'));
+  const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
+  assert.ok(permissionModeIndex >= 0);
+  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'auto');
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
   assert.equal(spawnOptions.env.CUSTOM_ENV, 'enabled');
 });
