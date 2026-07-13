@@ -60,6 +60,7 @@ import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAudi
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import {
   hydrateReplyPreview,
+  isDelivered,
   type StoredMessage,
   type StoredToolEvent,
   type StreamMetadataAugmentInput,
@@ -105,6 +106,7 @@ import {
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   estimateFullHistoryTokens,
+  formatA2ATriggerPrompt,
   formatFreshnessReviewPrompt,
   freshnessPersistenceEgress,
   getEffectiveRuntimeContextBudget,
@@ -503,6 +505,14 @@ export async function* routeSerial(
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
+      const a2aTriggerMessage = a2aTriggerMessageId ? await deps.messageStore.getById(a2aTriggerMessageId) : null;
+      const a2aTriggerContent =
+        a2aTriggerMessage &&
+        a2aTriggerMessage.threadId === threadId &&
+        !a2aTriggerMessage.deletedAt &&
+        isDelivered(a2aTriggerMessage)
+          ? a2aTriggerMessage.content
+          : undefined;
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -679,7 +689,11 @@ export async function* routeSerial(
             .filter(Boolean)
             .join('\n'),
         );
-        const incMessageTokens = estimateTokens(message);
+        const explicitMessageForBudget =
+          contentFreeInboxEnabled && directMessageFrom && a2aTriggerMessageId
+            ? formatA2ATriggerPrompt(a2aTriggerContent, a2aTriggerMessageId)
+            : message;
+        const incMessageTokens = estimateTokens(explicitMessageForBudget);
         const effectiveMaxContextTokens = Math.min(
           Math.max(0, effectiveContextBudget.maxPromptTokens - incSystemTokens - incMessageTokens - 200),
           effectiveContextBudget.maxContextTokens,
@@ -764,7 +778,7 @@ export async function* routeSerial(
               bootstrapContext,
               mcpInstructions,
               inc.contextText,
-              message,
+              explicitMessageForBudget,
             ]
               .filter(Boolean)
               .join('\n\n'),
@@ -783,6 +797,7 @@ export async function* routeSerial(
         const explicitMessage = selectExplicitPromptMessage(inc, currentUserMessageId, message, {
           ...(directMessageFrom ? { directMessageFrom } : {}),
           ...(a2aTriggerMessageId ? { triggerMessageId: a2aTriggerMessageId } : {}),
+          ...(a2aTriggerContent ? { triggerContent: a2aTriggerContent } : {}),
         });
         if (explicitMessage) parts.push(explicitMessage);
         prompt = parts.join('\n\n---\n\n');

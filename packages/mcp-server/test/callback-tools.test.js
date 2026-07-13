@@ -265,11 +265,12 @@ describe('MCP Callback Tools', () => {
       };
     };
 
-    const result = await handleCheckInbox({ limit: 3 });
+    const result = await handleCheckInbox({ limit: 3, cursor: 'opaque-next-cursor' });
 
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl.includes('/api/callbacks/check-inbox'));
     assert.ok(capturedUrl.includes('limit=3'));
+    assert.ok(capturedUrl.includes('cursor=opaque-next-cursor'));
     assert.ok(!result.content[0].text.includes('message content'));
   });
 

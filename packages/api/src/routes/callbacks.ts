@@ -17,11 +17,12 @@ import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/R
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
+import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import {
   buildContentFreeInbox,
+  decodeContentFreeInboxCursor,
   selectUnreadMessagesForCat,
 } from '../domains/cats/services/agents/routing/route-helpers.js';
-import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -275,6 +276,7 @@ const pendingMentionsQuerySchema = z.object({
 const checkInboxQuerySchema = z.object({
   threadId: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(20).optional(),
+  cursor: z.string().min(1).max(1024).optional(),
 });
 
 const ackMentionsSchema = z.object({
@@ -1581,8 +1583,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const unseen = await messageStore.getByThreadAfter(effectiveThreadId, cursor, undefined, principal.userId);
     const thread = await Promise.resolve(threadStore?.get(effectiveThreadId)).catch(() => null);
     const relevant = selectUnreadMessagesForCat(unseen, principal.catId, thread?.thinkingMode ?? 'play');
+    const pageCursor = parsed.data.cursor ? decodeContentFreeInboxCursor(parsed.data.cursor) : undefined;
+    if (parsed.data.cursor && !pageCursor) {
+      reply.status(400);
+      return { error: 'Invalid inbox cursor' };
+    }
     const inbox = buildContentFreeInbox(effectiveThreadId, relevant, {
       maxIds: parsed.data.limit ?? 1,
+      ...(pageCursor ? { cursor: pageCursor } : {}),
       ...(principal.kind === 'invocation' && request.callbackAuth?.a2aTriggerMessageId
         ? { excludeMessageId: request.callbackAuth.a2aTriggerMessageId }
         : {}),

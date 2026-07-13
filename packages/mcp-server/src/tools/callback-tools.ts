@@ -314,6 +314,7 @@ export const checkInboxInputSchema = {
     .optional()
     .describe('Required only for persistent agent-key auth; invocation auth uses the current thread.'),
   limit: z.number().int().min(1).max(20).optional().default(1).describe('Maximum message IDs to return.'),
+  cursor: z.string().min(1).optional().describe('Opaque nextCursor from the previous inbox page.'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -615,6 +616,7 @@ export async function handleGetPendingMentions(input: { includeAcked?: boolean |
 export async function handleCheckInbox(input: {
   threadId?: string | undefined;
   limit?: number | undefined;
+  cursor?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return callbackGet(
@@ -622,6 +624,7 @@ export async function handleCheckInbox(input: {
     {
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
   );
@@ -1293,7 +1296,7 @@ export const callbackTools = [
     name: 'cat_cafe_check_inbox',
     description:
       'Check the current thread for content-free unread metadata before loading message bodies. ' +
-      'Returns only unreadCount, senders, messageIds, and hasMore; it never returns message content or changes cursors. ' +
+      'Returns only unreadCount, senders, messageIds, hasMore, and an opaque nextCursor when another stable snapshot page exists; it never returns message content or changes delivery/mention cursors. ' +
       'Use cat_cafe_get_thread_context or cat_cafe_fetch_thread_history to read the body on demand.',
     inputSchema: checkInboxInputSchema,
     handler: handleCheckInbox,

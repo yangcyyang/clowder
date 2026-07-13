@@ -671,6 +671,66 @@ describe('Callback Routes', () => {
     assert.deepEqual(JSON.parse(repeated.body), body, 'check-inbox must be a repeatable pure read');
   });
 
+  test('GET check-inbox follows an opaque snapshot cursor without duplicates or later-arrival drift', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const rows = Array.from({ length: 4 }, (_, index) =>
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `SECRET-PAGE-BODY-${index}`,
+        mentions: [],
+        timestamp: Date.now() + index,
+      }),
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const firstResponse = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/check-inbox?limit=3',
+      headers,
+    });
+    assert.equal(firstResponse.statusCode, 200);
+    const first = JSON.parse(firstResponse.body);
+    assert.equal(first.unreadCount, 4);
+    assert.deepEqual(
+      first.messageIds,
+      rows.slice(1).map((row) => row.id),
+    );
+    assert.equal(first.hasMore, true);
+    assert.equal(typeof first.nextCursor, 'string');
+    assert.ok(!firstResponse.body.includes('SECRET-PAGE-BODY'));
+
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'SECRET-LATE-ARRIVAL',
+      mentions: [],
+      timestamp: Date.now() + 100,
+    });
+    const secondResponse = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/check-inbox?limit=3&cursor=${encodeURIComponent(first.nextCursor)}`,
+      headers,
+    });
+    assert.equal(secondResponse.statusCode, 200);
+    const second = JSON.parse(secondResponse.body);
+    assert.equal(second.unreadCount, 4, 'cursor must retain the first page snapshot total');
+    assert.deepEqual(second.messageIds, [rows[0].id]);
+    assert.equal(second.hasMore, false);
+    assert.equal(second.nextCursor, undefined);
+    assert.ok(!secondResponse.body.includes('SECRET'));
+    assert.equal(await deliveryCursorStore.getCursor('user-1', 'opus', 'default'), undefined);
+    assert.equal(await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', 'default'), undefined);
+
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/check-inbox?cursor=not-a-valid-cursor',
+      headers,
+    });
+    assert.equal(invalid.statusCode, 400);
+  });
+
   // ---- GET /api/callbacks/thread-context ----
 
   test('GET thread-context returns recent messages', async () => {

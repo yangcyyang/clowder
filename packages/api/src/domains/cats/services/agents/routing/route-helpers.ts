@@ -1339,6 +1339,14 @@ export interface ContentFreeInbox {
   senders: string[];
   messageIds: string[];
   hasMore: boolean;
+  nextCursor?: string;
+}
+
+export interface ContentFreeInboxCursor {
+  /** Upper bound captured on page 1 so later arrivals do not shift this page walk. */
+  snapshotMessageId: string;
+  /** Oldest message returned by the previous page (exclusive upper bound). */
+  beforeMessageId: string;
 }
 
 export type AgentIntentType = 'discussion' | 'action' | 'correction' | 'approval' | 'stage-input';
@@ -1543,10 +1551,55 @@ export function selectExplicitPromptMessage(
   >,
   currentUserMessageId: string | undefined,
   message: string,
-  a2a?: { directMessageFrom?: CatId; triggerMessageId?: string },
+  a2a?: { directMessageFrom?: CatId; triggerMessageId?: string; triggerContent?: string },
 ): string | undefined {
-  if (inc.contentFreeInbox && a2a?.directMessageFrom && a2a.triggerMessageId) return message;
+  if (inc.contentFreeInbox && a2a?.directMessageFrom && a2a.triggerMessageId) {
+    return formatA2ATriggerPrompt(a2a.triggerContent, a2a.triggerMessageId);
+  }
   return shouldAppendExplicitCurrentMessage(inc, currentUserMessageId) ? message : undefined;
+}
+
+const A2A_TRIGGER_MAX_TOKENS = 8_000;
+const A2A_TRIGGER_TRUNCATION_MARKER = '[原文超限已截断，用 cat_cafe_fetch_thread_history 按 ID 取全文]';
+
+function renderA2ATriggerPrompt(content: string, triggerMessageId: string): string {
+  return [`[A2A Trigger messageId=${triggerMessageId}]`, content, '[/A2A Trigger]'].join('\n');
+}
+
+/**
+ * Inject the exact A2A trigger on the content-free path, independently from
+ * the 80-char reply preview and the 360-char InvocationContext formatter.
+ * Pathological inputs retain both ends and an explicit pull-by-ID recovery hint.
+ */
+export function formatA2ATriggerPrompt(
+  content: string | undefined,
+  triggerMessageId: string,
+  maxTokens = A2A_TRIGGER_MAX_TOKENS,
+): string {
+  const unavailable = '正文不可用；请用 cat_cafe_fetch_thread_history 按消息 ID 取全文。';
+  if (!content) return renderA2ATriggerPrompt(unavailable, triggerMessageId);
+
+  const full = renderA2ATriggerPrompt(content, triggerMessageId);
+  if (estimateTokens(full) <= maxTokens) return full;
+
+  let low = 0;
+  let high = content.length;
+  let best = renderA2ATriggerPrompt(A2A_TRIGGER_TRUNCATION_MARKER, triggerMessageId);
+  while (low <= high) {
+    const keep = Math.floor((low + high) / 2);
+    const headLength = Math.ceil(keep / 2);
+    const tailLength = Math.floor(keep / 2);
+    const head = content.slice(0, headLength);
+    const tail = tailLength > 0 ? content.slice(-tailLength) : '';
+    const candidate = renderA2ATriggerPrompt(`${head}\n${A2A_TRIGGER_TRUNCATION_MARKER}\n${tail}`, triggerMessageId);
+    if (estimateTokens(candidate) <= maxTokens) {
+      best = candidate;
+      low = keep + 1;
+    } else {
+      high = keep - 1;
+    }
+  }
+  return best;
 }
 
 /**
@@ -2005,18 +2058,59 @@ export function selectUnreadMessagesForCat(
 export function buildContentFreeInbox(
   threadId: string,
   messages: readonly StoredMessage[],
-  options: { excludeMessageId?: string; maxIds?: number } = {},
+  options: { excludeMessageId?: string; maxIds?: number; cursor?: ContentFreeInboxCursor } = {},
 ): ContentFreeInbox {
-  const filtered = options.excludeMessageId ? messages.filter((m) => m.id !== options.excludeMessageId) : [...messages];
+  const filtered = (
+    options.excludeMessageId ? messages.filter((m) => m.id !== options.excludeMessageId) : [...messages]
+  ).sort((left, right) => left.id.localeCompare(right.id));
   const maxIds = Math.max(1, options.maxIds ?? 20);
-  const page = filtered.slice(-maxIds);
+  const snapshotMessageId = options.cursor?.snapshotMessageId ?? filtered.at(-1)?.id;
+  const snapshot = snapshotMessageId ? filtered.filter((message) => message.id <= snapshotMessageId) : [];
+  const pageCursor = options.cursor;
+  const remaining = pageCursor ? snapshot.filter((message) => message.id < pageCursor.beforeMessageId) : snapshot;
+  // Preserve the original inbox contract: page 1 is the newest unread slice.
+  const page = remaining.slice(-maxIds);
+  const hasMore = remaining.length > maxIds;
+  const oldestPageMessageId = page[0]?.id;
+  const nextCursor =
+    hasMore && snapshotMessageId && oldestPageMessageId
+      ? encodeContentFreeInboxCursor({
+          snapshotMessageId,
+          beforeMessageId: oldestPageMessageId,
+        })
+      : undefined;
   return {
     threadId,
-    unreadCount: filtered.length,
+    unreadCount: snapshot.length,
     senders: [...new Set(page.map((m) => m.catId ?? m.userId))],
     messageIds: page.map((m) => m.id),
-    hasMore: filtered.length > maxIds,
+    hasMore,
+    ...(nextCursor ? { nextCursor } : {}),
   };
+}
+
+function encodeContentFreeInboxCursor(cursor: ContentFreeInboxCursor): string {
+  return Buffer.from(JSON.stringify([cursor.snapshotMessageId, cursor.beforeMessageId]), 'utf8').toString('base64url');
+}
+
+export function decodeContentFreeInboxCursor(encoded: string): ContentFreeInboxCursor | undefined {
+  try {
+    const value: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    if (
+      !Array.isArray(value) ||
+      value.length !== 2 ||
+      typeof value[0] !== 'string' ||
+      !value[0] ||
+      typeof value[1] !== 'string' ||
+      !value[1] ||
+      value[1] > value[0]
+    ) {
+      return undefined;
+    }
+    return { snapshotMessageId: value[0], beforeMessageId: value[1] };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Hard-capped prompt notification. Full IDs remain available through cat_cafe_check_inbox. */
