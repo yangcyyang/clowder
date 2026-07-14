@@ -203,6 +203,11 @@ export class GrokAgentService implements AgentService {
       // Grok names the runtime tool `run_terminal_command`, but permission rules use the Bash alias.
       '--allow',
       'Bash',
+      // Structured workspace edits are core engineering actions. Keep them explicit so unknown tools stay gated.
+      '--allow',
+      'Write',
+      '--allow',
+      'Edit',
     ];
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);

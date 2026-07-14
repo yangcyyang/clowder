@@ -57,6 +57,19 @@ Grok CLI 0.2.93 的真实工具事件名是 `run_terminal_command`，但 `--allo
 - 真实正向 smoke：完全使用生产参数，强制调用 `run_terminal_command`，在 `/tmp/clowder-grok-bash-production-positive-95174.txt` 写入精确内容 `GROK_BASH_PERMISSION_OK_V2`；文件存在、内容精确、无 errorCode、回合正常 `done`。
 - 真实负向 smoke：完全使用同一生产参数，强制调用未 allow 的 `Write` 写 `/tmp/clowder-grok-write-production-negative-95174.txt`。确认文件不存在，消息序列为 `system_info -> error -> session_init -> done`，error/done 均带 `permission_cancelled`，错误文案明确本轮未完成。
 
+## 2026-07-14 后续：结构化编辑工具补齐
+
+推特日报采集链路暴露了新的真实场景：Grok 已能通过 `Bash` 执行终端命令，但在生成 SOP 时自然选择内置 `Write`，无头权限门连续两次取消回合。原负向 smoke 证明了“未知工具仍受门控”，但同时把工程 Agent 的核心结构化编辑能力排除在生产白名单之外。
+
+修复保持 `permission-mode=default`，仅在 MCP namespace 与 `Bash` 之外显式追加 `Write`、`Edit`；继续禁止 `--always-approve`、`bypassPermissions` 和全工具放行。这个边界没有新增 Bash 做不到的文件写能力，但让文件变更走可审计的结构化工具，避免为绕过权限门而退化成 shell 写文件。
+
+验证证据：
+
+- RED：参数测试期望 `Write`、`Edit` 时，生产参数只有 MCP namespace 与 `Bash`，测试按预期失败。
+- GREEN：API build 通过，Grok provider 定向测试 `9/9` 通过。
+- 真实 `Write` smoke：精确写入 `/tmp/clowder-grok-write-permission-fixed-28867.txt`，内容为 `GROK_WRITE_PERMISSION_FIXED_OK`，无 errorCode，终态为 `done`。
+- 真实 `Edit` smoke：将 `/tmp/clowder-grok-edit-permission-fixed.txt` 从 `EDIT_BEFORE` 原位替换为 `EDIT_AFTER`，无 errorCode，终态为 `done`。
+
 ## Quality Gate
 
 - 原始需求：task #370 / `#clowderAI:13e17dfa`，三条验收为“终端工具窄放行、权限取消诚实失败、生产参数正反双 smoke”。

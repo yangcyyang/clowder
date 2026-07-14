@@ -71,7 +71,12 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   const allowedTools = spawnOptions.args.flatMap((value, index, args) =>
     value === '--allow' && args[index + 1] ? [args[index + 1]] : [],
   );
-  assert.deepEqual(allowedTools, ['MCPTool(cat-cafe-clowder-runtime__*)', 'Bash']);
+  assert.deepEqual(allowedTools, [
+    'MCPTool(cat-cafe-clowder-runtime__*)',
+    'Bash',
+    'Write',
+    'Edit',
+  ]);
   assert.equal(spawnOptions.args.includes('--always-approve'), false);
   assert.equal(spawnOptions.args.includes('bypassPermissions'), false);
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
