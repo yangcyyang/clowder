@@ -5,6 +5,8 @@ import { ChatContainer } from '@/components/ChatContainer';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({ ok: true }));
+const mockConfirmUnreadAck = vi.fn();
+const mockArmUnreadSuppression = vi.fn();
 
 type StoreMessage = {
   id: string;
@@ -66,8 +68,8 @@ const baseStore = () => ({
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
+  confirmUnreadAck: mockConfirmUnreadAck,
+  armUnreadSuppression: mockArmUnreadSuppression,
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
@@ -168,6 +170,8 @@ vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 describe('F069-R5: read ack via POST /read/latest', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let hasFocusSpy: ReturnType<typeof vi.spyOn>;
+  let visibilityStateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -180,10 +184,15 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   });
 
   beforeEach(() => {
+    hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    visibilityStateSpy = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    mockApiFetch.mockClear();
+    mockApiFetch.mockReset();
+    mockApiFetch.mockResolvedValue({ ok: true });
+    mockConfirmUnreadAck.mockClear();
+    mockArmUnreadSuppression.mockClear();
     storeState = {
       currentThreadId: 'thread-A',
       messages: [
@@ -204,6 +213,8 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       root.unmount();
     });
     container.remove();
+    hasFocusSpy.mockRestore();
+    visibilityStateSpy.mockRestore();
   });
 
   it('sends POST /read/latest on mount (no message ID needed)', async () => {
@@ -334,6 +345,108 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  it.each([
+    ['hidden', 'hidden' as const, true],
+    ['unfocused', 'visible' as const, false],
+  ])('does not ack newly arrived messages while the tab is %s', async (_label, visibility, hasFocus) => {
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    mockApiFetch.mockClear();
+
+    visibilityStateSpy.mockReturnValue(visibility);
+    hasFocusSpy.mockReturnValue(hasFocus);
+    storeState = {
+      currentThreadId: 'thread-A',
+      messages: [
+        ...storeState.messages,
+        {
+          id: '0000001772900002-000002-aabbcc02',
+          type: 'assistant',
+          content: 'arrived while hidden',
+          timestamp: Date.now(),
+          catId: 'opus',
+        },
+      ],
+      threads: [],
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('/read/latest'),
+    );
+    expect(ackCalls).toHaveLength(0);
+  });
+
+  it('acks deferred messages once when the tab becomes visible and focused again', async () => {
+    visibilityStateSpy.mockReturnValue('hidden');
+    hasFocusSpy.mockReturnValue(false);
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'))).toHaveLength(0);
+
+    visibilityStateSpy.mockReturnValue('visible');
+    hasFocusSpy.mockReturnValue(true);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('/read/latest'),
+    );
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0][0]).toContain('thread-A');
+  });
+
+  it.each([
+    ['non-2xx response', () => Promise.resolve({ ok: false })],
+    ['network rejection', () => Promise.reject(new Error('network unavailable'))],
+  ])('settles suppression after %s so a later attention retry can clear it', async (_label, failOnce) => {
+    let readAckAttempts = 0;
+    mockApiFetch.mockImplementation(async (url) => {
+      if (String(url).includes('/read/latest') && readAckAttempts++ === 0) return await failOnce();
+      return { ok: true };
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(mockArmUnreadSuppression).toHaveBeenCalledTimes(1);
+    expect(mockConfirmUnreadAck).toHaveBeenCalledTimes(1);
+
+    visibilityStateSpy.mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    visibilityStateSpy.mockReturnValue('visible');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // Every arm attempt, successful or failed, has one matching settlement.
+    // The second successful retry therefore leaves the store ledger at zero.
+    expect(mockArmUnreadSuppression).toHaveBeenCalledTimes(2);
+    expect(mockConfirmUnreadAck).toHaveBeenCalledTimes(2);
   });
 
   it('renders unread divider before the first message after the read cursor', async () => {

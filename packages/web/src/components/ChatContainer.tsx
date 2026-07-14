@@ -1238,16 +1238,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   // F069-R5: Ack read cursor server-side. The backend finds the latest real message
   // and acks it atomically — no frontend ID guessing, no timing races with fetchHistory.
-  // Fires on thread entry AND when new messages arrive (messages.length changes),
-  // so switching away after receiving new messages still acks to the latest.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Only a visible, focused tab may acknowledge reading. Hidden tabs share the same
+  // user+thread cursor and must not silently clear unread state in another window.
   const _messageCount = messages.length;
-  useEffect(() => {
+  const lastReadAckKeyRef = useRef<string | null>(null);
+  const acknowledgeVisibleThread = useCallback(() => {
+    if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+    const ackKey = `${threadId}:${_messageCount}`;
+    if (lastReadAckKeyRef.current === ackKey) return;
+    lastReadAckKeyRef.current = ackKey;
+
     // Re-arm suppression before each ack. /read/latest is idempotent — any
     // successful POST means server cursor is at latest, so any successful ack
     // can safely clear suppression (no generation tracking needed).
     armUnreadSuppression(threadId);
-    apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
+    void apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
@@ -1255,12 +1260,34 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       .then((res) => {
         if (res.ok) {
           confirmUnreadAck(threadId);
+          return;
         }
+        // A failed request still settles the in-flight suppression ledger. If
+        // it leaked here, a later retry would leave pendingAckCount > 0 and
+        // suppress server-hydrated unread badges forever.
+        confirmUnreadAck(threadId);
+        if (lastReadAckKeyRef.current === ackKey) lastReadAckKeyRef.current = null;
       })
       .catch((err) => {
+        confirmUnreadAck(threadId);
+        if (lastReadAckKeyRef.current === ackKey) lastReadAckKeyRef.current = null;
         console.debug('[F069] read ack failed:', err);
       });
   }, [threadId, _messageCount, confirmUnreadAck, armUnreadSuppression]);
+
+  useEffect(() => {
+    acknowledgeVisibleThread();
+  }, [acknowledgeVisibleThread]);
+
+  useEffect(() => {
+    const acknowledgeAfterAttentionReturns = () => acknowledgeVisibleThread();
+    document.addEventListener('visibilitychange', acknowledgeAfterAttentionReturns);
+    window.addEventListener('focus', acknowledgeAfterAttentionReturns);
+    return () => {
+      document.removeEventListener('visibilitychange', acknowledgeAfterAttentionReturns);
+      window.removeEventListener('focus', acknowledgeAfterAttentionReturns);
+    };
+  }, [acknowledgeVisibleThread]);
 
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {

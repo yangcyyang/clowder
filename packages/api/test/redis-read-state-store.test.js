@@ -339,7 +339,7 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(summaries[0].unreadCount, 0);
   });
 
-  it('getUnreadSummaries() treats no cursor as fully read (cold-start guard)', async () => {
+  it('getUnreadSummaries() seeds a cold-start baseline and counts the next visible message', async () => {
     const tid = uniqueId('t');
     await messageStore.append({
       userId: 'user1',
@@ -349,7 +349,7 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
       timestamp: Date.now() - 1000,
       threadId: tid,
     });
-    await messageStore.append({
+    const baselineMessage = await messageStore.append({
       userId: 'user1',
       catId: 'opus',
       content: 'world',
@@ -358,13 +358,75 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
       threadId: tid,
     });
 
-    // No ack → no cursor → should return 0 (not "all unread")
-    // Pre-F069 threads have no cursor; treating them as all-unread
-    // causes badges to reappear on every page refresh.
-    const summaries = await store.getUnreadSummaries('user1', [tid], messageStore);
-    assert.equal(summaries[0].unreadCount, 0);
-    assert.equal(summaries[0].hasUserMention, false);
-    assert.equal(summaries[0].lastReadMessageId, undefined);
+    // The first hydration keeps legacy history read, but must persist its latest
+    // message as a baseline so future messages can survive a refresh as unread.
+    const initial = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(initial[0].unreadCount, 0);
+    assert.equal(initial[0].hasUserMention, false);
+    assert.equal(initial[0].lastReadMessageId, baselineMessage.id);
+    assert.equal((await store.get('user1', tid)).lastReadMessageId, baselineMessage.id);
+
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'new after baseline',
+      mentions: [],
+      timestamp: Date.now() + 1,
+      threadId: tid,
+    });
+
+    const afterNewMessage = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(afterNewMessage[0].unreadCount, 1);
+    assert.equal(afterNewMessage[0].lastReadMessageId, baselineMessage.id);
+  });
+
+  it('a focused tab ack clears the shared cursor for another store instance', async () => {
+    const tid = uniqueId('t');
+    const first = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'baseline',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: tid,
+    });
+    await store.ack('user1', tid, first.id);
+    const latest = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'new reply',
+      mentions: [],
+      timestamp: Date.now() + 1,
+      threadId: tid,
+    });
+
+    const otherTabStore = new RedisThreadReadStateStore(redis);
+    assert.equal((await otherTabStore.getUnreadSummaries('user1', [tid], messageStore))[0].unreadCount, 1);
+
+    // A genuinely focused tab reads the message. Shared cursor semantics are intentional.
+    await store.ack('user1', tid, latest.id);
+    assert.equal((await otherTabStore.getUnreadSummaries('user1', [tid], messageStore))[0].unreadCount, 0);
+  });
+
+  it('seeds an empty-thread baseline so its first visible reply is unread', async () => {
+    const tid = uniqueId('t');
+
+    const initial = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(initial[0].unreadCount, 0);
+    assert.equal(initial[0].lastReadMessageId, '0');
+
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'first reply',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: tid,
+    });
+
+    const afterFirstReply = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(afterFirstReply[0].unreadCount, 1);
+    assert.equal(afterFirstReply[0].lastReadMessageId, '0');
   });
 
   it('getUnreadSummaries() handles multiple threads (mixed cursor states)', async () => {
@@ -395,15 +457,15 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
       threadId: tB,
     });
 
-    // Ack thread A at first message → 1 unread; thread B has no cursor → 0 (cold-start)
+    // Ack thread A at first message → 1 unread; thread B seeds its current message as baseline.
     await store.ack('user1', tA, mA1.id);
 
     const summaries = await store.getUnreadSummaries('user1', [tA, tB], messageStore);
     const map = new Map(summaries.map((s) => [s.threadId, s]));
     assert.equal(map.get(tA).unreadCount, 1);
     assert.equal(map.get(tA).lastReadMessageId, mA1.id);
-    assert.equal(map.get(tB).unreadCount, 0); // no cursor = fully read
-    assert.equal(map.get(tB).lastReadMessageId, undefined);
+    assert.equal(map.get(tB).unreadCount, 0);
+    assert.ok(map.get(tB).lastReadMessageId);
   });
 
   // --- deleteByThread ---

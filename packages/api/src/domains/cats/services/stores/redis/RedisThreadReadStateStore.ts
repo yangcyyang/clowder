@@ -4,10 +4,10 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { isUserVisibleUnreadMessage } from '../visibility.js';
 import type { IMessageStore } from '../ports/MessageStore.js';
 import type { IThreadReadStateStore, ThreadReadState, ThreadUnreadSummary } from '../ports/ThreadReadStateStore.js';
 import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
+import { isUserVisibleUnreadMessage } from '../visibility.js';
 
 /**
  * Lua CAS: atomic monotonic ack — only advance cursor, never regress.
@@ -54,11 +54,19 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
 
     for (const threadId of threadIds) {
       const state = await this.get(userId, threadId);
-      // Cold-start guard: no read cursor = treat as fully read (0 unread).
-      // Pre-F069 threads have no cursor; counting all messages as unread
-      // causes every badge to reappear on every page refresh.
+      // Cold-start guard: legacy threads without a cursor start fully read, but
+      // must persist a baseline. Otherwise every future refresh also returns 0
+      // and new unread messages can never survive a Web process restart.
       if (!state) {
-        summaries.push({ threadId, unreadCount: 0, hasUserMention: false });
+        const latestMessageId = (await messageStore.getLatestThreadWatermarkMessageId(threadId)) ?? '0';
+        await this.ack(userId, threadId, latestMessageId);
+        const baseline = await this.get(userId, threadId);
+        summaries.push({
+          threadId,
+          unreadCount: 0,
+          hasUserMention: false,
+          lastReadMessageId: baseline?.lastReadMessageId ?? latestMessageId,
+        });
         continue;
       }
       const afterId = state.lastReadMessageId;
