@@ -3,6 +3,7 @@
 import type { TaskEvidence, TaskItem, TaskStatus } from '@cat-cafe/shared';
 import {
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent,
   useCallback,
   useEffect,
@@ -14,6 +15,7 @@ import {
 import { useCatData } from '@/hooks/useCatData';
 import { isCommandInvocation } from '@/hooks/useChatCommands';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
 import type { CatStatusType } from '@/stores/chat-types';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -22,7 +24,7 @@ import { compressImage } from '@/utils/compressImage';
 import { RESET_CONTEXT_CONFIRMATION, resetThreadContext } from '@/utils/reset-thread-context';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, shouldRenderChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
 import { ImagePreview } from './ImagePreview';
 import { MentionPicker } from './MentionPicker';
@@ -88,7 +90,10 @@ type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
 type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
 export type InlineThreadSearchHit = { id: string; index: number };
 type InlineThreadSendKeyEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>;
-type ReplyCountUpdateOptions = { authoritative?: boolean };
+type ReplyCountUpdateOptions = {
+  authoritative?: boolean;
+  latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+};
 type ViewInChannelWindow = {
   location: { pathname: string };
   history: { pushState: (data: unknown, unused: string, url?: string | URL | null) => void };
@@ -148,6 +153,54 @@ export function shouldShowInlineThreadRuntimeStatus(status: CatStatusType): bool
 export function shouldSendInlineThreadMessage(event: InlineThreadSendKeyEvent): boolean {
   if (event.key !== 'Enter') return false;
   if (event.shiftKey) return false;
+  return true;
+}
+
+export function getInlineThreadPanelShellClassName(): string {
+  return 'thread-panel-motion fixed inset-0 z-[60] flex h-[100dvh] min-h-0 bg-[var(--console-overlay-medium)] lg:relative lg:inset-auto lg:z-auto lg:h-full lg:flex-shrink-0 lg:bg-transparent';
+}
+
+function findInlineThreadSourceCopyIndex(
+  messages: readonly ChatMessageData[],
+  sourceMessage: ChatMessageData,
+): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (
+      message?.timestamp === sourceMessage.timestamp &&
+      message.content === sourceMessage.content &&
+      message.catId === sourceMessage.catId &&
+      message.type === sourceMessage.type
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+export function getInlineThreadReplyMessages(
+  messages: readonly ChatMessageData[],
+  sourceMessage: ChatMessageData,
+): ChatMessageData[] {
+  const sourceIndex = findInlineThreadSourceCopyIndex(messages, sourceMessage);
+
+  return sourceIndex >= 0
+    ? messages.slice(sourceIndex + 1)
+    : messages.filter((message) => message.timestamp > sourceMessage.timestamp);
+}
+
+export function getInlineThreadSourceMessageId(
+  messages: readonly ChatMessageData[],
+  sourceMessage: ChatMessageData,
+): string | undefined {
+  const sourceIndex = findInlineThreadSourceCopyIndex(messages, sourceMessage);
+  return sourceIndex >= 0 ? messages[sourceIndex]?.id : undefined;
+}
+
+export function isCountableInlineThreadReply(message: ChatMessageData): boolean {
+  if (!shouldRenderChatMessage(message)) return false;
+  if (message.origin === 'progress' || message.type === 'system') return false;
+  if (message.source?.connector === 'task-system') return false;
   return true;
 }
 
@@ -503,23 +556,21 @@ export function InlineThreadPanel({
     return () => clearInterval(timer);
   }, [loadMessages, loadQueueRuntime, runtimeCats.length]);
 
-  const replyMessages = useMemo(() => {
-    const sourceIndex = messages.findIndex(
-      (msg) =>
-        msg.timestamp === sourceMessage.timestamp &&
-        msg.content === sourceMessage.content &&
-        msg.catId === sourceMessage.catId &&
-        msg.type === sourceMessage.type,
-    );
+  const replyMessages = useMemo(() => getInlineThreadReplyMessages(messages, sourceMessage), [messages, sourceMessage]);
+  const visibleReplyMessages = useMemo(
+    () => replyMessages.filter((message) => shouldRenderChatMessage(message)),
+    [replyMessages],
+  );
+  const countableReplyMessages = useMemo(
+    () => replyMessages.filter((message) => isCountableInlineThreadReply(message)),
+    [replyMessages],
+  );
+  useVisibleThreadReadAck(threadId, countableReplyMessages.length + 1);
 
-    if (sourceIndex >= 0) {
-      return messages.slice(sourceIndex + 1);
-    }
-
-    return messages.filter((msg) => msg.timestamp > sourceMessage.timestamp);
-  }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
-
-  const searchableMessages = useMemo(() => [sourceMessage, ...replyMessages], [replyMessages, sourceMessage]);
+  const searchableMessages = useMemo(
+    () => [sourceMessage, ...visibleReplyMessages],
+    [sourceMessage, visibleReplyMessages],
+  );
   const searchHits = useMemo(
     () => getInlineThreadSearchHits(searchableMessages, searchQuery),
     [searchQuery, searchableMessages],
@@ -578,21 +629,28 @@ export function InlineThreadPanel({
     [closeThreadSearch, moveSearchHit],
   );
 
-  const sourceThreadMessageId = useMemo(() => {
-    const sourceInBranch = messages.find(
-      (msg) =>
-        msg.timestamp === sourceMessage.timestamp &&
-        msg.content === sourceMessage.content &&
-        msg.catId === sourceMessage.catId &&
-        msg.type === sourceMessage.type,
-    );
-    return sourceInBranch?.id;
-  }, [messages, sourceMessage.catId, sourceMessage.content, sourceMessage.timestamp, sourceMessage.type]);
+  const sourceThreadMessageId = useMemo(
+    () => getInlineThreadSourceMessageId(messages, sourceMessage),
+    [messages, sourceMessage],
+  );
 
   useEffect(() => {
     if (loading) return;
-    onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length, { authoritative: true });
-  }, [loading, onReplyCountChange, replyMessages.length, sourceMessage.id, threadId]);
+    const latestReply = countableReplyMessages.at(-1);
+    onReplyCountChange?.(sourceMessage.id, threadId, countableReplyMessages.length, {
+      authoritative: true,
+      ...(latestReply
+        ? {
+            latestReply: {
+              id: latestReply.id,
+              catId: latestReply.catId ?? null,
+              content: latestReply.content.replace(/\s+/g, ' ').trim() || '回复',
+              timestamp: latestReply.timestamp,
+            },
+          }
+        : {}),
+    });
+  }, [countableReplyMessages, loading, onReplyCountChange, sourceMessage.id, threadId]);
 
   const handleSend = useCallback(async () => {
     const content = input.trim() || (images.length > 0 ? '上传图片' : '');
@@ -651,7 +709,15 @@ export function InlineThreadPanel({
       setInput('');
       setImages([]);
       closeMentionPicker();
-      onReplyCountChange?.(sourceMessage.id, threadId, replyMessages.length + 1, { authoritative: false });
+      onReplyCountChange?.(sourceMessage.id, threadId, countableReplyMessages.length + 1, {
+        authoritative: false,
+        latestReply: {
+          id: `optimistic-${Date.now()}`,
+          catId: null,
+          content,
+          timestamp: Date.now(),
+        },
+      });
       void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(() => startReplyPolling());
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '发送失败');
@@ -667,7 +733,7 @@ export function InlineThreadPanel({
     loadMessages,
     loadQueueRuntime,
     onReplyCountChange,
-    replyMessages.length,
+    countableReplyMessages.length,
     sending,
     sourceThreadMessageId,
     sourceMessage,
@@ -859,14 +925,13 @@ export function InlineThreadPanel({
   );
 
   return (
-    <div
-      className="thread-panel-motion hidden h-full min-h-0 flex-shrink-0 lg:flex"
-      data-open={isClosing ? 'false' : 'true'}
-    >
-      <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
+    <div className={getInlineThreadPanelShellClassName()} data-open={isClosing ? 'false' : 'true'}>
+      <div className="hidden lg:block">
+        <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
+      </div>
       <aside
-        className="slock-inline-thread-panel flex h-full min-h-0 flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)]"
-        style={{ width: panelWidth }}
+        className="slock-inline-thread-panel flex h-full min-h-0 w-full flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] lg:w-[var(--inline-thread-panel-width)]"
+        style={{ '--inline-thread-panel-width': `${panelWidth}px` } as CSSProperties}
       >
         <div className="slock-inline-thread-header flex h-[54px] flex-shrink-0 items-center justify-between border-b border-[var(--slock-border-color)] px-5">
           <div className="min-w-0 text-sm font-semibold text-[var(--cafe-text)]">
@@ -1041,15 +1106,15 @@ export function InlineThreadPanel({
           <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
             <div>Beginning of replies</div>
             <div className="mt-1">
-              {replyMessages.length} {replyMessages.length === 1 ? 'reply' : 'replies'}
+              {visibleReplyMessages.length} {visibleReplyMessages.length === 1 ? 'reply' : 'replies'}
             </div>
           </div>
           {loading ? (
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
-          ) : replyMessages.length === 0 ? (
+          ) : visibleReplyMessages.length === 0 ? (
             <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
           ) : (
-            replyMessages.map((msg) => {
+            visibleReplyMessages.map((msg) => {
               const isHit = searchHits.some((hit) => hit.id === msg.id);
               const isActiveHit = activeSearchHit?.id === msg.id;
               return (

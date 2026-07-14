@@ -12,7 +12,9 @@ describe('canViewMessage', () => {
   let isUserVisibleUnreadMessage;
 
   beforeEach(async () => {
-    ({ canViewMessage, isUserVisibleUnreadMessage } = await import('../dist/domains/cats/services/stores/visibility.js'));
+    ({ canViewMessage, isUserVisibleUnreadMessage } = await import(
+      '../dist/domains/cats/services/stores/visibility.js'
+    ));
   });
 
   test('user always sees everything', () => {
@@ -79,6 +81,27 @@ describe('canViewMessage', () => {
         threadId: 'thread1',
         origin: 'progress',
         messageClass: 'status',
+      }),
+      false,
+    );
+  });
+
+  test('task-system audit notices do not manufacture unread dots', () => {
+    assert.equal(
+      isUserVisibleUnreadMessage({
+        id: 'task-event-1',
+        userId: 'system',
+        catId: null,
+        content: 'task #376 状态：进行中 → 待验收。',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-task',
+        source: {
+          connector: 'task-system',
+          label: 'Task',
+          icon: '📋',
+          meta: { presentation: 'system_notice', eventType: 'task_status_changed' },
+        },
       }),
       false,
     );

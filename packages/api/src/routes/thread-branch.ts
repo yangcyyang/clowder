@@ -139,6 +139,21 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       return { error: '指定的消息不存在或不属于此对话', code: 'INVALID_FROM_MESSAGE' };
     }
 
+    // Inline Thread 使用现有 extra.slockThread 持久化父子关联；编辑分支保持原语义，
+    // 不出现在父消息的 Thread 折叠行里。
+    if (editedContent === undefined && fromMessage.extra?.slockThread) {
+      const existingBranch = await threadStore.get(fromMessage.extra.slockThread.branchThreadId);
+      if (existingBranch) {
+        reply.status(200);
+        return {
+          threadId: existingBranch.id,
+          messageCount: 0,
+          title: existingBranch.title ?? '分支对话',
+          reused: true,
+        };
+      }
+    }
+
     // ③ Get all visible messages up to and including fromMessage
     // getByThread filters soft-deleted/tombstone — cannot branch from deleted messages
     const allMessages = await messageStore.getByThread(id, 10000);
@@ -173,10 +188,21 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
             : {}),
           ...(src.metadata ? { metadata: src.metadata } : {}),
           ...(src.origin ? { origin: src.origin } : {}),
+          ...(src.visibility ? { visibility: src.visibility } : {}),
+          ...(src.whisperTo ? { whisperTo: [...src.whisperTo] } : {}),
+          ...(src.revealedAt !== undefined ? { revealedAt: src.revealedAt } : {}),
           mentions: [...src.mentions],
           timestamp: src.timestamp,
           threadId: newThread.id,
         });
+      }
+
+      if (editedContent === undefined) {
+        const linked = await messageStore.updateExtra(fromMessage.id, {
+          ...(fromMessage.extra ?? {}),
+          slockThread: { branchThreadId: newThread.id, replyCount: 0 },
+        });
+        if (!linked) throw new Error('Source message disappeared while linking inline thread');
       }
     } catch (err) {
       // Best-effort cleanup: sync/async failure-safe

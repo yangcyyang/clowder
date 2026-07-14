@@ -113,6 +113,7 @@ import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
+import { deriveThreadReplySummary, type ThreadReplySummary } from './thread-reply-summary.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
 const DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS = 30_000;
@@ -1744,6 +1745,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       page = hasMore ? messages.slice(1) : messages;
     }
 
+    // Thread 回复仍物理隔离在 branch；主频道响应只派生一个轻量折叠摘要。
+    // 这里复用既有 extra.slockThread，不写新的持久化结构。
+    const threadReplySummaries = new Map<string, ThreadReplySummary>();
+    await Promise.all(
+      page.map(async (message) => {
+        const link = message.extra?.slockThread;
+        if (!link) return;
+        const branchMessages = await opts.messageStore.getByThread(link.branchThreadId, 10000, userId);
+        threadReplySummaries.set(message.id, deriveThreadReplySummary(message, branchMessages));
+      }),
+    );
+
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {
       id: string;
@@ -1792,7 +1805,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
               ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
               ...(m.extra.agentCommunication ? { agentCommunication: m.extra.agentCommunication } : {}),
-              ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
+              ...(m.extra.slockThread
+                ? {
+                    slockThread: {
+                      ...m.extra.slockThread,
+                      ...(threadReplySummaries.get(m.id) ?? {}),
+                      replyCount: threadReplySummaries.get(m.id)?.replyCount ?? m.extra.slockThread.replyCount,
+                    },
+                  }
+                : {}),
               ...(m.extra.reactions ? { reactions: m.extra.reactions } : {}),
             },
           }

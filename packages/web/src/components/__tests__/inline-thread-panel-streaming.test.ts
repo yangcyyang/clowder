@@ -3,18 +3,22 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
-  getViewInChannelHref,
+  getInlineThreadPanelShellClassName,
+  getInlineThreadReplyMessages,
+  getInlineThreadSourceMessageId,
   getInlineThreadSearchHits,
   getNextInlineThreadSearchIndex,
+  getViewInChannelHref,
   InlineThreadTaskStatusCard,
+  isCountableInlineThreadReply,
   isUnsafeInlineThreadTarget,
   navigateViewInChannel,
   normalizeInlineThreadMessage,
   shouldSendInlineThreadMessage,
   shouldShowInlineThreadRuntimeStatus,
 } from '@/components/InlineThreadPanel';
-import type { ChatMessage } from '@/stores/chatStore';
 import { CHAT_THREAD_ROUTE_EVENT } from '@/components/ThreadSidebar/thread-navigation';
+import type { ChatMessage } from '@/stores/chatStore';
 
 describe('InlineThreadPanel streaming normalization', () => {
   it('maps API draft replies to streaming messages so ChatMessage hides partial content', () => {
@@ -49,6 +53,44 @@ describe('InlineThreadPanel streaming normalization', () => {
   });
 });
 
+describe('InlineThreadPanel reply boundary', () => {
+  it('uses the last identical source copy as the start of replies', () => {
+    const source = {
+      id: 'source',
+      type: 'user',
+      catId: null,
+      content: 'same source',
+      timestamp: 100,
+    } as ChatMessage;
+    const firstCopy = { ...source, id: 'copy-1' };
+    const betweenCopies = { ...source, id: 'context-between', content: 'not a reply', timestamp: 150 };
+    const lastCopy = { ...source, id: 'copy-2' };
+    const reply = { ...source, id: 'reply-1', content: 'real reply', timestamp: 200 };
+
+    expect(getInlineThreadReplyMessages([firstCopy, betweenCopies, lastCopy, reply], source).map((m) => m.id)).toEqual([
+      'reply-1',
+    ]);
+    expect(getInlineThreadSourceMessageId([firstCopy, betweenCopies, lastCopy, reply], source)).toBe('copy-2');
+  });
+
+  it('excludes progress, task-system and system notices from fold count/summary', () => {
+    const normal = { id: 'normal', type: 'assistant', catId: 'opus', content: 'done', timestamp: 1 } as ChatMessage;
+    const progress = { ...normal, id: 'progress', origin: 'progress' as const };
+    const taskSystem = {
+      ...normal,
+      id: 'task-system',
+      type: 'connector' as const,
+      source: { connector: 'task-system', label: 'Task', icon: 'task' },
+    };
+    const systemNotice = { ...normal, id: 'system', type: 'system' as const };
+
+    expect(isCountableInlineThreadReply(normal)).toBe(true);
+    expect(isCountableInlineThreadReply(progress)).toBe(false);
+    expect(isCountableInlineThreadReply(taskSystem)).toBe(false);
+    expect(isCountableInlineThreadReply(systemNotice)).toBe(false);
+  });
+});
+
 describe('InlineThreadPanel runtime status visibility', () => {
   it('hides silent/done cats from the thread current-replies strip', () => {
     expect(shouldShowInlineThreadRuntimeStatus('alive_but_silent')).toBe(false);
@@ -74,6 +116,16 @@ describe('InlineThreadPanel thread target guard', () => {
   });
 });
 
+describe('InlineThreadPanel responsive shell', () => {
+  it('stays reachable below the desktop breakpoint', () => {
+    const className = getInlineThreadPanelShellClassName();
+
+    expect(className).not.toContain('hidden');
+    expect(className).toContain('fixed');
+    expect(className).toContain('lg:relative');
+  });
+});
+
 describe('InlineThreadPanel view-in-channel target', () => {
   it('links back to the parent channel and highlights the source message', () => {
     expect(getViewInChannelHref('thread-parent', 'msg-source')).toBe('/thread/thread-parent?highlight=msg-source');
@@ -86,7 +138,9 @@ describe('InlineThreadPanel view-in-channel target', () => {
     const scrolled: string[] = [];
     const fakeWindow = {
       location: { pathname: '/thread/thread-parent' },
-      history: { pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)) },
+      history: {
+        pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)),
+      },
       dispatchEvent: (event: Event) => {
         dispatched.push(event.type);
         return true;
@@ -105,7 +159,9 @@ describe('InlineThreadPanel view-in-channel target', () => {
     const dispatched: string[] = [];
     const fakeWindow = {
       location: { pathname: '/thread/thread-branch' },
-      history: { pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)) },
+      history: {
+        pushState: (_data: unknown, _unused: string, href?: string | URL | null) => pushed.push(String(href)),
+      },
       dispatchEvent: (event: Event) => {
         dispatched.push(event.type);
         return true;

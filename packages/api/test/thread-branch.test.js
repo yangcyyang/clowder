@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canViewMessage } from '../dist/domains/cats/services/stores/visibility.js';
 import { threadBranchRoutes } from '../dist/routes/thread-branch.js';
 
 function createMockSocketManager() {
@@ -179,6 +180,97 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     // Verify original thread is unchanged
     const origMsgs = messageStore.getByThread('thread-orig', 100);
     assert.equal(origMsgs.length, 4);
+
+    await app.close();
+  });
+
+  it('preserves whisper visibility when copying branch context', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    seedThread(messageStore, threadStore);
+    const whisper = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: '仅 codex 可见的秘密',
+      mentions: [],
+      timestamp: 1004,
+      threadId: 'thread-orig',
+      visibility: 'whisper',
+      whisperTo: ['codex'],
+    });
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: whisper.id, userId: 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 201);
+    const copied = messageStore.getByThread(res.json().threadId, 100).at(-1);
+    assert.equal(copied.visibility, 'whisper');
+    assert.deepEqual(copied.whisperTo, ['codex']);
+    assert.equal(canViewMessage(copied, { type: 'cat', catId: 'codex' }), true);
+    assert.equal(canViewMessage(copied, { type: 'cat', catId: 'opus' }), false);
+
+    await app.close();
+  });
+
+  it('persists and reuses the inline thread link on the source message', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    const msgs = seedThread(messageStore, threadStore);
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: msgs[2].id, userId: 'user-1' },
+    });
+
+    assert.equal(first.statusCode, 201);
+    const firstBody = first.json();
+    assert.deepEqual(messageStore.getById(msgs[2].id).extra?.slockThread, {
+      branchThreadId: firstBody.threadId,
+      replyCount: 0,
+    });
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: msgs[2].id, userId: 'user-1' },
+    });
+
+    assert.equal(second.statusCode, 200);
+    assert.equal(second.json().threadId, firstBody.threadId);
+    assert.equal(second.json().reused, true);
+    assert.equal(
+      threadStore.list().filter((thread) => thread.id !== 'thread-orig').length,
+      1,
+      'refresh/retry must not create an orphan second branch',
+    );
+
+    await app.close();
+  });
+
+  it('does not attach edit-as-branch conversations to the inline thread fold', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    const msgs = seedThread(messageStore, threadStore);
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: {
+        fromMessageId: msgs[2].id,
+        editedContent: '帮我写个注册页',
+        userId: 'user-1',
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(messageStore.getById(msgs[2].id).extra?.slockThread, undefined);
 
     await app.close();
   });

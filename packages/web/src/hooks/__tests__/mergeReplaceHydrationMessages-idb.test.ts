@@ -50,6 +50,32 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
     expect(result.messages[0]!.content).toBe('fresh-from-server');
   });
 
+  it('preserves the authoritative slockThread fold metadata during same-id hydration', () => {
+    const history: ChatMessage[] = [
+      makeMsg({
+        id: 'root-with-thread',
+        extra: {
+          slockThread: {
+            branchThreadId: 'branch-1',
+            replyCount: 2,
+            latestReply: { id: 'reply-2', catId: 'opus', content: '最新回复', timestamp: 2000 },
+          },
+        },
+      }),
+    ];
+    const current: ChatMessage[] = [
+      makeMsg({
+        id: 'root-with-thread',
+        contentBlocks: [{ type: 'text', text: '更丰富的本地消息' }],
+        extra: { stream: { invocationId: 'inv-local' } },
+      }),
+    ];
+
+    const result = mergeReplaceHydrationMessages(history, current, {});
+
+    expect(result.messages[0]!.extra?.slockThread).toEqual(history[0]!.extra?.slockThread);
+  });
+
   it('mixed: cached drops, live preserves, in-history reconciles — single hydration', () => {
     const history: ChatMessage[] = [makeMsg({ id: 'survives' })];
     const current: ChatMessage[] = [

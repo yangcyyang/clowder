@@ -355,7 +355,11 @@ export interface ChatMessage {
     /** Model-authored, non-terminal acknowledgement/heartbeat. */
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
     /** Slock 归档导入：当前批次消息对应的 thread 回复分支。 */
-    slockThread?: { branchThreadId: string; replyCount: number };
+    slockThread?: {
+      branchThreadId: string;
+      replyCount: number;
+      latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+    };
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;

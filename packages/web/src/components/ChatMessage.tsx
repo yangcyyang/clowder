@@ -16,8 +16,8 @@ import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { MarkdownContent } from './MarkdownContent';
-import { MetadataBadge } from './MetadataBadge';
 import { MessageReactions } from './MessageReactions';
+import { MetadataBadge } from './MetadataBadge';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
@@ -122,11 +122,23 @@ function MessageTaskBadge({
   );
 }
 
-function ThreadReplyBadge({ count, newCount = 0, onOpen }: { count: number; newCount?: number; onOpen: () => void }) {
+function ThreadReplyBadge({
+  count,
+  newCount = 0,
+  latestReply,
+  latestAuthorLabel,
+  onOpen,
+}: {
+  count: number;
+  newCount?: number;
+  latestReply?: { content: string };
+  latestAuthorLabel?: string;
+  onOpen: () => void;
+}) {
   if (count <= 0) return null;
 
   return (
-    <div className="mt-2">
+    <div className="mt-2 w-full max-w-xl">
       <button
         type="button"
         aria-label={`打开 Thread，${count} 条回复${newCount > 0 ? `，${newCount} 条新回复` : ''}`}
@@ -135,7 +147,7 @@ function ThreadReplyBadge({ count, newCount = 0, onOpen }: { count: number; newC
           event.stopPropagation();
           onOpen();
         }}
-        className="inline-flex items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2 py-1 text-[11px] font-semibold leading-none text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
+        className="flex min-h-11 w-full items-center gap-2 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1.5 text-left text-[11px] font-semibold text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
       >
         <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path
@@ -145,8 +157,35 @@ function ThreadReplyBadge({ count, newCount = 0, onOpen }: { count: number; newC
             strokeLinejoin="round"
           />
         </svg>
-        {count} {count === 1 ? 'reply' : 'replies'}
-        {newCount > 0 && <span className="text-conn-emerald-text">· {newCount} new</span>}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 leading-none">
+            <span>
+              {count} {count === 1 ? 'reply' : 'replies'}
+            </span>
+            {newCount > 0 && (
+              <>
+                <span
+                  data-thread-unread-dot="true"
+                  aria-hidden="true"
+                  className="h-2 w-2 flex-shrink-0 rounded-full bg-conn-emerald-text"
+                />
+                <span className="text-conn-emerald-text">· {newCount} new</span>
+              </>
+            )}
+          </span>
+          {latestReply && latestAuthorLabel && (
+            <span
+              data-thread-reply-summary="true"
+              className="mt-1 block truncate font-normal leading-snug text-[var(--cafe-text-muted)]"
+              title={`${latestAuthorLabel} · ${latestReply.content}`}
+            >
+              {latestAuthorLabel} · {latestReply.content}
+            </span>
+          )}
+        </span>
+        <span aria-hidden="true" className="flex-shrink-0 text-[var(--cafe-text-muted)]">
+          ›
+        </span>
       </button>
     </div>
   );
@@ -178,7 +217,12 @@ interface ChatMessageProps {
   message: ChatMessageType;
   getCatById: (id: string) => CatData | undefined;
   isGrouped?: boolean;
-  threadReplyInfo?: { branchThreadId: string; replyCount: number; newCount?: number };
+  threadReplyInfo?: {
+    branchThreadId: string;
+    replyCount: number;
+    newCount?: number;
+    latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+  };
   onOpenThread?: (messageId: string) => void;
   onOpenTaskThread?: (task: TaskItem) => void;
   isEditing?: boolean;
@@ -246,7 +290,7 @@ export function ChatMessage({
     .map((task, index) => ({ task, seq: index + 1 }))
     .find(({ task }) => task.sourceMessageId === message.id);
   const taskAssignee = taskEntry?.task.ownerCatId ? getCatById(taskEntry.task.ownerCatId) : undefined;
-  const taskAssigneeLabel = taskAssignee ? formatCatName(taskAssignee) : taskEntry?.task.ownerCatId ?? undefined;
+  const taskAssigneeLabel = taskAssignee ? formatCatName(taskAssignee) : (taskEntry?.task.ownerCatId ?? undefined);
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
   const isSchedulerReply = isSchedulerReplyPreview(message.replyPreview);
@@ -339,7 +383,10 @@ export function ChatMessage({
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">
           <div className="max-w-[85%] w-full">
-            <TimeoutDiagnosticsPanel errorMessage={systemDisplayContent} diagnostics={message.extra.timeoutDiagnostics} />
+            <TimeoutDiagnosticsPanel
+              errorMessage={systemDisplayContent}
+              diagnostics={message.extra.timeoutDiagnostics}
+            />
           </div>
         </div>
       );
@@ -354,7 +401,9 @@ export function ChatMessage({
           : 'text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/5';
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
-        <div className={`px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${toneClass}`}>
+        <div
+          className={`px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${toneClass}`}
+        >
           {isFollowup && <span className="mr-1">🔗</span>}
           {systemDisplayContent}
           {isFollowup && (
@@ -421,8 +470,12 @@ export function ChatMessage({
             <span className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-user)]">
               {coCreator.name}
             </span>
-            <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
-            {message.editedAt && <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>}
+            <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">
+              {formatDualTime(message.timestamp, message.deliveredAt)}
+            </span>
+            {message.editedAt && (
+              <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>
+            )}
           </div>
           <div
             className={
@@ -504,6 +557,12 @@ export function ChatMessage({
             <ThreadReplyBadge
               count={threadReplyInfo.replyCount}
               newCount={threadReplyInfo.newCount}
+              latestReply={threadReplyInfo.latestReply}
+              latestAuthorLabel={
+                threadReplyInfo.latestReply?.catId
+                  ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
+                  : '你'
+              }
               onOpen={() => onOpenThread(message.id)}
             />
           )}
@@ -540,8 +599,12 @@ export function ChatMessage({
               <span className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-agent)]">
                 {catStyle.label}
               </span>
-              <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">{formatTime(message.timestamp)}</span>
-              {message.editedAt && <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>}
+              <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">
+                {formatTime(message.timestamp)}
+              </span>
+              {message.editedAt && (
+                <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>
+              )}
               {isWhisper && (
                 <span
                   className={`px-1.5 py-0.5 rounded [font-size:var(--clowder-type-meta)] ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
@@ -569,11 +632,7 @@ export function ChatMessage({
                 <span>定时提醒</span>
               </div>
             )}
-            {showRuntimeMetadata
-              ? fullRuntimeMetadataBadge
-              : deliveryOnlyDegraded
-                ? deliveryOnlyMetadataBadge
-                : null}
+            {showRuntimeMetadata ? fullRuntimeMetadataBadge : deliveryOnlyDegraded ? deliveryOnlyMetadataBadge : null}
             {message.extra?.crossPost &&
               (() => {
                 const sourceId = message.extra.crossPost?.sourceThreadId;
@@ -615,7 +674,11 @@ export function ChatMessage({
           ) : disableContentCollapse && hasTextContent ? (
             <MarkdownContent content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
           ) : hasTextContent ? (
-            <CollapsibleMarkdown content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
+            <CollapsibleMarkdown
+              content={visibleContent}
+              className={catStyle?.font}
+              searchHighlight={searchHighlight}
+            />
           ) : message.isStreaming ? (
             <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
           ) : null}
@@ -658,6 +721,12 @@ export function ChatMessage({
           <ThreadReplyBadge
             count={threadReplyInfo.replyCount}
             newCount={threadReplyInfo.newCount}
+            latestReply={threadReplyInfo.latestReply}
+            latestAuthorLabel={
+              threadReplyInfo.latestReply?.catId
+                ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
+                : '你'
+            }
             onOpen={() => onOpenThread(message.id)}
           />
         )}

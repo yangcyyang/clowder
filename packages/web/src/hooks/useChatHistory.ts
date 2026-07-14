@@ -139,6 +139,7 @@ function mergeMessageExtra(
   const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
   const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
   const systemKind = preferred?.systemKind ?? fallback?.systemKind;
+  const slockThread = preferred?.slockThread ?? fallback?.slockThread;
   if (
     !rich &&
     !crossPost &&
@@ -147,7 +148,8 @@ function mergeMessageExtra(
     !scheduler &&
     !timeoutDiagnostics &&
     !governanceBlocked &&
-    !systemKind
+    !systemKind &&
+    !slockThread
   ) {
     return undefined;
   }
@@ -160,6 +162,7 @@ function mergeMessageExtra(
     ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
     ...(governanceBlocked ? { governanceBlocked } : {}),
     ...(systemKind ? { systemKind } : {}),
+    ...(slockThread ? { slockThread } : {}),
   };
 }
 
@@ -515,7 +518,11 @@ export function useChatHistory(threadId: string) {
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing' | 'progress_heartbeat';
               agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
-              slockThread?: { branchThreadId: string; replyCount: number };
+              slockThread?: {
+                branchThreadId: string;
+                replyCount: number;
+                latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+              };
             };
             timestamp: number;
             editedAt?: number;

@@ -1,8 +1,19 @@
-export type InlineThreadReplyEntry = { branchThreadId: string; replyCount: number };
+export type InlineThreadReplyPreview = {
+  id: string;
+  catId: string | null;
+  content: string;
+  timestamp: number;
+};
+export type InlineThreadReplyEntry = {
+  branchThreadId: string;
+  replyCount: number;
+  latestReply?: InlineThreadReplyPreview;
+};
 export type InlineThreadReplyState = Record<string, InlineThreadReplyEntry>;
 
 export type InlineThreadReplyCountUpdateOptions = {
   authoritative?: boolean;
+  latestReply?: InlineThreadReplyPreview;
 };
 
 export function applyInlineThreadReplyCountUpdate(
@@ -21,11 +32,16 @@ export function applyInlineThreadReplyCountUpdate(
 
   if (isLoadingZero) return prev;
 
+  const latestReply =
+    options.latestReply ??
+    (!options.authoritative && existing?.branchThreadId === branchThreadId ? existing.latestReply : undefined);
+
   return {
     ...prev,
     [sourceMessageId]: {
       branchThreadId,
       replyCount,
+      ...(latestReply ? { latestReply } : {}),
     },
   };
 }

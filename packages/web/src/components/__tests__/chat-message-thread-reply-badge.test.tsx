@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatMessage } from '@/components/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
-import { useTaskStore, type TaskItem } from '@/stores/taskStore';
+import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -101,7 +101,17 @@ describe('ChatMessage thread reply badge', () => {
         <ChatMessage
           message={makeUserMessage()}
           getCatById={() => undefined}
-          threadReplyInfo={{ branchThreadId: 'thread-branch', replyCount: 11, newCount: 5 }}
+          threadReplyInfo={{
+            branchThreadId: 'thread-branch',
+            replyCount: 11,
+            newCount: 5,
+            latestReply: {
+              id: 'reply-latest',
+              catId: 'opus',
+              content: '已完成验收矩阵与窄屏回归',
+              timestamp: Date.now(),
+            },
+          }}
           onOpenThread={onOpenThread}
         />,
       );
@@ -113,13 +123,47 @@ describe('ChatMessage thread reply badge', () => {
 
     expect(replyButton).toBeTruthy();
     expect(replyButton?.textContent).toContain('5 new');
+    expect(replyButton?.textContent).toContain('opus');
+    expect(replyButton?.textContent).toContain('已完成验收矩阵与窄屏回归');
     expect(replyButton?.getAttribute('aria-label')).toContain('打开 Thread');
+    expect(replyButton?.querySelector('[data-thread-unread-dot="true"]')).toBeTruthy();
+    expect(replyButton?.className).toContain('min-h-11');
 
     act(() => {
       replyButton?.click();
     });
 
     expect(onOpenThread).toHaveBeenCalledWith('m-thread-parent');
+  });
+
+  it('keeps the latest summary compact and hides the unread dot when read', () => {
+    act(() => {
+      root.render(
+        <ChatMessage
+          message={makeUserMessage()}
+          getCatById={() => undefined}
+          threadReplyInfo={{
+            branchThreadId: 'thread-branch',
+            replyCount: 1,
+            newCount: 0,
+            latestReply: {
+              id: 'reply-latest',
+              catId: null,
+              content: '这是用户发出的最后一条回复',
+              timestamp: Date.now(),
+            },
+          }}
+          onOpenThread={vi.fn()}
+        />,
+      );
+    });
+
+    const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('1 reply'),
+    );
+    expect(replyButton?.textContent).toContain('你 · 这是用户发出的最后一条回复');
+    expect(replyButton?.querySelector('[data-thread-unread-dot="true"]')).toBeNull();
+    expect(replyButton?.querySelector('[data-thread-reply-summary="true"]')?.className).toContain('truncate');
   });
 
   it('renders a slock-like task dispatch chip with assignee and opens the task thread', () => {

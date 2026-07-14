@@ -84,6 +84,17 @@ Project / Channel → Message → Thread Reply → Task / Agent Status
 - Task 状态消息
 - Evidence / 引用消息
 
+#### Thread reply 默认折叠（task #376）
+
+- 主时间线只渲染 root message；branch/thread reply 不再重复流入主时间线。
+- 有回复的 root 下方显示一条紧凑折叠行：真实 reply count、当前查看者可见的最新回复摘要、真实未读点/未读数。
+- 最新摘要按当前查看者做可见性过滤；未向查看者公开的 whisper 不得泄漏作者或正文。`progress`、task-system、运行态噪声不参与计数和摘要。
+- 打开 parent 不等于读过 branch。只有 thread panel 可见且页面获得焦点时，才推进 branch 的 `/read/latest` cursor；这与频道侧栏未读规则保持一致。
+- task 在主时间线继续使用单行 task chip/当前状态作为短标记；详细执行过程与 thread reply 留在分支面板。
+- 桌面端 thread panel 为右侧面板；窄屏端为全屏覆盖层，折叠行仍保留可触达的整行入口。
+
+实现边界：只复用现有 `extra.slockThread` 链接与 branch message store；reply count/最新摘要在消息响应层按查看者计算，不新增或迁移持久化数据结构。
+
 ### 3.4 右侧 Context Panel
 
 右侧只放“上下文”，不放主操作。
@@ -295,7 +306,8 @@ Agent 状态更像“成员状态”，不要像游戏角色状态。
 ### Phase 2
 
 - 用户能清楚看到谁在说话、谁在处理、任务是什么状态
-- thread reply 入口明确
+- thread reply 入口明确，主时间线默认折叠 branch 回复并显示计数、摘要与真实未读
+- 非接收者看不到 whisper 摘要；打开 parent 不会错误清除 branch 未读
 - task 状态能直接从消息流识别
 - 右侧能查看任务、Agent 状态、Evidence
 - Agent 执行状态不再淹没在主消息流里
@@ -315,4 +327,3 @@ Mock 只覆盖一个核心路径：
 ```
 
 该 Mock 只用于确认方向，不代表最终生产代码。
-

@@ -37,6 +37,19 @@ context: "Task 存在感优化执行方案 — 对齐 Raft 的任务体验"
 3. **状态迁移有播报 + 通知**：每次 claim/in_review/done 留痕并主动触达。
 4. **task #N 全局可点**：任意位置引用都能跳转。
 
+### 主频道呈现补充（task #376，2026-07-14）
+
+用户已选择 Raft 原生的 B 形态：task 和讨论仍在同一频道，主时间线保持简洁，执行细节收进 task/thread 分支。
+
+- root message 留在主时间线；thread replies 默认折叠为一行入口。
+- 折叠行显示 reply count、当前查看者可见的最新摘要和 branch 真实未读。
+- 主时间线里的 task 只保留单行 task chip/当前状态短标记；详细状态演进、回复与证据留在 task thread。
+- `parent visible != branch read`：只有 branch panel 可见且页面聚焦才确认 branch 已读。
+- whisper 摘要必须按查看者过滤，progress/task-system/runtime noise 不进入摘要。
+- 不改消息存储结构；响应层计算摘要，沿用 `extra.slockThread` 关联 branch。
+
+验证门包括 API/Web 定向回归、隔离 Redis 全量 API、Web build，以及桌面和 390px 窄屏真实浏览器截图。
+
 ## 2. 分阶段实施（按杠杆排序，低风险先行）
 
 ### Phase A：呈现层快赢（纯前端，低风险，先做）

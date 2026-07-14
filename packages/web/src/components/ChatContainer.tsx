@@ -23,6 +23,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useVadInterrupt } from '@/hooks/useVadInterrupt';
+import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
@@ -211,8 +212,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setViewMode,
     isLoading: chatIsLoading,
     clearUnread,
-    confirmUnreadAck,
-    armUnreadSuppression,
     rightPanelMode,
   } = useChatStore();
   // F173 Phase C Task 3 — full read-side migration. All thread liveness +
@@ -1236,58 +1235,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     return disconnectBottomChromeObserver;
   }, [disconnectBottomChromeObserver]);
 
-  // F069-R5: Ack read cursor server-side. The backend finds the latest real message
-  // and acks it atomically — no frontend ID guessing, no timing races with fetchHistory.
-  // Only a visible, focused tab may acknowledge reading. Hidden tabs share the same
-  // user+thread cursor and must not silently clear unread state in another window.
   const _messageCount = messages.length;
-  const lastReadAckKeyRef = useRef<string | null>(null);
-  const acknowledgeVisibleThread = useCallback(() => {
-    if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
-    const ackKey = `${threadId}:${_messageCount}`;
-    if (lastReadAckKeyRef.current === ackKey) return;
-    lastReadAckKeyRef.current = ackKey;
-
-    // Re-arm suppression before each ack. /read/latest is idempotent — any
-    // successful POST means server cursor is at latest, so any successful ack
-    // can safely clear suppression (no generation tracking needed).
-    armUnreadSuppression(threadId);
-    void apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    })
-      .then((res) => {
-        if (res.ok) {
-          confirmUnreadAck(threadId);
-          return;
-        }
-        // A failed request still settles the in-flight suppression ledger. If
-        // it leaked here, a later retry would leave pendingAckCount > 0 and
-        // suppress server-hydrated unread badges forever.
-        confirmUnreadAck(threadId);
-        if (lastReadAckKeyRef.current === ackKey) lastReadAckKeyRef.current = null;
-      })
-      .catch((err) => {
-        confirmUnreadAck(threadId);
-        if (lastReadAckKeyRef.current === ackKey) lastReadAckKeyRef.current = null;
-        console.debug('[F069] read ack failed:', err);
-      });
-  }, [threadId, _messageCount, confirmUnreadAck, armUnreadSuppression]);
-
-  useEffect(() => {
-    acknowledgeVisibleThread();
-  }, [acknowledgeVisibleThread]);
-
-  useEffect(() => {
-    const acknowledgeAfterAttentionReturns = () => acknowledgeVisibleThread();
-    document.addEventListener('visibilitychange', acknowledgeAfterAttentionReturns);
-    window.addEventListener('focus', acknowledgeAfterAttentionReturns);
-    return () => {
-      document.removeEventListener('visibilitychange', acknowledgeAfterAttentionReturns);
-      window.removeEventListener('focus', acknowledgeAfterAttentionReturns);
-    };
-  }, [acknowledgeVisibleThread]);
+  // F069/#374: 主频道与 Inline Thread 共享同一套 visible+focused 服务端 read ack。
+  useVisibleThreadReadAck(threadId, _messageCount);
 
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {
