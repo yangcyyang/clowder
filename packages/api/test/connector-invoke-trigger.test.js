@@ -28,7 +28,7 @@ function noopLog() {
  */
 function mockRouter(opts = {}) {
   const calls =
-    /** @type {Array<{userId: string, message: string, threadId: string, userMessageId: string, targetCats: string[], intent: object}>} */ ([]);
+    /** @type {Array<{userId: string, message: string, threadId: string, userMessageId: string, targetCats: string[], intent: object, options?: any}>} */ ([]);
   const ackCalls = /** @type {Array<{userId: string, threadId: string}>} */ ([]);
 
   return {
@@ -37,7 +37,7 @@ function mockRouter(opts = {}) {
     /** @type {any} */
     router: {
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
-        calls.push({ userId, message, threadId, userMessageId, targetCats, intent });
+        calls.push({ userId, message, threadId, userMessageId, targetCats, intent, options });
 
         if (opts.throwError) throw opts.throwError;
 
@@ -256,6 +256,20 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(routerMock.calls[0].threadId, 'thread-1');
     assert.strictEqual(routerMock.calls[0].userMessageId, 'msg-1');
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['opus']);
+  });
+
+  it('propagates silent scheduler receipt presentation without changing the message type', async () => {
+    const trigger = createTrigger();
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'primer', 'msg-primer', undefined, {
+      sourceCategory: 'scheduled',
+      responsePresentation: 'silent_receipt',
+    });
+    await waitForTrigger();
+
+    assert.strictEqual(routerMock.calls[0].options.responsePresentation, 'silent_receipt');
+    const textBroadcast = socketMock.broadcasts.find((entry) => entry.msg.type === 'text');
+    assert.ok(textBroadcast, 'existing text event should still be transported');
+    assert.strictEqual(textBroadcast.msg.extra.scheduler.hiddenReceipt, true);
   });
 
   it('broadcasts agent messages to WebSocket room', async () => {
@@ -627,6 +641,88 @@ describe('ConnectorInvokeTrigger', () => {
     await waitForTrigger();
 
     assert.strictEqual(deliverCalls.length, 0, 'Should NOT deliver empty reply for silent cat');
+  });
+
+  it('does not add an empty-result reminder when the invocation already surfaced a real error', async () => {
+    const errorOnlyRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, targetCats) {
+        yield {
+          type: 'error',
+          catId: targetCats[0],
+          error: 'Codex 额度已用尽，恢复时间未知',
+          errorCode: 'usage_limit',
+          metadata: { usage: { inputTokens: 10, outputTokens: 0 } },
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'done',
+          catId: targetCats[0],
+          content: '',
+          timestamp: Date.now(),
+        };
+      },
+      async ackCollectedCursors() {},
+    });
+    const appends = /** @type {any[]} */ ([]);
+    const messageStore = /** @type {any} */ ({
+      async append(input) {
+        appends.push(input);
+        return { ...input, id: `stored-${appends.length}` };
+      },
+      async getByThread() {
+        return [];
+      },
+    });
+    const deliveries = /** @type {any[]} */ ([]);
+    const outboundHook = /** @type {any} */ ({
+      async deliver(...args) {
+        deliveries.push(args);
+      },
+    });
+
+    const trigger = createTrigger({ router: errorOnlyRouter, messageStore, outboundHook });
+    trigger.trigger('thread-1', /** @type {any} */ ('gpt52'), 'user-1', 'primer', 'msg-primer-1');
+    await waitForTrigger();
+
+    assert.ok(
+      socketMock.broadcasts.some((entry) => entry.msg.type === 'error'),
+      'the real error should remain visible',
+    );
+    assert.strictEqual(appends.length, 0, 'must not persist a duplicate connector-empty-result notice');
+    assert.strictEqual(deliveries.length, 1, 'external delivery should receive the same human-readable error once');
+    assert.match(String(deliveries[0][1]), /Codex 额度已用尽/);
+    assert.doesNotMatch(String(deliveries[0][1]), /没有返回可展示文本/);
+    const failedUpdate = recordMock.updates.find((entry) => entry.data.status === 'failed');
+    assert.deepStrictEqual(failedUpdate.data.usageByCat.gpt52, { inputTokens: 10, outputTokens: 0 });
+  });
+
+  it('does not mark a recoverable provider error failed after the same cat returns text', async () => {
+    const recoveringRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, targetCats) {
+        yield {
+          type: 'error',
+          catId: targetCats[0],
+          error: 'temporary tool transport error',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'text',
+          catId: targetCats[0],
+          content: 'Recovered answer',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const trigger = createTrigger({ router: recoveringRouter });
+
+    trigger.trigger('thread-1', /** @type {any} */ ('gpt52'), 'user-1', 'run', 'msg-recover-1');
+    await waitForTrigger();
+
+    const terminalUpdate = recordMock.updates.at(-1)?.data;
+    assert.strictEqual(terminalUpdate.status, 'succeeded');
+    assert.strictEqual(terminalUpdate.error, undefined);
   });
 
   it('freshness hold stays private and transitions the matching streaming placeholder to review', async () => {

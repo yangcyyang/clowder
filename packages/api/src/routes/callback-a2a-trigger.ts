@@ -30,6 +30,7 @@ import {
 } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
+import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -484,6 +485,8 @@ export async function triggerA2AInvocation(
 
       // F070: track governance block errorCode for recoverable failure marking
       let governanceErrorCode: string | undefined;
+      const pendingProviderErrors = new Map<string, string>();
+      const collectedUsage = new Map<string, TokenUsage>();
 
       for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
         ...(controller?.signal ? { signal: controller.signal } : {}),
@@ -507,6 +510,15 @@ export async function triggerA2AInvocation(
         if (msg.type === 'done' && msg.errorCode) {
           governanceErrorCode = msg.errorCode;
         }
+        if (msg.type === 'error' && msg.catId) {
+          pendingProviderErrors.set(msg.catId, msg.error?.trim() || 'Provider error');
+        }
+        if (msg.type === 'text' && msg.catId && msg.content?.trim()) {
+          pendingProviderErrors.delete(msg.catId);
+        }
+        if ((msg.type === 'done' || msg.type === 'error') && msg.catId && msg.metadata?.usage) {
+          collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+        }
         socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
       }
 
@@ -514,6 +526,7 @@ export async function triggerA2AInvocation(
         finalStatus = 'canceled';
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'canceled',
+          ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
         });
       } else if (governanceErrorCode) {
         // F070: Governance gate blocked — mark as failed with errorCode for retry
@@ -521,10 +534,19 @@ export async function triggerA2AInvocation(
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'failed',
           error: governanceErrorCode,
+          ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
+        });
+      } else if (pendingProviderErrors.size > 0) {
+        finalStatus = 'failed';
+        await invocationRecordStore.update(createResult.invocationId, {
+          status: 'failed',
+          error: [...pendingProviderErrors.values()].join('\n'),
+          ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
         });
       } else {
         await invocationRecordStore.update(createResult.invocationId, {
           status: 'succeeded',
+          ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
         });
         finalStatus = 'succeeded';
       }

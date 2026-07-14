@@ -2574,7 +2574,10 @@ describe('routeSerial degradation notification', () => {
 
       assert.equal(captureService.calls.length, 1, 'codex should be called once');
       assert.ok(captureService.calls[0].includes('Context 理智线预警'), 'prompt should include rational-line warning');
-      assert.ok(captureService.calls[0].includes('.cat-cafe/memory/{catId}.md'), 'warning should request memory write-back');
+      assert.ok(
+        captureService.calls[0].includes('.cat-cafe/memory/{catId}.md'),
+        'warning should request memory write-back',
+      );
     } finally {
       delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
     }
@@ -2916,6 +2919,71 @@ describe('routeSerial: done-only (no text, no error)', () => {
     assert.equal(doneMsgs[0].isFinal, true, 'silent single-cat run should mark done as final');
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent cat should not persist blank content');
+  });
+});
+
+describe('routeParallel: provider error diagnostics survive reload', () => {
+  it('persists diagnostics on the existing system error message', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: {
+          async *invoke() {
+            yield {
+              type: 'error',
+              catId: 'codex',
+              error: 'Codex 额度超限，7/20 23:26 恢复',
+              errorCode: 'usage_limit',
+              metadata: {
+                provider: 'openai',
+                model: 'gpt-5-codex',
+                diagnostics: { rawError: 'usage limit raw detail', invocationId: 'inv-parallel' },
+              },
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+      },
+      appendCalls,
+    );
+
+    for await (const _msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const errorAppend = appendCalls.find((message) => message.userId === 'system' && message.catId === null);
+    assert.ok(errorAppend);
+    assert.equal(errorAppend.metadata.diagnostics.errorCode, 'usage_limit');
+    assert.equal(errorAppend.metadata.diagnostics.invocationId, 'inv-parallel');
+  });
+
+  it('does not persist a recovered provider error after later same-cat text', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: {
+          async *invoke() {
+            yield { type: 'error', catId: 'codex', error: 'temporary tool transport error', timestamp: Date.now() };
+            yield { type: 'text', catId: 'codex', content: 'Recovered answer', timestamp: Date.now() };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+      },
+      appendCalls,
+    );
+
+    for await (const _msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      // drain
+    }
+
+    assert.ok(appendCalls.some((message) => message.catId === 'codex' && message.content === 'Recovered answer'));
+    assert.equal(
+      appendCalls.some((message) => message.userId === 'system' && message.content.startsWith('Error:')),
+      false,
+    );
   });
 });
 

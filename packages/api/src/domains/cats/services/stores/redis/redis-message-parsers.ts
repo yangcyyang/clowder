@@ -46,6 +46,7 @@ export function safeParseExtra(raw: string | undefined):
       crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
       scheduler?: {
         hiddenTrigger?: boolean;
+        hiddenReceipt?: boolean;
         toast?: {
           type: 'success' | 'error' | 'info';
           title: string;
@@ -72,6 +73,7 @@ export function safeParseExtra(raw: string | undefined):
       crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
       scheduler?: {
         hiddenTrigger?: boolean;
+        hiddenReceipt?: boolean;
         toast?: {
           type: 'success' | 'error' | 'info';
           title: string;
@@ -115,10 +117,11 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    // #481: Preserve scheduler sub-field (hiddenTrigger, toast) through Redis round-trip
+    // #481: Preserve scheduler sub-field through Redis round-trip.
     if (parsed.scheduler && typeof parsed.scheduler === 'object') {
       const sched: NonNullable<typeof result.scheduler> = {};
       if (parsed.scheduler.hiddenTrigger === true) sched.hiddenTrigger = true;
+      if (parsed.scheduler.hiddenReceipt === true) sched.hiddenReceipt = true;
       if (parsed.scheduler.toast && typeof parsed.scheduler.toast === 'object') {
         sched.toast = parsed.scheduler.toast;
       }

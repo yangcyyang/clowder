@@ -37,6 +37,7 @@ export interface SchedulerToastPayload {
 export interface SchedulerMessageExtra {
   scheduler?: {
     hiddenTrigger?: boolean;
+    hiddenReceipt?: boolean;
     toast?: SchedulerToastPayload;
   };
 }

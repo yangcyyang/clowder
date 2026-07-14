@@ -17,6 +17,7 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../domains/cats/services/agents/routing/route-helpers.js';
+import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -238,6 +239,8 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         const persistenceContext: PersistenceContext = { failed: false, errors: [] };
         // F070: track governance block errorCode (mirror messages.ts)
         let governanceErrorCode: string | undefined;
+        const pendingProviderErrors = new Map<string, string>();
+        const collectedUsage = new Map<string, TokenUsage>();
 
         await opts.invocationRecordStore.update(id, { phase: 'first_token_waiting' });
         opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'invocation_phase', {
@@ -283,19 +286,36 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           if (msg.type === 'done' && msg.errorCode) {
             governanceErrorCode = msg.errorCode;
           }
+          if (msg.type === 'error' && msg.catId) {
+            pendingProviderErrors.set(msg.catId, msg.error?.trim() || 'Provider error');
+          }
+          if (msg.type === 'text' && msg.catId && msg.content?.trim()) {
+            pendingProviderErrors.delete(msg.catId);
+          }
+          if ((msg.type === 'done' || msg.type === 'error') && msg.catId && msg.metadata?.usage) {
+            collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+          }
           if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
             opts.invocationTracker.completeSlot(record.threadId, msg.catId, controller);
           }
           opts.socketManager.broadcastAgentMessage({ ...msg, invocationId: id }, record.threadId);
         }
 
-        // P1-2: mark failed if any message persistence failed
-        if (persistenceContext.failed) {
+        if (controller.signal.aborted) {
+          await opts.invocationRecordStore.update(id, {
+            status: 'canceled',
+            phase: 'done',
+            ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
+          });
+          finalStatus = 'canceled';
+        } else if (persistenceContext.failed) {
+          // P1-2: mark failed if any message persistence failed
           const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
             phase: 'done',
             error: `Message delivered but persistence failed: ${errorDetail}`,
+            ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
           opts.socketManager.broadcastAgentMessage(
             {
@@ -311,6 +331,14 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             status: 'failed',
             phase: 'done',
             error: governanceErrorCode,
+            ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
+          });
+        } else if (pendingProviderErrors.size > 0) {
+          await opts.invocationRecordStore.update(id, {
+            status: 'failed',
+            phase: 'done',
+            error: [...pendingProviderErrors.values()].join('\n'),
+            ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
         } else {
           await opts.invocationRecordStore.update(id, { phase: 'persisting' });
@@ -324,7 +352,11 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           // throws, the catch block sees running→failed (valid transition).
           await opts.router.ackCollectedCursors(record.userId, record.threadId, cursorBoundaries);
 
-          await opts.invocationRecordStore.update(id, { status: 'succeeded', phase: 'done' });
+          await opts.invocationRecordStore.update(id, {
+            status: 'succeeded',
+            phase: 'done',
+            ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
+          });
           finalStatus = 'succeeded';
         }
       } catch (err) {

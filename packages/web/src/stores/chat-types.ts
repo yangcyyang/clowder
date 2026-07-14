@@ -88,6 +88,8 @@ export interface ChatMessageMetadata {
   usage?: TokenUsage;
   /** Runtime-only warnings surfaced behind the message's metadata chip. */
   runtimeWarnings?: RuntimeWarning[];
+  /** Provider failure diagnostics; redacted and bounded by the API. */
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface RuntimeWarning {
@@ -335,6 +337,8 @@ export interface ChatMessage {
     scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
     timeoutDiagnostics?: TimeoutDiagnostics;
+    /** Realtime provider diagnostics before the persisted history message is hydrated. */
+    providerDiagnostics?: Record<string, unknown>;
     /** F070: Governance blocked data for actionable bootstrap card */
     governanceBlocked?: {
       projectPath: string;

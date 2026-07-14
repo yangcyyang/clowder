@@ -303,6 +303,72 @@ describe('QueueProcessor', () => {
     });
   });
 
+  it('preserves silent window-primer presentation after connector work is queued', async () => {
+    deps.router.routeExecution = mock.fn(async function* () {
+      yield {
+        type: 'text',
+        catId: 'codex',
+        content: 'Codex 窗口已激活，当前时间 10:30。',
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+    const entry = enqueueEntry(deps.queue, {
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      responsePresentation: 'silent_receipt',
+      targetCats: ['codex'],
+      content: 'window-primer: warm the active session',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-primer');
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0]?.arguments[6];
+    assert.equal(routeOptions.responsePresentation, 'silent_receipt');
+    const textBroadcast = deps.socketManager.broadcastAgentMessage.mock.calls
+      .map((call) => call.arguments[0])
+      .find((message) => message.type === 'text');
+    assert.ok(textBroadcast, 'queued primer should still use the existing text event');
+    assert.equal(textBroadcast.extra.scheduler.hiddenReceipt, true);
+  });
+
+  it('keeps ordinary queued scheduled reminders visible', async () => {
+    const entry = enqueueEntry(deps.queue, {
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      targetCats: ['codex'],
+      content: '提醒我提交周报',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-reminder');
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0]?.arguments[6];
+    assert.equal(routeOptions.responsePresentation, undefined);
+  });
+
+  it('does not infer silent presentation from scheduled reminder text', async () => {
+    const entry = enqueueEntry(deps.queue, {
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      targetCats: ['codex'],
+      content: 'window-primer: this is ordinary user-visible reminder text',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-marker-reminder');
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0]?.arguments[6];
+    assert.equal(routeOptions.responsePresentation, undefined);
+  });
+
   it('emits queue_updated(action=completed) after entry is removed from queue', async () => {
     const entry = enqueueEntry(deps.queue, { targetCats: ['codex'] });
     deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
@@ -2142,6 +2208,163 @@ describe('QueueProcessor', () => {
         .find((input) => input.status === 'succeeded');
       assert.equal(succeededUpdate.usageByCat.opus.deliveryOnlyMode, 'degraded');
     });
+
+    it('marks a provider error event failed and preserves usage in the InvocationRecord', async () => {
+      const providerErrorDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'error',
+              catId: 'opus',
+              error: 'Provider timeout while waiting for response body',
+              metadata: {
+                provider: 'catagent',
+                model: 'claude-opus-4',
+                usage: { inputTokens: 654, outputTokens: 0, cacheReadTokens: 222 },
+              },
+              timestamp: Date.now(),
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const providerErrorProcessor = new QueueProcessor(providerErrorDeps);
+      enqueueEntry(providerErrorDeps.queue, { userId: 'u1', targetCats: ['opus'] });
+
+      await providerErrorProcessor.processNext('t1', 'u1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const terminalUpdates = providerErrorDeps.invocationRecordStore.update.mock.calls.map(
+        (call) => call.arguments[1],
+      );
+      assert.equal(
+        terminalUpdates.some((input) => input.status === 'succeeded'),
+        false,
+        'provider error must never converge to succeeded',
+      );
+      const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
+      assert.ok(failedUpdate, 'provider error must converge to failed');
+      assert.equal(failedUpdate.error, 'Provider timeout while waiting for response body');
+      assert.deepEqual(failedUpdate.usageByCat, {
+        opus: { inputTokens: 654, outputTokens: 0, cacheReadTokens: 222 },
+      });
+    });
+
+    it('persistence failure outranks a normal done and preserves usage in the InvocationRecord', async () => {
+      const streamLifecycle = [];
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {
+          streamLifecycle.push('start:begin');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          streamLifecycle.push('start:end');
+        }),
+        onStreamFailure: mock.fn(async () => {
+          streamLifecycle.push('failure');
+        }),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+      const persistenceDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            const routeOptions = args[6];
+            routeOptions.persistenceContext.failed = true;
+            routeOptions.persistenceContext.errors.push({
+              catId: 'opus',
+              error: 'assistant message append failed',
+            });
+            yield {
+              type: 'text',
+              catId: 'opus',
+              content: 'answer generated but not persisted',
+              metadata: {
+                provider: 'catagent',
+                model: 'claude-opus-4',
+                usage: { inputTokens: 321, outputTokens: 45 },
+              },
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        streamingHook,
+      });
+      const persistenceProcessor = new QueueProcessor(persistenceDeps);
+      enqueueEntry(persistenceDeps.queue, { userId: 'u1', targetCats: ['opus'] });
+
+      await persistenceProcessor.processNext('t1', 'u1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map(
+        (call) => call.arguments[1],
+      );
+      assert.equal(terminalUpdates.some((input) => input.status === 'succeeded'), false);
+      const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
+      assert.ok(failedUpdate, 'persistence failure must converge to failed');
+      assert.equal(failedUpdate.error, 'persistence_failure: opus: assistant message append failed');
+      assert.deepEqual(failedUpdate.usageByCat, {
+        opus: { inputTokens: 321, outputTokens: 45 },
+      });
+      assert.equal(streamingHook.onStreamFailure.mock.calls.length, 1);
+      assert.deepEqual(streamingHook.onStreamFailure.mock.calls[0].arguments, [
+        't1',
+        'persistence_failure: opus: assistant message append failed',
+        'inv-stub',
+      ]);
+      assert.deepEqual(streamLifecycle, ['start:begin', 'start:end', 'failure']);
+      assert.equal(streamingHook.onStreamEnd.mock.calls.length, 0);
+    });
+
+    it('persistence failure outranks a simultaneous provider terminal error', async () => {
+      const persistenceDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            const routeOptions = args[6];
+            routeOptions.persistenceContext.failed = true;
+            routeOptions.persistenceContext.errors.push({
+              catId: 'opus',
+              error: 'assistant message append failed',
+            });
+            yield {
+              type: 'error',
+              catId: 'opus',
+              error: 'Provider timeout while waiting for response body',
+              metadata: {
+                provider: 'catagent',
+                model: 'claude-opus-4',
+                usage: { inputTokens: 654, outputTokens: 0 },
+              },
+              timestamp: Date.now(),
+            };
+            yield {
+              type: 'done',
+              catId: 'opus',
+              errorCode: 'provider_timeout',
+              timestamp: Date.now(),
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      const persistenceProcessor = new QueueProcessor(persistenceDeps);
+      enqueueEntry(persistenceDeps.queue, { userId: 'u1', targetCats: ['opus'] });
+
+      await persistenceProcessor.processNext('t1', 'u1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map(
+        (call) => call.arguments[1],
+      );
+      assert.equal(terminalUpdates.some((input) => input.status === 'succeeded'), false);
+      const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
+      assert.ok(failedUpdate, 'persistence failure must converge to failed');
+      assert.equal(failedUpdate.error, 'persistence_failure: opus: assistant message append failed');
+      assert.deepEqual(failedUpdate.usageByCat, {
+        opus: { inputTokens: 654, outputTokens: 0 },
+      });
+    });
   });
 
   // ── Tracker guard: prevent duplicate execution for CLI-active cats ──
@@ -2432,7 +2655,11 @@ describe('QueueProcessor', () => {
         const failedUpdate = hookDeps.invocationRecordStore.update.mock.calls.find(
           (call) => call.arguments[1]?.status === 'failed',
         );
-        assert.match(failedUpdate.arguments[1].error, /permission_cancelled/);
+        assert.equal(
+          failedUpdate.arguments[1].error,
+          'permission_cancelled: Grok 终端工具权限未获批准，本轮未完成。',
+          'structured code must stay authoritative without duplicate prefixes',
+        );
         assert.equal(
           hookDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'succeeded'),
           false,
@@ -3096,12 +3323,7 @@ describe('QueueProcessor', () => {
       const auditUpdate = deps.invocationRecordStore.update.mock.calls.find(
         (call) => call.arguments[1]?.userMessageIds,
       );
-      assert.deepEqual(auditUpdate?.arguments[1].userMessageIds, [
-        'message-1',
-        'message-2',
-        'message-3',
-        'message-4',
-      ]);
+      assert.deepEqual(auditUpdate?.arguments[1].userMessageIds, ['message-1', 'message-2', 'message-3', 'message-4']);
       processor.dispose();
     });
 

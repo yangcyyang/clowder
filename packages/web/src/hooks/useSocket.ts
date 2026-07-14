@@ -56,14 +56,22 @@ interface AgentMessage {
   toolName?: string;
   toolInput?: Record<string, unknown>;
   error?: string;
+  errorCode?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
+  metadata?: {
+    provider: string;
+    model: string;
+    sessionId?: string;
+    usage?: import('../stores/chat-types').TokenUsage;
+    diagnostics?: Record<string, unknown>;
+  };
   /** progress = non-terminal Agent-authored acknowledgement/heartbeat. */
   origin?: 'stream' | 'callback' | 'progress';
   messageId?: string;
   extra?: {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+    scheduler?: { hiddenReceipt?: boolean };
   };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
@@ -807,11 +815,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
     socket.on(
       'message_reactions_updated',
-      (data: {
-        messageId: string;
-        threadId: string;
-        reactions: import('../stores/chat-types').MessageReaction[];
-      }) => {
+      (data: { messageId: string; threadId: string; reactions: import('../stores/chat-types').MessageReaction[] }) => {
         callbacksRef.current.onMessageReactionsUpdated?.(data);
       },
     );

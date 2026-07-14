@@ -14,6 +14,17 @@ const INTERNAL_RUNTIME_JSON_TYPES = new Set([
   'session_handoff_write_failed',
   'session_seal_requested',
 ]);
+// Temporary migration shim for the five primer receipts persisted before
+// scheduler.hiddenReceipt shipped. Delete after the default-thread retention
+// window no longer contains these exact IDs; never broaden this to text matching,
+// or a user-requested "窗口已激活" reply could disappear.
+const LEGACY_WINDOW_PRIMER_RECEIPT_IDS = new Set([
+  '0001783988092014-000071-74726008',
+  '0001783996224835-000088-8338059d',
+  '0001784005219544-000095-4b0f0972',
+  '0001784014233586-000241-a222b827',
+  '0001784026820468-000069-3d6f0005',
+]);
 
 function isInternalRuntimeJsonLine(line: string): boolean {
   const trimmed = line.trim();
@@ -42,10 +53,17 @@ export function sanitizeAgentVisibleContent(content: string): string {
     cleaned.push(line);
   }
 
-  return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return cleaned
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function isUserVisibleChatMessage(message: ChatMessage): boolean {
+  if (message.extra?.scheduler?.hiddenReceipt || LEGACY_WINDOW_PRIMER_RECEIPT_IDS.has(message.id)) {
+    return false;
+  }
+
   if (message.origin === 'briefing') {
     return false;
   }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
-import { isUnreadCountableChatMessage, isUserVisibleChatMessage, sanitizeAgentVisibleContent } from '../chat-message-visibility';
+import {
+  isUnreadCountableChatMessage,
+  isUserVisibleChatMessage,
+  sanitizeAgentVisibleContent,
+} from '../chat-message-visibility';
 
 describe('chat-message-visibility', () => {
   it('hides context briefing messages from the main chat surface and unread counts', () => {
@@ -37,6 +41,38 @@ describe('chat-message-visibility', () => {
     expect(isUnreadCountableChatMessage(heartbeatMessage)).toBe(false);
   });
 
+  it('hides scheduler silent receipts from both timeline and unread counts', () => {
+    const receipt: ChatMessage = {
+      id: 'primer-new',
+      threadId: 'default',
+      type: 'assistant',
+      catId: 'gpt52',
+      content: 'Codex 窗口已激活，当前时间 2026-07-14 22:30。',
+      origin: 'stream',
+      extra: { scheduler: { hiddenReceipt: true } },
+      timestamp: Date.now(),
+    } as ChatMessage;
+
+    expect(isUserVisibleChatMessage(receipt)).toBe(false);
+    expect(isUnreadCountableChatMessage(receipt)).toBe(false);
+  });
+
+  it('hides only the five known legacy primer receipts, not similar manual replies', () => {
+    const legacy: ChatMessage = {
+      id: '0001783996224835-000088-8338059d',
+      threadId: 'default',
+      type: 'assistant',
+      catId: 'gpt52',
+      content: 'Codex 窗口已激活，当前时间 2026-07-14 10:30。',
+      origin: 'stream',
+      timestamp: 1783996224835,
+    } as ChatMessage;
+    const manual = { ...legacy, id: 'manual-window-activation', timestamp: Date.now() };
+
+    expect(isUserVisibleChatMessage(legacy)).toBe(false);
+    expect(isUserVisibleChatMessage(manual)).toBe(true);
+  });
+
   it('strips internal shared-state and handoff runtime notices from visible assistant content', () => {
     const content = [
       '⚠️ Shared-state preflight: uncommitted shared-state files: cat-template.json, docs/ROADMAP.md. Please commit+push before continuing (shared-rules §14).',
@@ -69,8 +105,7 @@ describe('chat-message-visibility', () => {
       threadId: 'thread-1',
       type: 'system',
       variant: 'info',
-      content:
-        '{"type":"handoff_draft_window","catId":"gpt52","sessionId":"session_1","threadId":"default"}',
+      content: '{"type":"handoff_draft_window","catId":"gpt52","sessionId":"session_1","threadId":"default"}',
       timestamp: Date.now(),
     } as Partial<ChatMessage> as ChatMessage;
 

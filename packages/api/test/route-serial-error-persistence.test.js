@@ -31,6 +31,15 @@ function createTextThenErrorService(catId, text, errorMsg) {
   };
 }
 
+function createTextService(catId, text) {
+  return {
+    async *invoke() {
+      yield { type: 'text', catId, content: text, timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createThinkingOnlyService(catId) {
   return {
     async *invoke() {
@@ -104,6 +113,25 @@ function createMockDeps(services, appendCalls) {
 }
 
 describe('route-serial error persistence (F5 reload)', () => {
+  it('persists scheduler silent-receipt presentation on the existing assistant message type', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      { gemini: createTextService('gemini', 'Codex 窗口已激活，当前时间 10:30。') },
+      appendCalls,
+    );
+
+    for await (const _msg of routeSerial(deps, ['gemini'], 'primer', 'user1', 'thread1', {
+      responsePresentation: 'silent_receipt',
+    })) {
+      // drain
+    }
+
+    const catAppend = appendCalls.find((message) => message.catId === 'gemini');
+    assert.ok(catAppend, 'receipt remains auditable as the existing assistant message');
+    assert.equal(catAppend.extra.scheduler.hiddenReceipt, true);
+  });
+
   it('persists error-only response as system message with Error: prefix', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -129,6 +157,49 @@ describe('route-serial error persistence (F5 reload)', () => {
     // No cat message with [错误] prefix should exist
     const catAppend = appendCalls.find((m) => m.catId === 'gemini');
     assert.equal(catAppend, undefined, 'error-only should NOT persist as cat message');
+  });
+
+  it('persists provider diagnostics on the same concise error message for F5 reload', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: {
+          async *invoke() {
+            yield {
+              type: 'error',
+              catId: 'codex',
+              error: 'Codex 额度超限，7/20 23:26 恢复',
+              errorCode: 'usage_limit',
+              metadata: {
+                provider: 'openai',
+                model: 'gpt-5-codex',
+                diagnostics: {
+                  rawError: "You've hit your usage limit. Try again at Jul 20th, 2026 11:26 PM",
+                  resetAt: 1784561160000,
+                  invocationId: 'inv-quota',
+                  rawArchivePath: '/tmp/raw/inv-quota.ndjson',
+                },
+              },
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+      },
+      appendCalls,
+    );
+
+    for await (const _msg of routeSerial(deps, ['codex'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const errorAppend = appendCalls.find((message) => message.userId === 'system' && message.catId === null);
+    assert.ok(errorAppend, 'quota failure should remain one persisted system error message');
+    assert.equal(errorAppend.content, 'Error: Codex 额度超限，7/20 23:26 恢复');
+    assert.equal(errorAppend.metadata.diagnostics.errorCode, 'usage_limit');
+    assert.equal(errorAppend.metadata.diagnostics.invocationId, 'inv-quota');
+    assert.match(errorAppend.metadata.diagnostics.rawError, /usage limit/i);
   });
 
   it('persists text+error as separate cat message + system error', async () => {
@@ -163,6 +234,33 @@ describe('route-serial error persistence (F5 reload)', () => {
     assert.ok(errorAppend.content.includes('model_capacity'), 'system error should contain the error code');
   });
 
+  it('does not persist a recovered provider error after later same-cat text', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        gemini: {
+          async *invoke() {
+            yield { type: 'error', catId: 'gemini', error: 'temporary tool transport error', timestamp: Date.now() };
+            yield { type: 'text', catId: 'gemini', content: 'Recovered answer', timestamp: Date.now() };
+            yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+          },
+        },
+      },
+      appendCalls,
+    );
+
+    for await (const _msg of routeSerial(deps, ['gemini'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    assert.ok(appendCalls.some((message) => message.catId === 'gemini' && message.content === 'Recovered answer'));
+    assert.equal(
+      appendCalls.some((message) => message.userId === 'system' && message.content.startsWith('Error:')),
+      false,
+    );
+  });
+
   it('streams error event to frontend regardless of persistence', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -195,7 +293,10 @@ describe('route-serial error persistence (F5 reload)', () => {
       (m) => m.userId === 'system' && m.catId === null && m.source?.connector === 'silent-completion',
     );
     assert.ok(noticeAppend, 'should persist a visible silent-completion notice');
-    assert.ok(noticeAppend.content.includes('没有返回可展示文本'), 'notice should explain that no displayable text was produced');
+    assert.ok(
+      noticeAppend.content.includes('没有返回可展示文本'),
+      'notice should explain that no displayable text was produced',
+    );
     assert.ok(
       noticeAppend.content.includes('请总结刚才读取/检查到的内容'),
       'notice should suggest a concrete follow-up prompt',

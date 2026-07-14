@@ -987,6 +987,117 @@ describe('POST /api/messages deliveryMode', () => {
     assert.ok(canceledCall, 'should mark as canceled when signal aborted');
   });
 
+  it('provider error event without text marks the invocation failed and preserves usage', async () => {
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        catId: 'opus',
+        error: 'Provider timeout while waiting for response body',
+        metadata: {
+          provider: 'catagent',
+          model: 'claude-opus-4',
+          usage: { inputTokens: 321, outputTokens: 0, cacheReadTokens: 123 },
+        },
+        timestamp: Date.now(),
+      };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '测试 provider error 终态', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const terminalUpdates = deps.invocationRecordStore.update.mock.calls.map((call) => call.arguments[1]);
+    assert.equal(
+      terminalUpdates.some((input) => input.status === 'succeeded'),
+      false,
+      'provider error must never converge to succeeded',
+    );
+    const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
+    assert.ok(failedUpdate, 'provider error must converge to failed');
+    assert.equal(failedUpdate.error, 'Provider timeout while waiting for response body');
+    assert.deepEqual(failedUpdate.usageByCat, {
+      opus: { inputTokens: 321, outputTokens: 0, cacheReadTokens: 123 },
+    });
+    assert.equal(deps.queueProcessor.onInvocationComplete.mock.calls.at(-1).arguments[2], 'failed');
+  });
+
+  it('keeps governance errorCode authoritative over an earlier generic provider error', async () => {
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        catId: 'opus',
+        error: 'Generic provider failure detail',
+        metadata: {
+          provider: 'catagent',
+          model: 'claude-opus-4',
+          usage: { inputTokens: 77, outputTokens: 0 },
+        },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'done',
+        catId: 'opus',
+        errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+        timestamp: Date.now(),
+      };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '测试 governance 优先级', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const failedUpdate = deps.invocationRecordStore.update.mock.calls
+      .map((call) => call.arguments[1])
+      .find((input) => input.status === 'failed');
+    assert.ok(failedUpdate);
+    assert.equal(failedUpdate.error, 'GOVERNANCE_BOOTSTRAP_REQUIRED');
+    assert.deepEqual(failedUpdate.usageByCat, { opus: { inputTokens: 77, outputTokens: 0 } });
+  });
+
+  it('does not treat partial text before a provider error as a successful terminal answer', async () => {
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'text', catId: 'opus', content: '部分输出', timestamp: Date.now() };
+      yield {
+        type: 'error',
+        catId: 'opus',
+        error: 'Provider connection closed before completion',
+        timestamp: Date.now(),
+      };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '测试 partial + error', threadId: 'thread-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const terminalUpdates = deps.invocationRecordStore.update.mock.calls.map((call) => call.arguments[1]);
+    assert.equal(
+      terminalUpdates.some((input) => input.status === 'succeeded'),
+      false,
+    );
+    assert.equal(
+      terminalUpdates.find((input) => input.status === 'failed')?.error,
+      'Provider connection closed before completion',
+    );
+  });
+
   it('F148 fix: abort after partial completion still acks collected cursors', async () => {
     const controller = new AbortController();
 

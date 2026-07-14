@@ -19,6 +19,7 @@ import {
 } from '../domains/cats/services/agents/routing/MultiMentionOrchestrator.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
+import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -233,6 +234,8 @@ async function dispatchToTarget(
     orch.registerDispatch(requestId, targetCatId, controller);
 
     let governanceErrorCode: string | undefined;
+    const pendingProviderErrors = new Map<string, string>();
+    const collectedUsage = new Map<string, TokenUsage>();
 
     try {
       // #768: Defer intent_mode broadcast until CLI produces first event.
@@ -270,6 +273,15 @@ async function dispatchToTarget(
         if (msg.type === 'done' && msg.errorCode) {
           governanceErrorCode = msg.errorCode;
         }
+        if (msg.type === 'error' && msg.catId) {
+          pendingProviderErrors.set(msg.catId, msg.error?.trim() || 'Provider error');
+        }
+        if (msg.type === 'text' && msg.catId && msg.content?.trim()) {
+          pendingProviderErrors.delete(msg.catId);
+        }
+        if ((msg.type === 'done' || msg.type === 'error') && msg.catId && msg.metadata?.usage) {
+          collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+        }
 
         socketManager.broadcastAgentMessage({ ...msg, invocationId }, threadId);
       }
@@ -278,10 +290,17 @@ async function dispatchToTarget(
         ? 'canceled'
         : governanceErrorCode
           ? 'failed'
+          : pendingProviderErrors.size > 0
+            ? 'failed'
           : 'succeeded';
       await invocationRecordStore.update(invocationId, {
         status: finalInvocationStatus,
-        ...(governanceErrorCode ? { error: governanceErrorCode } : {}),
+        ...(governanceErrorCode
+          ? { error: governanceErrorCode }
+          : pendingProviderErrors.size > 0
+            ? { error: [...pendingProviderErrors.values()].join('\n') }
+            : {}),
+        ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
       });
     } finally {
       orch.unregisterDispatch(requestId, targetCatId);
@@ -289,9 +308,14 @@ async function dispatchToTarget(
 
     // If aborted or governance-blocked, do NOT record response
     // or flush result — the partial/empty text would produce a misleading summary.
-    if (controller.signal.aborted || governanceErrorCode) {
+    if (controller.signal.aborted || governanceErrorCode || pendingProviderErrors.size > 0) {
+      cancelTimeout(requestId);
+      orch.handleFailure(
+        requestId,
+        governanceErrorCode ?? ([...pendingProviderErrors.values()].join('\n') || 'dispatch_canceled'),
+      );
       log.info(
-        { requestId, targetCatId, governanceErrorCode },
+        { requestId, targetCatId, governanceErrorCode, providerError: [...pendingProviderErrors.values()].join('\n') },
         '[F086] Multi-mention dispatch aborted/blocked, skipping recordResponse',
       );
       return;

@@ -99,6 +99,8 @@ export interface ScheduleTriggerPolicy {
   readonly reason?: string;
   readonly sourceCategory?: string;
   readonly suggestedSkill?: string;
+  /** Scheduler bookkeeping replies that should remain auditable but stay out of the dialogue timeline. */
+  readonly responsePresentation?: 'silent_receipt';
 }
 
 export interface ScheduleLifecycleNotice {

@@ -946,6 +946,8 @@ export async function* routeSerial(
       let hadProviderError = false;
       // Collect error text separately for system-message persistence (F5 reload)
       let collectedErrorText = '';
+      let collectedErrorMetadata: MessageMetadata | undefined;
+      let collectedErrorCode: string | undefined;
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
@@ -1265,6 +1267,16 @@ export async function* routeSerial(
               if (effectiveMsg.error) {
                 collectedErrorText += `${collectedErrorText ? '\n' : ''}${effectiveMsg.error}`;
               }
+              if (effectiveMsg.metadata) collectedErrorMetadata = effectiveMsg.metadata;
+              if (effectiveMsg.errorCode) collectedErrorCode = effectiveMsg.errorCode;
+            }
+            if (effectiveMsg.type === 'text' && effectiveMsg.content?.trim() && hadProviderError) {
+              // A later same-cat answer proves the preceding provider/tool error was recoverable.
+              hadError = false;
+              hadProviderError = false;
+              collectedErrorText = '';
+              collectedErrorMetadata = undefined;
+              collectedErrorCode = undefined;
             }
             if (effectiveMsg.metadata && !firstMetadata) {
               firstMetadata = effectiveMsg.metadata;
@@ -1602,6 +1614,7 @@ export async function* routeSerial(
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                ...(options.responsePresentation === 'silent_receipt' ? { scheduler: { hiddenReceipt: true } } : {}),
               },
             } as const;
             if (deps.freshnessGate) {
@@ -1795,6 +1808,9 @@ export async function* routeSerial(
             messageId: storedMsgId,
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
+            ...(options.responsePresentation === 'silent_receipt'
+              ? { extra: { scheduler: { hiddenReceipt: true } } }
+              : {}),
             timestamp: storedTimestamp,
           } as AgentMessage;
           for (const block of allRichBlocks) {
@@ -2447,6 +2463,17 @@ export async function* routeSerial(
             content: `Error: ${collectedErrorText}`,
             mentions: [],
             origin: 'stream',
+            ...(collectedErrorMetadata
+              ? {
+                  metadata: {
+                    ...collectedErrorMetadata,
+                    diagnostics: {
+                      ...collectedErrorMetadata.diagnostics,
+                      ...(collectedErrorCode ? { errorCode: collectedErrorCode } : {}),
+                    },
+                  },
+                }
+              : {}),
             timestamp: Date.now(),
             threadId,
           });

@@ -728,6 +728,8 @@ export async function* routeParallel(
   // F060: Collect inline rich blocks per cat from system_info stream
   const catStreamRichBlocks = new Map<string, import('@cat-cafe/shared').RichBlock[]>();
   const catErrorText = new Map<string, string>();
+  const catErrorMetadata = new Map<string, MessageMetadata>();
+  const catErrorCode = new Map<string, string>();
   const catHadError = new Set<string>();
   // #267: track errors that happened BEFORE abort — only these are real provider failures
   const catHadProviderError = new Set<string>();
@@ -933,6 +935,21 @@ export async function* routeParallel(
             const prev = catErrorText.get(effectiveMsg.catId) ?? '';
             catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
           }
+          if (effectiveMsg.metadata) catErrorMetadata.set(effectiveMsg.catId, effectiveMsg.metadata);
+          if (effectiveMsg.errorCode) catErrorCode.set(effectiveMsg.catId, effectiveMsg.errorCode);
+        }
+        if (
+          effectiveMsg.type === 'text' &&
+          effectiveMsg.catId &&
+          effectiveMsg.content?.trim() &&
+          catHadProviderError.has(effectiveMsg.catId)
+        ) {
+          // A later same-cat answer proves the preceding provider/tool error was recoverable.
+          catHadError.delete(effectiveMsg.catId);
+          catHadProviderError.delete(effectiveMsg.catId);
+          catErrorText.delete(effectiveMsg.catId);
+          catErrorMetadata.delete(effectiveMsg.catId);
+          catErrorCode.delete(effectiveMsg.catId);
         }
         // Accumulate tool events per cat
         const toolEvt = toStoredToolEvent(effectiveMsg);
@@ -1285,6 +1302,7 @@ export async function* routeParallel(
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
+                ...(options.responsePresentation === 'silent_receipt' ? { scheduler: { hiddenReceipt: true } } : {}),
               },
             } as const;
             if (deps.freshnessGate) {
@@ -1724,6 +1742,17 @@ export async function* routeParallel(
               content: `Error: ${errorText}`,
               mentions: [],
               origin: 'stream',
+              ...(catErrorMetadata.get(msg.catId)
+                ? {
+                    metadata: {
+                      ...catErrorMetadata.get(msg.catId)!,
+                      diagnostics: {
+                        ...catErrorMetadata.get(msg.catId)!.diagnostics,
+                        ...(catErrorCode.get(msg.catId) ? { errorCode: catErrorCode.get(msg.catId) } : {}),
+                      },
+                    },
+                  }
+                : {}),
               timestamp: Date.now(),
               threadId,
             });

@@ -9,6 +9,78 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('triggerA2AInvocation (fallback path)', () => {
+  test('provider error without later text marks InvocationRecord failed', async () => {
+    const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
+    const updates = [];
+    const invocationRecordStore = {
+      create() {
+        return { outcome: 'created', invocationId: 'inv-provider-error' };
+      },
+      update(id, data) {
+        updates.push({ id, ...data });
+      },
+    };
+    const tracker = {
+      has() {
+        return false;
+      },
+      start() {
+        return new AbortController();
+      },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
+      complete() {},
+      completeAll() {},
+    };
+    const router = {
+      async *routeExecution() {
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: 'provider unavailable',
+          metadata: { usage: { inputTokens: 14, outputTokens: 0 } },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    await triggerA2AInvocation(
+      {
+        router,
+        invocationRecordStore,
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: tracker,
+        log: { error() {}, warn() {}, info() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: '@缅因猫\nreview',
+        userId: 'user-1',
+        threadId: 't-provider-error',
+        triggerMessage: {
+          id: 'msg-provider-error',
+          threadId: 't-provider-error',
+          userId: 'user-1',
+          catId: 'opus',
+          content: 'test',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const failed = updates.find((update) => update.status === 'failed');
+    assert.ok(failed);
+    assert.equal(failed.error, 'provider unavailable');
+    assert.deepEqual(failed.usageByCat.codex, { inputTokens: 14, outputTokens: 0 });
+  });
+
   test('marks InvocationRecord as canceled when thread is deleting (P2-1)', async () => {
     const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
 

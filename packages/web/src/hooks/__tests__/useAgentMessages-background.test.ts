@@ -16,6 +16,7 @@ import {
   type BackgroundAgentMessage,
   clearBackgroundStreamRefForActiveEvent,
   handleBackgroundAgentMessage,
+  resetBackgroundErrorToastOutagesForTest,
 } from '../useAgentMessages';
 
 /** Monotonic counter matching useSocket.ts bgSeq */
@@ -75,6 +76,7 @@ describe('background thread socket handling', () => {
     testBgFinalizedRefs.clear();
     testPendingCallbacks.clear();
     resetSharedReplacedInvocations();
+    resetBackgroundErrorToastOutagesForTest();
     clearDoneTimeoutCalls = [];
   });
 
@@ -106,6 +108,31 @@ describe('background thread socket handling', () => {
       expect(state.hasActiveInvocation).toBe(false);
       expect(state.unreadCount).toBe(0);
       expect(useToastStore.getState().toasts).toHaveLength(0);
+    });
+
+    it('drops hidden scheduler receipt text without creating unread or a bubble', () => {
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        content: 'Codex 窗口已激活，当前时间 22:30。',
+        extra: { scheduler: { hiddenReceipt: true } },
+        timestamp: Date.now(),
+      });
+
+      const state = useChatStore.getState().getThreadState('thread-bg');
+      expect(state.messages).toHaveLength(0);
+      expect(state.unreadCount).toBe(0);
+
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        extra: { scheduler: { hiddenReceipt: true } },
+        timestamp: Date.now() + 1,
+      });
+      expect(useToastStore.getState().toasts).toHaveLength(0);
+      expect(useChatStore.getState().getThreadState('thread-bg').catStatuses.codex).toBe('done');
     });
   });
 
@@ -156,6 +183,60 @@ describe('background thread socket handling', () => {
   });
 
   describe('P1-3 (R2): error must not be overwritten by done', () => {
+    it('toasts once per outage and allows another toast after a successful cycle', () => {
+      const error = {
+        type: 'error',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        error: 'quota exceeded',
+        timestamp: Date.now(),
+      } as const;
+      simulateBackgroundMessage(error);
+      simulateBackgroundMessage({ ...error, timestamp: error.timestamp + 1 });
+      expect(useToastStore.getState().toasts.filter((toast) => toast.type === 'error')).toHaveLength(1);
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        content: 'recovered',
+        timestamp: error.timestamp + 2,
+      });
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        timestamp: error.timestamp + 3,
+      });
+      simulateBackgroundMessage({ ...error, timestamp: error.timestamp + 4 });
+
+      expect(useToastStore.getState().toasts.filter((toast) => toast.type === 'error')).toHaveLength(2);
+    });
+
+    it('keeps provider diagnostics folded with the realtime error message', () => {
+      simulateBackgroundMessage({
+        type: 'error',
+        catId: 'codex',
+        threadId: 'thread-bg',
+        error: 'Codex 额度超限，7/20 23:26 恢复',
+        metadata: {
+          provider: 'openai',
+          model: 'gpt-5-codex',
+          diagnostics: { rawError: 'raw quota detail', invocationId: 'inv-quota' },
+        },
+        timestamp: Date.now(),
+      });
+
+      const errorMessage = useChatStore
+        .getState()
+        .getThreadState('thread-bg')
+        .messages.find((message) => message.variant === 'error');
+      expect(errorMessage?.extra?.providerDiagnostics).toMatchObject({
+        rawError: 'raw quota detail',
+        invocationId: 'inv-quota',
+      });
+    });
+
     it('done after error preserves error status', () => {
       // Backend sends error then done
       simulateBackgroundMessage({

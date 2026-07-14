@@ -689,6 +689,169 @@ test('includes reconnect diagnostics in CLI exit error when available', async ()
   assert.ok(errMsg.error.includes('Reconnecting... 2/5'), 'error should include multiple reconnect attempts');
 });
 
+test('classifies Codex usage-limit failures into a concise summary with structured diagnostics', async () => {
+  const proc = createMockProcess();
+  proc.kill = mock.fn(() => true);
+  const spawnFn = createMockSpawnFn(proc);
+  const rawArchive = {
+    append: mock.fn(async () => {}),
+    getPath: mock.fn((invocationId) => `/tmp/codex-raw/${invocationId}.ndjson`),
+  };
+  const service = new CodexAgentService({ spawnFn, rawArchive });
+  const rawError =
+    "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Jul 20th, 2026 11:26 PM.";
+
+  const promise = collect(
+    service.invoke('quota failure', {
+      invocationId: 'inv-usage-limit-1',
+      auditContext: {
+        invocationId: 'inv-usage-limit-1',
+        threadId: 'thread-usage-limit-1',
+        userId: 'user-1',
+        catId: 'codex',
+      },
+    }),
+  );
+
+  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-usage-limit-1' })}\n`);
+  proc.stdout.write(
+    `${JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'command_execution', command: 'pwd', status: 'completed', exit_code: 0 },
+    })}\n`,
+  );
+  proc.stdout.write(`${JSON.stringify({ type: 'error', message: rawError })}\n`);
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: rawError } })}\n`);
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const msgs = await promise;
+  const errMsg = msgs.find((m) => m.type === 'error');
+  assert.ok(errMsg);
+  assert.equal(errMsg.errorCode, 'usage_limit');
+  assert.equal(errMsg.error, 'Codex 额度超限，7/20 23:26 恢复');
+  assert.ok(!errMsg.error.includes('https://'), 'channel summary must not expose the raw usage URL');
+  assert.deepEqual(errMsg.metadata.diagnostics, {
+    rawError,
+    resetAt: new Date(2026, 6, 20, 23, 26).getTime(),
+    invocationId: 'inv-usage-limit-1',
+    rawArchivePath: '/tmp/codex-raw/inv-usage-limit-1.ndjson',
+  });
+});
+
+test('bounds and redacts credential-like text in usage-limit diagnostics while preserving the raw archive', async () => {
+  const proc = createMockProcess();
+  proc.kill = mock.fn(() => true);
+  const spawnFn = createMockSpawnFn(proc);
+  const rawArchive = {
+    append: mock.fn(async () => {}),
+    getPath: mock.fn((invocationId) => `/tmp/codex-raw/${invocationId}.ndjson`),
+  };
+  const service = new CodexAgentService({ spawnFn, rawArchive });
+  const agentToken = ['sk', 'agent', 'super_secret_agent_token'].join('_');
+  const apiKey = ['sk', 'project', 'super-secret-api-key'].join('-');
+  const clientSecret = 'client-secret-should-not-persist';
+  const cookie = 'harmless=x; session=session-cookie-should-not-persist';
+  const jwt = `${'a'.repeat(16)}.${'b'.repeat(16)}.${'c'.repeat(16)}`;
+  const rawError =
+    "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage or try again at Jul 20th, 2026 11:26 PM. " +
+    `Authorization: Bearer ${agentToken} OPENAI_API_KEY=${apiKey} CLIENT_SECRET=${clientSecret} ` +
+    `Cookie=${cookie}\njwt=${jwt} ${'diagnostic-noise-'.repeat(400)}`;
+
+  const promise = collect(
+    service.invoke('quota redaction', {
+      invocationId: 'inv-usage-redaction-1',
+      auditContext: {
+        invocationId: 'inv-usage-redaction-1',
+        threadId: 'thread-usage-redaction-1',
+        userId: 'user-1',
+        catId: 'codex',
+      },
+    }),
+  );
+  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-usage-redaction-1' })}\n`);
+  proc.stdout.write(`${JSON.stringify({ type: 'error', message: rawError })}\n`);
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const msgs = await promise;
+  const errMsg = msgs.find((m) => m.type === 'error');
+  assert.ok(errMsg);
+  assert.equal(errMsg.errorCode, 'usage_limit');
+  assert.equal(errMsg.error, 'Codex 额度超限，7/20 23:26 恢复');
+  assert.ok(errMsg.metadata.diagnostics.rawError.length <= 4096);
+  assert.match(errMsg.metadata.diagnostics.rawError, /\[redacted\]/);
+  assert.match(errMsg.metadata.diagnostics.rawError, /\[truncated\]$/);
+  assert.ok(!errMsg.metadata.diagnostics.rawError.includes(agentToken));
+  assert.ok(!errMsg.metadata.diagnostics.rawError.includes(apiKey));
+  assert.ok(!errMsg.metadata.diagnostics.rawError.includes(clientSecret));
+  assert.ok(!errMsg.metadata.diagnostics.rawError.includes(cookie));
+  assert.ok(!errMsg.metadata.diagnostics.rawError.includes(jwt));
+
+  const archivedProviderError = rawArchive.append.mock.calls
+    .map((call) => call.arguments[1])
+    .find((payload) => payload?.type === 'error');
+  assert.equal(archivedProviderError.message, rawError, 'raw archive remains the full diagnostic source of truth');
+});
+
+test('keeps usage-limit visible when the reset time cannot be parsed', async () => {
+  const proc = createMockProcess();
+  proc.kill = mock.fn(() => true);
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn });
+  const rawError =
+    "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again after the next billing refresh.";
+
+  const promise = collect(service.invoke('quota parse failure', { invocationId: 'inv-usage-limit-unknown-reset' }));
+  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-usage-limit-unknown-reset' })}\n`);
+  proc.stdout.write(`${JSON.stringify({ type: 'error', message: rawError })}\n`);
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const msgs = await promise;
+  const errMsg = msgs.find((m) => m.type === 'error');
+  assert.ok(errMsg);
+  assert.equal(errMsg.errorCode, 'usage_limit');
+  assert.equal(errMsg.error, 'Codex 额度超限，恢复时间未知');
+  assert.equal(errMsg.metadata.diagnostics.rawError, rawError);
+  assert.equal(errMsg.metadata.diagnostics.invocationId, 'inv-usage-limit-unknown-reset');
+  assert.ok(!Object.hasOwn(errMsg.metadata.diagnostics, 'resetAt'));
+});
+
+for (const [name, rawError] of [
+  ['authentication', 'Authentication failed: invalid token'],
+  ['permission', 'Permission denied while opening workspace'],
+  ['unknown', 'An unexpected provider failure occurred'],
+  [
+    'stream disconnect',
+    'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
+  ],
+]) {
+  test(`does not misclassify ${name} failures as usage limits`, async () => {
+    const proc = createMockProcess();
+    proc.kill = mock.fn(() => true);
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ spawnFn });
+
+    const promise = collect(service.invoke(`${name} failure`));
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: `thread-${name}` })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'command_execution', command: 'pwd', status: 'completed', exit_code: 0 },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'error', message: rawError })}\n`);
+    proc.stdout.end();
+    proc._emitter.emit('exit', 1, null);
+
+    const msgs = await promise;
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg, `${name} failure must remain user-visible`);
+    assert.notEqual(errMsg.errorCode, 'usage_limit');
+  });
+}
+
 test('suppresses exit code 1 when Codex produced substantive output (item.completed)', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

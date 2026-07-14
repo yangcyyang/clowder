@@ -458,6 +458,38 @@ describe('Multi-Mention Routes', () => {
     assert.ok(connectorEvent, 'Should have broadcast connector_message');
   });
 
+  test('provider error without later text marks the target invocation failed', async () => {
+    mockRouter.routeExecution = async function* (_userId, _message, _threadId, _invId, targetCats) {
+      const catId = targetCats[0];
+      yield {
+        type: 'error',
+        catId,
+        error: 'provider unavailable',
+        metadata: { usage: { inputTokens: 13, outputTokens: 0 } },
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: { targets: ['codex'], question: 'Quick question', callbackTo: 'opus' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 200));
+    const created = mockInvocationRecordStore.getCreated();
+    assert.equal(created.length, 1);
+    const record = mockInvocationRecordStore.getRecord(created[0].id);
+    assert.equal(record.status, 'failed');
+    assert.equal(record.error, 'provider unavailable');
+    assert.deepEqual(record.usageByCat.codex, { inputTokens: 13, outputTokens: 0 });
+    const { getMultiMentionOrchestrator } = await import('../dist/routes/callback-multi-mention-routes.js');
+    assert.equal(getMultiMentionOrchestrator().getStatus(res.json().requestId), 'failed');
+  });
+
   // ── Anti-cascade ──────────────────────────────────────────────────
 
   test('rejects multi-mention from active target cat (anti-cascade)', async () => {

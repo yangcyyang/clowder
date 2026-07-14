@@ -13,11 +13,15 @@ import { invocationsRoutes } from '../dist/routes/invocations.js';
 
 /** Stub AgentRouter: routeExecution yields one text message then returns */
 function createMockRouter(options = {}) {
-  const { shouldThrow } = options;
+  const { shouldThrow, events } = options;
   return {
     routeExecution: async function* (_userId, _msg, _threadId, _userMsgId, _cats, _intent, _opts) {
       if (shouldThrow) {
         throw new Error('Agent execution failed');
+      }
+      if (events) {
+        yield* events;
+        return;
       }
       yield { type: 'text', catId: 'opus', content: 'retry response', timestamp: Date.now() };
     },
@@ -115,6 +119,53 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
 
     const record = invocationRecordStore.get(invocationId);
     assert.equal(record.status, 'succeeded');
+  });
+
+  it('retry provider error without later text remains failed', async () => {
+    const router = createMockRouter({
+      events: [
+        {
+          type: 'error',
+          catId: 'opus',
+          error: 'provider unavailable',
+          metadata: { usage: { inputTokens: 12, outputTokens: 0 } },
+          timestamp: Date.now(),
+        },
+        { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() },
+      ],
+    });
+    const { app, invocationRecordStore, invocationId } = await setupRetryScenario(router);
+
+    const res = await app.inject({ method: 'POST', url: `/api/invocations/${invocationId}/retry` });
+    assert.equal(res.statusCode, 202);
+
+    await new Promise((r) => setTimeout(r, 100));
+    const record = invocationRecordStore.get(invocationId);
+    assert.equal(record.status, 'failed');
+    assert.equal(record.error, 'provider unavailable');
+    assert.deepEqual(record.usageByCat.opus, { inputTokens: 12, outputTokens: 0 });
+  });
+
+  it('retry canceled after the generator starts cannot fall through to succeeded', async () => {
+    const tracker = new InvocationTracker();
+    const router = {
+      routeExecution: async function* () {
+        yield { type: 'text', catId: 'opus', content: 'partial response', timestamp: Date.now() };
+        tracker.cancel('thread-1', 'opus', 'user-1', 'user_cancel');
+      },
+      resolveTargetsAndIntent: async () => ({
+        targetCats: ['opus'],
+        intent: { intent: 'execute', explicit: false, promptTags: [] },
+      }),
+      ackCollectedCursors: async () => {},
+    };
+    const { app, invocationRecordStore, invocationId } = await setupRetryScenario(router, tracker);
+
+    const res = await app.inject({ method: 'POST', url: `/api/invocations/${invocationId}/retry` });
+    assert.equal(res.statusCode, 202);
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.equal(invocationRecordStore.get(invocationId).status, 'canceled');
   });
 
   it('retry queued → 202 + normal execution', async () => {

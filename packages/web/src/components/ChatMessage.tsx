@@ -41,6 +41,26 @@ export function shouldRenderChatMessage(message: ChatMessageType): boolean {
   return isUserVisibleChatMessage(message);
 }
 
+export function shouldGroupAssistantMessage(message: ChatMessageType, isGrouped: boolean): boolean {
+  return isGrouped && message.extra?.agentCommunication?.kind !== 'ack';
+}
+
+export function getProviderErrorDiagnostics(message: ChatMessageType): Record<string, unknown> | undefined {
+  return message.extra?.providerDiagnostics ?? message.metadata?.diagnostics;
+}
+
+function formatProviderDiagnostics(diagnostics: Record<string, unknown>): string {
+  const lines: string[] = [];
+  if (typeof diagnostics.errorCode === 'string') lines.push(`错误码：${diagnostics.errorCode}`);
+  if (typeof diagnostics.resetAt === 'number') {
+    lines.push(`恢复时间：${new Date(diagnostics.resetAt).toLocaleString('zh-CN')}`);
+  }
+  if (typeof diagnostics.invocationId === 'string') lines.push(`Invocation：${diagnostics.invocationId}`);
+  if (typeof diagnostics.rawArchivePath === 'string') lines.push(`原始归档：${diagnostics.rawArchivePath}`);
+  if (typeof diagnostics.rawError === 'string') lines.push(`原始错误：\n${diagnostics.rawError}`);
+  return lines.join('\n');
+}
+
 const TASK_EVIDENCE_KEYS = ['tests', 'build', 'screenshot', 'review', 'lesson'] as const;
 
 function countTaskEvidence(task: TaskItem): number {
@@ -308,7 +328,7 @@ export function ChatMessage({
     });
 
   const direction = catData ? parseDirection(message, () => ({ toCat: getMentionToCat(), re: getMentionRe() })) : null;
-  const isAssistantContinuation = isGrouped;
+  const isAssistantContinuation = shouldGroupAssistantMessage(message, isGrouped);
   const assistantAppearClass =
     message.type === 'assistant' && !message.isStreaming ? 'motion-safe:animate-message-appear' : '';
   const catRuntimeStatus = message.catId ? catStatuses[message.catId] : undefined;
@@ -392,6 +412,8 @@ export function ChatMessage({
       );
     }
 
+    const providerDiagnostics = isError ? getProviderErrorDiagnostics(message) : undefined;
+
     const toneClass = isTool
       ? 'text-cafe-muted bg-cafe-surface-elevated/50 font-mono text-xs py-1'
       : isFollowup
@@ -406,6 +428,14 @@ export function ChatMessage({
         >
           {isFollowup && <span className="mr-1">🔗</span>}
           {systemDisplayContent}
+          {providerDiagnostics && formatProviderDiagnostics(providerDiagnostics) && (
+            <details className="mt-2 border-t border-current/20 pt-1 text-xs">
+              <summary className="cursor-pointer select-none font-semibold">诊断详情</summary>
+              <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] opacity-85">
+                {formatProviderDiagnostics(providerDiagnostics)}
+              </pre>
+            </details>
+          )}
           {isFollowup && (
             <span className="block mt-1 text-xs text-conn-purple-text">输入 @猫名 跟进 来发起 follow-up</span>
           )}

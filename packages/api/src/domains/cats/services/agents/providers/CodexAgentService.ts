@@ -91,7 +91,42 @@ function applyAuthMode(env: Record<string, string>, authMode: CodexAuthMode): Re
 }
 
 const MAX_RECENT_STREAM_ERRORS = 5;
-const MAX_STREAM_ERROR_LENGTH = 240;
+const MAX_RECENT_STREAM_ERROR_CAPTURE_LENGTH = 65_536;
+const MAX_STREAM_ERROR_DISPLAY_LENGTH = 240;
+const MAX_CODEX_ERROR_DIAGNOSTIC_LENGTH = 4096;
+const CODEX_ERROR_DIAGNOSTIC_TRUNCATION_SUFFIX = '\n[truncated]';
+const CODEX_USAGE_LIMIT_ERROR_CODE = 'usage_limit';
+const CODEX_USAGE_LIMIT_PATTERN = /\byou(?:'|’)?ve hit your usage limit\b/i;
+const CODEX_RESET_AT_PATTERN =
+  /\btry again at\s+([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?,\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(am|pm)\b/i;
+const CODEX_MONTH_INDEX: Readonly<Record<string, number>> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+interface CodexUsageLimitReset {
+  resetAt: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+interface CodexExitErrorPresentation {
+  error: string;
+  errorCode?: string;
+  diagnostics?: Record<string, unknown>;
+}
 
 function collectCodexStreamError(event: unknown, recentErrors: string[]): void {
   if (typeof event !== 'object' || event === null) return;
@@ -100,7 +135,10 @@ function collectCodexStreamError(event: unknown, recentErrors: string[]): void {
   const raw = record.message;
   if (typeof raw !== 'string') return;
 
-  const msg = raw.trim().slice(0, MAX_STREAM_ERROR_LENGTH);
+  // The durable raw archive already owns the complete provider event. Keep this
+  // in-memory diagnostic buffer bounded so a hostile stderr line cannot inflate
+  // the long-lived API process before presentation redaction/truncation runs.
+  const msg = raw.trim().slice(0, MAX_RECENT_STREAM_ERROR_CAPTURE_LENGTH);
   if (!msg) return;
 
   const last = recentErrors[recentErrors.length - 1];
@@ -114,8 +152,84 @@ function collectCodexStreamError(event: unknown, recentErrors: string[]): void {
 
 function withRecentDiagnostics(base: string, recentErrors: string[]): string {
   if (recentErrors.length === 0) return base;
-  const lines = recentErrors.map((line) => `- ${line}`);
+  const lines = recentErrors.map(
+    (line) => `- ${redactAndBoundCodexError(line).slice(0, MAX_STREAM_ERROR_DISPLAY_LENGTH)}`,
+  );
   return `${base}\n最近流错误:\n${lines.join('\n')}`;
+}
+
+function redactAndBoundCodexError(rawError: string): string {
+  const redacted = rawError
+    .replace(/(\bauthorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+/gi, '$1[redacted]')
+    .replace(/(\bbearer\s+)[a-z0-9._~+/=-]{8,}/gi, '$1[redacted]')
+    .replace(
+      /(\b(?:openai[_-]?)?api[_-]?key|\b(?:access[_-]?)?token|\bclient[_-]?secret)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      '$1$2[redacted]',
+    )
+    .replace(/(\b(?:set-)?cookie\s*[:=]\s*)[^\r\n]+/gi, '$1[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[redacted-jwt]')
+    .replace(/\bsk_(agent|machine)_[a-z0-9_-]+\b/gi, 'sk_$1_<redacted>')
+    .replace(/\bsk-(?:proj(?:ect)?-)?[a-z0-9_-]{8,}\b/gi, 'sk-<redacted>');
+
+  if (redacted.length <= MAX_CODEX_ERROR_DIAGNOSTIC_LENGTH) return redacted;
+  const visibleLength = MAX_CODEX_ERROR_DIAGNOSTIC_LENGTH - CODEX_ERROR_DIAGNOSTIC_TRUNCATION_SUFFIX.length;
+  return `${redacted.slice(0, visibleLength)}${CODEX_ERROR_DIAGNOSTIC_TRUNCATION_SUFFIX}`;
+}
+
+function parseCodexUsageLimitReset(rawError: string): CodexUsageLimitReset | undefined {
+  const match = rawError.match(CODEX_RESET_AT_PATTERN);
+  if (!match) return undefined;
+
+  const [, rawMonth, rawDay, rawYear, rawHour, rawMinute, meridiem] = match;
+  const month = CODEX_MONTH_INDEX[rawMonth.slice(0, 3).toLowerCase()];
+  const day = Number(rawDay);
+  const year = Number(rawYear);
+  const hour12 = Number(rawHour);
+  const minute = Number(rawMinute);
+  if (month === undefined || day < 1 || hour12 < 1 || hour12 > 12 || minute < 0 || minute > 59) {
+    return undefined;
+  }
+
+  const hour = (hour12 % 12) + (meridiem.toLowerCase() === 'pm' ? 12 : 0);
+  const reset = new Date(year, month, day, hour, minute, 0, 0);
+  if (
+    Number.isNaN(reset.getTime()) ||
+    reset.getFullYear() !== year ||
+    reset.getMonth() !== month ||
+    reset.getDate() !== day ||
+    reset.getHours() !== hour ||
+    reset.getMinutes() !== minute
+  ) {
+    return undefined;
+  }
+
+  return { resetAt: reset.getTime(), month: month + 1, day, hour, minute };
+}
+
+function buildCodexExitErrorPresentation(args: {
+  base: string;
+  recentErrors: string[];
+  invocationId?: string;
+  rawArchivePath?: string;
+}): CodexExitErrorPresentation {
+  const rawUsageLimitError = [...args.recentErrors].reverse().find((line) => CODEX_USAGE_LIMIT_PATTERN.test(line));
+  if (!rawUsageLimitError) {
+    return { error: withRecentDiagnostics(args.base, args.recentErrors) };
+  }
+
+  const reset = parseCodexUsageLimitReset(rawUsageLimitError);
+  return {
+    error: reset
+      ? `Codex 额度超限，${reset.month}/${reset.day} ${String(reset.hour).padStart(2, '0')}:${String(reset.minute).padStart(2, '0')} 恢复`
+      : 'Codex 额度超限，恢复时间未知',
+    errorCode: CODEX_USAGE_LIMIT_ERROR_CODE,
+    diagnostics: {
+      rawError: redactAndBoundCodexError(rawUsageLimitError),
+      ...(reset ? { resetAt: reset.resetAt } : {}),
+      ...(args.invocationId ? { invocationId: args.invocationId } : {}),
+      ...(args.rawArchivePath ? { rawArchivePath: args.rawArchivePath } : {}),
+    },
+  };
 }
 
 function toTomlString(value: string): string {
@@ -397,9 +511,13 @@ export class CodexAgentService implements AgentService {
 
     const metadata: MessageMetadata = { provider: 'openai', model: cliModel };
     const auditContext = options?.auditContext;
+    const diagnosticInvocationId = auditContext?.invocationId ?? options?.invocationId;
+    let diagnosticRawArchivePath: string | undefined;
     const recentStreamErrors: string[] = [];
 
     try {
+      diagnosticRawArchivePath =
+        diagnosticInvocationId && this.rawArchive.getPath ? this.rawArchive.getPath(diagnosticInvocationId) : undefined;
       // HOME isolation: only for API Key mode.
       // OAuth mode needs real HOME (~/.codex/auth.json for token refresh).
       // API Key mode must AVOID real HOME — stale OAuth token refresh will fail
@@ -554,9 +672,15 @@ export class CodexAgentService implements AgentService {
         }
         if (isCliError(event)) {
           // Codex CLI 0.98+ returns exit code 1 after successful completion.
-          // Suppress the error ONLY if we saw substantive output (item.completed).
-          // thread.started alone is NOT enough — that just means session init.
-          if (event.exitCode === 1 && event.signal === null && sawSubstantiveOutput) {
+          // Suppress the error ONLY if we saw substantive output (item.completed)
+          // and the provider did not emit an explicit stream error. thread.started
+          // alone is NOT enough — that just means session init.
+          if (
+            event.exitCode === 1 &&
+            event.signal === null &&
+            sawSubstantiveOutput &&
+            recentStreamErrors.length === 0
+          ) {
             log.warn(
               {},
               `[codex] Codex CLI exited with code 1 after substantive output (suppressing as Codex 0.98+ quirk)`,
@@ -564,11 +688,26 @@ export class CodexAgentService implements AgentService {
             continue;
           }
           const base = formatCliExitError('Codex CLI', event);
+          const presentation = buildCodexExitErrorPresentation({
+            base,
+            recentErrors: recentStreamErrors,
+            ...(diagnosticInvocationId ? { invocationId: diagnosticInvocationId } : {}),
+            ...(diagnosticRawArchivePath ? { rawArchivePath: diagnosticRawArchivePath } : {}),
+          });
           yield {
             type: 'error',
             catId: this.catId,
-            error: withRecentDiagnostics(base, recentStreamErrors),
-            metadata,
+            error: presentation.error,
+            ...(presentation.errorCode ? { errorCode: presentation.errorCode } : {}),
+            metadata: presentation.diagnostics
+              ? {
+                  ...metadata,
+                  diagnostics: {
+                    ...metadata.diagnostics,
+                    ...presentation.diagnostics,
+                  },
+                }
+              : metadata,
             timestamp: Date.now(),
           };
           continue;

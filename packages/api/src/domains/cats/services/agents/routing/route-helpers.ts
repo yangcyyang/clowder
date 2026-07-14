@@ -1112,6 +1112,8 @@ export interface RouteOptions {
   currentUserMessageId?: string | undefined;
   /** Same-thread message that agent stream/callback output should visually reply to. */
   replyToMessageId?: string | undefined;
+  /** Existing message type with scheduler-specific presentation metadata. */
+  responsePresentation?: 'silent_receipt' | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
   /** A2A routing mode.

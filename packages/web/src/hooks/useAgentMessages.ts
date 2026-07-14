@@ -101,7 +101,13 @@ interface AgentMsg {
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string; sessionId?: string; usage?: import('../stores/chat-types').TokenUsage };
+  metadata?: {
+    provider: string;
+    model: string;
+    sessionId?: string;
+    usage?: import('../stores/chat-types').TokenUsage;
+    diagnostics?: Record<string, unknown>;
+  };
   /** Tool name (for 'tool_use' events from backend) */
   toolName?: string;
   /** Tool input params (for 'tool_use' events from backend) */
@@ -119,6 +125,7 @@ interface AgentMsg {
   extra?: {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+    scheduler?: { hiddenReceipt?: boolean };
   };
   /** F121: Reply-to message ID */
   replyTo?: string;
@@ -249,6 +256,13 @@ function isRecoverableInFlightError(msg: { type: string; errorCode?: string; isF
   return msg.errorCode === 'upstream_error' || msg.errorCode === 'tool_error';
 }
 
+export function shouldSuppressScheduledReceiptMessage(msg: {
+  type: string;
+  extra?: { scheduler?: { hiddenReceipt?: boolean } };
+}): boolean {
+  return msg.type === 'text' && msg.extra?.scheduler?.hiddenReceipt === true;
+}
+
 export interface BackgroundAgentMessage {
   type: string;
   catId: string;
@@ -263,11 +277,18 @@ export interface BackgroundAgentMessage {
   /** Structured backend/provider error code. Some provider errors are recoverable mid-run. */
   errorCode?: string;
   isFinal?: boolean;
-  metadata?: { provider: string; model: string; sessionId?: string; usage?: TokenUsage };
+  metadata?: {
+    provider: string;
+    model: string;
+    sessionId?: string;
+    usage?: TokenUsage;
+    diagnostics?: Record<string, unknown>;
+  };
   /** F52: Cross-thread origin metadata */
   extra?: {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+    scheduler?: { hiddenReceipt?: boolean };
   };
   /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
@@ -388,6 +409,12 @@ export type ActiveRoutedAgentMessage = {
   threadId?: string;
   isFinal?: boolean;
 };
+
+const backgroundErrorToastOutages = new Set<string>();
+
+export function resetBackgroundErrorToastOutagesForTest(): void {
+  backgroundErrorToastOutages.clear();
+}
 
 interface SystemInfoConsumeResult {
   consumed: boolean;
@@ -1295,6 +1322,10 @@ export function handleBackgroundAgentMessage(
   msg: BackgroundAgentMessage,
   options: HandleBackgroundMessageOptions,
 ): void {
+  if (shouldSuppressScheduledReceiptMessage(msg)) {
+    return;
+  }
+
   if (msg.type === 'text' && msg.content && msg.origin === 'progress') {
     const id = msg.messageId ?? `progress-${msg.invocationId ?? 'detached'}-${msg.catId}-${msg.timestamp}`;
     const state = options.store.getThreadState(msg.threadId);
@@ -1684,13 +1715,19 @@ export function handleBackgroundAgentMessage(
     // canonical event 走 stable-key dedup；invocationless 仍 legacy addMessageToThread
     // 用 deterministic bg-err id 避免冲突。pattern 跟 B1.5 active error 同源。
     const errorContent = `Error: ${msg.error ?? 'Unknown error'}`;
+    const providerDiagnostics = msg.metadata?.diagnostics;
+    const backgroundErrorExtra = providerDiagnostics ? { providerDiagnostics } : undefined;
     let bgErrorReducerHandled = false;
     if (msg.invocationId) {
       const event = adaptIncomingToBubbleEvent(msg, { sourcePath: 'background' });
       if (event) {
         const eventWithEnrichment = {
           ...event,
-          payload: { ...(event.payload ?? {}), content: errorContent },
+          payload: {
+            ...(event.payload ?? {}),
+            content: errorContent,
+            ...(backgroundErrorExtra ? { extra: backgroundErrorExtra } : {}),
+          },
         };
         const threadState = options.store.getThreadState(msg.threadId);
         const prevLen = threadState.messages.length;
@@ -1722,6 +1759,7 @@ export function handleBackgroundAgentMessage(
         variant: 'error',
         catId: msg.catId,
         content: errorContent,
+        ...(backgroundErrorExtra ? { extra: backgroundErrorExtra } : {}),
         timestamp: msg.timestamp,
       });
     }
@@ -1733,13 +1771,19 @@ export function handleBackgroundAgentMessage(
       options.clearDoneTimeout?.(msg.threadId);
       markThreadInvocationComplete(msg, options);
     }
-    options.addToast({
-      type: 'error',
-      title: `${msg.catId} 出错`,
-      message: msg.error ?? 'Unknown error',
-      threadId: msg.threadId,
-      duration: 8000,
-    });
+    if (!recoverableInFlightError) {
+      const outageKey = `${msg.threadId}:${msg.catId}`;
+      if (!backgroundErrorToastOutages.has(outageKey)) {
+        backgroundErrorToastOutages.add(outageKey);
+        options.addToast({
+          type: 'error',
+          title: `${msg.catId} 出错`,
+          message: msg.error ?? 'Unknown error',
+          threadId: msg.threadId,
+          duration: 8000,
+        });
+      }
+    }
     return;
   }
 
@@ -1747,14 +1791,17 @@ export function handleBackgroundAgentMessage(
     stopTrackedStream(streamKey, msg, options);
     const currentStatus = options.store.getThreadState(msg.threadId).catStatuses[msg.catId];
     if (currentStatus !== 'error') {
+      backgroundErrorToastOutages.delete(`${msg.threadId}:${msg.catId}`);
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
-      options.addToast({
-        type: 'success',
-        title: `${msg.catId} 完成`,
-        message: `${msg.catId} 已完成处理`,
-        threadId: msg.threadId,
-        duration: 5000,
-      });
+      if (!msg.extra?.scheduler?.hiddenReceipt) {
+        options.addToast({
+          type: 'success',
+          title: `${msg.catId} 完成`,
+          message: `${msg.catId} 已完成处理`,
+          threadId: msg.threadId,
+          duration: 5000,
+        });
+      }
     }
     drainPendingBackgroundCallback(msg, options);
     if (msg.isFinal) {
@@ -3015,6 +3062,10 @@ export function useAgentMessages() {
       // Reset timeout on any message (keeps timer alive during streaming)
       resetTimeout();
 
+      if (shouldSuppressScheduledReceiptMessage(msg)) {
+        return;
+      }
+
       if (msg.type === 'text' && msg.content) {
         if (msg.origin === 'progress') {
           const id = msg.messageId ?? `progress-${msg.invocationId ?? 'detached'}-${msg.catId}-${Date.now()}`;
@@ -3438,6 +3489,7 @@ export function useAgentMessages() {
           appendToolEvent(messageId, toolResultEventData);
         }
       } else if (msg.type === 'done') {
+        const silentReceiptDone = msg.extra?.scheduler?.hiddenReceipt === true;
         // Stale-terminal guard (Bug-G, shared with `error` via isStaleTerminalEvent):
         // A stale done must NOT touch cat-level or bubble-level state — doing so
         // terminates a newer invocation's bubble, clears its activeRef, and marks
@@ -3679,7 +3731,7 @@ export function useAgentMessages() {
           // Stale-done guard (砚砚 R4): a stale done did not compute messageId
           // (we skipped phase-3 entirely), so `!messageId` would spuriously fire
           // catch-up even though inv-2 is alive and has its own bubble. Skip.
-          if (!messageId && !isStaleDone) {
+          if (!messageId && !isStaleDone && !silentReceiptDone) {
             const tid = useChatStore.getState().currentThreadId;
             console.warn('[stream-catchup] done(isFinal) with no active bubble — requesting catch-up', {
               catId: msg.catId,
@@ -4250,20 +4302,27 @@ export function useAgentMessages() {
             }
             return base;
           })();
-          const errorExtra = timeoutDiag
-            ? {
-                timeoutDiagnostics: {
-                  silenceDurationMs: timeoutDiag.silenceDurationMs as number,
-                  processAlive: timeoutDiag.processAlive as boolean,
-                  lastEventType: timeoutDiag.lastEventType as string | undefined,
-                  firstEventAt: timeoutDiag.firstEventAt as number | undefined,
-                  lastEventAt: timeoutDiag.lastEventAt as number | undefined,
-                  cliSessionId: timeoutDiag.cliSessionId as string | undefined,
-                  invocationId: timeoutDiag.invocationId as string | undefined,
-                  rawArchivePath: timeoutDiag.rawArchivePath as string | undefined,
-                },
-              }
-            : undefined;
+          const providerDiagnostics = msg.metadata?.diagnostics;
+          const errorExtra =
+            timeoutDiag || providerDiagnostics
+              ? {
+                  ...(timeoutDiag
+                    ? {
+                        timeoutDiagnostics: {
+                          silenceDurationMs: timeoutDiag.silenceDurationMs as number,
+                          processAlive: timeoutDiag.processAlive as boolean,
+                          lastEventType: timeoutDiag.lastEventType as string | undefined,
+                          firstEventAt: timeoutDiag.firstEventAt as number | undefined,
+                          lastEventAt: timeoutDiag.lastEventAt as number | undefined,
+                          cliSessionId: timeoutDiag.cliSessionId as string | undefined,
+                          invocationId: timeoutDiag.invocationId as string | undefined,
+                          rawArchivePath: timeoutDiag.rawArchivePath as string | undefined,
+                        },
+                      }
+                    : {}),
+                  ...(providerDiagnostics ? { providerDiagnostics } : {}),
+                }
+              : undefined;
 
           let errorReducerHandled = false;
           if (msg.invocationId) {

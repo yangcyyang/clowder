@@ -86,6 +86,8 @@ export interface QueueEntry {
   priority: 'urgent' | 'normal';
   /** F175: origin category for visual grouping */
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'freshness_review';
+  /** Existing message type with scheduler-specific presentation metadata. */
+  responsePresentation?: 'silent_receipt';
   /** Queue-internal dedup key for agent control-flow work. */
   continuationKey?: string;
   /** Bounded successor review for a Freshness Hold. */
@@ -316,6 +318,7 @@ export class InvocationQueue {
           ? 'normal'
           : (input.priority ?? 'normal'),
       sourceCategory: input.sourceCategory,
+      responsePresentation: input.responsePresentation,
       continuationKey: input.continuationKey,
       freshnessReview: input.freshnessReview ? structuredClone(input.freshnessReview) : undefined,
       suggestedSkill: input.suggestedSkill,

@@ -57,6 +57,8 @@ export interface ConnectorTriggerPolicy {
   readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
+  /** Scheduler bookkeeping reply presentation; does not introduce a new message type. */
+  readonly responsePresentation?: 'silent_receipt';
 }
 
 /**
@@ -121,6 +123,7 @@ export class ConnectorInvokeTrigger {
         priority,
         policy?.sourceCategory,
         policy?.suggestedSkill,
+        policy?.responsePresentation,
       );
     }
 
@@ -137,6 +140,7 @@ export class ConnectorInvokeTrigger {
         priority,
         policy?.sourceCategory,
         policy?.suggestedSkill,
+        policy?.responsePresentation,
       );
     }
 
@@ -152,6 +156,7 @@ export class ConnectorInvokeTrigger {
       policy?.suggestedSkill,
       sender,
       controller,
+      policy?.responsePresentation,
     ).catch((err) => {
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -168,6 +173,7 @@ export class ConnectorInvokeTrigger {
     priority: 'urgent' | 'normal' = 'normal',
     sourceCategory?: string,
     suggestedSkill?: string,
+    responsePresentation?: 'silent_receipt',
   ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
 
@@ -192,6 +198,7 @@ export class ConnectorInvokeTrigger {
         : {}),
       ...(sender ? { senderMeta: sender } : {}),
       ...(suggestedSkill ? { suggestedSkill } : {}),
+      ...(responsePresentation ? { responsePresentation } : {}),
     });
 
     if (result.outcome === 'resetting') {
@@ -254,6 +261,7 @@ export class ConnectorInvokeTrigger {
     suggestedSkill?: string,
     sender?: { id: string; name?: string },
     preAcquiredController?: AbortController,
+    responsePresentation?: 'silent_receipt',
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
@@ -315,6 +323,7 @@ export class ConnectorInvokeTrigger {
       const persistenceContext: PersistenceContext = { failed: false, errors: [] };
       const collectedUsage = new Map<string, TokenUsage>();
       const collectedTextParts: string[] = [];
+      const pendingProviderErrors = new Map<string, string>();
       const collectedSystemNoticeParts: string[] = [];
 
       // ISSUE-9: Track per-turn content for individual outbound delivery
@@ -373,6 +382,7 @@ export class ConnectorInvokeTrigger {
         cursorBoundaries,
         persistenceContext,
         parentInvocationId: createResult.invocationId,
+        ...(responsePresentation ? { responsePresentation } : {}),
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {
@@ -386,10 +396,12 @@ export class ConnectorInvokeTrigger {
         }
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
-        if (msg.type === 'done' && msg.catId) {
+        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
           if (msg.metadata?.usage) {
             collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
           }
+        }
+        if (msg.type === 'done' && msg.catId) {
           // ISSUE-9: snapshot richBlocks for current turn before next cat overwrites
           // Cloud-P1-5 fix: only reuse turn if still open (currentTurnCatId matches)
           const egress = persistenceContext.egressByCat?.[msg.catId];
@@ -476,6 +488,13 @@ export class ConnectorInvokeTrigger {
           const noticeText = extractConnectorVisibleSystemNotice(msg.content);
           if (noticeText) collectedSystemNoticeParts.push(noticeText);
         }
+        if (msg.type === 'error' && typeof msg.error === 'string' && msg.error.trim()) {
+          pendingProviderErrors.set(msg.catId ?? catId, msg.error.trim());
+        }
+        if (msg.type === 'text' && msg.catId && typeof msg.content === 'string' && msg.content.trim()) {
+          // A later answer from the same cat proves the provider/tool error was recoverable.
+          pendingProviderErrors.delete(msg.catId);
+        }
         const messageEgress = msg.catId ? persistenceContext.egressByCat?.[msg.catId] : undefined;
         const suppressContentReplay =
           (msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result') &&
@@ -483,7 +502,21 @@ export class ConnectorInvokeTrigger {
             messageEgress?.disposition === 'discarded' ||
             messageEgress?.replayed === true);
         if (!suppressContentReplay) {
-          socketManager.broadcastAgentMessage({ ...msg, invocationId: createResult.invocationId }, threadId);
+          socketManager.broadcastAgentMessage(
+            {
+              ...msg,
+              invocationId: createResult.invocationId,
+              ...(responsePresentation === 'silent_receipt'
+                ? {
+                    extra: {
+                      ...msg.extra,
+                      scheduler: { hiddenReceipt: true },
+                    },
+                  }
+                : {}),
+            },
+            threadId,
+          );
         }
       }
 
@@ -509,7 +542,9 @@ export class ConnectorInvokeTrigger {
         const generatedVisibleContent =
           collectedTextParts.length > 0 ||
           outboundTurns.some((turn) => turn.textParts.length > 0 || (turn.richBlocks && turn.richBlocks.length > 0));
-        if (!generatedVisibleContent && !freshnessSuppressed) {
+        const collectedErrorParts = [...pendingProviderErrors.values()];
+        const surfacedError = collectedErrorParts.length > 0;
+        if (!generatedVisibleContent && !freshnessSuppressed && !surfacedError) {
           const fallbackContent = await this.ensureVisibleEmptyResultNotice({
             threadId,
             userId,
@@ -526,7 +561,8 @@ export class ConnectorInvokeTrigger {
 
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
         await invocationRecordStore.update(createResult.invocationId, {
-          status: 'succeeded',
+          status: surfacedError ? 'failed' : 'succeeded',
+          ...(surfacedError ? { error: collectedErrorParts.join('\n').slice(0, 2000) } : {}),
           ...(collectedUsage.size > 0
             ? {
                 usageByCat: Object.fromEntries(collectedUsage),
@@ -534,10 +570,15 @@ export class ConnectorInvokeTrigger {
             : {}),
         });
         enqueueFreshnessReviews(persistenceContext, this.opts.queueProcessor);
-        finalStatus = 'succeeded';
+        finalStatus = surfacedError ? 'failed' : 'succeeded';
 
         // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
-        const finalContent = collectedTextParts.join('');
+        const finalContent =
+          collectedTextParts.length > 0
+            ? collectedTextParts.join('')
+            : surfacedError
+              ? `[执行失败] ${collectedErrorParts.join('\n')}`
+              : '';
 
         // Phase 4: Finalize streaming — ensure start completed before ending
         if (this.opts.streamingHook) {
@@ -563,7 +604,7 @@ export class ConnectorInvokeTrigger {
         }
 
         // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
-        const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+        const hasContent = finalContent.length > 0 || outboundTurns.length > 0;
         log.info(
           {
             threadId,

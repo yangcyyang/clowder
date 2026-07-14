@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chatStore';
-import { shouldRenderChatMessage } from '../ChatMessage';
+import { getProviderErrorDiagnostics, shouldGroupAssistantMessage, shouldRenderChatMessage } from '../ChatMessage';
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -99,8 +99,51 @@ describe('shouldRenderChatMessage', () => {
   it('keeps meaningful assistant non-text user-visible surfaces', () => {
     expect(
       shouldRenderChatMessage(
-        message({ extra: { rich: { v: 1, blocks: [{ title: 'done' }] as NonNullable<NonNullable<ChatMessage['extra']>['rich']>['blocks'] } } }),
+        message({
+          extra: {
+            rich: {
+              v: 1,
+              blocks: [{ title: 'done' }] as NonNullable<NonNullable<ChatMessage['extra']>['rich']>['blocks'],
+            },
+          },
+        }),
       ),
     ).toBe(true);
+  });
+
+  it('keeps ack progress as a standalone ordinary assistant message', () => {
+    const ack = message({
+      origin: 'progress',
+      content: '收到，我开始检查。',
+      extra: { agentCommunication: { kind: 'ack', invocationId: 'inv-ack' } },
+    });
+    const heartbeat = message({
+      origin: 'progress',
+      content: '正在跑测试。',
+      extra: { agentCommunication: { kind: 'heartbeat', invocationId: 'inv-ack' } },
+    });
+
+    expect(shouldGroupAssistantMessage(ack, true)).toBe(false);
+    expect(shouldGroupAssistantMessage(heartbeat, true)).toBe(true);
+  });
+
+  it('reads provider diagnostics from history metadata and realtime extra', () => {
+    const historical = message({
+      type: 'system',
+      content: 'Error: Codex 额度超限，7/20 23:26 恢复',
+      metadata: {
+        provider: 'openai',
+        model: 'gpt-5-codex',
+        diagnostics: { rawError: 'raw quota detail', invocationId: 'inv-history' },
+      },
+    });
+    const realtime = message({
+      type: 'system',
+      content: 'Error: Codex 额度超限',
+      extra: { providerDiagnostics: { rawError: 'live detail', invocationId: 'inv-live' } },
+    });
+
+    expect(getProviderErrorDiagnostics(historical)?.invocationId).toBe('inv-history');
+    expect(getProviderErrorDiagnostics(realtime)?.invocationId).toBe('inv-live');
   });
 });

@@ -1014,6 +1014,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const collectedUsage = new Map<string, TokenUsage>();
           // F070: track governance block errorCode for recoverable failure marking
           let governanceErrorCode: string | undefined;
+          // Provider services may terminate with an error event and no done.errorCode.
+          // Keep that terminal truth separate from thrown/canceled/governance paths.
+          const pendingProviderErrors = new Map<string, string>();
 
           // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
           const outboundTurns: Array<{
@@ -1243,8 +1246,19 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             if (continuationCapsule) {
               continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
             }
-            if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
+            if ((msg.type === 'done' || msg.type === 'error') && msg.catId && msg.metadata?.usage) {
               collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
+            }
+            if (msg.type === 'error' && msg.catId) {
+              pendingProviderErrors.set(
+                msg.catId,
+                typeof msg.error === 'string' && msg.error.trim() ? msg.error : 'Provider error',
+              );
+            }
+            if (msg.type === 'text' && msg.catId && typeof msg.content === 'string' && msg.content.trim()) {
+              // Some providers emit a recoverable tool-level error, then continue with a valid answer.
+              // Only an error with no later same-cat text remains terminal.
+              pendingProviderErrors.delete(msg.catId);
             }
             if (msg.type === 'done' && msg.errorCode) {
               governanceErrorCode = msg.errorCode;
@@ -1382,6 +1396,27 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               status: 'failed',
               phase: 'done',
               error: governanceErrorCode,
+              ...(collectedUsage.size > 0
+                ? {
+                    usageByCat: Object.fromEntries(collectedUsage),
+                  }
+                : {}),
+            });
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+          } else if (pendingProviderErrors.size > 0) {
+            const providerErrorText = [...pendingProviderErrors.values()].join('\n');
+            if (cursorBoundaries.size > 0) {
+              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+            }
+            await opts.invocationRecordStore?.update(createResult.invocationId, {
+              status: 'failed',
+              phase: 'done',
+              error: providerErrorText,
+              ...(collectedUsage.size > 0
+                ? {
+                    usageByCat: Object.fromEntries(collectedUsage),
+                  }
+                : {}),
             });
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {

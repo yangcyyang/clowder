@@ -224,6 +224,7 @@ export interface AgentMessage {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     targetCats?: string[];
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+    scheduler?: { hiddenReceipt?: boolean };
   };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;

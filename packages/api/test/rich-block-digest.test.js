@@ -181,6 +181,11 @@ describe('safeParseExtra', () => {
     assert.equal(result.stream?.invocationId, 'inv-2');
   });
 
+  it('preserves scheduler hidden-receipt presentation through Redis parsing', () => {
+    const result = safeParseExtra(JSON.stringify({ scheduler: { hiddenReceipt: true } }));
+    assert.equal(result?.scheduler?.hiddenReceipt, true);
+  });
+
   it('ignores stream with invalid shape (no invocationId)', () => {
     const raw = JSON.stringify({ stream: { foo: 'bar' } });
     assert.equal(safeParseExtra(raw), undefined);

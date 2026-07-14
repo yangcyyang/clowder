@@ -936,9 +936,7 @@ export class QueueProcessor {
                 ...(aggregate.usage.historyGovernanceDegraded != null
                   ? { historyGovernanceDegraded: aggregate.usage.historyGovernanceDegraded }
                   : {}),
-                ...(aggregate.usage.deliveryOnlyMode
-                  ? { deliveryOnlyMode: aggregate.usage.deliveryOnlyMode }
-                  : {}),
+                ...(aggregate.usage.deliveryOnlyMode ? { deliveryOnlyMode: aggregate.usage.deliveryOnlyMode } : {}),
                 ...(aggregate.usage.deliveryOnlyDegradedIssue
                   ? { deliveryOnlyDegradedIssue: aggregate.usage.deliveryOnlyDegradedIssue }
                   : {}),
@@ -1735,7 +1733,8 @@ export class QueueProcessor {
         finalStatus = 'succeeded';
         return 'succeeded';
       }
-      invocationId = createResult.invocationId;
+      const activeInvocationId = createResult.invocationId;
+      invocationId = activeInvocationId;
 
       // F175: user-message batching — collect adjacent matching entries
       // Placed after idempotency check so batched entries aren't dropped on duplicate
@@ -1982,6 +1981,7 @@ export class QueueProcessor {
       const tokenUsageAggregates = new Map<string, TokenUsageAggregate>();
       let terminalErrorCode: string | undefined;
       let terminalErrorText: string | undefined;
+      const pendingProviderErrors = new Map<string, string>();
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
@@ -2245,16 +2245,30 @@ export class QueueProcessor {
 
       // F122B B6: Collect response text for completion hook (multi-mention aggregation).
       const hook = this.entryCompleteHooks.get(entry.id);
+      const silentScheduledReceipt = entry.responsePresentation === 'silent_receipt';
 
       // F088 fix: start streaming placeholder on external platforms
       let streamStartPromise: Promise<void> | undefined;
       if (this.deps.streamingHook) {
         streamStartPromise = this.deps.streamingHook
-          .onStreamStart(threadId, primaryCat, invocationId, entry.senderMeta)
+          .onStreamStart(threadId, primaryCat, activeInvocationId, entry.senderMeta)
           .catch((err) => {
             log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamStart failed');
           });
       }
+      const notifyStreamFailure = async (error: string): Promise<void> => {
+        if (!this.deps.streamingHook?.onStreamFailure) return;
+        if (streamStartPromise) {
+          const STREAM_START_TIMEOUT_MS = 5000;
+          await Promise.race([
+            streamStartPromise,
+            new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS).unref()),
+          ]);
+        }
+        await this.deps.streamingHook.onStreamFailure(threadId, error, activeInvocationId).catch((err) => {
+          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamFailure failed');
+        });
+      };
 
       // F151: Mid-loop delivery to preserve ordering (same fix as ConnectorInvokeTrigger)
       const deliveredTurnIndices = new Set<number>();
@@ -2285,6 +2299,7 @@ export class QueueProcessor {
         {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
+          ...(silentScheduledReceipt ? { responsePresentation: 'silent_receipt' } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           enqueueA2ATargets: async (handoff: {
@@ -2445,11 +2460,15 @@ export class QueueProcessor {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
         if (msg.type === 'error' && typeof msg.error === 'string') {
-          terminalErrorText = msg.error;
+          pendingProviderErrors.set(msg.catId ?? primaryCat, msg.error);
+        }
+        if (msg.type === 'text' && msg.catId && typeof msg.content === 'string' && msg.content.trim()) {
+          // A later answer from the same cat proves a tool-level error was recoverable.
+          pendingProviderErrors.delete(msg.catId);
         }
         if (msg.type === 'done' && typeof msg.errorCode === 'string') {
           terminalErrorCode = msg.errorCode;
-          terminalErrorText ??= msg.errorCode;
+          terminalErrorText = pendingProviderErrors.get(msg.catId ?? primaryCat) ?? msg.errorCode;
         }
 
         // F088 fix: collect per-turn content for outbound delivery
@@ -2546,6 +2565,7 @@ export class QueueProcessor {
                 origin: 'stream',
                 timestamp: Date.now(),
                 ...(invocationId ? { invocationId } : {}),
+                ...(silentScheduledReceipt ? { extra: { scheduler: { hiddenReceipt: true } } } : {}),
               },
               threadId,
             );
@@ -2554,7 +2574,21 @@ export class QueueProcessor {
         }
 
         if (!(completeMessageDeliveryEnabled && msg.type === 'text')) {
-          socketManager.broadcastAgentMessage({ ...msg, ...(invocationId ? { invocationId } : {}) }, threadId);
+          socketManager.broadcastAgentMessage(
+            {
+              ...msg,
+              ...(invocationId ? { invocationId } : {}),
+              ...(silentScheduledReceipt
+                ? {
+                    extra: {
+                      ...((msg as { extra?: Record<string, unknown> }).extra ?? {}),
+                      scheduler: { hiddenReceipt: true },
+                    },
+                  }
+                : {}),
+            },
+            threadId,
+          );
         }
       }
 
@@ -2570,26 +2604,56 @@ export class QueueProcessor {
         return finalStatus;
       }
 
-      if (terminalErrorCode) {
-        if (this.deps.streamingHook?.onStreamFailure) {
-          if (streamStartPromise) {
-            const STREAM_START_TIMEOUT_MS = 5000;
-            await Promise.race([
-              streamStartPromise,
-              new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS).unref()),
-            ]);
-          }
-          await this.deps.streamingHook
-            .onStreamFailure(threadId, terminalErrorText ?? 'Provider reported a terminal failure', invocationId)
-            .catch((err) => {
-              log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.onStreamFailure failed');
-            });
-        }
+      // Persistence is authoritative over downstream/provider outcomes: once an
+      // assistant message failed to persist, this invocation cannot be successful.
+      if (persistenceContext.failed) {
+        const persistenceError =
+          persistenceContext.errors.length > 0
+            ? `persistence_failure: ${persistenceContext.errors
+                .map(({ catId, error }) => `${catId}: ${error}`)
+                .join('; ')}`
+            : 'persistence_failure: message persistence failed';
+        await notifyStreamFailure(persistenceError);
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
         await invocationRecordStore.update(invocationId, {
           status: 'failed',
           phase: 'done',
-          error: `${terminalErrorCode}: ${terminalErrorText ?? 'Provider reported a terminal failure'}`,
+          error: persistenceError,
+          ...(tokenUsageAggregates.size > 0
+            ? {
+                usageByCat: Object.fromEntries(
+                  Array.from(tokenUsageAggregates, ([catId, aggregate]) => [catId, aggregate.usage]),
+                ),
+              }
+            : {}),
+        });
+        finalStatus = 'failed';
+        return finalStatus;
+      }
+
+      const unresolvedProviderErrorText = [...pendingProviderErrors.values()].join('\n') || undefined;
+      terminalErrorText ??= unresolvedProviderErrorText;
+      if (terminalErrorCode || terminalErrorText) {
+        await notifyStreamFailure(terminalErrorText ?? 'Provider reported a terminal failure');
+        await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
+        const terminalError = terminalErrorCode
+          ? terminalErrorText && terminalErrorText !== terminalErrorCode
+            ? terminalErrorText.startsWith(`${terminalErrorCode}:`)
+              ? terminalErrorText
+              : `${terminalErrorCode}: ${terminalErrorText}`
+            : terminalErrorCode
+          : (terminalErrorText ?? 'Provider reported a terminal failure');
+        await invocationRecordStore.update(invocationId, {
+          status: 'failed',
+          phase: 'done',
+          error: terminalError,
+          ...(tokenUsageAggregates.size > 0
+            ? {
+                usageByCat: Object.fromEntries(
+                  Array.from(tokenUsageAggregates, ([catId, aggregate]) => [catId, aggregate.usage]),
+                ),
+              }
+            : {}),
         });
         finalStatus = 'failed';
         return finalStatus;

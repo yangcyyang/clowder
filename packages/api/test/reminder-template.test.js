@@ -47,6 +47,50 @@ describe('reminderTemplate', () => {
     assert.equal(arg.extra.scheduler.hiddenTrigger, true);
   });
 
+  it('marks window-primer replies as silent receipts without silencing ordinary reminders', async () => {
+    const triggerMock = { trigger: mock.fn() };
+    const primerSpec = reminderTemplate.createSpec('rem-primer', {
+      trigger: { type: 'cron', expression: '0 10 * * *' },
+      params: { message: 'window-primer：只需回复「Codex 窗口已激活 + 当前时间」' },
+      deliveryThreadId: 'th-primer',
+    });
+    await primerSpec.run.execute('primer', 'thread-th-primer', {
+      assignedCatId: 'gpt52',
+      deliver: mock.fn(async () => 'msg-primer'),
+      invokeTrigger: triggerMock,
+    });
+
+    const primerPolicy = triggerMock.trigger.mock.calls[0].arguments[6];
+    assert.equal(primerPolicy.sourceCategory, 'scheduled');
+    assert.equal(primerPolicy.responsePresentation, 'silent_receipt');
+
+    triggerMock.trigger.mock.resetCalls();
+    const ordinarySpec = reminderTemplate.createSpec('rem-water', {
+      trigger: { type: 'cron', expression: '0 11 * * *' },
+      params: { message: '喝水提醒' },
+      deliveryThreadId: 'th-water',
+    });
+    await ordinarySpec.run.execute('喝水提醒', 'thread-th-water', {
+      assignedCatId: 'gpt52',
+      deliver: mock.fn(async () => 'msg-water'),
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, undefined);
+
+    triggerMock.trigger.mock.resetCalls();
+    const markerSentenceSpec = reminderTemplate.createSpec('rem-marker-sentence', {
+      trigger: { type: 'cron', expression: '0 12 * * *' },
+      params: { message: '复盘 window-primer: 配置，不要隐藏这条提醒' },
+      deliveryThreadId: 'th-marker-sentence',
+    });
+    await markerSentenceSpec.run.execute('marker sentence', 'thread-th-marker-sentence', {
+      assignedCatId: 'gpt52',
+      deliver: mock.fn(async () => 'msg-marker-sentence'),
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, undefined);
+  });
+
   it('deliver payload stays cat-agnostic when assignedCatId is null', async () => {
     const deliverMock = mock.fn(async () => 'msg-2');
     const spec = reminderTemplate.createSpec('rem-4', {
