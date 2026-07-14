@@ -338,6 +338,11 @@ const PROGRESS_VISIBILITY_SECTION = `## 即时开工回执与长任务心跳
 - 长任务仅在阶段确实变化且距上次用户可见更新约 45–60 秒时，用 \`kind='heartbeat'\` 发新事实；相同阶段不得重复刷屏。
 - progress 消息不是最终交付，也不能替代最终回复；最终结果仍走正常输出，并给交付物、验证证据和下一步。`;
 
+const DISCUSSION_EXECUTION_GATE_SECTION = `## 讨论 / 执行门禁（先判阶段）
+- 先判定用户是在讨论还是明确要求行动，再应用行动纪律。
+- 用户在陈述目标、发散讨论、征求意见（如“探讨/怎么看/是否/如何”），且未给明确执行口令时：只听清、给分析和选项、收敛方案；不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单。
+- “开工/按这个做/安排/执行”等明确执行口令出现后才进入行动流程：认领 → ack → 执行 → 交付。`;
+
 /**
  * L0 Governance Core — Slock-like always-on constitutional floor.
  * Keep this short: every agent sees it, including minimal/default DM responders.
@@ -373,7 +378,7 @@ const GOVERNANCE_OPERATIONAL_DIGEST = `## 协作规则（shared-rules.md）
 防漏接：做前认领，做完切到待验收/完成；没人认领的任务留在 board 可见；@ 本身就是传球。
 升级铲屎官仅三种：不可逆操作、愿景级决策、跨猫僵局；其他自决。
 上下文：默认只看最近窗口和摘要；缺 thread 历史用 get_thread_context，缺证据/refs 用 search_evidence，缺 session 接续用 session-chain/digest。
-执行闭环：先认领（claim）或复用任务；未认领/claim 前不写文件/改代码/启动构建；交付必须附证据；阻塞说明阻塞原因 + 缺什么 + 谁能补。
+执行闭环：先判讨论/执行；讨论时只分析和收敛，不建 task/不 @ 队友；明确执行口令后，先认领（claim）或复用任务；未认领/claim 前不写文件/改代码/启动构建；交付必须附证据；阻塞说明阻塞原因 + 缺什么 + 谁能补。
 输出：中文白话优先；默认一两句话给结论；无任务短路；禁接续检查/记忆命中等协议黑话。
 解释：方案/架构/机制/决策/权衡/排查类回答可用生活类比，但不要固定套模板标题。
 行为约束：写入 .cat-cafe/memory/{catId}.md 的行为偏好，不靠全局品种管控。
@@ -473,6 +478,7 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   return [
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
+    '阶段先判：用户只在陈述目标、发散讨论或征求意见，且未明确“开工/按这个做/安排/执行”时，只分析和收敛；不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单。明确执行口令出现后才进入下面的行动纪律。',
     '行动任务先认领当前消息或匹配任务；未认领前不写文件、不改代码、不启动构建；如果任务被别人认领，停止并说明冲突。',
     '文件删除权限：用户或 A2A 派工已明确要求删除，且文件受 git 版本控制时，可直接删除并用 git diff/status 留证；这不是不可逆操作。§10.4 的“删数据”指数据库、生产资源或不可恢复数据。',
     '交付必须有证据；完成后切到待验收，阻塞就写清缺什么。',
@@ -723,6 +729,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   if (rosterLines) {
     lines.push(rosterLines, '');
   }
+
+  lines.push(DISCUSSION_EXECUTION_GATE_SECTION, '');
 
   lines.push(
     '## Clowder CLI 工作纪律',

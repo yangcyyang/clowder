@@ -227,6 +227,65 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('未认领/claim 前不写文件/改代码/启动构建'));
   });
 
+  test('shared-rules and prompt keep discussion-before-action gate', async () => {
+    const { readFileSync } = await import('node:fs');
+    const rulesPath = resolve(import.meta.dirname, '../../../cat-cafe-skills/refs/shared-rules.md');
+    const rulesText = readFileSync(rulesPath, 'utf8');
+
+    assert.match(rulesText, /先判定当前阶段是讨论还是执行/);
+    assert.match(rulesText, /陈述目标、发散讨论、征求意见/);
+    assert.match(rulesText, /不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单/);
+    assert.match(rulesText, /明确执行口令.*才进入行动流程/);
+
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+
+    const gatePosition = prompt.indexOf('## 讨论 / 执行门禁（先判阶段）');
+    const actionPosition = prompt.indexOf('## Clowder CLI 工作纪律');
+    assert.ok(gatePosition >= 0, 'prompt should inject the discussion/execution gate');
+    assert.ok(actionPosition > gatePosition, 'stage classification must appear before action discipline');
+    assert.ok(prompt.includes('不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单'));
+    assert.ok(prompt.includes('开工/按这个做/安排/执行'));
+    assert.ok(prompt.includes('明确执行口令出现后才进入行动流程'));
+    assert.ok(prompt.includes('行动任务先认领或复用任务'), 'explicit execution must still reach claim-first flow');
+
+    const minimalPrompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      toolPolicy: 'minimal',
+    });
+    assert.ok(minimalPrompt.includes('## 讨论 / 执行门禁（先判阶段）'), 'minimal cats need the same stage gate');
+    assert.ok(
+      minimalPrompt.indexOf('## 讨论 / 执行门禁（先判阶段）') < minimalPrompt.indexOf('## Clowder CLI 工作纪律'),
+      'minimal cats must classify discussion before action',
+    );
+
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const runtimePrompt = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      threadId: 'thread-discussion-gate',
+      currentUserMessageId: 'msg-discussion-gate',
+    });
+    const runtimeGatePosition = runtimePrompt.indexOf('阶段先判：');
+    const runtimeActionPosition = runtimePrompt.indexOf('行动任务先认领当前消息或匹配任务');
+    assert.ok(runtimeGatePosition >= 0, 'resumed sessions need a per-invocation discussion gate');
+    assert.ok(
+      runtimeActionPosition > runtimeGatePosition,
+      'runtime task gate must classify stage before claim-first action',
+    );
+    assert.ok(runtimePrompt.includes('不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单'));
+  });
+
   test('is deterministic (identical inputs produce identical output)', async () => {
     const build = await getBuilder();
     const ctx = {
