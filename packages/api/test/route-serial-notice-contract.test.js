@@ -1,3 +1,4 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -97,6 +98,10 @@ function findA2ABlockedNotice(appendCalls) {
   return appendCalls.find((msg) => msg.source?.connector === 'a2a-routing-blocked');
 }
 
+function findA2ADeferredNotice(appendCalls) {
+  return appendCalls.find((msg) => msg.source?.connector === 'a2a-routing-deferred');
+}
+
 describe('route-serial notice contract', () => {
   it('emits routing-syntax-hint with explicit system_notice presentation metadata', async () => {
     // F167 Phase H AC-H5 (2026-04-24): Phase H `routing-syntax-hint` is now the
@@ -134,54 +139,71 @@ describe('route-serial notice contract', () => {
     assert.equal(hintBroadcast.payload.message.source.meta.noticeTone, 'warning');
   });
 
-  it('persists an A2A blocked notice when queued user messages block text-scan handoff', async () => {
+  it('persists an A2A deferred notice after queued user messages delay a durable handoff', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const feedbackWrites = [];
     const broadcasts = [];
-    const deps = createMockDeps({ opus: createLineStartMentionService('opus') }, appendCalls, feedbackWrites, broadcasts);
+    const deps = createMockDeps(
+      { opus: createLineStartMentionService('opus') },
+      appendCalls,
+      feedbackWrites,
+      broadcasts,
+    );
 
+    const enqueueCalls = [];
     for await (const _msg of routeSerial(deps, ['opus'], 'review this', 'user1', 'thread-a2a-queued', {
+      currentUserMessageId: 'msg-user-1',
       queueHasQueuedMessages: () => true,
-      enqueueA2ATargets: async () => {
-        throw new Error('should not enqueue while user messages are pending');
+      enqueueA2ATargets: async (input) => {
+        enqueueCalls.push(input);
+        return input.targetCats;
       },
     })) {
     }
 
-    const notice = findA2ABlockedNotice(appendCalls);
-    assert.ok(notice, 'should append a visible A2A blocked notice');
-    assert.match(notice.content, /@gpt52 未自动触发/);
+    assert.equal(enqueueCalls.length, 1, 'queued user work should delay execution, not drop durable admission');
+    assert.equal(enqueueCalls[0].sourceUserMessageId, 'msg-user-1');
+    assert.equal(enqueueCalls[0].waitedForQueuedUserMessages, true);
+
+    const notice = findA2ADeferredNotice(appendCalls);
+    assert.ok(notice, 'should append a visible A2A deferred notice');
+    assert.equal(notice.content, '[交接提醒]: @gpt52 已排队，用户消息处理完自动传球。');
     assert.equal(notice.source.meta.reason, 'queued_user_messages');
     assert.equal(notice.source.meta.presentation, 'system_notice');
 
     const broadcast = broadcasts.find(
       (entry) =>
-        entry.event === 'connector_message' && entry.payload.message.source?.connector === 'a2a-routing-blocked',
+        entry.event === 'connector_message' && entry.payload.message.source?.connector === 'a2a-routing-deferred',
     );
     assert.ok(broadcast, 'should broadcast the A2A blocked notice in real-time');
   });
 
-  it('persists an A2A blocked notice when the target cat is already active or queued', async () => {
+  it('admits an active target through the durable queue without a stale blocked notice', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const feedbackWrites = [];
     const broadcasts = [];
-    const deps = createMockDeps({ opus: createLineStartMentionService('opus') }, appendCalls, feedbackWrites, broadcasts);
+    const deps = createMockDeps(
+      { opus: createLineStartMentionService('opus') },
+      appendCalls,
+      feedbackWrites,
+      broadcasts,
+    );
 
+    const enqueueCalls = [];
     for await (const _msg of routeSerial(deps, ['opus'], 'review this', 'user1', 'thread-a2a-active', {
       hasQueuedOrActiveAgentForCat: () => true,
-      enqueueA2ATargets: async () => {
-        throw new Error('should not enqueue when target is active');
+      enqueueA2ATargets: async (input) => {
+        enqueueCalls.push(input);
+        return input.targetCats;
       },
     })) {
     }
 
+    assert.equal(enqueueCalls.length, 1, 'busy targets should use task #366 durable queue admission');
     const notice = findA2ABlockedNotice(appendCalls);
-    assert.ok(notice, 'should append a visible A2A blocked notice');
-    assert.match(notice.content, /已有排队或执行中的任务/);
-    assert.equal(notice.source.meta.reason, 'active_or_queued');
-    assert.equal(notice.source.meta.targetCatId, 'gpt52');
+    assert.equal(notice, undefined, 'durably admitted busy targets must not retain the old blocked warning');
   });
 
   it('persists an A2A blocked notice when queue enqueue returns no accepted target', async () => {
@@ -189,7 +211,12 @@ describe('route-serial notice contract', () => {
     const appendCalls = [];
     const feedbackWrites = [];
     const broadcasts = [];
-    const deps = createMockDeps({ opus: createLineStartMentionService('opus') }, appendCalls, feedbackWrites, broadcasts);
+    const deps = createMockDeps(
+      { opus: createLineStartMentionService('opus') },
+      appendCalls,
+      feedbackWrites,
+      broadcasts,
+    );
 
     for await (const _msg of routeSerial(deps, ['opus'], 'review this', 'user1', 'thread-a2a-noop', {
       enqueueA2ATargets: async () => [],

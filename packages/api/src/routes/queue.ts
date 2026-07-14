@@ -16,19 +16,16 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   type InvocationQueue,
-  type QueueEntry,
   isSystemPinnedQueueEntry,
+  type QueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import { injectClaudeRuntimeSteer } from '../domains/cats/services/agents/providers/claude-runtime-steer.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { injectClaudeRuntimeSteer } from '../domains/cats/services/agents/providers/claude-runtime-steer.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
-import {
-  auditDangerousActionBestEffort,
-  requireDangerousActionConfirmation,
-} from '../utils/dangerous-action-guard.js';
+import { auditDangerousActionBestEffort, requireDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
@@ -108,9 +105,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     try {
       const drafts = await draftStore.getByThread(userId, threadId);
       const matchingDrafts = drafts.filter((draft) => draft.catId === catId);
-      await Promise.all(
-        matchingDrafts.map((draft) => draftStore.delete(userId, threadId, draft.invocationId)),
-      );
+      await Promise.all(matchingDrafts.map((draft) => draftStore.delete(userId, threadId, draft.invocationId)));
       return matchingDrafts.length;
     } catch (err) {
       app.log.warn({ err, threadId, userId, catId }, '[queue] failed to clean canceled cat drafts');
@@ -276,6 +271,14 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
 
       const { mode } = parseResult.data;
+      const guardedDeferredA2A = entry.sourceCategory === 'a2a' && entry.a2aWaitedForQueuedUserMessages === true;
+      if (mode === 'promote' && guardedDeferredA2A) {
+        reply.status(409);
+        return {
+          error: '延迟交接由冲突保护顺序管理，不能手动调整位置',
+          code: 'A2A_REPLAY_GUARD_POSITION_LOCKED',
+        };
+      }
       if (mode === 'promote') {
         invocationQueue.promote(threadId, guard.userId, entryId);
         socketManager.emitToUser(guard.userId, 'queue_updated', {
@@ -284,6 +287,18 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           action: 'steer_promote',
         });
         return { ok: true };
+      }
+
+      if (guardedDeferredA2A) {
+        const guardedResult = await queueProcessor.processDeferredA2AEntry(threadId, guard.userId, entryId);
+        if (!guardedResult.started) {
+          reply.status(409);
+          return {
+            error: '交接仍在等待用户消息排空或冲突确认',
+            code: 'A2A_REPLAY_GUARD_BLOCKED',
+          };
+        }
+        return guardedResult;
       }
 
       // mode === 'immediate'

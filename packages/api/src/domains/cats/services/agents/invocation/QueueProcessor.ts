@@ -20,16 +20,18 @@ import {
 } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
-import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
+import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
 import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import { appendProjectHandoffLogForPromptProjects } from '../memory/ProjectProgressStore.js';
 import { sanitizeAgentVisibleOutput } from '../routing/agent-output-sanitizer.js';
 import {
+  buildAgentIntentSnapshot,
   freshnessPersistenceEgress,
-  persistA2APendingNotice,
   type PersistenceContext,
+  persistA2APendingNotice,
+  persistA2AReplayConflictNotice,
 } from '../routing/route-helpers.js';
 import {
   accumulateTextAggregate,
@@ -1432,9 +1434,11 @@ export class QueueProcessor {
           const recovery = isParallelDispatchEnabled()
             ? this.tryExecuteAllAcrossUsers(threadId, catId)
             : this.tryExecuteNextAcrossUsers(threadId, catId);
-          void recovery.catch((err) => {
-            this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
-          });
+          void recovery
+            .then(() => this.tryAutoExecute(threadId))
+            .catch((err) => {
+              this.deps.log.error({ err, threadId, catId }, '[QueueProcessor] Auto-recovery dequeue failed');
+            });
         }
       }, QueueProcessor.PAUSE_RECOVERY_DELAY_MS);
     }
@@ -1491,10 +1495,168 @@ export class QueueProcessor {
     this.clearUserBatchTimers(threadId, userId);
     // Clear all paused slots for this thread (manual resume clears all)
     this.clearPause(threadId);
-    if (isParallelDispatchEnabled()) {
-      return this.tryExecuteAllForUser(threadId, userId);
+    const guardedBefore = this.deps.queue
+      .list(threadId, userId)
+      .filter((entry) => entry.status === 'queued' && entry.a2aWaitedForQueuedUserMessages === true);
+    const result = isParallelDispatchEnabled()
+      ? await this.tryExecuteAllForUser(threadId, userId)
+      : await this.tryExecuteNextForUser(threadId, userId);
+    await this.tryAutoExecute(threadId);
+    if (!result.started && guardedBefore.length > 0) {
+      const remaining = new Set(
+        this.deps.queue
+          .list(threadId, userId)
+          .filter((entry) => entry.status === 'queued')
+          .map((entry) => entry.id),
+      );
+      const handled = guardedBefore.find((entry) => !remaining.has(entry.id));
+      if (handled) return { started: true, entry: handled };
     }
-    return this.tryExecuteNextForUser(threadId, userId);
+    return result;
+  }
+
+  /** Targeted manual dispatch for a deferred A2A entry; never consumes unrelated queue work. */
+  async processDeferredA2AEntry(
+    threadId: string,
+    userId: string,
+    entryId: string,
+  ): Promise<{ started: boolean; entry?: QueueEntry; redirected?: boolean; blocked?: boolean }> {
+    const entry = this.deps.queue.list(threadId, userId).find((candidate) => candidate.id === entryId);
+    if (!entry || entry.status !== 'queued' || entry.a2aWaitedForQueuedUserMessages !== true) {
+      return { started: false, blocked: true };
+    }
+    if (this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
+      return { started: false, entry, blocked: true };
+    }
+    const replayResolution = await this.resolveDeferredA2AReplay(entry);
+    if (replayResolution === 'blocked') return { started: false, entry, blocked: true };
+    if (replayResolution === 'redirected') {
+      await this.tryAutoExecute(threadId);
+      return { started: true, entry, redirected: true };
+    }
+    if (this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
+      return { started: false, entry, blocked: true };
+    }
+    return this.startAutoExecuteEntry(entry) ? { started: true, entry } : { started: false, entry, blocked: true };
+  }
+
+  /**
+   * A handoff delayed by queued user work must re-check explicit user corrections
+   * before replay. On conflict, durably wake the sender instead of the target.
+   */
+  private async resolveDeferredA2AReplay(entry: QueueEntry): Promise<'continue' | 'redirected' | 'blocked'> {
+    if (entry.sourceCategory !== 'a2a' || entry.a2aWaitedForQueuedUserMessages !== true) {
+      return 'continue';
+    }
+    if (!entry.a2aSourceUserMessageId || !entry.callerCatId) {
+      this.deps.log.warn(
+        {
+          threadId: entry.threadId,
+          entryId: entry.id,
+          hasSourceUserMessageId: Boolean(entry.a2aSourceUserMessageId),
+          hasCallerCatId: Boolean(entry.callerCatId),
+        },
+        '[QueueProcessor] Deferred A2A replay lineage incomplete; keeping handoff queued',
+      );
+      return 'blocked';
+    }
+
+    let interveningMessages: StoredMessage[];
+    try {
+      interveningMessages = await Promise.resolve(
+        this.deps.messageStore.getByThreadAfter(entry.threadId, entry.a2aSourceUserMessageId, undefined, entry.userId),
+      );
+    } catch (err) {
+      this.deps.log.warn(
+        { err, threadId: entry.threadId, entryId: entry.id },
+        '[QueueProcessor] Deferred A2A conflict check failed; keeping handoff queued',
+      );
+      return 'blocked';
+    }
+
+    let correction: NonNullable<ReturnType<typeof buildAgentIntentSnapshot>>['recentMessages'][number] | undefined;
+    for (let index = interveningMessages.length - 1; index >= 0; index--) {
+      const snapshot = buildAgentIntentSnapshot([interveningMessages[index]!]);
+      const candidate = snapshot?.recentMessages[0];
+      if (candidate?.type === 'correction') {
+        correction = candidate;
+        break;
+      }
+    }
+    if (!correction) return 'continue';
+
+    const targetCatId = entry.targetCats[0];
+    if (!targetCatId) return 'blocked';
+    const reminderKey = `a2a-conflict:${entry.id}:${correction.id}`;
+    const reminderContent = [
+      '[A2A 交接冲突提醒]',
+      `原交接目标：@${targetCatId}`,
+      `原交接内容：${entry.content}`,
+      `用户最新修正：${correction.content}`,
+      '请根据用户最新指令重新确认是否需要交接；不要直接恢复原传球。',
+    ].join('\n');
+    const reminderResult = this.deps.queue.enqueue({
+      threadId: entry.threadId,
+      userId: entry.userId,
+      idempotencyKey: reminderKey,
+      content: reminderContent,
+      source: 'agent',
+      sourceCategory: 'conflict',
+      targetCats: [entry.callerCatId],
+      intent: 'execute',
+      autoExecute: true,
+      pendingMentionId: reminderKey,
+      expiresAt: Date.now() + PENDING_MENTION_TTL_MS,
+    });
+    if (reminderResult.outcome !== 'enqueued' || !reminderResult.entry) {
+      this.deps.log.warn(
+        { threadId: entry.threadId, entryId: entry.id, outcome: reminderResult.outcome },
+        '[QueueProcessor] Conflict reminder admission failed; keeping original handoff queued',
+      );
+      return 'blocked';
+    }
+
+    try {
+      await this.deps.queue.persistEntry(reminderResult.entry);
+    } catch (err) {
+      if (!reminderResult.deduped) {
+        this.deps.queue.remove(entry.threadId, entry.userId, reminderResult.entry.id);
+      }
+      this.deps.log.warn(
+        { err, threadId: entry.threadId, entryId: entry.id, reminderEntryId: reminderResult.entry.id },
+        '[QueueProcessor] Conflict reminder persistence failed; keeping original handoff queued',
+      );
+      return 'blocked';
+    }
+
+    try {
+      const removed = await this.deps.queue.removePersisted(entry.threadId, entry.userId, entry.id);
+      if (!removed) return 'blocked';
+    } catch (err) {
+      this.deps.log.warn(
+        { err, threadId: entry.threadId, entryId: entry.id },
+        '[QueueProcessor] Conflict reminder persisted but original handoff removal failed; keeping handoff queued',
+      );
+      return 'blocked';
+    }
+    this.deps.socketManager.emitToUser(entry.userId, 'queue_updated', {
+      threadId: entry.threadId,
+      queue: this.deps.queue.list(entry.threadId, entry.userId),
+      action: 'enqueued',
+    });
+    await persistA2AReplayConflictNotice(this.deps, {
+      threadId: entry.threadId,
+      queueEntryId: entry.id,
+      fromCatId: entry.callerCatId,
+      targetCatId,
+      correctionMessageId: correction.id,
+    }).catch((err) => {
+      this.deps.log.warn(
+        { err, threadId: entry.threadId, entryId: entry.id },
+        '[QueueProcessor] Persist A2A replay conflict notice failed',
+      );
+    });
+    return 'redirected';
   }
 
   /**
@@ -1524,30 +1686,45 @@ export class QueueProcessor {
       );
     }
 
+    let redirectedConflict = false;
     for (const entry of entries) {
-      const entryCat = entry.targetCats[0] ?? 'unknown';
-      const sk = QueueProcessor.slotKey(threadId, entryCat);
-      // Skip if slot is busy (mutex or tracker)
-      if (this.processingSlots.has(sk)) continue;
-      if (this.deps.invocationTracker.has(threadId, entryCat)) continue;
-
-      // Guard: markProcessingById may fail if entry was consumed between snapshot and now
-      if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
-      this.processingSlots.set(sk, Date.now());
-      void this.executeEntry(entry).then(
-        (status) => {
-          this.processingSlots.delete(sk);
-          this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
-          this.signalDeliveryBatchDone(threadId, status);
-        },
-        () => {
-          this.processingSlots.delete(sk);
-          this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
-          this.signalDeliveryBatchDone(threadId, 'failed');
-        },
-      );
+      if (entry.a2aWaitedForQueuedUserMessages === true && this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
+        continue;
+      }
+      const replayResolution = await this.resolveDeferredA2AReplay(entry);
+      if (replayResolution === 'blocked') continue;
+      if (replayResolution === 'redirected') {
+        redirectedConflict = true;
+        continue;
+      }
+      if (entry.a2aWaitedForQueuedUserMessages === true && this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
+        continue;
+      }
+      this.startAutoExecuteEntry(entry);
       // Continue scanning — start all entries with free cat slots (parallel dispatch)
     }
+    if (redirectedConflict) await this.tryAutoExecute(threadId);
+  }
+
+  private startAutoExecuteEntry(entry: QueueEntry): boolean {
+    const entryCat = entry.targetCats[0] ?? 'unknown';
+    const sk = QueueProcessor.slotKey(entry.threadId, entryCat);
+    if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(entry.threadId, entryCat)) return false;
+    if (!this.deps.queue.markProcessingById(entry.threadId, entry.id)) return false;
+    this.processingSlots.set(sk, Date.now());
+    void this.executeEntry(entry).then(
+      (status) => {
+        this.processingSlots.delete(sk);
+        this.onInvocationComplete(entry.threadId, entryCat, status).catch(() => {});
+        this.signalDeliveryBatchDone(entry.threadId, status);
+      },
+      () => {
+        this.processingSlots.delete(sk);
+        this.onInvocationComplete(entry.threadId, entryCat, 'failed').catch(() => {});
+        this.signalDeliveryBatchDone(entry.threadId, 'failed');
+      },
+    );
+    return true;
   }
 
   // ── Internal ──
@@ -1577,7 +1754,7 @@ export class QueueProcessor {
     // F175: scan by comparator order, skip entries whose target slot is busy
     const busyCats = new Set<string>();
     for (;;) {
-      const entry = this.deps.queue.markProcessingAcrossUsers(threadId, busyCats);
+      const entry = this.deps.queue.markProcessingAcrossUsers(threadId, busyCats, { skipDeferredA2A: true });
       if (!entry) return { started: false };
 
       const entryCat = entry.targetCats[0] ?? catId;
@@ -1632,7 +1809,7 @@ export class QueueProcessor {
     let entryCat = 'unknown';
     let sk = '';
     for (;;) {
-      entry = this.deps.queue.markProcessing(threadId, userId, busyCats);
+      entry = this.deps.queue.markProcessing(threadId, userId, busyCats, { skipDeferredA2A: true });
       if (!entry) return { started: false };
 
       entryCat = entry.targetCats[0] ?? 'unknown';
@@ -1742,7 +1919,9 @@ export class QueueProcessor {
         const batch =
           entry.source === 'user'
             ? queue.collectUserBatch(threadId, userId)
-            : queue.collectA2ABatch(threadId, userId, entry.targetCats);
+            : entry.a2aWaitedForQueuedUserMessages === true
+              ? []
+              : queue.collectA2ABatch(threadId, userId, entry.targetCats);
         const sortedTargets = [...entry.targetCats].sort();
         const matching = batch.filter(
           (e) =>
@@ -2309,6 +2488,8 @@ export class QueueProcessor {
             targetCats: import('@cat-cafe/shared').CatId[];
             content: string;
             triggerMessageId?: string;
+            sourceUserMessageId?: string;
+            waitedForQueuedUserMessages?: true;
             freshnessProtected?: true;
           }) => {
             const enqueued: import('@cat-cafe/shared').CatId[] = [];
@@ -2352,6 +2533,8 @@ export class QueueProcessor {
                 autoExecute: true,
                 callerCatId: handoff.callerCatId,
                 a2aTriggerMessageId: handoff.triggerMessageId,
+                a2aSourceUserMessageId: handoff.sourceUserMessageId,
+                a2aWaitedForQueuedUserMessages: handoff.waitedForQueuedUserMessages,
                 pendingMentionId,
                 expiresAt: pendingMentionId ? Date.now() + PENDING_MENTION_TTL_MS : undefined,
                 freshnessProtected: handoff.freshnessProtected,

@@ -123,6 +123,7 @@ import {
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   parseCompactBoundarySystemInfo,
+  persistA2ADeferredNotice,
   persistA2ARoutingBlockedNotice,
   persistSilentCompletionNotice,
   publishFreshnessDraft,
@@ -1888,9 +1889,13 @@ export async function* routeSerial(
           if (queuedMessagesPending) {
             log.info(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount },
-              'A2A text-scan blocked: user messages pending in queue (fairness gate)',
+              enqueueA2ATargets
+                ? 'A2A text-scan deferred: user messages pending; admitting to durable queue'
+                : 'A2A text-scan blocked: user messages pending in queue (fairness gate)',
             );
-            await emitA2ABlockedNotice(a2aMentions, 'queued_user_messages');
+            if (!enqueueA2ATargets) {
+              await emitA2ABlockedNotice(a2aMentions, 'queued_user_messages');
+            }
           } else if (worklistEntry.a2aCount >= maxDepth) {
             log.info(
               { threadId, catId, a2aMentions, a2aCount: worklistEntry.a2aCount, maxDepth },
@@ -1903,7 +1908,12 @@ export async function* routeSerial(
           }
         }
 
-        if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
+        if (
+          a2aMentions.length > 0 &&
+          worklistEntry.a2aCount < maxDepth &&
+          !signal?.aborted &&
+          (!queuedMessagesPending || Boolean(enqueueA2ATargets))
+        ) {
           if (enqueueA2ATargets) {
             if (!storedMsgId) {
               await emitA2ABlockedNotice(a2aMentions, 'trigger_not_persisted');
@@ -1948,6 +1958,8 @@ export async function* routeSerial(
                   targetCats: queueTargets,
                   content: storedContent,
                   triggerMessageId: storedMsgId,
+                  ...(currentUserMessageId ? { sourceUserMessageId: currentUserMessageId } : {}),
+                  ...(queuedMessagesPending ? { waitedForQueuedUserMessages: true as const } : {}),
                   ...(deps.freshnessGate ? { freshnessProtected: true as const } : {}),
                 });
                 const enqueuedSet = new Set(enqueued.map((pendingCat) => pendingCat as string));
@@ -1956,6 +1968,19 @@ export async function* routeSerial(
                   await emitA2ABlockedNotice(droppedTargets, 'enqueue_noop');
                 }
                 for (const pendingCat of enqueued) {
+                  if (queuedMessagesPending) {
+                    await persistA2ADeferredNotice(deps, {
+                      threadId,
+                      fromCatId: catId,
+                      targetCatId: pendingCat,
+                      triggerMessageId: storedMsgId,
+                    }).catch((err) => {
+                      log.warn(
+                        { err, threadId, fromCatId: catId, targetCatId: pendingCat, triggerMessageId: storedMsgId },
+                        'persist A2A deferred notice failed',
+                      );
+                    });
+                  }
                   const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
                   yield {
                     type: 'a2a_handoff' as AgentMessageType,

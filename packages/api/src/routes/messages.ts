@@ -1117,6 +1117,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                       targetCats: CatId[];
                       content: string;
                       triggerMessageId?: string;
+                      sourceUserMessageId?: string;
+                      waitedForQueuedUserMessages?: true;
                       freshnessProtected?: true;
                     }) => {
                       const enqueued: CatId[] = [];
@@ -1160,6 +1162,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                           autoExecute: true,
                           callerCatId: handoff.callerCatId,
                           a2aTriggerMessageId: handoff.triggerMessageId,
+                          a2aSourceUserMessageId: handoff.sourceUserMessageId,
+                          a2aWaitedForQueuedUserMessages: handoff.waitedForQueuedUserMessages,
                           pendingMentionId,
                           expiresAt: pendingMentionId ? Date.now() + PENDING_MENTION_TTL_MS : undefined,
                           freshnessProtected: handoff.freshnessProtected,

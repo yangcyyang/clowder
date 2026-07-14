@@ -36,7 +36,9 @@ import {
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService, DeliveryOnlyDegradedIssue } from '../../types.js';
+
 export type { DeliveryOnlyDegradedIssue } from '../../types.js';
+
 import type { FreshnessEgressGate } from '../freshness/FreshnessEgressGate.js';
 import type { FreshnessReviewPayload } from '../invocation/InvocationQueue.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
@@ -796,9 +798,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
     ...(input.deliveryOnly
       ? {
           deliveryOnlyMode: input.deliveryOnly.mode,
-          ...(input.deliveryOnly.degradedIssue
-            ? { deliveryOnlyDegradedIssue: input.deliveryOnly.degradedIssue }
-            : {}),
+          ...(input.deliveryOnly.degradedIssue ? { deliveryOnlyDegradedIssue: input.deliveryOnly.degradedIssue } : {}),
         }
       : {}),
   };
@@ -1150,6 +1150,10 @@ export interface RouteOptions {
         targetCats: CatId[];
         content: string;
         triggerMessageId?: string;
+        /** User message whose invocation produced this handoff. Conflict checks scan after this boundary. */
+        sourceUserMessageId?: string;
+        /** This handoff was durably admitted while user work was queued, so replay needs the conflict guard. */
+        waitedForQueuedUserMessages?: true;
         /** Preserve Freshness protection when this handoff becomes a new queued route. */
         freshnessProtected?: true;
       }) => Promise<readonly CatId[]>)
@@ -1278,6 +1282,100 @@ export async function persistA2APendingNotice(
     timestamp,
     source,
     idempotencyKey: `a2a-pending:${args.queueEntryId}`,
+  });
+  deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+    threadId: args.threadId,
+    message: {
+      id: stored.id,
+      type: 'connector',
+      content: stored.content,
+      source: stored.source,
+      timestamp: stored.timestamp,
+    },
+  });
+}
+
+export async function persistA2ADeferredNotice(
+  deps: Pick<RouteStrategyDeps, 'messageStore' | 'socketManager'>,
+  args: {
+    threadId: string;
+    fromCatId: string;
+    targetCatId: string;
+    triggerMessageId: string;
+  },
+): Promise<void> {
+  const timestamp = Date.now();
+  const content = `[交接提醒]: @${args.targetCatId} 已排队，用户消息处理完自动传球。`;
+  const source = {
+    connector: 'a2a-routing-deferred',
+    label: '交接已排队',
+    icon: '⚠️',
+    meta: {
+      presentation: 'system_notice',
+      noticeTone: 'warning',
+      fromCatId: args.fromCatId,
+      targetCatId: args.targetCatId,
+      triggerMessageId: args.triggerMessageId,
+      reason: 'queued_user_messages',
+    },
+  } as const;
+  const stored = await deps.messageStore.append({
+    userId: 'system',
+    catId: null,
+    threadId: args.threadId,
+    content,
+    mentions: [],
+    timestamp,
+    source,
+    idempotencyKey: `a2a-deferred:${args.triggerMessageId}:${args.fromCatId}:${args.targetCatId}`,
+  });
+  deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+    threadId: args.threadId,
+    message: {
+      id: stored.id,
+      type: 'connector',
+      content: stored.content,
+      source: stored.source,
+      timestamp: stored.timestamp,
+    },
+  });
+}
+
+export async function persistA2AReplayConflictNotice(
+  deps: Pick<RouteStrategyDeps, 'messageStore' | 'socketManager'>,
+  args: {
+    threadId: string;
+    queueEntryId: string;
+    fromCatId: string;
+    targetCatId: string;
+    correctionMessageId: string;
+  },
+): Promise<void> {
+  const timestamp = Date.now();
+  const content = `[交接提醒]: 用户已改指令或取消，未直接触发 @${args.targetCatId}；已提醒 @${args.fromCatId} 重新确认。`;
+  const source = {
+    connector: 'a2a-replay-conflict',
+    label: '交接待确认',
+    icon: '⚠️',
+    meta: {
+      presentation: 'system_notice',
+      noticeTone: 'warning',
+      queueEntryId: args.queueEntryId,
+      fromCatId: args.fromCatId,
+      targetCatId: args.targetCatId,
+      correctionMessageId: args.correctionMessageId,
+      reason: 'user_instruction_conflict',
+    },
+  } as const;
+  const stored = await deps.messageStore.append({
+    userId: 'system',
+    catId: null,
+    threadId: args.threadId,
+    content,
+    mentions: [],
+    timestamp,
+    source,
+    idempotencyKey: `a2a-replay-conflict:${args.queueEntryId}`,
   });
   deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
     threadId: args.threadId,

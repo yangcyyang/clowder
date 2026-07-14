@@ -78,6 +78,10 @@ export interface QueueEntry {
   callerCatId?: string;
   /** The persisted agent message that triggered this A2A work item. */
   a2aTriggerMessageId?: string;
+  /** User-message boundary used to inspect intervening user corrections before deferred A2A replay. */
+  a2aSourceUserMessageId?: string;
+  /** Replay was deferred specifically because user work was queued. */
+  readonly a2aWaitedForQueuedUserMessages?: true;
   /** Immutable lineage marker: this work descends from a Freshness-protected route. */
   readonly freshnessProtected?: true;
   /** F134: sender identity for connector group chat messages (used for UI display) */
@@ -119,6 +123,15 @@ export interface InvocationQueuePersistence {
 }
 
 const MAX_QUEUE_DEPTH = 5;
+
+interface MarkProcessingOptions {
+  /** Deferred A2A work must pass QueueProcessor's replay/conflict guard before processing. */
+  skipDeferredA2A?: boolean;
+}
+
+function isDeferredA2AReplayEntry(entry: Pick<QueueEntry, 'sourceCategory' | 'a2aWaitedForQueuedUserMessages'>) {
+  return entry.sourceCategory === 'a2a' && entry.a2aWaitedForQueuedUserMessages === true;
+}
 
 export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sourceCategory'>): boolean {
   return (
@@ -241,6 +254,8 @@ export class InvocationQueue {
       | 'autoExecute'
       | 'callerCatId'
       | 'a2aTriggerMessageId'
+      | 'a2aSourceUserMessageId'
+      | 'a2aWaitedForQueuedUserMessages'
       | 'priority'
       | 'position'
       | 'suggestedSkill'
@@ -252,6 +267,8 @@ export class InvocationQueue {
       autoExecute?: boolean;
       callerCatId?: string;
       a2aTriggerMessageId?: string;
+      a2aSourceUserMessageId?: string;
+      a2aWaitedForQueuedUserMessages?: true;
       priority?: 'urgent' | 'normal';
       suggestedSkill?: string;
       callerTraceContext?: CallerTraceContext;
@@ -309,6 +326,8 @@ export class InvocationQueue {
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
       a2aTriggerMessageId: input.a2aTriggerMessageId,
+      a2aSourceUserMessageId: input.a2aSourceUserMessageId,
+      a2aWaitedForQueuedUserMessages: input.a2aWaitedForQueuedUserMessages === true ? true : undefined,
       freshnessProtected: input.freshnessProtected === true ? true : undefined,
       senderMeta: input.senderMeta,
       priority:
@@ -392,6 +411,25 @@ export class InvocationQueue {
     return removed;
   }
 
+  /**
+   * Durable removal barrier for persisted pending work.
+   * The in-memory entry remains queued when persistence deletion fails.
+   */
+  async removePersisted(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) return null;
+    const idx = q.findIndex((entry) => entry.id === entryId);
+    if (idx === -1) return null;
+    const entry = q[idx];
+    if (!entry) return null;
+    const snapshot = { ...entry };
+    if (entry.pendingMentionId) await this.persistence?.delete(entry.id);
+    const currentIdx = q.findIndex((candidate) => candidate.id === entryId);
+    if (currentIdx === -1) return snapshot;
+    this.originalContents.delete(entryId);
+    return q.splice(currentIdx, 1)[0] ?? snapshot;
+  }
+
   /** Shallow copy of all entries sorted by dequeue priority (comparator order). */
   list(threadId: string, userId: string): QueueEntry[] {
     const q = this.queues.get(this.scopeKey(threadId, userId));
@@ -468,10 +506,20 @@ export class InvocationQueue {
   }
 
   /** F175: Mark the highest-priority queued entry as processing (stays in array). */
-  markProcessing(threadId: string, userId: string, skipCatIds?: Set<string>): QueueEntry | null {
+  markProcessing(
+    threadId: string,
+    userId: string,
+    skipCatIds?: Set<string>,
+    options?: MarkProcessingOptions,
+  ): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const queued = q.filter((e) => e.status === 'queued' && !skipCatIds?.has(e.targetCats[0] ?? ''));
+    const queued = q.filter(
+      (entry) =>
+        entry.status === 'queued' &&
+        !skipCatIds?.has(entry.targetCats[0] ?? '') &&
+        !(options?.skipDeferredA2A && isDeferredA2AReplayEntry(entry)),
+    );
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
     const best = queued[0]!;
@@ -535,13 +583,18 @@ export class InvocationQueue {
 
   /** F175: Mark the highest-priority queued entry across users as processing.
    *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
-  markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
+  markProcessingAcrossUsers(
+    threadId: string,
+    skipCatIds?: Set<string>,
+    options?: MarkProcessingOptions,
+  ): QueueEntry | null {
     let best: QueueEntry | null = null;
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
         if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
+        if (options?.skipDeferredA2A && isDeferredA2AReplayEntry(e)) continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
           best = e;
         }
@@ -819,6 +872,7 @@ export class InvocationQueue {
           entry.status === 'queued' &&
           entry.source === 'agent' &&
           entry.sourceCategory === 'a2a' &&
+          entry.a2aWaitedForQueuedUserMessages !== true &&
           arraysEqual(sorted(entry.targetCats), expectedTargets),
       )
       .sort(InvocationQueue.compareEntries)
@@ -926,6 +980,17 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       if (q.some((e) => e.status === 'queued' && e.source !== 'agent')) return true;
+    }
+    return false;
+  }
+
+  /** Whether user/connector work is still queued or processing in this thread. */
+  hasOutstandingNonAgentForThread(threadId: string): boolean {
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      if (q.some((entry) => entry.source !== 'agent' && (entry.status === 'queued' || entry.status === 'processing'))) {
+        return true;
+      }
     }
     return false;
   }

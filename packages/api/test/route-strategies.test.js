@@ -875,6 +875,44 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(handoffs.length, 0, 'should not emit handoff when fairness guard blocks extension');
   });
 
+  it('admits A2A to the durable queue while queued user messages keep execution deferred', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({
+      opus: createMockService('opus', '我先回复\n@缅因猫 帮忙继续'),
+      codex: createMockService('codex', 'must not run inside the current route'),
+    });
+    const enqueueCalls = [];
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
+      currentUserMessageId: 'msg-user-1',
+      queueHasQueuedMessages: () => true,
+      enqueueA2ATargets: async (input) => {
+        enqueueCalls.push(input);
+        return input.targetCats;
+      },
+    })) {
+      messages.push(msg);
+    }
+
+    assert.equal(enqueueCalls.length, 1, 'durable admission must not be suppressed by queued user work');
+    assert.equal(enqueueCalls[0].threadId, 'thread1');
+    assert.equal(enqueueCalls[0].userId, 'user1');
+    assert.equal(enqueueCalls[0].callerCatId, 'opus');
+    assert.deepEqual(enqueueCalls[0].targetCats, ['codex']);
+    assert.equal(enqueueCalls[0].sourceUserMessageId, 'msg-user-1');
+    assert.equal(enqueueCalls[0].waitedForQueuedUserMessages, true);
+    assert.ok(enqueueCalls[0].triggerMessageId, 'durable admission requires the persisted handoff message id');
+
+    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
+    assert.equal(codexText.length, 0, 'durable target must not execute inside the current route');
+    assert.equal(
+      messages.filter((m) => m.type === 'a2a_handoff').length,
+      1,
+      'accepted durable admission should emit one handoff event',
+    );
+  });
+
   it('skips A2A text-scan @mention when cat already dispatched via callback (cross-path dedup)', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({

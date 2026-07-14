@@ -138,6 +138,8 @@ describe('InvocationQueue', () => {
         source: 'agent',
         sourceCategory: 'a2a',
         autoExecute: true,
+        a2aSourceUserMessageId: 'msg-user-source',
+        a2aWaitedForQueuedUserMessages: true,
         pendingMentionId: 'a2a:msg-1:opus:codex',
         expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
       }),
@@ -148,7 +150,10 @@ describe('InvocationQueue', () => {
     const summary = await restored.restorePersistedEntries();
     assert.equal(summary.restored, 1);
     assert.deepEqual(summary.threadIds, ['t1']);
-    assert.equal(restored.list('t1', 'u1')[0].pendingMentionId, 'a2a:msg-1:opus:codex');
+    const restoredEntry = restored.list('t1', 'u1')[0];
+    assert.equal(restoredEntry.pendingMentionId, 'a2a:msg-1:opus:codex');
+    assert.equal(restoredEntry.a2aSourceUserMessageId, 'msg-user-source');
+    assert.equal(restoredEntry.a2aWaitedForQueuedUserMessages, true);
   });
 
   it('drops expired pending mentions during restore', async () => {
@@ -1290,6 +1295,84 @@ describe('InvocationQueue', () => {
     queue.enqueue(entry({ source: 'connector', targetCats: ['opus'] }));
     queue.markProcessing('t1', 'u1');
     assert.equal(queue.hasQueuedNonAgentForThread('t1'), false, 'processing entries are already being handled');
+  });
+
+  it('hasOutstandingNonAgentForThread includes processing user work for deferred A2A replay', () => {
+    queue.enqueue(entry({ source: 'user', targetCats: ['opus'] }));
+    queue.markProcessing('t1', 'u1');
+
+    assert.equal(queue.hasQueuedNonAgentForThread('t1'), false);
+    assert.equal(queue.hasOutstandingNonAgentForThread('t1'), true);
+  });
+
+  it('generic dequeue can skip deferred A2A entries reserved for the replay guard', () => {
+    const deferred = queue.enqueue(
+      entry({
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+        a2aWaitedForQueuedUserMessages: true,
+        targetCats: ['codex'],
+      }),
+    ).entry;
+    const user = queue.enqueue(entry({ source: 'user', targetCats: ['opus'] })).entry;
+
+    const marked = queue.markProcessing('t1', 'u1', undefined, { skipDeferredA2A: true });
+    assert.equal(marked.id, user.id);
+    assert.equal(queue.list('t1', 'u1').find((queued) => queued.id === deferred.id).status, 'queued');
+  });
+
+  it('A2A batching excludes deferred entries that require an individual replay guard', () => {
+    queue.enqueue(entry({ source: 'agent', sourceCategory: 'a2a', autoExecute: true, targetCats: ['codex'] }));
+    queue.enqueue(
+      entry({
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+        a2aWaitedForQueuedUserMessages: true,
+        targetCats: ['codex'],
+      }),
+    );
+
+    assert.equal(queue.collectA2ABatch('t1', 'u1', ['codex']).length, 1);
+  });
+
+  it('removePersisted rechecks the exact entry id after awaiting durable deletion', async () => {
+    let resolveDelete;
+    const deleteGate = new Promise((resolve) => {
+      resolveDelete = resolve;
+    });
+    let deleteCalls = 0;
+    const durableQueue = new InvocationQueue({
+      save: async () => {},
+      delete: async () => {
+        deleteCalls++;
+        if (deleteCalls === 1) await deleteGate;
+      },
+      list: async () => [],
+    });
+    const deferred = durableQueue.enqueue(
+      entry({
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+        a2aWaitedForQueuedUserMessages: true,
+        pendingMentionId: 'a2a:deferred',
+      }),
+    ).entry;
+    const next = durableQueue.enqueue(entry({ source: 'user', content: 'must survive' })).entry;
+
+    const removing = durableQueue.removePersisted('t1', 'u1', deferred.id);
+    await Promise.resolve();
+    durableQueue.remove('t1', 'u1', deferred.id);
+    resolveDelete();
+
+    const removed = await removing;
+    assert.equal(removed.id, deferred.id);
+    assert.equal(
+      durableQueue.list('t1', 'u1').some((queued) => queued.id === next.id),
+      true,
+    );
   });
 
   it('hasQueuedNonAgentForThread returns false for empty queue', () => {

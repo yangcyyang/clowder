@@ -26,6 +26,7 @@ function buildDeps(overrides = {}) {
     invocationQueue,
     queueProcessor: {
       processNext: mock.fn(async () => ({ started: false })),
+      processDeferredA2AEntry: mock.fn(async () => ({ started: false, blocked: true })),
       isPaused: mock.fn(() => false),
       getPauseReason: mock.fn(() => undefined),
       clearPause: mock.fn(() => {}),
@@ -502,6 +503,102 @@ describe('Queue Management API', () => {
     assert.equal(doneCall.arguments[0].isFinal, true);
   });
 
+  it('POST /queue/:entryId/steer immediate routes deferred A2A through its targeted guard', async () => {
+    const guarded = enqueueEntry(deps.invocationQueue, {
+      content: '@codex guarded handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aSourceUserMessageId: 'msg-user-original',
+      a2aWaitedForQueuedUserMessages: true,
+      targetCats: ['codex'],
+    });
+    const unrelated = enqueueEntry(deps.invocationQueue, { content: 'unrelated user work', targetCats: ['opus'] });
+    deps.queueProcessor.processDeferredA2AEntry = mock.fn(async () => ({
+      started: true,
+      entry: guarded.entry,
+      redirected: true,
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${guarded.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.redirected, true);
+    assert.equal(deps.queueProcessor.processDeferredA2AEntry.mock.calls.length, 1);
+    assert.equal(deps.queueProcessor.processDeferredA2AEntry.mock.calls[0].arguments[2], guarded.entry.id);
+    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(
+      deps.invocationQueue.list('t1', 'user-a').some((entry) => entry.id === unrelated.entry.id),
+      true,
+      'targeted guard must not consume unrelated work',
+    );
+  });
+
+  it('POST /queue/:entryId/steer immediate keeps deferred A2A and user work queued when guard blocks', async () => {
+    const guarded = enqueueEntry(deps.invocationQueue, {
+      content: '@codex guarded handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aSourceUserMessageId: 'msg-user-original',
+      a2aWaitedForQueuedUserMessages: true,
+      targetCats: ['codex'],
+    });
+    const userWork = enqueueEntry(deps.invocationQueue, { content: 'queued user work', targetCats: ['opus'] });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${guarded.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'A2A_REPLAY_GUARD_BLOCKED');
+    const remaining = deps.invocationQueue.list('t1', 'user-a');
+    assert.equal(
+      remaining.some((entry) => entry.id === guarded.entry.id),
+      true,
+    );
+    assert.equal(
+      remaining.some((entry) => entry.id === userWork.entry.id),
+      true,
+    );
+    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0);
+  });
+
+  it('POST /queue/:entryId/steer promote rejects deferred A2A because guard order is immutable', async () => {
+    const guarded = enqueueEntry(deps.invocationQueue, {
+      source: 'agent',
+      sourceCategory: 'a2a',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aSourceUserMessageId: 'msg-user-original',
+      a2aWaitedForQueuedUserMessages: true,
+      targetCats: ['codex'],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${guarded.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'promote' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).code, 'A2A_REPLAY_GUARD_POSITION_LOCKED');
+  });
+
   it('POST /queue/:entryId/steer immediate injects into active Claude runtime when steer v2 flag is enabled', async () => {
     await app.close();
     const deliveredAtValues = [];
@@ -561,14 +658,16 @@ describe('Queue Management API', () => {
       assert.equal(body.mode, 'runtime');
       assert.deepEqual(writes[0], { type: 'user', message: { role: 'user', content: 'runtime steer' } });
       assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0, 'runtime steer must not cancel active Claude');
-      assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0, 'runtime steer must not start a new invocation');
+      assert.equal(
+        deps.queueProcessor.processNext.mock.calls.length,
+        0,
+        'runtime steer must not start a new invocation',
+      );
       assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0, 'injected entry should leave the queue');
       assert.equal(deps.messageStore.markDelivered.mock.calls.length, 1);
       assert.equal(deps.messageStore.markDelivered.mock.calls[0].arguments[0], 'msg-1');
       assert.ok(deliveredAtValues[0] > 0);
-      const delivered = deps.socketManager.emitToUser.mock.calls.find(
-        (c) => c.arguments[1] === 'messages_delivered',
-      );
+      const delivered = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'messages_delivered');
       assert.ok(delivered, 'runtime-steered queued message should be delivered to the timeline');
     } finally {
       unregister();

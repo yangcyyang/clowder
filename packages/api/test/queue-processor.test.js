@@ -42,6 +42,7 @@ function stubDeps(overrides = {}) {
     messageStore: {
       append: mock.fn(async () => ({ id: 'msg-stub' })),
       getById: mock.fn(async () => null),
+      getByThreadAfter: mock.fn(async () => []),
     },
     log: {
       info: mock.fn(),
@@ -1896,6 +1897,429 @@ describe('QueueProcessor', () => {
       assert.equal(routeOptions.replyToMessageId, 'msg-claude-handoff');
     });
 
+    it('redirects a queued-user A2A conflict to a durable reminder for the sender', async () => {
+      const messagesAfterSource = [
+        {
+          id: 'msg-user-correction',
+          threadId: 't1',
+          userId: 'u1',
+          catId: null,
+          content: '先别做这个，换方向，等我确认后再执行',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+      ];
+      const conflictDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-conflict-notice' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => messagesAfterSource),
+        },
+      });
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      const entry = enqueueEntry(conflictDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+      conflictDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-agent-handoff');
+
+      await conflictProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const createCalls = conflictDeps.invocationRecordStore.create.mock.calls.map((call) => call.arguments[0]);
+      assert.equal(
+        createCalls.some((input) => input.targetCats[0] === 'codex'),
+        false,
+        'conflicting target must not run',
+      );
+      assert.equal(
+        createCalls.filter((input) => input.targetCats[0] === 'opus-45').length,
+        1,
+        'sender should receive exactly one durable conflict reminder',
+      );
+      const reminderRoute = conflictDeps.router.routeExecution.mock.calls.find(
+        (call) => call.arguments[4][0] === 'opus-45',
+      );
+      assert.ok(reminderRoute, 'conflict reminder should execute through the normal queue path');
+      assert.match(reminderRoute.arguments[1], /@codex 请继续原方案/);
+      assert.match(reminderRoute.arguments[1], /先别做这个，换方向/);
+
+      const noticeInput = conflictDeps.messageStore.append.mock.calls.find(
+        (call) => call.arguments[0].source?.connector === 'a2a-replay-conflict',
+      )?.arguments[0];
+      assert.ok(noticeInput, 'thread should receive one visible conflict notice');
+      assert.match(noticeInput.content, /已提醒 @opus-45 重新确认/);
+    });
+
+    it('detects a deferred A2A correction even when later supplements exceed the intent snapshot window', async () => {
+      const messagesAfterSource = [
+        {
+          id: 'msg-user-correction-old',
+          threadId: 't1',
+          userId: 'u1',
+          catId: null,
+          content: '先别做这个，等我重新确认',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+        ...Array.from({ length: 21 }, (_, index) => ({
+          id: `msg-user-supplement-${index}`,
+          threadId: 't1',
+          userId: 'u1',
+          catId: null,
+          content: `补充材料 ${index}`,
+          mentions: [],
+          timestamp: Date.now() + index + 1,
+        })),
+      ];
+      const conflictDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-conflict-notice' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => messagesAfterSource),
+        },
+      });
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      const entry = enqueueEntry(conflictDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+      conflictDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-agent-handoff');
+
+      await conflictProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const targets = conflictDeps.invocationRecordStore.create.mock.calls.map(
+        (call) => call.arguments[0].targetCats[0],
+      );
+      assert.equal(targets.includes('codex'), false, 'any correction after the source boundary must block the target');
+      assert.equal(targets.filter((target) => target === 'opus-45').length, 1);
+    });
+
+    it('keeps the original deferred A2A queued when conflict history cannot be read', async () => {
+      const conflictDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => {
+            throw new Error('history unavailable');
+          }),
+        },
+      });
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      const entry = enqueueEntry(conflictDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+
+      await conflictProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      assert.equal(conflictDeps.invocationRecordStore.create.mock.calls.length, 0);
+      assert.equal(
+        conflictDeps.queue.list('t1', 'u1').some((queued) => queued.id === entry.id),
+        true,
+      );
+    });
+
+    it('fails closed when a deferred A2A is missing its conflict-check lineage', async () => {
+      const conflictDeps = stubDeps();
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      const entry = enqueueEntry(conflictDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+
+      await conflictProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      assert.equal(conflictDeps.invocationRecordStore.create.mock.calls.length, 0);
+      assert.equal(
+        conflictDeps.queue.list('t1', 'u1').some((queued) => queued.id === entry.id),
+        true,
+      );
+      assert.equal(conflictDeps.log.warn.mock.calls.length > 0, true);
+    });
+
+    it('routes manual processNext through the deferred A2A conflict guard', async () => {
+      const conflictDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-conflict-notice' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => [
+            {
+              id: 'msg-user-correction',
+              threadId: 't1',
+              userId: 'u1',
+              catId: null,
+              content: '暂停，先确认后再执行',
+              mentions: [],
+              timestamp: Date.now(),
+            },
+          ]),
+        },
+      });
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      enqueueEntry(conflictDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+
+      await conflictProcessor.processNext('t1', 'u1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const targets = conflictDeps.invocationRecordStore.create.mock.calls.map(
+        (call) => call.arguments[0].targetCats[0],
+      );
+      assert.equal(targets.includes('codex'), false, 'manual dequeue must not bypass the conflict guard');
+      assert.equal(targets.filter((target) => target === 'opus-45').length, 1);
+    });
+
+    it('keeps the original deferred A2A queued when durable removal fails', async () => {
+      const persistence = {
+        save: mock.fn(async () => {}),
+        delete: mock.fn(async () => {
+          throw new Error('redis delete unavailable');
+        }),
+        list: mock.fn(async () => []),
+      };
+      const queue = new InvocationQueue(persistence);
+      const conflictDeps = stubDeps({
+        queue,
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-conflict-notice' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => [
+            {
+              id: 'msg-user-correction',
+              threadId: 't1',
+              userId: 'u1',
+              catId: null,
+              content: '不要做，先讨论',
+              mentions: [],
+              timestamp: Date.now(),
+            },
+          ]),
+        },
+      });
+      const conflictProcessor = new QueueProcessor(conflictDeps);
+      const entry = enqueueEntry(queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+        pendingMentionId: 'a2a:msg-agent-handoff:opus-45:codex',
+      });
+      await queue.persistEntry(entry);
+
+      await conflictProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      assert.equal(
+        queue.list('t1', 'u1').some((queued) => queued.id === entry.id),
+        true,
+      );
+      assert.equal(
+        conflictDeps.invocationRecordStore.create.mock.calls.some(
+          (call) => call.arguments[0].targetCats[0] === 'codex',
+        ),
+        false,
+      );
+    });
+
+    it('keeps a queued-user A2A deferred until the processing user message finishes', async () => {
+      const fairnessDeps = stubDeps();
+      const fairnessProcessor = new QueueProcessor(fairnessDeps);
+      const userEntry = enqueueEntry(fairnessDeps.queue, {
+        userId: 'u1',
+        source: 'user',
+        content: '第二条用户消息',
+        targetCats: ['opus'],
+      });
+      fairnessDeps.queue.backfillMessageId('t1', 'u1', userEntry.id, 'msg-user-2');
+      assert.ok(fairnessDeps.queue.markProcessingById('t1', userEntry.id));
+
+      const handoffEntry = enqueueEntry(fairnessDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请接球',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-1',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+      fairnessDeps.queue.backfillMessageId('t1', 'u1', handoffEntry.id, 'msg-agent-handoff');
+
+      await fairnessProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.equal(
+        fairnessDeps.invocationRecordStore.create.mock.calls.length,
+        0,
+        'handoff must stay queued while the user message is processing',
+      );
+
+      fairnessDeps.queue.removeProcessed('t1', 'u1', userEntry.id);
+      await fairnessProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.equal(
+        fairnessDeps.invocationRecordStore.create.mock.calls.filter(
+          (call) => call.arguments[0].targetCats[0] === 'codex',
+        ).length,
+        1,
+        'handoff should run exactly once after user work finishes',
+      );
+    });
+
+    it('rechecks user work after the async conflict-history read before dispatching deferred A2A', async () => {
+      let resolveHistory;
+      let signalHistoryStarted;
+      const historyStarted = new Promise((resolve) => {
+        signalHistoryStarted = resolve;
+      });
+      const historyResult = new Promise((resolve) => {
+        resolveHistory = resolve;
+      });
+      const fairnessDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => {
+            signalHistoryStarted();
+            return historyResult;
+          }),
+        },
+      });
+      const fairnessProcessor = new QueueProcessor(fairnessDeps);
+      const handoffEntry = enqueueEntry(fairnessDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请接球',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-1',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+
+      const autoExecute = fairnessProcessor.tryAutoExecute('t1');
+      await historyStarted;
+      enqueueEntry(fairnessDeps.queue, {
+        userId: 'u1',
+        source: 'user',
+        content: '读取期间到达的新用户消息',
+        targetCats: ['opus'],
+      });
+      resolveHistory([]);
+      await autoExecute;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      assert.equal(fairnessDeps.invocationRecordStore.create.mock.calls.length, 0);
+      assert.equal(
+        fairnessDeps.queue.list('t1', 'u1').some((entry) => entry.id === handoffEntry.id),
+        true,
+      );
+    });
+
+    it('does not treat an ordinary queued-user supplement as an A2A replay conflict', async () => {
+      const supplementDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async (input) => ({ ...input, id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          getByThreadAfter: mock.fn(async () => [
+            {
+              id: 'msg-user-supplement',
+              threadId: 't1',
+              userId: 'u1',
+              catId: null,
+              content: '补充一份材料，继续按原方案处理',
+              mentions: [],
+              timestamp: Date.now(),
+            },
+          ]),
+        },
+      });
+      const supplementProcessor = new QueueProcessor(supplementDeps);
+      const entry = enqueueEntry(supplementDeps.queue, {
+        userId: 'u1',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        content: '@codex 请继续原方案',
+        targetCats: ['codex'],
+        autoExecute: true,
+        callerCatId: 'opus-45',
+        a2aTriggerMessageId: 'msg-agent-handoff',
+        a2aSourceUserMessageId: 'msg-user-original',
+        a2aWaitedForQueuedUserMessages: true,
+      });
+      supplementDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-agent-handoff');
+
+      await supplementProcessor.tryAutoExecute('t1');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const createCalls = supplementDeps.invocationRecordStore.create.mock.calls.map((call) => call.arguments[0]);
+      assert.equal(createCalls.filter((input) => input.targetCats[0] === 'codex').length, 1);
+      assert.equal(
+        createCalls.some((input) => input.targetCats[0] === 'opus-45'),
+        false,
+      );
+      assert.equal(
+        supplementDeps.messageStore.append.mock.calls.some(
+          (call) => call.arguments[0].source?.connector === 'a2a-replay-conflict',
+        ),
+        false,
+      );
+    });
+
     it('enqueues text-scan A2A mentions as independent autoExecute work items', async () => {
       const previousProjectIds = process.env.CAT_CAFE_PROJECT_CONTEXT_IDS;
       const projectRoot = await mkdtemp(join(tmpdir(), 'queue-handoff-project-'));
@@ -2297,10 +2721,11 @@ describe('QueueProcessor', () => {
       await persistenceProcessor.processNext('t1', 'u1');
       await new Promise((resolve) => setTimeout(resolve, 80));
 
-      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map(
-        (call) => call.arguments[1],
+      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map((call) => call.arguments[1]);
+      assert.equal(
+        terminalUpdates.some((input) => input.status === 'succeeded'),
+        false,
       );
-      assert.equal(terminalUpdates.some((input) => input.status === 'succeeded'), false);
       const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
       assert.ok(failedUpdate, 'persistence failure must converge to failed');
       assert.equal(failedUpdate.error, 'persistence_failure: opus: assistant message append failed');
@@ -2354,10 +2779,11 @@ describe('QueueProcessor', () => {
       await persistenceProcessor.processNext('t1', 'u1');
       await new Promise((resolve) => setTimeout(resolve, 80));
 
-      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map(
-        (call) => call.arguments[1],
+      const terminalUpdates = persistenceDeps.invocationRecordStore.update.mock.calls.map((call) => call.arguments[1]);
+      assert.equal(
+        terminalUpdates.some((input) => input.status === 'succeeded'),
+        false,
       );
-      assert.equal(terminalUpdates.some((input) => input.status === 'succeeded'), false);
       const failedUpdate = terminalUpdates.find((input) => input.status === 'failed');
       assert.ok(failedUpdate, 'persistence failure must converge to failed');
       assert.equal(failedUpdate.error, 'persistence_failure: opus: assistant message append failed');
