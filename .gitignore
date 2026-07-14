@@ -174,4 +174,6 @@ __pycache__/
 designs/exports/
 packages/api/test/__b1_parent_a__/
 .next-dev/
+# Isolated production build used by the API bearer fallback verification.
+packages/web/.next-auth-test/
 .gstack/

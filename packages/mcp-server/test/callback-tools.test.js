@@ -50,6 +50,7 @@ describe('MCP Callback Tools', () => {
   });
 
   test('handlePostMessage calls API with correct body', async () => {
+    process.env.CLOWDER_API_BEARER_TOKEN = 'global-api-secret';
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
     let capturedUrl, capturedOptions;
@@ -74,6 +75,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.callbackToken, undefined, 'creds must NOT be dual-written to body');
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+    assert.equal(capturedOptions.headers.authorization, 'Bearer global-api-secret');
   });
 
   test('handlePostProgress uses the non-terminal callback endpoint and preserves idempotency', async () => {
@@ -689,6 +691,7 @@ describe('MCP Callback Tools', () => {
   });
 
   test('queues post-message to local outbox when transient failures exhaust retries', async () => {
+    process.env.CLOWDER_API_BEARER_TOKEN = 'outbox-must-not-persist-this';
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
     globalThis.fetch = async () => ({
@@ -711,6 +714,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(persisted.path, '/api/callbacks/post-message');
     assert.equal(persisted.body.content, 'offline message');
     assert.equal(persisted.body.clientMessageId, 'offline-001');
+    assert.ok(!JSON.stringify(persisted).includes('outbox-must-not-persist-this'));
   });
 
   test('flushes queued outbox payload before posting new message after recovery', async () => {

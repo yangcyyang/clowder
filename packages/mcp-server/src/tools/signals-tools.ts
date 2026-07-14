@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { applyApiBearerHeader } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -23,6 +24,7 @@ async function apiJson(
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   try {
     const headers = new Headers(init?.headers);
+    applyApiBearerHeader(headers);
     headers.set('X-Cat-Cafe-User', SIGNAL_USER);
     if (init?.body && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');

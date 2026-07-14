@@ -129,7 +129,7 @@ import {
 } from './infrastructure/email/index.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
-import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
+import { apiBearerAuthPlugin, sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
@@ -258,6 +258,10 @@ async function main(): Promise<void> {
   const telemetryHandle = initTelemetry();
 
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+
+  // Short-term deployment hardening: when configured, protect every /api/*
+  // route before CORS or route-specific handlers can short-circuit the request.
+  await app.register(apiBearerAuthPlugin);
 
   if (isDebugMode) {
     app.log.info({ logDir: LOG_DIR_PATH }, '[api] Debug mode enabled (--debug flag)');

@@ -10,9 +10,11 @@
 
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import cookie from '@fastify/cookie';
 import websocketPlugin from '@fastify/websocket';
 import Fastify from 'fastify';
 import WebSocket from 'ws';
+import { apiBearerAuthPlugin, sessionAuthPlugin, sessionRoute } from '../../dist/infrastructure/session-auth.js';
 
 /**
  * Helper: attempt a WebSocket upgrade with specific headers.
@@ -133,5 +135,45 @@ describe('F156 Phase B-1: Terminal WS Origin Security', () => {
     });
     assert.strictEqual(result.upgraded, true, 'WS upgrade itself succeeds (origin OK)');
     assert.strictEqual(result.closeCode, 4001, 'Handler rejects: session required');
+  });
+});
+
+describe('P1 API bearer: terminal WebSocket session delegation', () => {
+  it('allows a bearer-minted HttpOnly session cookie on a terminal WS upgrade', async () => {
+    const originalToken = process.env.CLOWDER_API_BEARER_TOKEN;
+    process.env.CLOWDER_API_BEARER_TOKEN = 'terminal-global-secret';
+    const app = Fastify({ logger: false });
+
+    try {
+      const { terminalRoutes } = await import('../../dist/routes/terminal.js');
+      await app.register(apiBearerAuthPlugin);
+      await app.register(cookie);
+      await app.register(sessionAuthPlugin);
+      await app.register(sessionRoute);
+      await app.register(websocketPlugin);
+      await app.register(terminalRoutes, {});
+      await app.listen({ port: 0, host: '127.0.0.1' });
+      const port = app.server.address().port;
+
+      const session = await app.inject({
+        method: 'GET',
+        url: '/api/session',
+        headers: { authorization: 'Bearer terminal-global-secret' },
+      });
+      assert.equal(session.statusCode, 200);
+      const cookieHeader = session.headers['set-cookie']?.split(';', 1)[0];
+      assert.ok(cookieHeader);
+
+      const result = await attemptWsUpgrade(port, '/api/terminal/sessions/missing/ws', {
+        origin: 'http://localhost:3003',
+        cookie: cookieHeader,
+      });
+      assert.equal(result.upgraded, true);
+      assert.equal(result.closeCode, 4004, 'cookie passed both bearer and session gates; only the missing PTY remains');
+    } finally {
+      await app.close();
+      if (originalToken === undefined) delete process.env.CLOWDER_API_BEARER_TOKEN;
+      else process.env.CLOWDER_API_BEARER_TOKEN = originalToken;
+    }
   });
 });

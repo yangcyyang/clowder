@@ -29,6 +29,11 @@ const distDir = process.env.NEXT_DIST_DIR ?? (process.env.NODE_ENV === 'developm
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Only expose whether the server-side proxy is active. The bearer itself
+  // must never enter a NEXT_PUBLIC_* variable or a browser bundle.
+  env: {
+    NEXT_PUBLIC_API_AUTH_PROXY_ENABLED: process.env.CLOWDER_API_BEARER_TOKEN?.trim() ? '1' : '0',
+  },
   // Keep dev-server artifacts separate from `next build` output. Running build
   // while 3003 is open previously overwrote `.next/static`, leaving dev HTML
   // pointing at missing CSS/JS files and rendering the app as raw HTML.

@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -30,7 +31,7 @@ function buildAuthHeaders(): Record<string, string> {
   };
   const catId = resolveToolCatId();
   if (catId) headers['x-cat-id'] = catId;
-  return headers;
+  return withApiBearerHeaders(headers);
 }
 
 // --- list_session_chain ---

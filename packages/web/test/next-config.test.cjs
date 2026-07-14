@@ -5,7 +5,14 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT', 'NODE_ENV', 'NEXT_DIST_DIR'];
+const ENV_KEYS = [
+  'NEXT_PUBLIC_API_URL',
+  'API_SERVER_PORT',
+  'FRONTEND_PORT',
+  'NODE_ENV',
+  'NEXT_DIST_DIR',
+  'CLOWDER_API_BEARER_TOKEN',
+];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -87,6 +94,16 @@ describe('next.config rewrites', () => {
   it('allows explicit distDir override for one-off diagnostics', async () => {
     await withEnv({ NODE_ENV: 'development', NEXT_DIST_DIR: '.next-debug' }, async (config) => {
       assert.equal(config.distDir, '.next-debug');
+    });
+  });
+
+  it('exposes only a safe auth-proxy boolean and never the bearer token', async () => {
+    await withEnv({ CLOWDER_API_BEARER_TOKEN: 'DO_NOT_BUNDLE_THIS_SENTINEL' }, async (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED, '1');
+      assert.ok(!JSON.stringify(config).includes('DO_NOT_BUNDLE_THIS_SENTINEL'));
+    });
+    await withEnv({}, async (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED, '0');
     });
   });
 });

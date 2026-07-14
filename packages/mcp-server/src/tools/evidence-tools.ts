@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -88,7 +89,7 @@ export async function handleSearchEvidence(input: {
   const queryLabel = JSON.stringify(input.query);
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: withApiBearerHeaders() });
 
     if (!response.ok) {
       const text = await response.text();

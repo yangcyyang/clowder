@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
+import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 
 export function shouldAcceptNavigate(sessionThreadId: string | null, eventThreadId: string | undefined): boolean {
   // Auto navigation is a side effect. Require explicit thread ownership when
@@ -76,8 +76,11 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
 
     import('socket.io-client').then(({ io }) => {
       if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
+      const apiUrl = new URL(SOCKET_URL);
+      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
+        transports: ['websocket'],
+        autoConnect: false,
+      });
 
       socket.emit('join_room', 'workspace:global');
       if (worktreeId) {
@@ -105,6 +108,12 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
       };
 
       socket.on('workspace:navigate', handler);
+
+      void ensureSocketSession()
+        .then(() => {
+          if (!cancelled) socket.connect();
+        })
+        .catch(() => socket.disconnect());
 
       cleanup = () => {
         socket.off('workspace:navigate', handler);

@@ -87,6 +87,9 @@ async function main() {
     headers: {
       'Content-Type': 'application/json',
       'X-Cat-Cafe-User': user,
+      ...(process.env.CLOWDER_API_BEARER_TOKEN?.trim()
+        ? { Authorization: `Bearer ${process.env.CLOWDER_API_BEARER_TOKEN.trim()}` }
+        : {}),
     },
     body: JSON.stringify(payload),
   });

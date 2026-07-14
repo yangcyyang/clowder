@@ -1384,6 +1384,39 @@ describe('WeixinAdapter', () => {
       }
     });
 
+    it('sends the API bearer only to internal /api downloads', async () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const originalApiUrl = process.env.CAT_CAFE_API_URL;
+      const originalBearer = process.env.CLOWDER_API_BEARER_TOKEN;
+      process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+      process.env.CLOWDER_API_BEARER_TOKEN = 'weixin-api-secret';
+      /** @type {Array<{ url: string; authorization?: string }>} */
+      const requests = [];
+      try {
+        adapter._injectFetch(async (url, init) => {
+          requests.push({
+            url: String(url),
+            authorization: /** @type {Record<string, string> | undefined} */ (init?.headers)?.authorization,
+          });
+          return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+        });
+        await adapter['downloadToTemp']('/api/connector-media/photo.jpg');
+        await adapter['downloadToTemp']('https://files.example/api/photo.jpg');
+        assert.deepEqual(requests, [
+          {
+            url: 'http://127.0.0.1:3004/api/connector-media/photo.jpg',
+            authorization: 'Bearer weixin-api-secret',
+          },
+          { url: 'https://files.example/api/photo.jpg', authorization: undefined },
+        ]);
+      } finally {
+        if (originalApiUrl === undefined) delete process.env.CAT_CAFE_API_URL;
+        else process.env.CAT_CAFE_API_URL = originalApiUrl;
+        if (originalBearer === undefined) delete process.env.CLOWDER_API_BEARER_TOKEN;
+        else process.env.CLOWDER_API_BEARER_TOKEN = originalBearer;
+      }
+    });
+
     it('degrades non-SILK audio to file_item delivery', async () => {
       const adapter = new WeixinAdapter('test-token', noopLog());
       adapter._injectContextToken('user-1', 'ctx-1');

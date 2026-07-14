@@ -19,6 +19,7 @@ const GEMINI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
   CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
   CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
   CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+  CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
   CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
   CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
 };
@@ -26,6 +27,7 @@ const KIMI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
   CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
   CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
   CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+  CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
   CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
   CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
 };
@@ -97,6 +99,9 @@ function buildAntigravityCatCafeEnvBaseline(): Readonly<Record<string, string>> 
 function buildAntigravityCatCafeEnforcedEnv(): Readonly<Record<string, string>> {
   return {
     CAT_CAFE_API_URL: process.env.CAT_CAFE_API_URL?.trim() || 'http://localhost:3004',
+    ...(process.env.CLOWDER_API_BEARER_TOKEN?.trim()
+      ? { CLOWDER_API_BEARER_TOKEN: process.env.CLOWDER_API_BEARER_TOKEN.trim() }
+      : {}),
     CAT_CAFE_READONLY: 'true',
   };
 }

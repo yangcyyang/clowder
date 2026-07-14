@@ -244,6 +244,7 @@ test('injects an isolated native MCP config without persisting callback or accou
           CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-native-mcp',
           CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+          CLOWDER_API_BEARER_TOKEN: 'api-bearer-secret',
           CAT_CAFE_USER_ID: 'user-1',
           CAT_CAFE_CAT_ID: 'grok',
           CAT_CAFE_THREAD_ID: 'thread-1',
@@ -261,6 +262,8 @@ test('injects an isolated native MCP config without persisting callback or accou
     assert.doesNotMatch(config, /callback-secret/);
     assert.doesNotMatch(config, /xai-account-secret/);
     assert.match(bridge, /CAT_CAFE_CALLBACK_TOKEN/);
+    assert.match(bridge, /CLOWDER_API_BEARER_TOKEN/);
+    assert.doesNotMatch(config, /api-bearer-secret/);
     assert.match(bridge, /ALLOWED_WORKSPACE_DIRS/);
     assert.doesNotMatch(bridge, /XAI_API_KEY/);
     assert.equal(configMode, 0o600);

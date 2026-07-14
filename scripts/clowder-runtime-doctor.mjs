@@ -24,6 +24,7 @@ function readEnvValue(key, fallback) {
 
 const frontendPort = Number(readEnvValue('FRONTEND_PORT', '3003'));
 const apiPort = Number(readEnvValue('API_SERVER_PORT', '3004'));
+const apiBearerToken = process.env.CLOWDER_API_BEARER_TOKEN || readEnvValue('CLOWDER_API_BEARER_TOKEN', '');
 const uploadDirSetting = readEnvValue('UPLOAD_DIR', '');
 const effectiveUploadDir =
   uploadDirSetting === './uploads'
@@ -59,7 +60,11 @@ function cwdOfPid(pid) {
 
 async function fetchText(url) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      ...(apiBearerToken && url.includes('/api/')
+        ? { headers: { authorization: `Bearer ${apiBearerToken}` } }
+        : {}),
+    });
     const text = await res.text();
     return { ok: res.ok, status: res.status, text, contentType: res.headers.get('content-type') || '' };
   } catch (err) {

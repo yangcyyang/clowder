@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import type { CallbackAuthFailureReason } from '@cat-cafe/shared';
 import { CALLBACK_AUTH_FAILURE_REASONS, isCallbackAuthFailureReason, normalizeRichBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import { sendCallbackRequest } from './callback-outbox.js';
 import { extractReasonTag } from './callback-retry.js';
 import { withDegradation } from './degradation.js';
@@ -207,7 +208,7 @@ export async function callbackGet(
   const url = qs ? `${config.apiUrl}${path}?${qs}` : `${config.apiUrl}${path}`;
 
   try {
-    const response = await fetch(url, { headers: buildAuthHeaders(config) });
+    const response = await fetch(url, { headers: withApiBearerHeaders(buildAuthHeaders(config)) });
     if (!response.ok) {
       const text = await response.text();
       // F174 Phase A: tag structured reason from 401 callback_auth_failed body

@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -21,7 +22,7 @@ export async function handleReflect(input: { query: string }): Promise<ToolResul
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ query: input.query }),
     });
 

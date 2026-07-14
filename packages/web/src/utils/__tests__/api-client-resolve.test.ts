@@ -19,9 +19,11 @@ function stubLocation(overrides: Partial<Location> | null) {
 
 describe('resolveApiUrl', () => {
   const originalEnv = process.env.NEXT_PUBLIC_API_URL;
+  const originalAuthProxy = process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED;
 
   beforeEach(() => {
     delete process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED;
   });
 
   afterEach(() => {
@@ -30,6 +32,11 @@ describe('resolveApiUrl', () => {
       process.env.NEXT_PUBLIC_API_URL = originalEnv;
     } else {
       delete process.env.NEXT_PUBLIC_API_URL;
+    }
+    if (originalAuthProxy !== undefined) {
+      process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED = originalAuthProxy;
+    } else {
+      delete process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED;
     }
   });
 
@@ -118,5 +125,13 @@ describe('resolveApiUrl', () => {
     stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3011' });
     const resolve = await loadResolveApiUrl();
     expect(resolve()).toBe('http://127.0.0.1:3012');
+  });
+
+  it('forces the browser through the same-origin Web proxy when API auth is enabled', async () => {
+    process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED = '1';
+    process.env.NEXT_PUBLIC_API_URL = 'https://api.clowder-ai.com';
+    stubLocation({ hostname: 'localhost', protocol: 'http:', port: '3003' });
+    const resolve = await loadResolveApiUrl();
+    expect(resolve()).toBe('http://localhost:3003');
   });
 });

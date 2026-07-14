@@ -863,6 +863,16 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CLOWDER_API_BEARER_TOKEN',
+    defaultValue: '(未设置 → 保持单用户兼容模式)',
+    description: 'API 全局 Bearer 兜底鉴权；API/Web/Agent 进程必须共享同一服务端密钥',
+    category: 'server',
+    sensitive: true,
+    restartRequired: true,
+    runtimeEditable: false,
+    hubVisible: false,
+  },
+  {
     name: 'CAT_CAFE_INVOCATION_ID',
     defaultValue: '(运行时注入)',
     description: '当前 invocation ID（由 API 进程注入 MCP Server 子进程 env）',

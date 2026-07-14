@@ -8,7 +8,8 @@ import { useTreeNavigation } from '@/hooks/useTreeNavigation';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useWorkspaceSearch } from '@/hooks/useWorkspaceSearch';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
+import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 import { CommunityPanel } from './CommunityPanel';
 import { RecallFeed } from './memory/RecallFeed';
 import { TaskBoardPanel } from './TaskBoardPanel';
@@ -266,8 +267,11 @@ export function WorkspacePanel() {
     let cleanup: (() => void) | null = null;
     import('socket.io-client').then(({ io }) => {
       if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
+      const apiUrl = new URL(SOCKET_URL);
+      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
+        transports: ['websocket'],
+        autoConnect: false,
+      });
       // Join worktree-scoped room for targeted preview events
       const room = worktreeId ? `worktree:${worktreeId}` : 'preview:global';
       socket.emit('join_room', room);
@@ -276,6 +280,11 @@ export function WorkspacePanel() {
         setTimeout(() => setPortDiscoveryToast(null), 8000);
       };
       socket.on('preview:port-discovered', handler);
+      void ensureSocketSession()
+        .then(() => {
+          if (!cancelled) socket.connect();
+        })
+        .catch(() => socket.disconnect());
       // F120: auto-open listener moved to ChatContainer (usePreviewAutoOpen hook)
       // WorkspacePanel consumes pendingPreviewAutoOpen from store on mount
       cleanup = () => {

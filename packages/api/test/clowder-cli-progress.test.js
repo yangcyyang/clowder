@@ -12,11 +12,13 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 test('clowder message progress posts a non-terminal callback payload', async () => {
   let capturedPath = '';
   let capturedBody = {};
+  let capturedAuthorization = '';
   const server = createServer((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       capturedPath = request.url ?? '';
+      capturedAuthorization = request.headers.authorization ?? '';
       capturedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ status: 'ok', messageId: 'progress-1' }));
@@ -47,6 +49,7 @@ test('clowder message progress posts a non-terminal callback payload', async () 
           CAT_CAFE_INVOCATION_ID: 'inv-cli',
           CAT_CAFE_CALLBACK_TOKEN: 'token-cli',
           CAT_CAFE_THREAD_ID: 'thread-cli',
+          CLOWDER_API_BEARER_TOKEN: 'cli-global-secret',
         },
       },
     );
@@ -59,6 +62,7 @@ test('clowder message progress posts a non-terminal callback payload', async () 
       kind: 'ack',
       clientMessageId: 'ack:inv-cli:opus',
     });
+    assert.equal(capturedAuthorization, 'Bearer cli-global-secret');
     assert.match(stdout, /Progress sent to thread-cli: progress-1/);
   } finally {
     await new Promise((resolveClose, reject) =>

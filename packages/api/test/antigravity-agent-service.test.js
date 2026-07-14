@@ -142,6 +142,10 @@ describe('AntigravityAgentService (Bridge)', () => {
     assert.doesNotMatch(sentPrompt, /当前没有原生 MCP 注入/, 'should not claim native MCP is absent');
     assert.ok(sentPrompt.includes('/api/callbacks/thread-context?invocationId=inv-123&callbackToken=tok-456'));
     assert.ok(sentPrompt.includes('/api/callbacks/post-message'));
+    assert.ok(
+      sentPrompt.includes('Authorization: Bearer $CLOWDER_API_BEARER_TOKEN'),
+      'HTTP fallback must use the runtime bearer without embedding its value',
+    );
     assert.ok(sentPrompt.includes('/api/callbacks/instructions'));
     assert.ok(
       !sentPrompt.includes('/api/callbacks/instructions?invocationId=inv-123&callbackToken=tok-456'),

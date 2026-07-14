@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
@@ -21,7 +22,7 @@ async function callbackDelete(path: string): Promise<ToolResult> {
   try {
     const response = await fetch(`${config.apiUrl}${path}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(config) },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json', ...buildAuthHeaders(config) }),
     });
     if (!response.ok) {
       const text = await response.text();

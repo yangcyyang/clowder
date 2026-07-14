@@ -346,6 +346,7 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
           CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
           CAT_CAFE_INVOCATION_ID: 'invoke-123',
           CAT_CAFE_CALLBACK_TOKEN: 'token-123',
+          CLOWDER_API_BEARER_TOKEN: 'api-bearer-123',
         },
       }),
     );
@@ -362,6 +363,7 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
     assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
     assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
     assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
+    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CLOWDER_API_BEARER_TOKEN, 'api-bearer-123');
 
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
     await promise;

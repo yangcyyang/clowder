@@ -13,6 +13,7 @@ import type {
 } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { AgentMessage } from '../../domains/cats/services/types.js';
 import { createModuleLogger } from '../logger.js';
+import { isApiBearerAuthEnabled, isApiBearerAuthorized } from '../session-auth.js';
 import { BroadcastRateMonitor, type BroadcastRateMonitorOptions } from './BroadcastRateMonitor.js';
 import { ThreadSequencer } from './ThreadSequencer.js';
 
@@ -125,6 +126,18 @@ export class SocketManager {
       // the real security boundary against cross-site WebSocket hijacking.
       // Ref: OpenClaw ClawJacked (2026-02), CVE-2026-25253.
       allowRequest: (req, callback) => {
+        if (
+          isApiBearerAuthEnabled() &&
+          !isApiBearerAuthorized({
+            authorization: req.headers.authorization,
+            cookie: req.headers.cookie,
+            allowSessionCookie: true,
+          })
+        ) {
+          log.warn({ origin: req.headers.origin ?? null }, 'Socket.IO handshake rejected: unauthorized');
+          callback('Unauthorized', false);
+          return;
+        }
         const origin = req.headers.origin;
         if (!origin) {
           // No Origin header = non-browser client (curl, MCP, etc.).

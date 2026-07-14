@@ -11,17 +11,24 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { after, before, describe, it } from 'node:test';
+import cookie from '@fastify/cookie';
+import Fastify from 'fastify';
 import { io as ioClient } from 'socket.io-client';
 import { isOriginAllowed } from '../../dist/config/frontend-origin.js';
+import { apiBearerAuthPlugin, sessionAuthPlugin, sessionRoute } from '../../dist/infrastructure/session-auth.js';
 import { SocketManager } from '../../dist/infrastructure/websocket/SocketManager.js';
 
 /**
  * Helper: attempt a Socket.IO connection with a specific Origin header and transport.
  * Returns a promise that resolves with { connected, error }.
  */
-function attemptConnection(port, { origin, transports = ['websocket'], auth } = {}) {
+function attemptConnection(port, { origin, transports = ['websocket'], auth, authorization, cookie } = {}) {
   return new Promise((resolve) => {
-    const extraHeaders = origin ? { origin } : {};
+    const extraHeaders = {
+      ...(origin ? { origin } : {}),
+      ...(authorization ? { authorization } : {}),
+      ...(cookie ? { cookie } : {}),
+    };
     const socket = ioClient(`http://127.0.0.1:${port}`, {
       transports,
       autoConnect: true,
@@ -240,5 +247,80 @@ describe('F156: isOriginAllowed (unit)', () => {
   it('rejects empty origin', () => {
     const origins = ['http://localhost:3003'];
     assert.strictEqual(isOriginAllowed('', origins), false);
+  });
+});
+
+describe('P1 API bearer: Socket.IO handshake', () => {
+  let httpServer;
+  let socketManager;
+  let port;
+  let originalToken;
+
+  before(async () => {
+    originalToken = process.env.CLOWDER_API_BEARER_TOKEN;
+    process.env.CLOWDER_API_BEARER_TOKEN = 'socket-global-secret';
+    httpServer = createServer();
+    socketManager = new SocketManager(httpServer);
+    await new Promise((resolve) => {
+      httpServer.listen(0, '127.0.0.1', () => {
+        port = httpServer.address().port;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    socketManager?.close();
+    await new Promise((resolve) => httpServer?.close(resolve));
+    if (originalToken === undefined) delete process.env.CLOWDER_API_BEARER_TOKEN;
+    else process.env.CLOWDER_API_BEARER_TOKEN = originalToken;
+  });
+
+  it('rejects an allowed-origin socket without bearer-derived authentication', async () => {
+    const result = await attemptConnection(port, {
+      origin: 'http://localhost:3003',
+      transports: ['websocket'],
+    });
+    assert.equal(result.connected, false);
+  });
+
+  it('accepts the exact bearer for non-browser and proxy handshake clients', async () => {
+    const result = await attemptConnection(port, {
+      origin: 'http://localhost:3003',
+      transports: ['websocket'],
+      authorization: 'Bearer socket-global-secret',
+    });
+    assert.equal(result.connected, true);
+    result.socket?.disconnect();
+  });
+
+  it('accepts a bearer-minted HttpOnly session cookie for the Socket.IO handshake only', async () => {
+    const app = Fastify();
+    await app.register(apiBearerAuthPlugin);
+    await app.register(cookie);
+    await app.register(sessionAuthPlugin);
+    await app.register(sessionRoute);
+    await app.ready();
+
+    try {
+      const session = await app.inject({
+        method: 'GET',
+        url: '/api/session',
+        headers: { authorization: 'Bearer socket-global-secret' },
+      });
+      assert.equal(session.statusCode, 200);
+      const cookieHeader = session.headers['set-cookie']?.split(';', 1)[0];
+      assert.ok(cookieHeader);
+
+      const result = await attemptConnection(port, {
+        origin: 'http://localhost:3003',
+        transports: ['websocket'],
+        cookie: cookieHeader,
+      });
+      assert.equal(result.connected, true);
+      result.socket?.disconnect();
+    } finally {
+      await app.close();
+    }
   });
 });

@@ -7,6 +7,7 @@
  */
 
 import type { ToolResult } from './file-tools.js';
+import { withApiBearerHeaders } from '../api-auth.js';
 import { errorResult, successResult } from './file-tools.js';
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
@@ -15,7 +16,7 @@ export async function handleGetRichBlockRules(): Promise<ToolResult> {
   const url = `${API_URL}/api/callbacks/rich-block-rules`;
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: withApiBearerHeaders() });
 
     if (!response.ok) {
       const text = await response.text();

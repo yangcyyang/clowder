@@ -13,8 +13,9 @@ import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { useRuntimeEventsStore } from '@/stores/runtimeEventsStore';
 import { useToastStore } from '@/stores/toastStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
 import { classifyRuntimeSystemEvent } from '@/utils/runtime-notices';
+import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 import { getTaskAttentionToast } from '@/utils/taskAttention';
 import { getUserId } from '@/utils/userId';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
@@ -444,7 +445,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   // Phase D merge filter). Initial connect skipped because useChatHistory
   // mount already runs fetchHistory; double-firing would waste a roundtrip.
   const hasConnectedOnceRef = useRef(false);
-
   // Use ref to avoid socket disconnect/reconnect on every callbacks change.
   // Without this, thread switches cause socketCallbacks to rebuild (useMemo dep on threadId),
   // which triggers useEffect cleanup → socket disconnect → reconnect. During this gap,
@@ -457,6 +457,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     userIdRef.current = getUserId();
     joinedRoomsRef.current = loadJoinedRoomsFromSession(userIdRef.current);
     if (threadIdRef.current) {
@@ -481,9 +482,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       });
     };
 
-    const socket = io(API_URL, {
+    const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       auth: { userId: userIdRef.current },
+      autoConnect: false,
     });
 
     const getTransportName = () => {
@@ -1146,6 +1148,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
 
     socketRef.current = socket;
+    void ensureSocketSession()
+      .then(() => {
+        if (!cancelled) socket.connect();
+      })
+      .catch((error: unknown) => {
+        console.error('[ws] Session bootstrap failed before connect', error);
+      });
 
     // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
     // on a still-connected socket (won't trigger reconcile-on-reconnect).
@@ -1161,6 +1170,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     }
 
     return () => {
+      cancelled = true;
       clearInterval(watchdogTimer);
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);

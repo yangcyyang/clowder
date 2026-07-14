@@ -13,6 +13,7 @@
  * reason from Phase A.
  */
 
+import { withApiBearerHeaders } from './api-auth.js';
 import { buildAuthHeaders, getCallbackConfig } from './tools/callback-tools.js';
 
 /**
@@ -90,7 +91,7 @@ export async function performRefreshTick(
   try {
     const response = await fetch(`${config.apiUrl}/api/callbacks/refresh-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(config) },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json', ...buildAuthHeaders(config) }),
       body: '{}',
       signal: AbortSignal.timeout(timeoutMs),
     });

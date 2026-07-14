@@ -11,7 +11,24 @@ import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 
 const { SessionStore: LocalSessionStore } = await import('../../dist/infrastructure/session-auth.js');
-const { sessionAuthPlugin, sessionRoute } = await import('../../dist/infrastructure/session-auth.js');
+const { apiBearerAuthPlugin, isApiBearerAuthorized, sessionAuthPlugin, sessionRoute } = await import(
+  '../../dist/infrastructure/session-auth.js'
+);
+
+const API_BEARER_ENV = 'CLOWDER_API_BEARER_TOKEN';
+
+async function createAuthApp() {
+  const app = Fastify();
+  await app.register(apiBearerAuthPlugin);
+  await app.register(cookie);
+  await app.register(sessionAuthPlugin);
+  await app.register(sessionRoute);
+  app.get('/api/test', async (request) => ({ sessionUserId: request.sessionUserId ?? null }));
+  app.get('/apiary', async () => ({ ok: true }));
+  app.get('/health', async () => ({ ok: true }));
+  await app.ready();
+  return app;
+}
 
 describe('F156 D-1: LocalSessionStore', () => {
   it('create returns a token and stores userId', () => {
@@ -130,6 +147,21 @@ describe('F156 D-1: GET /api/session — session establishment', () => {
     assert.ok(setCookie.includes('Secure'), 'must have Secure flag behind HTTPS proxy');
   });
 
+  it('shares the session cookie across Clowder Web/API subdomains', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/session',
+      headers: {
+        host: '127.0.0.1:3004',
+        'x-forwarded-host': 'cafe.clowder-ai.com',
+        'x-forwarded-proto': 'https',
+      },
+    });
+    const setCookie = response.headers['set-cookie'];
+    assert.match(setCookie, /Domain=\.clowder-ai\.com/i);
+    assert.match(setCookie, /Secure/i);
+  });
+
   it('sets Secure flag for chained proxy header "https, http"', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -190,5 +222,119 @@ describe('F156 D-1: GET /api/session — session establishment', () => {
     assert.ok(!res.headers['set-cookie'], 'should not re-issue cookie for valid session');
     const body = JSON.parse(res.body);
     assert.equal(body.userId, 'default-user');
+  });
+});
+
+describe('P1 API bearer fallback', () => {
+  const originalToken = process.env[API_BEARER_ENV];
+
+  after(() => {
+    if (originalToken === undefined) delete process.env[API_BEARER_ENV];
+    else process.env[API_BEARER_ENV] = originalToken;
+  });
+
+  it('keeps legacy single-user behavior when the env token is unset', async () => {
+    delete process.env[API_BEARER_ENV];
+    const app = await createAuthApp();
+    try {
+      assert.equal((await app.inject({ method: 'GET', url: '/api/test' })).statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('protects every /api/* route with one generic 401 and accepts the exact bearer', async () => {
+    process.env[API_BEARER_ENV] = 'server-only-secret';
+    const app = await createAuthApp();
+    try {
+      for (const authorization of [undefined, 'Basic abc', 'Bearer wrong', 'Bearer server-only-secret-extra']) {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/api/test',
+          ...(authorization ? { headers: { authorization } } : {}),
+        });
+        assert.equal(res.statusCode, 401);
+        assert.deepEqual(JSON.parse(res.body), { error: 'Unauthorized' });
+        assert.equal(res.headers['www-authenticate'], undefined);
+        assert.ok(!res.body.includes('server-only-secret'));
+      }
+
+      const accepted = await app.inject({
+        method: 'GET',
+        url: '/api/test',
+        headers: { authorization: 'Bearer server-only-secret' },
+      });
+      assert.equal(accepted.statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not overmatch non-/api paths', async () => {
+    process.env[API_BEARER_ENV] = 'server-only-secret';
+    const app = await createAuthApp();
+    try {
+      assert.equal((await app.inject({ method: 'GET', url: '/health' })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'GET', url: '/apiary' })).statusCode, 200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a bearer-minted session cookie on ordinary HTTP while allowing explicit WebSocket delegation', async () => {
+    process.env[API_BEARER_ENV] = 'server-only-secret';
+    const app = await createAuthApp();
+    try {
+      const session = await app.inject({
+        method: 'GET',
+        url: '/api/session',
+        headers: { authorization: 'Bearer server-only-secret' },
+      });
+      assert.equal(session.statusCode, 200);
+      const token = session.headers['set-cookie']?.match(/cat_cafe_session=([^;]+)/)?.[1];
+      assert.ok(token);
+
+      const delegated = await app.inject({
+        method: 'GET',
+        url: '/api/test',
+        headers: { cookie: `cat_cafe_session=${token}` },
+      });
+      assert.equal(delegated.statusCode, 401);
+      assert.deepEqual(JSON.parse(delegated.body), { error: 'Unauthorized' });
+
+      const forgedUpgrade = await app.inject({
+        method: 'GET',
+        url: '/api/test',
+        headers: {
+          cookie: `cat_cafe_session=${token}`,
+          upgrade: 'websocket',
+        },
+      });
+      assert.equal(forgedUpgrade.statusCode, 401, 'Upgrade alone must not bypass bearer auth on an ordinary API route');
+
+      const cookieHeader = `cat_cafe_session=${token}`;
+      assert.equal(
+        isApiBearerAuthorized({ cookie: cookieHeader, env: process.env }),
+        false,
+        'session cookie must not authorize normal HTTP',
+      );
+      assert.equal(
+        isApiBearerAuthorized({ cookie: cookieHeader, env: process.env, allowSessionCookie: true }),
+        true,
+        'the server may explicitly delegate a bearer-minted session to a WebSocket handshake',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('fails closed when the token env is present but blank', async () => {
+    process.env[API_BEARER_ENV] = '   ';
+    const app = Fastify();
+    await assert.rejects(
+      app.register(apiBearerAuthPlugin).then(() => app.ready()),
+      /must not be blank/i,
+    );
+    await app.close();
   });
 });

@@ -3,7 +3,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
-import { API_URL } from '@/utils/api-client';
+import { SOCKET_URL } from '@/utils/socket-url';
 
 interface AgentPaneViewerProps {
   worktreeId: string;
@@ -35,7 +35,7 @@ export function AgentPaneViewer({ worktreeId, paneId, onBack }: AgentPaneViewerP
     fitAddon.fit();
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const apiUrl = new URL(API_URL);
+    const apiUrl = new URL(SOCKET_URL);
     const ws = new WebSocket(
       `${wsProtocol}//${apiUrl.host}/api/terminal/agent-panes/${paneId}/ws?worktreeId=${encodeURIComponent(worktreeId)}`,
     );

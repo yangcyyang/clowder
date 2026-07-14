@@ -152,7 +152,11 @@ export async function buildSessionBootstrap(
         const params = new URLSearchParams({ q: query, limit: '5' });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 500);
-        const res = await fetch(`${apiUrl}/api/evidence/search?${params.toString()}`, { signal: controller.signal });
+        const apiBearerToken = process.env.CLOWDER_API_BEARER_TOKEN?.trim();
+        const res = await fetch(`${apiUrl}/api/evidence/search?${params.toString()}`, {
+          signal: controller.signal,
+          ...(apiBearerToken ? { headers: { authorization: `Bearer ${apiBearerToken}` } } : {}),
+        });
         clearTimeout(timeout);
         if (res.ok) {
           const data = (await res.json()) as {

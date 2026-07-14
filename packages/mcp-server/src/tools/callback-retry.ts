@@ -2,6 +2,8 @@
  * Callback HTTP retry helpers
  */
 
+import { withApiBearerHeaders } from '../api-auth.js';
+
 const DEFAULT_RETRY_DELAYS_MS = [1000, 2000, 4000];
 
 export interface CallbackPostFailure {
@@ -68,7 +70,7 @@ export async function postJsonWithRetry(
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...extraHeaders },
+        headers: withApiBearerHeaders({ 'Content-Type': 'application/json', ...extraHeaders }),
         body: payload,
       });
 

@@ -424,6 +424,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     CAT_CAFE_CALLBACK_TOKEN: callbackToken,
     CAT_CAFE_USER_ID: userId,
     CAT_CAFE_CAT_ID: catId,
+    ...(process.env.CLOWDER_API_BEARER_TOKEN?.trim()
+      ? { CLOWDER_API_BEARER_TOKEN: process.env.CLOWDER_API_BEARER_TOKEN.trim() }
+      : {}),
     ...(params.currentUserMessageId ? { CAT_CAFE_CURRENT_MESSAGE_ID: params.currentUserMessageId } : {}),
     // F061 Bug-F cold-start (codex peer review on 47922fe7): cat_cafe_list_session_chain
     // requires threadId; without it, Bengal's cold-start prompt step 1 fails with

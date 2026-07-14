@@ -31,6 +31,11 @@ function normalizeLoopbackUrl(url: string): string {
 export function resolveApiUrl(): string {
   const location = getBrowserLocation();
 
+  if (location && process.env.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED === '1') {
+    const port = location.port ? `:${location.port}` : '';
+    return `${location.protocol}//${location.hostname}${port}`;
+  }
+
   // Cloudflare Tunnel: API 走 api.clowder-ai.com，Access cookie 在 .clowder-ai.com 上共享
   if (location?.hostname === 'cafe.clowder-ai.com') {
     return 'https://api.clowder-ai.com';
@@ -75,7 +80,7 @@ function notifySessionFailure() {
   });
 }
 
-function ensureSession(): Promise<void> {
+export function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
   sessionGate = fetch(`${API_URL}/api/session`, { credentials: 'include' })
     .then((res) => {

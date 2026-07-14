@@ -875,7 +875,13 @@ export class WeixinAdapter implements IOutboundAdapter {
       const { join, extname } = await import('node:path');
 
       const downloadUrl = this.resolveDownloadUrl(url);
-      const res = await this.fetchFn(downloadUrl, { signal: AbortSignal.timeout(30_000) });
+      const apiBearerToken = process.env.CLOWDER_API_BEARER_TOKEN?.trim();
+      const res = await this.fetchFn(downloadUrl, {
+        signal: AbortSignal.timeout(30_000),
+        ...(apiBearerToken && url.startsWith('/api/')
+          ? { headers: { authorization: `Bearer ${apiBearerToken}` } }
+          : {}),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
       const { randomUUID } = await import('node:crypto');

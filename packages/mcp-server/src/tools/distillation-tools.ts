@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -20,7 +21,7 @@ export async function handleMarkGeneralizable(input: { anchor: string; generaliz
   try {
     const res = await fetch(`${API_URL}/api/evidence/${encodeURIComponent(input.anchor)}/generalizable`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ generalizable: input.generalizable }),
     });
     if (!res.ok) {
@@ -48,7 +49,7 @@ export async function handleNominateForGlobal(input: {
   try {
     const res = await fetch(`${API_URL}/api/distillation/nominate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(input),
     });
     if (!res.ok) {
@@ -76,7 +77,7 @@ export async function handleReviewDistillation(input: {
   try {
     const res = await fetch(`${API_URL}/api/distillation/${encodeURIComponent(input.candidateId)}/review`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withApiBearerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ decision: input.decision, reviewerId: input.reviewerId }),
     });
     if (!res.ok) {

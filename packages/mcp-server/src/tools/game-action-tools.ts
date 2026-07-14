@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withApiBearerHeaders } from '../api-auth.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -13,7 +14,7 @@ function buildHeaders(): Record<string, string> {
   const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
   if (invocationId) headers['x-callback-invocation-id'] = invocationId;
   headers['content-type'] = 'application/json';
-  return headers;
+  return withApiBearerHeaders(headers);
 }
 
 function emitGameActionTrace(

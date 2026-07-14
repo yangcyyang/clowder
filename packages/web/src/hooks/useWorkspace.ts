@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
+import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 
 export interface WorktreeEntry {
   id: string;
@@ -213,10 +214,11 @@ export function useWorkspace() {
 
     import('socket.io-client').then(({ io }) => {
       if (cancelled) return;
-      const apiUrl = new URL(API_URL);
+      const apiUrl = new URL(SOCKET_URL);
       const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
         transports: ['websocket'],
         forceNew: true,
+        autoConnect: false,
       });
 
       socket.on('connect', () => {
@@ -236,6 +238,12 @@ export function useWorkspace() {
           fetchFile(openFilePath);
         }
       });
+
+      void ensureSocketSession()
+        .then(() => {
+          if (!cancelled) socket.connect();
+        })
+        .catch(() => socket.disconnect());
 
       cleanup = () => {
         socket.emit('workspace:unwatch-file');

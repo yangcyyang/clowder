@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL } from '@/utils/api-client';
+import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 
 /**
  * Fail-closed filter: determines if an auto-open event should be accepted.
@@ -48,8 +48,11 @@ export function usePreviewAutoOpen(worktreeId: string | null, threadId: string) 
 
     import('socket.io-client').then(({ io }) => {
       if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
+      const apiUrl = new URL(SOCKET_URL);
+      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
+        transports: ['websocket'],
+        autoConnect: false,
+      });
 
       // Always join preview:global so we receive broadcasts from auto-open
       // calls that omit worktreeId (common: cat calls API before session
@@ -68,6 +71,12 @@ export function usePreviewAutoOpen(worktreeId: string | null, threadId: string) 
       };
 
       socket.on('preview:auto-open', handler);
+
+      void ensureSocketSession()
+        .then(() => {
+          if (!cancelled) socket.connect();
+        })
+        .catch(() => socket.disconnect());
 
       cleanup = () => {
         socket.off('preview:auto-open', handler);
