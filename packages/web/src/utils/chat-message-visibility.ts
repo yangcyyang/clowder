@@ -14,16 +14,19 @@ const INTERNAL_RUNTIME_JSON_TYPES = new Set([
   'session_handoff_write_failed',
   'session_seal_requested',
 ]);
-// Temporary migration shim for the five primer receipts persisted before
-// scheduler.hiddenReceipt shipped. Delete after the default-thread retention
-// window no longer contains these exact IDs; never broaden this to text matching,
-// or a user-requested "窗口已激活" reply could disappear.
-const LEGACY_WINDOW_PRIMER_RECEIPT_IDS = new Set([
+// TODO(task #377): Delete both legacy collections together after the default-thread
+// retention window no longer contains these seven exact IDs. Never broaden this
+// to text matching: similar user-authored replies/errors must remain visible.
+const LEGACY_HIDDEN_MESSAGE_IDS = new Set([
   '0001783988092014-000071-74726008',
   '0001783996224835-000088-8338059d',
   '0001784005219544-000095-4b0f0972',
   '0001784014233586-000241-a222b827',
   '0001784026820468-000069-3d6f0005',
+  '0001784032228288-000002-ac973f99',
+]);
+const LEGACY_CONTENT_OVERRIDES = new Map([
+  ['0001784032228274-000001-03c48775', 'Error: Codex 额度超限，7/20 23:26 恢复'],
 ]);
 
 function isInternalRuntimeJsonLine(line: string): boolean {
@@ -59,8 +62,12 @@ export function sanitizeAgentVisibleContent(content: string): string {
     .trim();
 }
 
+export function getAgentVisibleContent(message: ChatMessage): string {
+  return sanitizeAgentVisibleContent(LEGACY_CONTENT_OVERRIDES.get(message.id) ?? message.content);
+}
+
 export function isUserVisibleChatMessage(message: ChatMessage): boolean {
-  if (message.extra?.scheduler?.hiddenReceipt || LEGACY_WINDOW_PRIMER_RECEIPT_IDS.has(message.id)) {
+  if (message.extra?.scheduler?.hiddenReceipt || LEGACY_HIDDEN_MESSAGE_IDS.has(message.id)) {
     return false;
   }
 
@@ -91,7 +98,7 @@ export function isUserVisibleChatMessage(message: ChatMessage): boolean {
 
   if (message.type === 'system') {
     if (message.variant === 'evidence' || message.variant === 'governance_blocked') return true;
-    if (sanitizeAgentVisibleContent(message.content).trim().length > 0) return true;
+    if (getAgentVisibleContent(message).trim().length > 0) return true;
     if (message.extra?.rich?.blocks?.length) return true;
     return false;
   }

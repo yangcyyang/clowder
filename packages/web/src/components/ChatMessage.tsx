@@ -7,7 +7,7 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
-import { isUserVisibleChatMessage, sanitizeAgentVisibleContent } from '@/utils/chat-message-visibility';
+import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
@@ -303,7 +303,7 @@ export function ChatMessage({
   const currentThread = useChatStore((s) => s.threads.find((t) => t.id === s.currentThreadId));
   const bubbleRestorePending = isLoadingThreads && !!currentThreadId && !currentThread;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
-  const visibleContent = sanitizeAgentVisibleContent(message.content);
+  const visibleContent = getAgentVisibleContent(message);
   const hasTextContent = visibleContent.trim().length > 0;
   const taskEntry = tasks
     .filter((task) => task.kind !== 'pr_tracking')

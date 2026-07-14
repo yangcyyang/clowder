@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import {
+  getAgentVisibleContent,
   isUnreadCountableChatMessage,
   isUserVisibleChatMessage,
   sanitizeAgentVisibleContent,
@@ -71,6 +72,30 @@ describe('chat-message-visibility', () => {
 
     expect(isUserVisibleChatMessage(legacy)).toBe(false);
     expect(isUserVisibleChatMessage(manual)).toBe(true);
+  });
+
+  it('migrates only the two exact legacy quota-noise messages', () => {
+    const rawQuota: ChatMessage = {
+      id: '0001784032228274-000001-03c48775',
+      threadId: 'default',
+      type: 'system',
+      content: 'Error: Codex CLI raw quota URL and provider diagnostics',
+      timestamp: 1784032228274,
+    } as ChatMessage;
+    const duplicate: ChatMessage = {
+      id: '0001784032228288-000002-ac973f99',
+      threadId: 'default',
+      type: 'system',
+      content: '[执行提醒]: gpt52 本轮没有返回可展示文本',
+      timestamp: 1784032228288,
+    } as ChatMessage;
+    const similarNewError = { ...rawQuota, id: 'new-quota-error', timestamp: Date.now() };
+
+    expect(isUserVisibleChatMessage(rawQuota)).toBe(true);
+    expect(getAgentVisibleContent(rawQuota)).toBe('Error: Codex 额度超限，7/20 23:26 恢复');
+    expect(isUserVisibleChatMessage(duplicate)).toBe(false);
+    expect(isUnreadCountableChatMessage(duplicate)).toBe(false);
+    expect(getAgentVisibleContent(similarNewError)).toContain('raw quota URL');
   });
 
   it('strips internal shared-state and handoff runtime notices from visible assistant content', () => {
