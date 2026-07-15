@@ -23,10 +23,10 @@ test('run-with-node-env-test forces NODE_ENV=test for vitest-invoked workspace t
   assert.match(result.stdout, /4 passed/);
 });
 
-test('run-with-node-env-test forces NODE_ENV=test for next-config node tests', () => {
+test('run-with-node-env-test forces NODE_ENV=test for native node commands', () => {
   const webRoot = resolve(__dirname, '..');
   const script = resolve(webRoot, 'scripts', 'run-with-node-env-test.mjs');
-  const result = spawnSync('node', [script, 'node', '--test', 'test/next-config.test.cjs'], {
+  const result = spawnSync('node', [script, 'node', '-e', 'process.stdout.write(process.env.NODE_ENV ?? "")'], {
     cwd: webRoot,
     env: {
       ...process.env,
@@ -36,5 +36,5 @@ test('run-with-node-env-test forces NODE_ENV=test for next-config node tests', (
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /pass 4/);
+  assert.equal(result.stdout, 'test');
 });

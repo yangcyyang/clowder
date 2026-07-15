@@ -55,6 +55,7 @@
     "check:fix": "pnpm biome check --write .",
     "test": "pnpm -r --if-present run test",
     "test:api:ci": "pnpm --filter @cat-cafe/api run test:ci",
+    "test:web:ci": "pnpm --filter @cat-cafe/web run test:ci",
     "test:api:lane:core": "pnpm --filter @cat-cafe/api run test:lane:core",
     "test:api:lane:redis": "pnpm --filter @cat-cafe/api run test:lane:redis",
     "test:api:lane:integration": "pnpm --filter @cat-cafe/api run test:lane:integration",

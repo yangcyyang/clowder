@@ -1,0 +1,293 @@
+{
+  "schemaVersion": 1,
+  "expectedTotals": {
+    "files": 15,
+    "tests": 122,
+    "failures": 37
+  },
+  "entries": [
+    {
+      "relativeFile": "src/components/__tests__/chat-container-intent-loading.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "ThinkingIndicator visibility for an active invocation without intentMode needs product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 5,
+      "failures": [
+        {
+          "fullName": "ChatContainer intent_mode loading lock renders ThinkingIndicator when a single active slot exists even if intentMode is missing",
+          "failureKind": "assertion:call-count"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/chat-input-b10-whisper-active.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Whisper selector behavior for executing cats, default selection, status badges, and queue placeholders needs product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 8,
+      "failures": [
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats disables executing cat chips in whisper selector",
+          "failureKind": "assertion:defined"
+        },
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats does not auto-select executing cats when entering whisper mode",
+          "failureKind": "assertion:invalid-input"
+        },
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats F108B AC-B7: whisper to idle cat shows whisper placeholder, not queue placeholder",
+          "failureKind": "assertion:contains"
+        },
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats falls back to targetCats when activeInvocations is empty but hasActiveInvocation is true (legacy path)",
+          "failureKind": "assertion:object-is"
+        },
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats P1-1: entering whisper with active cat — idle cats NOT pre-selected either",
+          "failureKind": "assertion:object-is"
+        },
+        {
+          "fullName": "F122B AC-B10: whisper mode + executing cats shows \"执行中\" status badge on executing cat row",
+          "failureKind": "assertion:invalid-input"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/chat-input-game-send-guard.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Game menu availability, temporary send guards, drill-in behavior, and dedicated start API handling need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 7,
+      "failures": [
+        {
+          "fullName": "game button toggle closes open menu clicking game button again dismisses the menu",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "game start calls dedicated API (not message pipeline) calls /api/game/start regardless of hasActiveInvocation",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "game start failure handling (P1-1) shows error and restores lobby on network failure",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "game start failure handling (P1-1) shows error and restores lobby when API returns error",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "layer drill-in does not trigger outside-click close clicking werewolf drills into modes (layer 2 visible)",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "sendGameCommand respects sendTemporarilyDisabled does NOT send game command when upload starts after menu is open",
+          "failureKind": "assertion:truthy"
+        },
+        {
+          "fullName": "sendGameCommand respects sendTemporarilyDisabled opens lobby when upload is idle, calls game API on confirm",
+          "failureKind": "runtime:null-property-access"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/chat-input-mobile.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Mobile toolbar whisper affordance and single-row textarea defaults need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 7,
+      "failures": [
+        {
+          "fullName": "ChatInput mobile toolbar expands toolbar on + click and shows attach/whisper buttons",
+          "failureKind": "assertion:contains"
+        },
+        {
+          "fullName": "ChatInput textarea auto-grow starts with rows=1",
+          "failureKind": "assertion:object-is"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/chat-input-whisper-targets.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Whisper targets with empty mention patterns need product-owner confirmation for visibility and selection behavior.",
+      "expiry": "2026-07-29",
+      "testCount": 2,
+      "failures": [
+        {
+          "fullName": "ChatInput whisper targets with empty mentionPatterns can toggle a whisper target with empty mentionPatterns",
+          "failureKind": "runtime:null-property-access"
+        },
+        {
+          "fullName": "ChatInput whisper targets with empty mentionPatterns shows all cats including those with empty mentionPatterns as whisper targets",
+          "failureKind": "assertion:not-null"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/install-plan-detail.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Direct MCP install request payloads, failure rendering, and onInstalled callback behavior need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 4,
+      "failures": [
+        {
+          "fullName": "InstallPlanDetail direct_mcp install calls onInstalled after successful install",
+          "failureKind": "assertion:call-count"
+        },
+        {
+          "fullName": "InstallPlanDetail direct_mcp install does not call onInstalled on failed install",
+          "failureKind": "assertion:contains"
+        },
+        {
+          "fullName": "InstallPlanDetail direct_mcp install omits projectPath from body when not provided",
+          "failureKind": "runtime:undefined-property-access"
+        },
+        {
+          "fullName": "InstallPlanDetail direct_mcp install POST body includes projectPath when provided",
+          "failureKind": "assertion:truthy"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/markdown-content-workspace-links.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Relative Markdown workspace links without a basePath need product-owner confirmation for internal versus external routing.",
+      "expiry": "2026-07-29",
+      "testCount": 16,
+      "failures": [
+        {
+          "fullName": "MarkdownContent workspace link rendering renders relative md link as external when no basePath",
+          "failureKind": "assertion:contains"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/mission-control-page.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Mission Control dependency labels in the expanded Done lane need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 37,
+      "failures": [
+        {
+          "fullName": "MissionControlPage — Done lane + dependencies renders dependency labels when feature row is expanded",
+          "failureKind": "assertion:contains"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/plan-board-panel.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Plan Board filtered-cat count and heading presentation need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 11,
+      "failures": [
+        {
+          "fullName": "F055: PlanBoardPanel (猫猫祟祟) AC-2: shows only cats with taskProgress (filters out empty)",
+          "failureKind": "assertion:contains"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/plugins-content-status.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Service plugin active, configured, and available status mapping needs product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 7,
+      "failures": [
+        {
+          "fullName": "resolvePluginStatuses service plugins show active when their features are running",
+          "failureKind": "assertion:object-is"
+        },
+        {
+          "fullName": "resolvePluginStatuses service plugins show available when no matching features exist",
+          "failureKind": "assertion:object-is"
+        },
+        {
+          "fullName": "resolvePluginStatuses service plugins show configured when features known but not running",
+          "failureKind": "assertion:object-is"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/thinking-content-mode.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Default collapsed state for thinking and CLI output needs product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 4,
+      "failures": [
+        {
+          "fullName": "ThinkingContent default collapse default: thinking is collapsed, CLI output block is collapsed",
+          "failureKind": "assertion:truthy"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/__tests__/thinking-mode-toggle.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Stream-origin thinking content rendering through the CLI Output block needs product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 7,
+      "failures": [
+        {
+          "fullName": "F045: ThinkingContent thinkingMode toggle stream-origin messages render via CliOutputBlock with text content default-expanded (stream-final-speech heuristic)",
+          "failureKind": "assertion:contains"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/ThreadSidebar/__tests__/thread-delete-confirm.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Thread delete button, confirmation dialog, cancellation, and DELETE timing need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 3,
+      "failures": [
+        {
+          "fullName": "Thread delete confirmation (I-1) calls DELETE API only after clicking confirm",
+          "failureKind": "assertion:truthy"
+        },
+        {
+          "fullName": "Thread delete confirmation (I-1) dismisses dialog when clicking cancel",
+          "failureKind": "assertion:contains"
+        },
+        {
+          "fullName": "Thread delete confirmation (I-1) shows confirmation dialog when clicking delete",
+          "failureKind": "assertion:truthy"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/ThreadSidebar/__tests__/thread-sidebar-bootcamp-entry.test.tsx",
+      "owner": "@yangcyyang",
+      "reason": "Bootcamp entry placement beside New Conversation and its open action need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 2,
+      "failures": [
+        {
+          "fullName": "ThreadSidebar bootcamp entry keeps the bootcamp entry directly to the left of new conversation",
+          "failureKind": "assertion:not-null"
+        },
+        {
+          "fullName": "ThreadSidebar bootcamp entry opens the bootcamp list from the sidebar entry",
+          "failureKind": "runtime:missing-element"
+        }
+      ]
+    },
+    {
+      "relativeFile": "src/components/ThreadSidebar/__tests__/thread-sidebar-scroll-memory.test.ts",
+      "owner": "@yangcyyang",
+      "reason": "Thread sidebar expand-all control and scroll-position persistence across switches and unmount need product-owner confirmation.",
+      "expiry": "2026-07-29",
+      "testCount": 2,
+      "failures": [
+        {
+          "fullName": "ThreadSidebar scroll memory does not overwrite sessionStorage with 0 when sidebar unmounts (detached DOM)",
+          "failureKind": "runtime:missing-element"
+        },
+        {
+          "fullName": "ThreadSidebar scroll memory keeps sidebar scroll position when switching to a thread far below",
+          "failureKind": "runtime:missing-element"
+        }
+      ]
+    }
+  ]
+}

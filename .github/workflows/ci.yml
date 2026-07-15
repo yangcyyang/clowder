@@ -105,6 +105,65 @@ jobs:
       - run: pnpm --filter @cat-cafe/api build
       - run: pnpm --filter @cat-cafe/api run test:lane:redis
 
+  web-vitest:
+    name: Web Vitest (Required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/web run test:ci:vitest
+
+  web-quarantine:
+    name: Web Quarantine Ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/web run test:ci:quarantine
+
+  web-native-config:
+    name: Web Native and Config Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/web run test:ci:config
+      - run: pnpm --filter @cat-cafe/web run test:ci:native
+
+  web-color:
+    name: Web Color Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/web run test:ci:colors
+
   dir-size:
     name: Directory Size Guard
     runs-on: ubuntu-latest

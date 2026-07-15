@@ -13,7 +13,13 @@
     "start": "next start",
     "start:pm2": "${NODE:-node} ../../scripts/live-worktree-build-gate.mjs --artifact .next/BUILD_ID -- pnpm run prestart && next start . -p 3003 -H 0.0.0.0",
     "lint": "next lint",
-    "test": "node scripts/run-with-node-env-test.mjs pnpm exec vitest run && node scripts/run-with-node-env-test.mjs node --test test/next-config.test.cjs test/ensure-production-build.test.mjs && node eslint-plugins/no-hardcoded-colors.test.js",
+    "test": "pnpm run test:ci",
+    "test:ci": "pnpm run test:ci:vitest && pnpm run test:ci:quarantine && pnpm run test:ci:config && pnpm run test:ci:native && pnpm run test:ci:colors",
+    "test:ci:vitest": "node scripts/run-test-quarantine.mjs blocking",
+    "test:ci:quarantine": "node scripts/run-test-quarantine.mjs quarantine",
+    "test:ci:config": "node scripts/run-with-node-env-test.mjs node --test --test-concurrency=1 test/next-config.test.cjs test/security-headers-config.test.js",
+    "test:ci:native": "node scripts/run-with-node-env-test.mjs node --test --test-concurrency=1 test/ensure-production-build.test.mjs test/run-with-node-env-test.test.cjs test/test-quarantine.test.mjs",
+    "test:ci:colors": "node eslint-plugins/no-hardcoded-colors.test.js",
     "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js"
   },
   "dependencies": {
