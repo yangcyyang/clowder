@@ -76,6 +76,7 @@ function sanitizeUnreadVisibleContent(content: string): string {
 
 export function isUserVisibleUnreadMessage(msg: StoredMessage): boolean {
   if (msg.deletedAt || msg._tombstone) return false;
+  if (msg.extra?.scheduler?.hiddenReceipt) return false;
   if (msg.origin === 'briefing') return false;
   if (msg.origin === 'progress') return false;
   if (msg.source?.connector === 'task-system') return false;

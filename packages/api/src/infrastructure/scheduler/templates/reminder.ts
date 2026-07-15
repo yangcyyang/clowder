@@ -16,7 +16,10 @@ export const reminderTemplate: TaskTemplate = {
   },
   createSpec(instanceId: string, p: DynamicTaskParams): TaskSpec_P1 {
     const message = (p.params.message as string) || '定时提醒';
-    const isWindowPrimer = /^window-primer\s*[：:]/i.test(message.trim());
+    // Production primer reminders address the target cat before the marker
+    // (for example: "@研究生 window-primer：..."). Keep the match anchored so
+    // ordinary reminders that merely mention window-primer remain visible.
+    const isWindowPrimer = /^(?:@[^\s：:]+\s+)?window-primer\s*[：:]/i.test(message.trim());
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const threadId = p.deliveryThreadId;

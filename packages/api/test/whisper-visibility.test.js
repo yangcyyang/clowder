@@ -106,6 +106,23 @@ describe('canViewMessage', () => {
       false,
     );
   });
+
+  test('silent scheduler receipts do not increment unread', () => {
+    assert.equal(
+      isUserVisibleUnreadMessage({
+        id: 'silent-receipt-1',
+        userId: 'user-1',
+        catId: 'gpt52',
+        content: 'Codex 窗口已激活，当前时间 10:30。',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'default',
+        origin: 'stream',
+        extra: { scheduler: { hiddenReceipt: true } },
+      }),
+      false,
+    );
+  });
 });
 
 describe('MessageStore whisper', () => {

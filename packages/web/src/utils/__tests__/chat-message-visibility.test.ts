@@ -58,7 +58,7 @@ describe('chat-message-visibility', () => {
     expect(isUnreadCountableChatMessage(receipt)).toBe(false);
   });
 
-  it('hides only the five known legacy primer receipts, not similar manual replies', () => {
+  it('hides only the known legacy primer receipts, not similar manual replies', () => {
     const legacy: ChatMessage = {
       id: '0001783996224835-000088-8338059d',
       threadId: 'default',
@@ -68,9 +68,18 @@ describe('chat-message-visibility', () => {
       origin: 'stream',
       timestamp: 1783996224835,
     } as ChatMessage;
+    const escapedAfterDeploy = [
+      ['0001784073633308-000001-1dcac89d', 'Claude 窗口已激活，当前时间 2026-07-15 08:00。'],
+      ['0001784082618960-000003-7a100130', 'Codex 窗口已激活，当前时间 2026-07-15 10:30。'],
+      ['0001784091614412-000011-884b7c4a', 'Claude 窗口已激活，当前时间 2026-07-15 13:00。'],
+    ].map(([id, content]) => ({ ...legacy, id, content, timestamp: Date.now() }));
     const manual = { ...legacy, id: 'manual-window-activation', timestamp: Date.now() };
 
     expect(isUserVisibleChatMessage(legacy)).toBe(false);
+    for (const escaped of escapedAfterDeploy) {
+      expect(isUserVisibleChatMessage(escaped)).toBe(false);
+      expect(isUnreadCountableChatMessage(escaped)).toBe(false);
+    }
     expect(isUserVisibleChatMessage(manual)).toBe(true);
   });
 

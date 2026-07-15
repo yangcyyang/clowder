@@ -15,7 +15,7 @@ const INTERNAL_RUNTIME_JSON_TYPES = new Set([
   'session_seal_requested',
 ]);
 // TODO(task #377): Delete both legacy collections together after the default-thread
-// retention window no longer contains these seven exact IDs. Never broaden this
+// retention window no longer contains these ten exact IDs. Never broaden this
 // to text matching: similar user-authored replies/errors must remain visible.
 const LEGACY_HIDDEN_MESSAGE_IDS = new Set([
   '0001783988092014-000071-74726008',
@@ -24,6 +24,9 @@ const LEGACY_HIDDEN_MESSAGE_IDS = new Set([
   '0001784014233586-000241-a222b827',
   '0001784026820468-000069-3d6f0005',
   '0001784032228288-000002-ac973f99',
+  '0001784073633308-000001-1dcac89d',
+  '0001784082618960-000003-7a100130',
+  '0001784091614412-000011-884b7c4a',
 ]);
 const LEGACY_CONTENT_OVERRIDES = new Map([
   ['0001784032228274-000001-03c48775', 'Error: Codex 额度超限，7/20 23:26 恢复'],

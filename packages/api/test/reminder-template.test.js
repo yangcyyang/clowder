@@ -65,6 +65,32 @@ describe('reminderTemplate', () => {
     assert.equal(primerPolicy.responsePresentation, 'silent_receipt');
 
     triggerMock.trigger.mock.resetCalls();
+    const mentionedPrimerSpec = reminderTemplate.createSpec('rem-mentioned-primer', {
+      trigger: { type: 'cron', expression: '0 10 * * *' },
+      params: { message: '@研究生 window-primer：只需回复「Claude 窗口已激活 + 当前时间」' },
+      deliveryThreadId: 'th-mentioned-primer',
+    });
+    await mentionedPrimerSpec.run.execute('mentioned primer', 'thread-th-mentioned-primer', {
+      assignedCatId: 'claude-sonnet5',
+      deliver: mock.fn(async () => 'msg-mentioned-primer'),
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, 'silent_receipt');
+
+    triggerMock.trigger.mock.resetCalls();
+    const asciiMentionedPrimerSpec = reminderTemplate.createSpec('rem-ascii-mentioned-primer', {
+      trigger: { type: 'cron', expression: '30 10 * * *' },
+      params: { message: '@gpt52 window-primer: reply with the current time' },
+      deliveryThreadId: 'th-ascii-mentioned-primer',
+    });
+    await asciiMentionedPrimerSpec.run.execute('ascii mentioned primer', 'thread-th-ascii-mentioned-primer', {
+      assignedCatId: 'gpt52',
+      deliver: mock.fn(async () => 'msg-ascii-mentioned-primer'),
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, 'silent_receipt');
+
+    triggerMock.trigger.mock.resetCalls();
     const ordinarySpec = reminderTemplate.createSpec('rem-water', {
       trigger: { type: 'cron', expression: '0 11 * * *' },
       params: { message: '喝水提醒' },
@@ -86,6 +112,19 @@ describe('reminderTemplate', () => {
     await markerSentenceSpec.run.execute('marker sentence', 'thread-th-marker-sentence', {
       assignedCatId: 'gpt52',
       deliver: mock.fn(async () => 'msg-marker-sentence'),
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, undefined);
+
+    triggerMock.trigger.mock.resetCalls();
+    const mentionedMarkerSentenceSpec = reminderTemplate.createSpec('rem-mentioned-marker-sentence', {
+      trigger: { type: 'cron', expression: '0 12 * * *' },
+      params: { message: '@研究生 请复盘 window-primer: 配置，不要隐藏这条提醒' },
+      deliveryThreadId: 'th-mentioned-marker-sentence',
+    });
+    await mentionedMarkerSentenceSpec.run.execute('mentioned marker sentence', 'thread-th-mentioned-marker-sentence', {
+      assignedCatId: 'claude-sonnet5',
+      deliver: mock.fn(async () => 'msg-mentioned-marker-sentence'),
       invokeTrigger: triggerMock,
     });
     assert.equal(triggerMock.trigger.mock.calls[0].arguments[6].responsePresentation, undefined);
