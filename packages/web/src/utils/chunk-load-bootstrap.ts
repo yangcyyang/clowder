@@ -7,7 +7,7 @@ export function createChunkLoadBootstrapScript(clientBuildId: string): string {
   const promptKey = 'clowder:recovery-prompt';
   const attemptedTargets = new Set();
   const chunkErrorPattern = /ChunkLoadError|Loading chunk \\d+ failed|failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i;
-  const nextStaticResourcePattern = /\\/_next\\/static\\/(?:chunks|css)\\//i;
+  const nextStaticResourcePattern = /^\\/_next\\/static\\/(?:chunks|css)\\//i;
 
   const collectErrorText = (reason) => {
     if (!reason) return '';
@@ -20,10 +20,18 @@ export function createChunkLoadBootstrapScript(clientBuildId: string): string {
 
   const isRecoverable = (event) => {
     const target = event && event.target;
-    const resourceUrl = target && typeof target === 'object'
-      ? [target.src, target.href].filter((value) => typeof value === 'string').join('\\n')
-      : '';
-    if (nextStaticResourcePattern.test(resourceUrl)) return true;
+    const resourceUrls = target && typeof target === 'object'
+      ? [target.src, target.href].filter((value) => typeof value === 'string')
+      : [];
+    const sameOriginNextResource = resourceUrls.some((resourceUrl) => {
+      try {
+        const parsed = new URL(resourceUrl, window.location.href);
+        return parsed.origin === window.location.origin && nextStaticResourcePattern.test(parsed.pathname);
+      } catch {
+        return false;
+      }
+    });
+    if (sameOriginNextResource) return true;
     let reason = event;
     try {
       reason = event && (typeof event === 'object' || typeof event === 'function') && 'reason' in event
@@ -63,15 +71,25 @@ export function createChunkLoadBootstrapScript(clientBuildId: string): string {
     attemptedTargets.add(targetBuildId);
     try {
       const rawRecord = window.sessionStorage.getItem(recoveryKey);
+      const persistedTargets = new Set();
       if (rawRecord) {
         try {
           const record = JSON.parse(rawRecord);
-          if (record && record.targetBuildId === targetBuildId) return false;
+          if (record && Array.isArray(record.attemptedTargets)) {
+            record.attemptedTargets.forEach((value) => {
+              if (typeof value === 'string' && value.trim()) persistedTargets.add(value.trim());
+            });
+          }
+          if (record && typeof record.targetBuildId === 'string' && record.targetBuildId.trim()) {
+            persistedTargets.add(record.targetBuildId.trim());
+          }
         } catch {}
       }
+      if (persistedTargets.has(targetBuildId)) return false;
+      persistedTargets.add(targetBuildId);
       window.sessionStorage.setItem(
         recoveryKey,
-        JSON.stringify({ targetBuildId, attemptedAt: Date.now() }),
+        JSON.stringify({ attemptedTargets: Array.from(persistedTargets), attemptedAt: Date.now() }),
       );
     } catch {}
     return true;

@@ -130,7 +130,15 @@ describe('ChunkLoadRefreshGuard', () => {
 
   async function renderGuard(strict = false) {
     await act(async () => {
-      root.render(strict ? <StrictMode><ChunkLoadRefreshGuard /></StrictMode> : <ChunkLoadRefreshGuard />);
+      root.render(
+        strict ? (
+          <StrictMode>
+            <ChunkLoadRefreshGuard />
+          </StrictMode>
+        ) : (
+          <ChunkLoadRefreshGuard />
+        ),
+      );
     });
     await flushEffects();
   }

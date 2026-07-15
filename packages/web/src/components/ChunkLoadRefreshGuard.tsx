@@ -13,6 +13,27 @@ import { CLIENT_WEB_BUILD_ID, fetchServerBuildId } from '@/utils/web-build-versi
 const BUILD_CHANNEL_NAME = 'clowder:web-build';
 const BOOTSTRAP_PROMPT_KEY = 'clowder:recovery-prompt';
 const PROBE_INTERVAL_MS = 30_000;
+const PROBE_TIMEOUT_MS = 10_000;
+
+type RecoveryStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+function createMemoryRecoveryStorage(): RecoveryStorage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+  };
+}
+
+function getSafeSessionStorage(): RecoveryStorage {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return createMemoryRecoveryStorage();
+  }
+}
 
 type BuildChangedMessage = {
   type: 'build-changed';
@@ -41,6 +62,7 @@ export function ChunkLoadRefreshGuard() {
   const promptVisibleRef = useRef(false);
   const reloadStartedRef = useRef(false);
   const controllerRef = useRef<BuildRecoveryController | null>(null);
+  const recoveryStorageRef = useRef<RecoveryStorage | null>(null);
 
   const beginReload = useCallback(async () => {
     if (reloadStartedRef.current) return;
@@ -54,14 +76,21 @@ export function ChunkLoadRefreshGuard() {
 
   useEffect(() => {
     let disposed = false;
-    let activeProbe: AbortController | null = null;
+    let activeProbe: {
+      timeoutId: number;
+      cancel: () => void;
+      cancelled: boolean;
+    } | null = null;
     const channel = openBuildChannel();
-    const controller = createBuildRecoveryController({
-      currentBuildId: CLIENT_WEB_BUILD_ID,
-      storage: window.sessionStorage,
-      hasUnsavedWork: () => hasUnsavedUserWork(document),
-    });
-    controllerRef.current = controller;
+    recoveryStorageRef.current ??= getSafeSessionStorage();
+    const controller =
+      controllerRef.current ??
+      createBuildRecoveryController({
+        currentBuildId: CLIENT_WEB_BUILD_ID,
+        storage: recoveryStorageRef.current,
+        hasUnsavedWork: () => hasUnsavedUserWork(document),
+      });
+    controllerRef.current ??= controller;
 
     const applyActions = (actions: BuildRecoveryAction[]) => {
       for (const action of actions) {
@@ -91,20 +120,38 @@ export function ChunkLoadRefreshGuard() {
     const probeBuildId = async () => {
       if (shouldSkipProbe()) return;
 
-      const controller = new AbortController();
-      activeProbe = controller;
+      const abortController = new AbortController();
+      let settleTimeout = () => {};
+      const timeoutResult = new Promise<null>((resolve) => {
+        settleTimeout = () => resolve(null);
+      });
+      const probe = {
+        timeoutId: 0,
+        cancelled: false,
+        cancel: () => {
+          probe.cancelled = true;
+          abortController.abort();
+          settleTimeout();
+        },
+      };
+      probe.timeoutId = window.setTimeout(() => {
+        abortController.abort();
+        settleTimeout();
+      }, PROBE_TIMEOUT_MS);
+      activeProbe = probe;
       try {
-        const serverBuildId = await fetchServerBuildId(fetch, controller.signal);
-        if (disposed || controller.signal.aborted) return;
+        const serverBuildId = await Promise.race([fetchServerBuildId(fetch, abortController.signal), timeoutResult]);
+        if (disposed || probe.cancelled) return;
         applyProbeResult(serverBuildId);
       } finally {
-        if (activeProbe === controller) activeProbe = null;
+        window.clearTimeout(probe.timeoutId);
+        if (activeProbe === probe) activeProbe = null;
       }
     };
 
     const resetFailuresAndProbe = () => {
       controller.resetProbeFailures();
-      activeProbe?.abort();
+      activeProbe?.cancel();
       activeProbe = null;
       void probeBuildId();
     };
@@ -112,12 +159,17 @@ export function ChunkLoadRefreshGuard() {
       if (document.visibilityState === 'visible') resetFailuresAndProbe();
     };
     const onError = (event: ErrorEvent) => {
-      if (isRecoverableChunkLoadError(event) || isRecoverableChunkLoadError(event.error ?? event.message)) {
+      if (
+        isRecoverableChunkLoadError(event, window.location.origin) ||
+        isRecoverableChunkLoadError(event.error ?? event.message, window.location.origin)
+      ) {
         requestRecovery('chunk', CLIENT_WEB_BUILD_ID);
       }
     };
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
-      if (isRecoverableChunkLoadError(event.reason)) requestRecovery('chunk', CLIENT_WEB_BUILD_ID);
+      if (isRecoverableChunkLoadError(event.reason, window.location.origin)) {
+        requestRecovery('chunk', CLIENT_WEB_BUILD_ID);
+      }
     };
     const onBootstrapPrompt = (event: Event) => {
       const request = parseBootstrapPrompt((event as CustomEvent<unknown>).detail);
@@ -165,8 +217,7 @@ export function ChunkLoadRefreshGuard() {
 
     return () => {
       disposed = true;
-      if (controllerRef.current === controller) controllerRef.current = null;
-      activeProbe?.abort();
+      activeProbe?.cancel();
       window.clearInterval(intervalId);
       window.removeEventListener('focus', resetFailuresAndProbe);
       window.removeEventListener('online', resetFailuresAndProbe);

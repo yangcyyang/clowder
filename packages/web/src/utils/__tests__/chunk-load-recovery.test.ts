@@ -51,9 +51,9 @@ describe('chunk-load-recovery', () => {
         'http://localhost:3003',
       ),
     ).toBe(false);
-    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } }, 'http://localhost:3003')).toBe(
-      false,
-    );
+    expect(
+      isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } }, 'http://localhost:3003'),
+    ).toBe(false);
     expect(isRecoverableChunkLoadError(new TypeError('ordinary request failed'))).toBe(false);
   });
 

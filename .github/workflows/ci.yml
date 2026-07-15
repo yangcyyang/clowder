@@ -153,6 +153,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/web run test:ci:config
       - run: pnpm --filter @cat-cafe/web run test:ci:native
+      - run: pnpm --filter @cat-cafe/web run test:ci:recovery
 
   web-color:
     name: Web Color Guard

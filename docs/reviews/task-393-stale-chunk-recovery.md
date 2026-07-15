@@ -11,6 +11,7 @@ This review covers the stale-chunk and build-version recovery chain implemented 
 - `53e88d5` — `fix(web): expose escaped build version route`
 - `f653750` — `test(web): verify stale build recovery`
 - `99732a9` — `fix(web): share stale build recovery controller`
+- `b0a834b` — `test(web): lock stale recovery review regressions`
 
 Independent review of the first Task 4 harness found two Important gaps: it duplicated the Guard's recovery branches,
 and its escape-hatch check scanned only the automation module, not the test driver. Commit `99732a9` closes those
@@ -61,9 +62,24 @@ It emits JSON evidence with `source=product-recovery` and verifies:
 The real React guard suites continue to own component lifecycle, persistent prompt, BroadcastChannel, cleanup order,
 and manual-action control-flow coverage.
 
+The final whole-branch review also locked same-origin resource filtering, a persistent per-tab attempted-target ledger,
+storage-denial safety, StrictMode prompt continuity, finite probe timeout, and standard CI wiring with RED tests before
+their implementation. The deterministic harness is now part of both `test:ci` and the required GitHub Web Native and
+Config job rather than an opt-in local-only script.
+
+Final-review RED evidence:
+
+```text
+focused Vitest: 3 files failed; 8 failed / 21 passed
+deterministic harness: CI wiring assertion failed; 1 failed / 6 passed
+```
+
+Those failures independently exercised cross-origin resource rejection, B→C→B page reconstruction, legacy storage
+migration, storage getter denial, StrictMode effect reconstruction, a hung probe timeout, and standard CI registration.
+
 ## Local gate
 
-The Important-fix gate ran from committed recovery chain through `99732a9`:
+The final remediation gate ran from the committed recovery chain through the whole-branch review fixes:
 
 ```bash
 pnpm --dir packages/web exec vitest run \
@@ -77,21 +93,22 @@ pnpm --dir packages/web exec vitest run \
 pnpm --dir packages/web test:stale-build-recovery
 pnpm --dir packages/web test:ci:config
 pnpm --dir packages/web lint
-CLOWDER_WEB_BUILD_ID=task393-controller-fix pnpm --dir packages/web build
-test "$(cat packages/web/.next/BUILD_ID)" = task393-controller-fix
+CLOWDER_WEB_BUILD_ID=task393-review-fixes pnpm --dir packages/web build
+test "$(cat packages/web/.next/BUILD_ID)" = task393-review-fixes
 git diff --check
 ```
 
 Results:
 
-- focused recovery Vitest: 7 files, 32 tests passed;
-- deterministic Node harness: 6 tests passed;
+- focused recovery Vitest: 7 files, 38 tests passed;
+- deterministic Node harness: 7 tests passed, including package/GitHub CI wiring;
 - Web config/security Node tests: 13 tests passed;
+- Biome on all changed code/tests/config: clean;
 - lint: exit 0; warnings only (existing hook/image warnings and Tasks 1–3 recovery UI color-token warnings);
-- production build: exit 0; generated `.next/BUILD_ID` is `task393-controller-fix`.
+- production build: exit 0; generated `.next/BUILD_ID` is `task393-review-fixes`.
 
 The production endpoint was tested without touching live port 3003 or PM2. A temporary server was started from this
-worktree on `127.0.0.1:5105`, then stopped after the probe:
+worktree on `127.0.0.1:5106`, then stopped after the probe:
 
 ```text
 HTTP/1.1 200 OK
@@ -99,7 +116,7 @@ cache-control: no-store, max-age=0
 pragma: no-cache
 content-type: application/json
 
-{"buildId":"task393-controller-fix"}
+{"buildId":"task393-review-fixes"}
 ```
 
 ## Service worker contract
@@ -123,9 +140,10 @@ These steps are intentionally deferred until an approved deployment; the local h
    - Confirm the old tab probes `/_clowder/build-id`, performs exactly one product-originated navigation, and renders B.
    - Keep the tab open through repeated probes and confirm no reload loop.
 2. **Draft-protected B→C**
-   - On deployed build B, enter unsent text in a thread and keep the tab open.
+   - On deployed build B, enter unsent text in a thread, attach a small image, and keep the tab open.
    - Deploy build C.
-   - Confirm the draft remains intact, no automatic navigation occurs, and the persistent recovery dialog is shown.
+   - Confirm the text and image attachment remain intact, no automatic navigation occurs, and the persistent recovery
+     dialog is shown.
    - Save the draft, choose **保存好草稿并刷新**, and confirm exactly one navigation to C.
 3. In both cases, confirm the build-id response is network-only/no-store and the existing service-worker registration
    remains registered.
