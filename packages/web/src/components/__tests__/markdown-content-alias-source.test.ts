@@ -25,6 +25,6 @@ describe('MarkdownContent alias source', () => {
     ]);
 
     const html = renderToStaticMarkup(React.createElement(MarkdownContent, { content: '@测试布偶别名 你先看下' }));
-    expect(html).toContain('color:#9B7EBD');
+    expect(html).toContain('text-[var(--cafe-accent)]');
   });
 });

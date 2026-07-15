@@ -391,7 +391,7 @@ describe('RightStatusPanel', () => {
       messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
     });
 
-    expect(html).toContain('--console-inspector-gradient');
-    expect(html).not.toMatch(/background:var\(--console-inspector-bg[^)]*\)(?!.*gradient)/);
+    expect(html).toContain('background:var(--console-shell-bg)');
+    expect(html).not.toContain('--console-inspector-gradient');
   });
 });

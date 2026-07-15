@@ -73,7 +73,16 @@ const mockGetThreadState = vi.fn(() => ({
 }));
 
 const storeState = {
-  messages: [] as Array<{ id: string; type: string; catId?: string; content: string; timestamp: number }>,
+  messages: [] as Array<{
+    id: string;
+    type: string;
+    catId?: string;
+    content: string;
+    timestamp: number;
+    origin?: 'stream';
+    isStreaming?: boolean;
+    extra?: { stream?: { invocationId?: string } };
+  }>,
   addMessage: mockAddMessage,
   appendToMessage: mockAppendToMessage,
   appendToolEvent: mockAppendToolEvent,
@@ -142,6 +151,23 @@ function Harness() {
 
 const OUTER = 'outer-user-turn-1';
 const INNER = 'inner-auth-child-1';
+
+function seedOuterStreamingBubble() {
+  const id = `msg-${OUTER}-opus`;
+  storeState.messages = [
+    {
+      id,
+      type: 'assistant',
+      catId: 'opus',
+      content: 'partial reply',
+      origin: 'stream',
+      isStreaming: true,
+      extra: { stream: { invocationId: OUTER } },
+      timestamp: 1200,
+    },
+  ];
+  return id;
+}
 
 describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚 GPT-5.5 thread_mogj6kvwp3l80x56)', () => {
   let container: HTMLDivElement;
@@ -331,7 +357,8 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
   // Active path tool/effect events (web_search/thinking/rich_block) — outer-first effectiveInv
   // 砚砚 GPT-5.4 PR #1429 review observation: these 3 paths use `effectiveInv = msg.invocationId ?? parsedInv`
   // for ensureActiveAssistantMessage; bubble id is `msg-{outer}-{cat}` per deriveBubbleId(invocationId, catId).
-  it('active web_search: bubble id uses outer (msg-{OUTER}-{cat}) not inner', () => {
+  it('active web_search attaches to the pre-existing outer invocation bubble without creating a placeholder', () => {
+    const expectedId = seedOuterStreamingBubble();
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -345,14 +372,17 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
         timestamp: 1300,
       });
     });
-    const expectedId = `msg-${OUTER}-opus`;
     const wrongId = `msg-${INNER}-opus`;
-    const addedIds = mockAddMessage.mock.calls.map((c) => c[0]?.id);
-    expect(addedIds).toContain(expectedId);
-    expect(addedIds).not.toContain(wrongId);
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAppendToolEvent).toHaveBeenCalledWith(
+      expectedId,
+      expect.objectContaining({ type: 'tool_use', label: 'opus → web_search' }),
+    );
+    expect(mockAppendToolEvent).not.toHaveBeenCalledWith(wrongId, expect.anything());
   });
 
-  it('active thinking: bubble id uses outer (msg-{OUTER}-{cat}) not inner', () => {
+  it('active thinking attaches to the pre-existing outer invocation bubble without creating a placeholder', () => {
+    const expectedId = seedOuterStreamingBubble();
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -366,14 +396,13 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
         timestamp: 1400,
       });
     });
-    const expectedId = `msg-${OUTER}-opus`;
     const wrongId = `msg-${INNER}-opus`;
-    const addedIds = mockAddMessage.mock.calls.map((c) => c[0]?.id);
-    expect(addedIds).toContain(expectedId);
-    expect(addedIds).not.toContain(wrongId);
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockSetMessageThinking).toHaveBeenCalledWith(expectedId, 'planning...');
+    expect(mockSetMessageThinking).not.toHaveBeenCalledWith(wrongId, expect.anything());
   });
 
-  it('active rich_block: bubble id uses outer (msg-{OUTER}-{cat}) not inner', () => {
+  it('active standalone rich_block survives default placeholder flag-off and uses outer invocation identity', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -396,5 +425,6 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
     const addedIds = mockAddMessage.mock.calls.map((c) => c[0]?.id);
     expect(addedIds).toContain(expectedId);
     expect(addedIds).not.toContain(wrongId);
+    expect(mockAppendRichBlock).toHaveBeenCalledWith(expectedId, expect.objectContaining({ id: 'block-1' }));
   });
 });

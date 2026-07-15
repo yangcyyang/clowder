@@ -53,8 +53,8 @@ describe('MarkdownContent mention highlighting', () => {
   it('highlights nickname and english-alias mentions with cat colors', () => {
     const html = render('@砚砚 请看下，@宪宪 也看下，@siamese 收尾');
     // Dynamic colors now use inline style with hex values (not Tailwind classes)
-    expect(html).toContain('color:#5B8C5A'); // codex
-    expect(html).toContain('color:#9B7EBD'); // opus
-    expect(html).toContain('color:#5B9BD5'); // gemini
+    expect(html).toContain('bg-[var(--cafe-accent)]/15');
+    expect(html.match(/text-\[var\(--cafe-accent\)\]/g)).toHaveLength(3);
+    expect(html).not.toContain('color:#');
   });
 });

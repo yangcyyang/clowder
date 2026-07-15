@@ -5,11 +5,16 @@ import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
-    selector: (s: { threads: { id: string; title: string }[]; uiThinkingExpandedByDefault: boolean }) => unknown,
+    selector: (s: {
+      threads: { id: string; title: string }[];
+      uiThinkingExpandedByDefault: boolean;
+      catStatuses: Record<string, never>;
+    }) => unknown,
   ) =>
     selector({
       uiThinkingExpandedByDefault: false,
       threads: [{ id: 'thread_mm72eyvc12345678', title: 'F052 跨线程调度测试' }],
+      catStatuses: {},
     }),
 }));
 

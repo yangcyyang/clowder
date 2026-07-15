@@ -4163,9 +4163,12 @@ export function useAgentMessages() {
               }
             }
 
-            if (!targetId && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
+            if (!targetId && parsed.block && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
               // Final fallback: recover the active stream bubble before creating a placeholder.
-              targetId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
+              // A rich block is user-visible reply content, so it must not be dropped when
+              // generic reply placeholders are disabled. Keep web_search/thinking/tool_use
+              // on getNonTextAssistantMessageId's feature-flagged path.
+              targetId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
               }) ?? undefined;
             }
@@ -4456,6 +4459,7 @@ export function useAgentMessages() {
       findInvocationlessStreamPlaceholder,
       getCurrentInvocationIdForCat,
       getCurrentInvocationStateForCat,
+      ensureActiveAssistantMessage,
       getOrRecoverActiveAssistantMessageId,
       isActiveCallbackStillStreaming,
       isStaleTerminalEvent,

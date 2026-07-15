@@ -82,7 +82,7 @@ describe('ReplyPill', () => {
       />,
     );
     // Fallback color is ragdoll purple
-    expect(html).toContain('#9B7EBD');
+    expect(html).toContain('var(--console-cat-fallback)');
     expect(html).toContain('@unknown-cat');
   });
 });

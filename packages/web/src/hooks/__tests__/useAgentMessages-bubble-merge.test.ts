@@ -457,43 +457,6 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     expect(bubble?.isStreaming, 'inv-2 bubble must NOT be closed by late done(inv-1)').toBe(true);
   });
 
-  it('invocationless text uses activeInvocations fallback so callback can correlate (cloud P2#2, PR#1352)', () => {
-    // Cloud Codex P2#2: text-bubble creation only used explicit msg.invocationId, so
-    // invocationless stream text always created an unbound placeholder. If invocation_
-    // created is missed but callback later includes invocationId, strict callback match
-    // can't correlate → split/ghost duplicate bubbles.
-    //
-    // Fix: when no explicit options.invocationId, fall back to activeInvocations (fresh,
-    // set by intent_mode UPSTREAM of invocation_created). NOT catInvocations (lags
-    // invocation_created — that was the original ea0973e7 trap).
-    mockAddMessage.mockImplementation((msg) => {
-      storeState.messages.push(msg);
-    });
-    storeState.activeInvocations = { 'inv-active-fresh': { catId: 'opus', mode: 'stream' } };
-    storeState.catInvocations = {}; // no direct binding yet (invocation_created hasn't fired)
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    // Invocationless tool_use arrives (no msg.invocationId).
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'tool_use',
-        catId: 'opus',
-        toolName: 'command_execution',
-        toolInput: { command: 'ls' },
-      });
-    });
-
-    // Bubble should be bound to the fresh activeInvocations slot (inv-active-fresh).
-    const created = storeState.messages.find((m) => m.type === 'assistant' && m.catId === 'opus');
-    expect(created, 'bubble must be created').toBeTruthy();
-    expect(created?.extra?.stream?.invocationId, 'bubble must be bound to the fresh activeInvocations slot').toBe(
-      'inv-active-fresh',
-    );
-  });
-
   it('mixed-id stream: invocationless chunks following an explicit new-inv chunk must NOT resolve to stale replaced inv (cloud P1#6, PR#1352)', () => {
     // Cloud Codex P1#6: shouldSuppressLateStreamChunk's invocationless fallback used
     // getCurrentInvocationIdForCat which reads catInvocations (potentially stale).

@@ -18,6 +18,7 @@ vi.mock('@/stores/chatStore', () => ({
       threads: [],
       currentThreadId: null,
       isLoadingThreads: false,
+      catStatuses: {},
       get messages() {
         return storeMessages;
       },

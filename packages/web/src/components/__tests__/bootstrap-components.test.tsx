@@ -191,7 +191,7 @@ describe('BootstrapPromptCard', () => {
         onSnooze={() => {}}
       />,
     );
-    expect(html).toContain('console-border-soft');
+    expect(html).toContain('console-card-bg');
     expect(html).toContain('console-card-soft-bg');
     expect(html).toContain('console-button-primary');
   });

@@ -388,10 +388,10 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
   if (!selected) return null;
 
   const tabs: { key: InspectorTab; label: string; color: string }[] = [
-    { key: 'system', label: 'System', color: 'text-blue-600' },
-    { key: 'user', label: 'User', color: 'text-green-600' },
-    { key: 'effective', label: 'Full Prompt', color: 'text-purple-600' },
-    { key: 'meta', label: 'Meta', color: 'text-amber-600' },
+    { key: 'system', label: 'System', color: 'text-[var(--semantic-info-text)]' },
+    { key: 'user', label: 'User', color: 'text-[var(--semantic-success-text)]' },
+    { key: 'effective', label: 'Full Prompt', color: 'text-[var(--console-xray-text)]' },
+    { key: 'meta', label: 'Meta', color: 'text-[var(--semantic-warning-text)]' },
   ];
 
   return (

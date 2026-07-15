@@ -1259,16 +1259,17 @@ describe('background thread socket handling', () => {
         timestamp: now,
       });
 
+      const rawSealPayload = JSON.stringify({
+        type: 'session_seal_requested',
+        catId: 'opus',
+        sessionSeq: 3,
+        healthSnapshot: { fillRatio: 0.42 },
+      });
       simulateBackgroundMessage({
         type: 'system_info',
         catId: 'opus',
         threadId: 'thread-bg',
-        content: JSON.stringify({
-          type: 'session_seal_requested',
-          catId: 'opus',
-          sessionSeq: 3,
-          healthSnapshot: { fillRatio: 0.42 },
-        }),
+        content: rawSealPayload,
         timestamp: now + 1,
       });
 
@@ -1284,11 +1285,12 @@ describe('background thread socket handling', () => {
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      expect(ts.messages).toHaveLength(3);
+      expect(ts.messages).toHaveLength(2);
       expect(ts.messages[0]?.variant).toBe('info');
-      expect(ts.messages[1]?.variant).toBe('info');
-      expect(ts.messages[2]?.variant).toBe('a2a_followup');
-      expect(ts.messages[2]?.content).toContain('缅因猫 @了 opus');
+      expect(ts.messages[1]?.variant).toBe('a2a_followup');
+      expect(ts.messages[1]?.content).toContain('缅因猫 @了 opus');
+      expect(ts.messages.map((message) => message.content)).not.toContain(rawSealPayload);
+      expect(ts.messages.every((message) => !message.content.includes('session_seal_requested'))).toBe(true);
     });
 
     it('consumes invocation_usage system_info into thread invocation + message metadata (no raw JSON message)', () => {

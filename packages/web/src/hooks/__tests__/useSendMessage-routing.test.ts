@@ -130,7 +130,7 @@ describe('SplitPaneView input routing (P1-1)', () => {
       (btn as HTMLElement).click();
     });
 
-    // SplitPaneView wraps onSend: (content, images, whisper, deliveryMode) => onSend(content, images, splitPaneTargetId, whisper, deliveryMode)
-    expect(mockOnSend).toHaveBeenCalledWith('test message', undefined, 'thread-2', undefined, undefined);
+    // SplitPaneView keeps attachments last while inserting splitPaneTargetId as overrideThreadId.
+    expect(mockOnSend).toHaveBeenCalledWith('test message', undefined, 'thread-2', undefined, undefined, undefined);
   });
 });
