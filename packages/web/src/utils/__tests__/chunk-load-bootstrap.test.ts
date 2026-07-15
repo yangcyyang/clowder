@@ -107,6 +107,15 @@ describe('chunk-load-bootstrap', () => {
     expect(browser.dispatched).toContainEqual(expect.objectContaining({ type: 'clowder:recovery-prompt' }));
   });
 
+  it('reloads for an inherited unhandled rejection reason when there is no draft', async () => {
+    const browser = fakeBrowser({ hasDraft: () => false });
+    const rejectionEvent = Object.create({ reason: new Error('Loading chunk 42 failed.') });
+
+    browser.emit('unhandledrejection', rejectionEvent);
+
+    await vi.waitFor(() => expect(browser.reload).toHaveBeenCalledTimes(1));
+  });
+
   it('prompts instead of reloading for a non-empty enabled textarea', async () => {
     const browser = fakeBrowser({
       hasDraft: () => false,

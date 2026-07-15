@@ -24,9 +24,12 @@ export function createChunkLoadBootstrapScript(clientBuildId: string): string {
       ? [target.src, target.href].filter((value) => typeof value === 'string').join('\\n')
       : '';
     if (nextStaticResourcePattern.test(resourceUrl)) return true;
-    const reason = event && Object.prototype.hasOwnProperty.call(event, 'reason')
-      ? event.reason
-      : event && (event.error || event.message || event);
+    let reason = event;
+    try {
+      reason = event && (typeof event === 'object' || typeof event === 'function') && 'reason' in event
+        ? event.reason
+        : event && (event.error || event.message || event);
+    } catch {}
     return chunkErrorPattern.test(collectErrorText(reason));
   };
 
