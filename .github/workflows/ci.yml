@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/slock-like-webui]
     paths-ignore:
       - 'docs/**'
       - '*.md'
