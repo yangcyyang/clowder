@@ -20,6 +20,7 @@
     "test:ci:config": "node scripts/run-with-node-env-test.mjs node --test --test-concurrency=1 test/next-config.test.cjs test/security-headers-config.test.js",
     "test:ci:native": "node scripts/run-with-node-env-test.mjs node --test --test-concurrency=1 test/ensure-production-build.test.mjs test/run-with-node-env-test.test.cjs test/test-quarantine.test.mjs",
     "test:ci:colors": "node eslint-plugins/no-hardcoded-colors.test.js",
+    "test:stale-build-recovery": "node --test test/stale-build-recovery-harness.test.mjs",
     "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js"
   },
   "dependencies": {
