@@ -36,13 +36,24 @@ describe('chunk-load-recovery', () => {
     expect(
       isRecoverableChunkLoadError('Failed to fetch dynamically imported module: /_next/static/chunks/app.js'),
     ).toBe(true);
-    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/_next/static/chunks/app.js' } })).toBe(
-      true,
+    expect(
+      isRecoverableChunkLoadError(
+        { target: { src: 'http://localhost:3003/_next/static/chunks/app.js' } },
+        'http://localhost:3003',
+      ),
+    ).toBe(true);
+    expect(
+      isRecoverableChunkLoadError({ target: { href: '/_next/static/css/app.css' } }, 'http://localhost:3003'),
+    ).toBe(true);
+    expect(
+      isRecoverableChunkLoadError(
+        { target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' } },
+        'http://localhost:3003',
+      ),
+    ).toBe(false);
+    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } }, 'http://localhost:3003')).toBe(
+      false,
     );
-    expect(isRecoverableChunkLoadError({ target: { href: 'http://localhost:3003/_next/static/css/app.css' } })).toBe(
-      true,
-    );
-    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } })).toBe(false);
     expect(isRecoverableChunkLoadError(new TypeError('ordinary request failed'))).toBe(false);
   });
 
@@ -70,7 +81,21 @@ describe('chunk-load-recovery', () => {
     const storage = memoryStorage('{not-json');
 
     expect(reserveAutomaticRecovery(storage, 'build-malformed', 42)).toBe(true);
-    expect(storage.getItem()).toBe(JSON.stringify({ targetBuildId: 'build-malformed', attemptedAt: 42 }));
+    expect(storage.getItem()).toBe(JSON.stringify({ attemptedTargets: ['build-malformed'], attemptedAt: 42 }));
+  });
+
+  it('persists every attempted target across controller and page reconstruction, including legacy records', () => {
+    const storage = memoryStorage(JSON.stringify({ targetBuildId: 'build-ledger-legacy', attemptedAt: 1 }));
+
+    expect(reserveAutomaticRecovery(storage, 'build-ledger-b', 2)).toBe(true);
+    expect(reserveAutomaticRecovery(storage, 'build-ledger-c', 3)).toBe(true);
+    expect(reserveAutomaticRecovery(storage, 'build-ledger-b', 4)).toBe(false);
+    expect(reserveAutomaticRecovery(storage, 'build-ledger-legacy', 5)).toBe(false);
+    expect(JSON.parse(storage.getItem() ?? '{}').attemptedTargets).toEqual([
+      'build-ledger-legacy',
+      'build-ledger-b',
+      'build-ledger-c',
+    ]);
   });
 
   it('detects text, image, file and textarea drafts while ignoring whitespace and disabled textareas', () => {

@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -128,9 +128,9 @@ describe('ChunkLoadRefreshGuard', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  async function renderGuard() {
+  async function renderGuard(strict = false) {
     await act(async () => {
-      root.render(<ChunkLoadRefreshGuard />);
+      root.render(strict ? <StrictMode><ChunkLoadRefreshGuard /></StrictMode> : <ChunkLoadRefreshGuard />);
     });
     await flushEffects();
   }
@@ -233,6 +233,30 @@ describe('ChunkLoadRefreshGuard', () => {
     expect(mocks.reload).not.toHaveBeenCalled();
   });
 
+  it('times out a hung probe, records one failed result, and releases the probe slot', async () => {
+    mocks.fetchServerBuildId.mockImplementation(
+      (_fetchImpl, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener('abort', () => resolve(null), { once: true });
+        }),
+    );
+    await renderGuard();
+    const firstSignal = mocks.fetchServerBuildId.mock.calls[0]?.[1];
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(mocks.controllerProbeResult).toHaveBeenCalledWith(null);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+    expect(mocks.fetchServerBuildId).toHaveBeenCalledTimes(2);
+  });
+
   it('applies this tab reservation and reloads once for duplicate BroadcastChannel events', async () => {
     await renderGuard();
     const channel = MockBroadcastChannel.instances[0];
@@ -277,6 +301,50 @@ describe('ChunkLoadRefreshGuard', () => {
 
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('检测到 Clowder 新版本');
     expect(mocks.reload).not.toHaveBeenCalled();
+  });
+
+  it('continues safely when the sessionStorage getter throws SecurityError', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+
+    try {
+      await renderGuard();
+    } finally {
+      if (descriptor) Object.defineProperty(window, 'sessionStorage', descriptor);
+    }
+
+    expect(mocks.fetchServerBuildId).toHaveBeenCalledTimes(1);
+    expect(mocks.reload).not.toHaveBeenCalled();
+  });
+
+  it('keeps the bootstrap prompt controller through StrictMode effect reconstruction', async () => {
+    const textarea = document.createElement('textarea');
+    textarea.value = 'StrictMode 草稿';
+    document.body.appendChild(textarea);
+    sessionStorage.setItem(
+      'clowder:recovery-prompt',
+      JSON.stringify({ kind: 'chunk', targetBuildId: 'build-a', reason: 'unsaved-draft' }),
+    );
+
+    await renderGuard(true);
+    const button = Array.from(document.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent === '保存好草稿并刷新',
+    );
+    await act(async () => {
+      button?.click();
+      button?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.prepareBrowserForReload).toHaveBeenCalledTimes(1);
+    expect(mocks.reload).toHaveBeenCalledTimes(1);
+    expect(mocks.controllerManualAction).toHaveBeenCalledTimes(1);
   });
 
   it('runs cleanup before the manual draft-safe button reloads exactly once', async () => {

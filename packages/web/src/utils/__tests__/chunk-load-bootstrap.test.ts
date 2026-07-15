@@ -16,6 +16,7 @@ function fakeBrowser(
     storage?: ReturnType<typeof memoryStorage>;
     hasDraft?: () => boolean;
     textareas?: Array<{ value: string; disabled?: boolean }>;
+    clientBuildId?: string;
   } = {},
 ) {
   const listeners = new Map<string, BrowserListener[]>();
@@ -53,13 +54,16 @@ function fakeBrowser(
       keys: () => Promise.resolve(['old-shell']),
       delete: () => Promise.resolve(true),
     },
-    location: { reload },
+    location: { href: 'http://localhost:3003/channel', origin: 'http://localhost:3003', reload },
   };
   const documentRef = {
     querySelectorAll: () => (options.textareas ?? []).filter((textarea) => !textarea.disabled),
   };
 
-  new Function('window', 'document', createChunkLoadBootstrapScript('build-a'))(windowRef, documentRef);
+  new Function('window', 'document', createChunkLoadBootstrapScript(options.clientBuildId ?? 'build-a'))(
+    windowRef,
+    documentRef,
+  );
 
   return {
     captures,
@@ -90,6 +94,38 @@ describe('chunk-load-bootstrap', () => {
 
     await vi.waitFor(() => expect(browser.reload).toHaveBeenCalledTimes(1));
     expect(browser.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts relative and same-origin Next resources but rejects cross-origin lookalikes', async () => {
+    const relative = fakeBrowser();
+    relative.emit('error', { target: { href: '/_next/static/css/app.css' } });
+    await vi.waitFor(() => expect(relative.reload).toHaveBeenCalledTimes(1));
+
+    const sameOrigin = fakeBrowser();
+    sameOrigin.emit('error', { target: { src: 'http://localhost:3003/_next/static/chunks/app.js' } });
+    await vi.waitFor(() => expect(sameOrigin.reload).toHaveBeenCalledTimes(1));
+
+    const crossOrigin = fakeBrowser();
+    crossOrigin.emit('error', { target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(crossOrigin.reload).not.toHaveBeenCalled();
+  });
+
+  it('remembers all attempted targets across page reconstruction and rejects B after B to C to B', async () => {
+    const storage = memoryStorage();
+    const firstB = fakeBrowser({ storage, clientBuildId: 'build-b' });
+    firstB.emit('error', { target: { src: '/_next/static/chunks/b.js' } });
+    await vi.waitFor(() => expect(firstB.reload).toHaveBeenCalledTimes(1));
+
+    const buildC = fakeBrowser({ storage, clientBuildId: 'build-c' });
+    buildC.emit('error', { target: { src: '/_next/static/chunks/c.js' } });
+    await vi.waitFor(() => expect(buildC.reload).toHaveBeenCalledTimes(1));
+
+    const secondB = fakeBrowser({ storage, clientBuildId: 'build-b' });
+    secondB.emit('error', { target: { src: '/_next/static/chunks/b-again.js' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(secondB.reload).not.toHaveBeenCalled();
   });
 
   it('prompts without navigating whenever the live draft bridge reports pending work', async () => {

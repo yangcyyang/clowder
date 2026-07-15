@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 
 import {
@@ -185,4 +186,13 @@ test('harness delegates recovery decisions to the production controller', async 
   assert.match(automationSource, /controller\.handleProbeResult/);
   assert.match(automationSource, /controller\.manualPromptAction/);
   assert.doesNotMatch(automationSource, /reserveAutomaticRecovery/);
+});
+
+test('deterministic recovery harness is wired into standard package and GitHub CI gates', async () => {
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const workflow = await readFile(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+
+  assert.match(packageJson.scripts['test:ci'], /test:ci:recovery/);
+  assert.equal(packageJson.scripts['test:ci:recovery'], 'pnpm run test:stale-build-recovery');
+  assert.match(workflow, /@cat-cafe\/web run test:ci:recovery/);
 });
