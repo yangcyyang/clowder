@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
-import { clearStaleBrowserShell, isRecoverableChunkLoadError, shouldAttemptChunkReload } from '../chunk-load-recovery';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  installThreadDraftBridge,
+  threadDrafts,
+  threadFileDrafts,
+  threadImageDrafts,
+} from '../../components/thread-drafts';
+import {
+  hasUnsavedUserWork,
+  isRecoverableChunkLoadError,
+  prepareBrowserForReload,
+  reserveAutomaticRecovery,
+} from '../chunk-load-recovery';
 
 function memoryStorage(initial?: string) {
   let value = initial ?? null;
@@ -11,30 +22,106 @@ function memoryStorage(initial?: string) {
   };
 }
 
+afterEach(() => {
+  threadDrafts.clear();
+  threadImageDrafts.clear();
+  threadFileDrafts.clear();
+  document.body.replaceChildren();
+  delete window.__CLOWDER_HAS_PENDING_DRAFT__;
+});
+
 describe('chunk-load-recovery', () => {
-  it('recognizes stale Next/Vite chunk loading failures', () => {
+  it('recognizes only Next chunk/css resource failures', () => {
     expect(isRecoverableChunkLoadError(new Error('Loading chunk 1234 failed.'))).toBe(true);
-    expect(isRecoverableChunkLoadError('Failed to fetch dynamically imported module: /_next/static/chunks/app.js')).toBe(
+    expect(
+      isRecoverableChunkLoadError('Failed to fetch dynamically imported module: /_next/static/chunks/app.js'),
+    ).toBe(true);
+    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/_next/static/chunks/app.js' } })).toBe(
       true,
     );
+    expect(isRecoverableChunkLoadError({ target: { href: 'http://localhost:3003/_next/static/css/app.css' } })).toBe(
+      true,
+    );
+    expect(isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } })).toBe(false);
     expect(isRecoverableChunkLoadError(new TypeError('ordinary request failed'))).toBe(false);
   });
 
-  it('only allows one automatic reload during the cooldown window', () => {
+  it('allows one automatic recovery per target build, never a second after cooldown', () => {
     const storage = memoryStorage();
-
-    expect(shouldAttemptChunkReload(storage, 1000)).toBe(true);
-    expect(shouldAttemptChunkReload(storage, 2000)).toBe(false);
-    expect(shouldAttemptChunkReload(storage, 130_000)).toBe(true);
+    expect(reserveAutomaticRecovery(storage, 'build-b', 1_000)).toBe(true);
+    expect(reserveAutomaticRecovery(storage, 'build-b', 130_000)).toBe(false);
+    expect(reserveAutomaticRecovery(storage, 'build-c', 131_000)).toBe(true);
   });
 
-  it('clears service workers and caches before reload', async () => {
+  it('fails closed with an in-memory latch when sessionStorage throws', () => {
+    const storage = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      },
+    };
+    expect(reserveAutomaticRecovery(storage, 'build-storage-off')).toBe(true);
+    expect(reserveAutomaticRecovery(storage, 'build-storage-off')).toBe(false);
+  });
+
+  it('treats malformed recovery records as absent and persists the target record', () => {
+    const storage = memoryStorage('{not-json');
+
+    expect(reserveAutomaticRecovery(storage, 'build-malformed', 42)).toBe(true);
+    expect(storage.getItem()).toBe(JSON.stringify({ targetBuildId: 'build-malformed', attemptedAt: 42 }));
+  });
+
+  it('detects text, image, file and textarea drafts while ignoring whitespace and disabled textareas', () => {
+    threadDrafts.set('thread-space', '   ');
+    expect(hasUnsavedUserWork(document)).toBe(false);
+
+    threadDrafts.set('thread-text', 'pending');
+    expect(hasUnsavedUserWork(document)).toBe(true);
+    threadDrafts.clear();
+
+    threadImageDrafts.set('thread-image', [new File(['image'], 'image.png')]);
+    expect(hasUnsavedUserWork(document)).toBe(true);
+    threadImageDrafts.clear();
+
+    threadFileDrafts.set('thread-file', [new File(['file'], 'draft.txt')]);
+    expect(hasUnsavedUserWork(document)).toBe(true);
+    threadFileDrafts.clear();
+
+    const whitespace = document.createElement('textarea');
+    whitespace.value = '   ';
+    document.body.append(whitespace);
+    expect(hasUnsavedUserWork(document)).toBe(false);
+
+    const disabled = document.createElement('textarea');
+    disabled.disabled = true;
+    disabled.value = 'disabled draft';
+    document.body.append(disabled);
+    expect(hasUnsavedUserWork(document)).toBe(false);
+
+    const textarea = document.createElement('textarea');
+    textarea.value = '  textarea draft  ';
+    document.body.append(textarea);
+    expect(hasUnsavedUserWork(document)).toBe(true);
+  });
+
+  it('installs a live draft bridge rather than a snapshot', () => {
+    installThreadDraftBridge();
+
+    expect(window.__CLOWDER_HAS_PENDING_DRAFT__?.()).toBe(false);
+    threadFileDrafts.set('background-thread', [new File(['pending'], 'pending.txt')]);
+    expect(window.__CLOWDER_HAS_PENDING_DRAFT__?.()).toBe(true);
+  });
+
+  it('updates service workers without unregistering and tolerates cache deletion rejection', async () => {
+    const update = vi.fn(() => Promise.resolve());
     const unregister = vi.fn(() => Promise.resolve(true));
-    const cacheDelete = vi.fn(() => Promise.resolve(true));
+    const cacheDelete = vi.fn(() => Promise.reject(new Error('cache busy')));
     const windowRef = {
       navigator: {
         serviceWorker: {
-          getRegistrations: () => Promise.resolve([{ unregister }]),
+          getRegistrations: () => Promise.resolve([{ update, unregister }]),
         },
       },
       caches: {
@@ -43,9 +130,10 @@ describe('chunk-load-recovery', () => {
       },
     } as unknown as Window;
 
-    await clearStaleBrowserShell(windowRef);
+    await expect(prepareBrowserForReload(windowRef)).resolves.toBeUndefined();
 
-    expect(unregister).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(unregister).not.toHaveBeenCalled();
     expect(cacheDelete).toHaveBeenCalledWith('old-shell');
   });
 });

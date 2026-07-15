@@ -8,6 +8,8 @@ import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
+import { createChunkLoadBootstrapScript } from '@/utils/chunk-load-bootstrap';
+import { CLIENT_WEB_BUILD_ID } from '@/utils/web-build-version';
 import '@xterm/xterm/css/xterm.css';
 import './theme-tokens.css';
 import './globals.css';
@@ -72,7 +74,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN" data-visual-theme="slock" suppressHydrationWarning>
       <body className={`${spaceGrotesk.variable} min-h-screen`}>
-        <script dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }} />
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted static theme bootstrap must run before hydration
+          dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }}
+        />
+        <script
+          id="clowder-chunk-recovery-bootstrap"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted build-time recovery bootstrap must run before hydration
+          dangerouslySetInnerHTML={{ __html: createChunkLoadBootstrapScript(CLIENT_WEB_BUILD_ID) }}
+        />
         <ChunkLoadRefreshGuard />
         <SessionBootstrap />
         <ThemeProvider>
