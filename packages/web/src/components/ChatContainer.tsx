@@ -172,7 +172,7 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
   ];
 
   return (
-    <div className="flex h-8 flex-shrink-0 items-center bg-[var(--console-shell-bg)] px-5">
+    <div className="slock-channel-tabs-row flex h-7 flex-shrink-0 items-center bg-[var(--console-shell-bg)] px-5">
       <div className="slock-tab-segmented flex h-7 w-fit overflow-hidden">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;

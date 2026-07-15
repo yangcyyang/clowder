@@ -1041,7 +1041,7 @@
   border-right: 0;
 }
 
-.slock-header-action {
+:where(.slock-header-action) {
   display: inline-flex;
   height: 32px;
   min-width: 32px;
@@ -1076,9 +1076,45 @@
   color: var(--cafe-text);
 }
 
+.slock-channel-title {
+  color: var(--cafe-text);
+}
+
+.slock-channel-stamp {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--slock-border-color);
+  border-radius: var(--slock-radius-sm);
+  background: var(--console-card-soft-bg);
+  color: var(--cafe-text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-chat-header {
   height: 40px;
   background: var(--console-shell-bg);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-stamp {
+  width: 32px;
+  height: 32px;
+  border: var(--slock-border-width) solid var(--slock-ink);
+  border-radius: 0;
+  background: var(--slock-rail-yellow);
+  color: var(--slock-ink);
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-title {
+  gap: 10px;
+}
+
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-tabs-row {
+  padding-inline: 0;
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action {
@@ -1137,7 +1173,7 @@
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
   .slock-tab-button[data-active="true"] {
-  background: color-mix(in srgb, var(--slock-rail-yellow) 74%, #ffffff);
+  background: var(--slock-rail-yellow);
   color: var(--slock-ink);
 }
 
@@ -1156,6 +1192,19 @@
   display: block;
   width: 14px;
   height: 14px;
+}
+
+@media (max-width: 639px) {
+  :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-channel-stamp {
+    width: 28px;
+    height: 28px;
+  }
+
+  :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-chat-header {
+    gap: 4px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-composer-shell {

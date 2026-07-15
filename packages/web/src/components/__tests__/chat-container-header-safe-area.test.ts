@@ -58,7 +58,14 @@ describe('ChatContainerHeader safe-area', () => {
     expect(innerRow?.className).toContain('slock-chat-header');
     expect(innerRow?.className).toContain('h-11');
     expect(container.querySelector('[data-testid="hub-button"]')).toBeNull();
-    expect(container.textContent).toContain('技能库');
-    expect(container.querySelector('[aria-label="打开静态 Skill 仪表板"]')).not.toBeNull();
+    const skillButton = container.querySelector<HTMLButtonElement>('[aria-label="打开静态 Skill 仪表板"]');
+    const knowledgeButton = container.querySelector<HTMLButtonElement>('[aria-label="沉淀为知识"]');
+
+    expect(skillButton?.className).toContain('slock-header-action--icon');
+    expect(knowledgeButton?.className).toContain('slock-header-action--icon');
+    expect(skillButton?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(knowledgeButton?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(skillButton?.textContent?.trim()).toBe('');
+    expect(knowledgeButton?.textContent?.trim()).toBe('');
   });
 });

@@ -5,7 +5,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatContainerHeader } from '@/components/ChatContainerHeader';
+import { ChatContainerHeader, ThreadIndicator } from '@/components/ChatContainerHeader';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) =>
@@ -73,6 +73,7 @@ describe('ChatContainerHeader thread indicator', () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    mockStore.threads = TEST_THREADS;
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -87,16 +88,40 @@ describe('ChatContainerHeader thread indicator', () => {
   };
 
   it('shows "大厅" when threadId is default', () => {
-    expect(renderHeader('default').textContent).toContain('大厅');
+    const rendered = renderHeader('default');
+    expect(rendered.textContent).toContain('大厅');
+    expect(rendered.querySelector('[data-testid="channel-stamp"]')?.textContent).toBe('#');
   });
 
-  it('shows thread title when a specific thread is selected', () => {
+  it('shows thread title and decorates a confirmed channel', () => {
     const rendered = renderHeader('thread_xyz');
     expect(rendered.textContent).toContain('讨论 F095 设计');
+
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(ThreadIndicator, { threadId: 'thread_xyz', showChannelStamp: true }),
+    );
+    expect(container.querySelector('[data-testid="channel-stamp"]')?.textContent).toBe('#');
   });
 
   it('shows "未命名对话" when thread has no title', () => {
     mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_no_title', title: null }];
     expect(renderHeader('thread_no_title').textContent).toContain('未命名对话');
+  });
+
+  it('does not flash a channel stamp for a direct message before hydration', () => {
+    mockStore.threads = [{ ...TEST_THREADS[0], id: 'thread_dm', title: '专家-Claude', isDM: true }];
+    const rendered = renderHeader('thread_dm');
+
+    expect(rendered.textContent).toContain('专家-Claude');
+    expect(rendered.querySelector('[data-testid="channel-stamp"]')).toBeNull();
+  });
+
+  it('does not decorate direct messages with a channel stamp', () => {
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(ThreadIndicator, { threadId: 'thread_xyz', showChannelStamp: false }),
+    );
+
+    expect(container.textContent).toContain('讨论 F095 设计');
+    expect(container.querySelector('[data-testid="channel-stamp"]')).toBeNull();
   });
 });

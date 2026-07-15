@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
+import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
 
 interface ChatContainerHeaderProps {
@@ -16,6 +16,8 @@ interface ChatContainerHeaderProps {
   onOpenChannelSettings: () => void;
   onOpenKnowledgeCapture: () => void;
 }
+
+type HeaderThreadKind = 'channel' | 'dm' | 'unknown';
 
 export function ChatContainerHeader({
   sidebarOpen,
@@ -35,7 +37,14 @@ export function ChatContainerHeader({
 }: ChatContainerHeaderProps) {
   const [isHydrated, setIsHydrated] = useState(false);
   const currentThread = useChatStore((s) => s.threads.find((t) => t.id === threadId));
-  const isDirectMessage = isHydrated ? Boolean(currentThread?.isDM) : false;
+  const threadKind: HeaderThreadKind =
+    threadId === 'default'
+      ? 'channel'
+      : !isHydrated || !currentThread
+        ? 'unknown'
+        : currentThread.isDM
+          ? 'dm'
+          : 'channel';
 
   useEffect(() => {
     setIsHydrated(true);
@@ -47,14 +56,15 @@ export function ChatContainerHeader({
 
   return (
     <header className="safe-area-top">
-      <div className="slock-chat-header h-11 border-b border-[var(--slock-border-color)] px-5 flex items-center gap-2">
+      <div className="slock-chat-header h-11 border-b border-[var(--slock-border-color)] px-5 flex items-center gap-1.5">
         <button
+          type="button"
           onClick={onToggleSidebar}
           className="slock-header-action slock-header-action--icon inline-flex md:hidden"
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
-          <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
@@ -63,37 +73,59 @@ export function ChatContainerHeader({
           </svg>
         </button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <ThreadIndicator threadId={threadId} />
+          <ThreadIndicator threadId={threadId} showChannelStamp={threadKind === 'channel'} />
           <ThreadMemberAvatars threadId={threadId} />
         </div>
         <ExportButton threadId={threadId} />
         <button
           type="button"
           onClick={openSkillDashboard}
-          className="slock-header-action slock-header-action--label hidden sm:inline-flex"
+          className="slock-header-action slock-header-action--icon hidden sm:inline-flex"
           title="打开静态 Skill 仪表板"
           aria-label="打开静态 Skill 仪表板"
         >
-          技能库
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4 text-cafe-secondary"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          >
+            <rect x="3" y="3" width="5" height="5" />
+            <rect x="12" y="3" width="5" height="5" />
+            <rect x="3" y="12" width="5" height="5" />
+            <path d="M12 14.5h5M14.5 12v5" />
+          </svg>
         </button>
         <button
           type="button"
           onClick={onOpenKnowledgeCapture}
-          className="slock-header-action slock-header-action--label hidden sm:inline-flex"
+          className="slock-header-action slock-header-action--icon hidden sm:inline-flex"
           title="沉淀为知识"
           aria-label="沉淀为知识"
         >
-          沉淀为知识
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4 text-cafe-secondary"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          >
+            <path d="M5 3.5h7.5A2.5 2.5 0 0 1 15 6v10.5H7.5A2.5 2.5 0 0 1 5 14z" />
+            <path d="M5 14a2.5 2.5 0 0 1 2.5-2.5H15M9 6.5h3" />
+          </svg>
         </button>
-        {!isDirectMessage && (
+        {threadKind === 'channel' && (
           <button
             type="button"
             onClick={onOpenChannelSettings}
-            className="slock-header-action slock-header-action--icon ml-1 inline-flex"
+            className="slock-header-action slock-header-action--icon inline-flex"
             title="频道设置"
             aria-label="频道设置"
           >
-            <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <svg className="h-4 w-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path
                 fillRule="evenodd"
                 d="M11.49 3.17a1.5 1.5 0 00-2.98 0l-.08.55a6.95 6.95 0 00-1.4.58l-.45-.33a1.5 1.5 0 00-2.11 2.11l.33.45c-.24.45-.44.92-.58 1.4l-.55.08a1.5 1.5 0 000 2.98l.55.08c.14.49.34.96.58 1.4l-.33.45a1.5 1.5 0 002.11 2.11l.45-.33c.45.24.92.44 1.4.58l.08.55a1.5 1.5 0 002.98 0l.08-.55c.49-.14.96-.34 1.4-.58l.45.33a1.5 1.5 0 002.11-2.11l-.33-.45c.24-.45.44-.92.58-1.4l.55-.08a1.5 1.5 0 000-2.98l-.55-.08a6.95 6.95 0 00-.58-1.4l.33-.45a1.5 1.5 0 00-2.11-2.11l-.45.33a6.95 6.95 0 00-1.4-.58l-.08-.55zM10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z"
@@ -111,12 +143,13 @@ export function ChatContainerHeader({
           </span>
         )}
         <button
+          type="button"
           onClick={onOpenMobileStatus}
-          className="slock-header-action slock-header-action--icon ml-1 inline-flex lg:hidden"
+          className="slock-header-action slock-header-action--icon inline-flex lg:hidden"
           title="打开状态面板"
           aria-label="打开状态面板"
         >
-          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="h-4 w-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
@@ -130,21 +163,23 @@ export function ChatContainerHeader({
   );
 }
 
-/** Thread indicator: shows which thread you're currently chatting in */
-function ThreadIndicator({ threadId }: { threadId: string }) {
+/** Thread indicator: pairs confirmed channel titles with the Raft-style # stamp. */
+export function ThreadIndicator({ threadId, showChannelStamp }: { threadId: string; showChannelStamp: boolean }) {
   const threads = useChatStore((s) => s.threads);
   const currentThread = threads.find((t) => t.id === threadId);
-
-  if (threadId === 'default') {
-    return <p className="text-base font-bold text-cafe truncate min-w-0">大厅</p>;
-  }
-
-  const title = currentThread?.title ?? '未命名对话';
+  const title = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
 
   return (
-    <p className="text-base font-bold text-cafe truncate min-w-0" title={title}>
-      {title}
-    </p>
+    <div className="slock-channel-title flex min-w-0 items-center gap-2">
+      {showChannelStamp && (
+        <span className="slock-channel-stamp shrink-0" data-testid="channel-stamp" aria-hidden="true">
+          #
+        </span>
+      )}
+      <p className="min-w-0 truncate text-base font-bold text-cafe" title={title}>
+        {title}
+      </p>
+    </div>
   );
 }
 
@@ -228,18 +263,15 @@ function RightPanelToggle({
 
   return (
     <button
+      type="button"
       onClick={handleClick}
-      className={`slock-header-action slock-header-action--icon ml-1 hidden lg:inline-flex ${
-        statusPanelOpen
-          ? isWorkspace
-            ? 'slock-header-action--active'
-            : 'slock-header-action--muted-active'
-          : ''
+      className={`slock-header-action slock-header-action--icon hidden lg:inline-flex ${
+        statusPanelOpen ? (isWorkspace ? 'slock-header-action--active' : 'slock-header-action--muted-active') : ''
       }`}
       aria-label={label}
       title={label}
     >
-      <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+      <svg aria-hidden="true" className="h-4 w-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
         <path
           fillRule="evenodd"
           d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 0v12h10V4H5z"
