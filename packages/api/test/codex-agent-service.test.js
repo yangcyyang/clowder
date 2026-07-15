@@ -71,6 +71,58 @@ function emitCodexEvents(proc, events) {
 
 // --- Test cases ---
 
+test('injected spawnFn does not require a real Codex executable', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({
+    spawnFn,
+    cliCommand: 'definitely-missing-codex-test-binary',
+  });
+
+  const promise = collect(service.invoke('Hello'));
+  emitCodexEvents(proc, [
+    { type: 'thread.started', thread_id: 'thread-injected-spawn' },
+    {
+      type: 'item.completed',
+      item: { id: 'msg-1', type: 'agent_message', text: 'Mocked Codex response' },
+    },
+  ]);
+
+  const msgs = await promise;
+  assert.equal(spawnFn.mock.callCount(), 1);
+  assert.equal(spawnFn.mock.calls[0].arguments[0], 'definitely-missing-codex-test-binary');
+  assert.equal(msgs.find((message) => message.type === 'text')?.content, 'Mocked Codex response');
+});
+
+test('without an injected executor a missing Codex executable is still rejected', async () => {
+  const service = new CodexAgentService({ cliCommand: 'definitely-missing-codex-test-binary' });
+
+  const msgs = await collect(service.invoke('Hello'));
+
+  assert.equal(msgs[0].type, 'error');
+  assert.match(msgs[0].error, /definitely-missing-codex-test-binary/);
+  assert.equal(msgs.at(-1).type, 'done');
+});
+
+test('spawnCliOverride does not require a real Codex executable', async () => {
+  let invokedCommand;
+  const service = new CodexAgentService({ cliCommand: 'definitely-missing-codex-test-binary' });
+
+  async function* spawnCliOverride(options) {
+    invokedCommand = options.command;
+    yield { type: 'thread.started', thread_id: 'thread-injected-override' };
+    yield {
+      type: 'item.completed',
+      item: { id: 'msg-1', type: 'agent_message', text: 'Overridden Codex response' },
+    };
+  }
+
+  const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
+
+  assert.equal(invokedCommand, 'definitely-missing-codex-test-binary');
+  assert.equal(msgs.find((message) => message.type === 'text')?.content, 'Overridden Codex response');
+});
+
 test('yields session_init, text, and done on basic success', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

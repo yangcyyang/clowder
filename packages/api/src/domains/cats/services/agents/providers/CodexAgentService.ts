@@ -554,7 +554,10 @@ export class CodexAgentService implements AgentService {
 
       const semanticCompletionController = new AbortController();
 
-      const codexCommand = resolveCliCommand(this.cliCommand);
+      // Dependency-injected executors own command resolution. Requiring the real
+      // binary here defeats spawnFn/spawnCliOverride test doubles on clean CI hosts.
+      const hasInjectedExecutor = Boolean(this.spawnFn || options?.spawnCliOverride);
+      const codexCommand = hasInjectedExecutor ? this.cliCommand : resolveCliCommand(this.cliCommand);
       if (!codexCommand) {
         yield {
           type: 'error' as const,
