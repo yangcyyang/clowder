@@ -9,9 +9,12 @@ This review covers the stale-chunk and build-version recovery chain implemented 
 - `7034763` — `fix(web): read inherited chunk rejection reasons`
 - `6b1949e` — `feat(web): reload safely on build changes`
 - `53e88d5` — `fix(web): expose escaped build version route`
+- `f653750` — `test(web): verify stale build recovery`
+- `99732a9` — `fix(web): share stale build recovery controller`
 
-The deterministic acceptance harness and this evidence are delivered together by the Task 4 commit with subject
-`test(web): verify stale build recovery`.
+Independent review of the first Task 4 harness found two Important gaps: it duplicated the Guard's recovery branches,
+and its escape-hatch check scanned only the automation module, not the test driver. Commit `99732a9` closes those
+verification gaps with a shared production controller and a two-file TypeScript-AST scanner.
 
 ## Deterministic harness evidence
 
@@ -22,54 +25,73 @@ $ node --test packages/web/test/stale-build-recovery-harness.test.mjs
 Could not find 'packages/web/test/stale-build-recovery-harness.test.mjs'
 ```
 
+Important-fix RED:
+
+```text
+SyntaxError: verify-stale-build-recovery.mjs does not provide scanAutomationEscapeHatches
+Error: Failed to resolve import "../build-recovery-controller"
+```
+
+The first failure proved that the scanner did not cover the test driver. The second locked the missing shared
+production controller before implementation.
+
 GREEN command:
 
 ```bash
 pnpm --dir packages/web test:stale-build-recovery
 ```
 
-Result: 4 tests passed. The Node harness starts a same-origin HTTP build-id fixture and invokes bundled production
-contracts from `web-build-version.ts` and `chunk-load-recovery.ts`; it does not copy the recovery decision logic.
+Result: 6 tests passed. The Node harness starts a same-origin HTTP build-id fixture and invokes the bundled production
+`build-recovery-controller.ts`, `web-build-version.ts`, and `chunk-load-recovery.ts` contracts. The React Guard invokes
+the same controller for probe results, BroadcastChannel/chunk requests, and the manual prompt action. The harness no
+longer implements build comparison, failure capping, reservation, prompt, announce, or reload decisions itself.
 It emits JSON evidence with `source=product-recovery` and verifies:
 
-- A→B without a draft: one navigation; a repeated B target stays at one navigation.
-- Three B-side HTTP 503 probes: zero navigation.
-- B→C with a text draft: zero navigation before the prompt action, one after it.
-- No browser-automation hard-refresh escape hatch is present in the harness.
+- A is first probed as the matching build, then the fixture switches A→B: one controller-emitted navigation; a
+  repeated B target stays at one navigation.
+- B is first probed successfully, then three 503 probes cap failures; the fourth attempt sends no HTTP. Attention
+  resets the cap and permits a new probe.
+- B is first probed as matching, then the fixture switches B→C with a text draft: zero navigation before the
+  controller's manual prompt action, one after it.
+- The real `prepareBrowserForReload` updates the existing service worker and clears the stale cache before the
+  controller-emitted navigation callback.
+- A TypeScript AST scanner checks exactly the Task 4 automation module and test driver. Negative fixtures cover direct,
+  optional, computed, and optional-computed `page`/`location` reload calls plus Cmd/Meta hard-refresh shortcuts.
 
 The real React guard suites continue to own component lifecycle, persistent prompt, BroadcastChannel, cleanup order,
 and manual-action control-flow coverage.
 
 ## Local gate
 
-All commands ran from worktree commit `53e88d5` plus the four Task 4 delivery files:
+The Important-fix gate ran from committed recovery chain through `99732a9`:
 
 ```bash
 pnpm --dir packages/web exec vitest run \
   src/utils/__tests__/web-build-version.test.ts \
   src/utils/__tests__/chunk-load-recovery.test.ts \
   src/utils/__tests__/chunk-load-bootstrap.test.ts \
+  src/utils/__tests__/build-recovery-controller.test.ts \
   src/components/__tests__/chunk-load-bootstrap-layout.test.ts \
   src/components/__tests__/chunk-load-refresh-guard.test.tsx \
   src/components/__tests__/global-error.test.tsx
 pnpm --dir packages/web test:stale-build-recovery
 pnpm --dir packages/web test:ci:config
 pnpm --dir packages/web lint
-CLOWDER_WEB_BUILD_ID=task393-local-b pnpm --dir packages/web build
-test "$(cat packages/web/.next/BUILD_ID)" = task393-local-b
+CLOWDER_WEB_BUILD_ID=task393-controller-fix pnpm --dir packages/web build
+test "$(cat packages/web/.next/BUILD_ID)" = task393-controller-fix
 git diff --check
 ```
 
 Results:
 
-- focused recovery Vitest: 6 files, 28 tests passed;
-- deterministic Node harness: 4 tests passed;
+- focused recovery Vitest: 7 files, 32 tests passed;
+- deterministic Node harness: 6 tests passed;
 - Web config/security Node tests: 13 tests passed;
 - lint: exit 0; warnings only (existing hook/image warnings and Tasks 1–3 recovery UI color-token warnings);
-- production build: exit 0; generated `.next/BUILD_ID` is `task393-local-b`.
+- production build: exit 0; generated `.next/BUILD_ID` is `task393-controller-fix`.
 
 The production endpoint was tested without touching live port 3003 or PM2. A temporary server was started from this
-worktree on `127.0.0.1:5103`, then stopped after the probe:
+worktree on `127.0.0.1:5105`, then stopped after the probe:
 
 ```text
 HTTP/1.1 200 OK
@@ -77,7 +99,7 @@ cache-control: no-store, max-age=0
 pragma: no-cache
 content-type: application/json
 
-{"buildId":"task393-local-b"}
+{"buildId":"task393-controller-fix"}
 ```
 
 ## Service worker contract
