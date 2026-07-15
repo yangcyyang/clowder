@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
+const nextPwaPath = require.resolve('@ducanh2912/next-pwa');
 const ENV_KEYS = [
   'NEXT_PUBLIC_API_URL',
   'API_SERVER_PORT',
@@ -12,6 +13,7 @@ const ENV_KEYS = [
   'NODE_ENV',
   'NEXT_DIST_DIR',
   'CLOWDER_API_BEARER_TOKEN',
+  'CLOWDER_WEB_BUILD_ID',
 ];
 
 function withEnv(overrides, run) {
@@ -32,6 +34,29 @@ function withEnv(overrides, run) {
       }
     }
   }
+}
+
+function withCapturedPwaOptions(overrides, run) {
+  const previousPwaModule = require.cache[nextPwaPath];
+  require.cache[nextPwaPath] = {
+    id: nextPwaPath,
+    filename: nextPwaPath,
+    loaded: true,
+    exports: {
+      default: (options) => (config) => ({ ...config, __pwaOptions: options }),
+    },
+  };
+
+  return Promise.resolve()
+    .then(() => withEnv(overrides, run))
+    .finally(() => {
+      delete require.cache[configPath];
+      if (previousPwaModule) {
+        require.cache[nextPwaPath] = previousPwaModule;
+      } else {
+        delete require.cache[nextPwaPath];
+      }
+    });
 }
 
 describe('next.config rewrites', () => {
@@ -104,6 +129,22 @@ describe('next.config rewrites', () => {
     });
     await withEnv({}, async (config) => {
       assert.equal(config.env?.NEXT_PUBLIC_API_AUTH_PROXY_ENABLED, '0');
+    });
+  });
+
+  it('uses the explicit stable build id for both server and browser contracts', async () => {
+    await withEnv({ NODE_ENV: 'development', CLOWDER_WEB_BUILD_ID: 'build-a' }, async (config) => {
+      assert.equal(await config.generateBuildId(), 'build-a');
+      assert.equal(config.env?.NEXT_PUBLIC_CLOWDER_WEB_BUILD_ID, 'build-a');
+    });
+  });
+
+  it('keeps the build-id probe NetworkOnly before generic PWA runtime caching rules', async () => {
+    await withCapturedPwaOptions({ NODE_ENV: 'production' }, async (config) => {
+      const runtimeCaching = config.__pwaOptions?.workboxOptions?.runtimeCaching;
+      assert.ok(Array.isArray(runtimeCaching));
+      assert.equal(runtimeCaching[0]?.urlPattern, '/_clowder/build-id');
+      assert.equal(runtimeCaching[0]?.handler, 'NetworkOnly');
     });
   });
 });

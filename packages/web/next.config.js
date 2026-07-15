@@ -1,6 +1,29 @@
+const { execFileSync } = require('node:child_process');
+
 const withPWA = require('@ducanh2912/next-pwa').default;
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
+
+function sanitizeBuildId(value) {
+  return value.trim().replace(/[^A-Za-z0-9._-]+/g, '-') || 'development';
+}
+
+function resolveWebBuildId() {
+  const explicitBuildId = process.env.CLOWDER_WEB_BUILD_ID?.trim();
+  if (explicitBuildId) return sanitizeBuildId(explicitBuildId);
+
+  try {
+    return sanitizeBuildId(
+      execFileSync('git', ['rev-parse', '--verify', 'HEAD'], {
+        cwd: __dirname,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    );
+  } catch {
+    return 'development';
+  }
+}
 
 function resolveApiBaseUrl() {
   // Prefer explicit local port over NEXT_PUBLIC_API_URL: SSR rewrites should
@@ -25,6 +48,7 @@ function resolveApiBaseUrl() {
 
 const apiBaseUrl = resolveApiBaseUrl();
 const distDir = process.env.NEXT_DIST_DIR ?? (process.env.NODE_ENV === 'development' ? '.next-dev' : '.next');
+const webBuildId = resolveWebBuildId();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -33,6 +57,10 @@ const nextConfig = {
   // must never enter a NEXT_PUBLIC_* variable or a browser bundle.
   env: {
     NEXT_PUBLIC_API_AUTH_PROXY_ENABLED: process.env.CLOWDER_API_BEARER_TOKEN?.trim() ? '1' : '0',
+    NEXT_PUBLIC_CLOWDER_WEB_BUILD_ID: webBuildId,
+  },
+  async generateBuildId() {
+    return webBuildId;
   },
   // Keep dev-server artifacts separate from `next build` output. Running build
   // while 3003 is open previously overwrote `.next/static`, leaving dev HTML
@@ -105,6 +133,10 @@ const pwaOptions = {
     disableDevLogs: true,
     runtimeCaching: [
       {
+        urlPattern: '/_clowder/build-id',
+        handler: 'NetworkOnly',
+      },
+      {
         // API calls: never cache — always fresh chat data
         urlPattern: /^https?:\/\/.*\/api\//,
         handler: 'NetworkOnly',
@@ -128,6 +160,4 @@ const pwaOptions = {
 };
 
 module.exports =
-  process.env.NODE_ENV === 'development' && !enablePwaInDev
-    ? nextConfig
-    : withPWA(pwaOptions)(nextConfig);
+  process.env.NODE_ENV === 'development' && !enablePwaInDev ? nextConfig : withPWA(pwaOptions)(nextConfig);
