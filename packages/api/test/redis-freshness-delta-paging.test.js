@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis message paging"
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import {

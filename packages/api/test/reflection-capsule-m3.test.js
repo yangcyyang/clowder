@@ -1,3 +1,4 @@
+// @ci-tier external reason="requires upstream reflection docs excluded from the public repository"
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

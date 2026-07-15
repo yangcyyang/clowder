@@ -1,3 +1,4 @@
+// @ci-tier external reason="requires upstream pack fixtures excluded from the public repository"
 /**
  * F129 Integration Test — End-to-End Pack Pipeline
  * AC coverage: AC-A1 through AC-A10

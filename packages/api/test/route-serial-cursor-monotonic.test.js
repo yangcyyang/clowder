@@ -115,7 +115,7 @@ test('routeSerial keeps newest cursor boundary when same cat re-enters in one ch
   };
 
   const cursorBoundaries = new Map();
-  for await (const _ of routeSerial(deps, ['opus'], '当前用户消息', 'user-1', 'thread-1', {
+  for await (const _ of routeSerial(deps, ['opus'], '标准工具箱 当前用户消息', 'user-1', 'thread-1', {
     currentUserMessageId: newUserMsgId,
     thinkingMode: 'play',
     cursorBoundaries,

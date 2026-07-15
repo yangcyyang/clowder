@@ -1,3 +1,4 @@
+// @ci-tier integration reason="covers session config cache and API route integration"
 /**
  * F33 Phase 3: Session Strategy — runtime override layer + route logic
  * Tests for getSessionStrategyWithSource(), runtime override cache,

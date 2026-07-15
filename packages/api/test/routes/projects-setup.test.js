@@ -1,9 +1,10 @@
+// @ci-tier local-os reason="runs local git init and writes project bootstrap files"
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import Fastify from 'fastify';

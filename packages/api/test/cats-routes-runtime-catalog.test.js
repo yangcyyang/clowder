@@ -470,7 +470,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const res = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    assert.deepEqual(body.cats, [], 'first-run bootstrap creates an empty runtime catalog');
+    assert.ok(body.cats.length > 0, 'first read remains available from the preloaded runtime registry');
 
     // F171: bootstrapCatCatalog now creates an EMPTY catalog (first-run quest).
     // The catalog file has breeds: [] — cats are served from catRegistry + lazy first-run setup.

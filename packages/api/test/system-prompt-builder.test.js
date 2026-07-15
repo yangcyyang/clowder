@@ -849,10 +849,17 @@ describe('SystemPromptBuilder', () => {
 
   test('readLessonsForPrompt loads .cat-cafe/LESSONS.md content', async () => {
     const { readLessonsForPrompt } = await import('../dist/domains/cats/services/agents/memory/LessonStore.js');
-    const content = await readLessonsForPrompt();
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-lessons-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe'), { recursive: true });
+      await writeFile(resolve(root, '.cat-cafe', 'LESSONS.md'), '# Clowder 公共踩坑记录\n\n- textFold fixture');
+      const content = await readLessonsForPrompt(root);
 
-    assert.ok(content?.includes('Clowder 公共踩坑记录'), 'Should load shared lessons file');
-    assert.ok(content?.includes('textFold'), 'Should include a real known lesson');
+      assert.ok(content?.includes('Clowder 公共踩坑记录'), 'Should load shared lessons file');
+      assert.ok(content?.includes('textFold'), 'Should include the fixture lesson');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test('readProjectProgressForPrompt loads selected progress.md files', async () => {
@@ -992,7 +999,10 @@ describe('SystemPromptBuilder', () => {
       );
 
       const content = await readProjectHandoffIndexesForBootstrap(['demo'], root);
-      assert.ok(content?.startsWith('[Project Handoff Index'), 'Should expose handoff index as the first durable block');
+      assert.ok(
+        content?.startsWith('[Project Handoff Index'),
+        'Should expose handoff index as the first durable block',
+      );
       assert.ok(content?.includes('continue bridge'), 'Should include handoff content');
       assert.ok(content?.includes('reference only'), 'Should mark block as reference data');
     } finally {
@@ -1056,7 +1066,10 @@ describe('SystemPromptBuilder', () => {
     assert.ok(high.includes('验证命令'), 'High pressure should request handoff evidence');
     assert.ok(critical.includes('紧急'), 'Should render critical pressure heading');
     assert.ok(critical.includes('必须立即停下'), 'Critical pressure should require stopping and preserving state');
-    assert.ok(critical.includes('下一轮可能从压缩后的摘要恢复'), 'Critical pressure should mention compression recovery');
+    assert.ok(
+      critical.includes('下一轮可能从压缩后的摘要恢复'),
+      'Critical pressure should mention compression recovery',
+    );
   });
 
   test('buildInvocationContext injects A2A exit check when enabled (non-parallel)', async () => {
@@ -2292,7 +2305,10 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('核心协作规则（摘要）'), 'minimal should keep the core governance floor');
     assert.ok(prompt.includes('完整规则按需查阅'), 'minimal should point to the full source of truth');
     assert.ok(!prompt.includes('46 hotfix止血治理'), 'minimal should not carry operational governance details');
-    assert.ok(!prompt.includes('缅因猫fallback层数检测'), 'minimal should not carry breed-specific operational audit text');
+    assert.ok(
+      !prompt.includes('缅因猫fallback层数检测'),
+      'minimal should not carry breed-specific operational audit text',
+    );
   });
 
   test('Slock-like governance: standard toolbox keeps operational shared-rules digest', async () => {

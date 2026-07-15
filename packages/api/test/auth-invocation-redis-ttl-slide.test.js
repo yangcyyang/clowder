@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated REDIS_URL and real Redis TTL sliding"
 /**
  * F174 Phase B P1 (gpt52 review on PR #1363) — Redis-specific TTL slide.
  *

@@ -76,6 +76,11 @@ export async function migrateRouterOpts(oldOpts) {
   resetMigrationState();
   await ensureCatRegistryPopulated();
   const { claudeService, codexService, geminiService, ...rest } = oldOpts;
+  if (rest.threadStore && typeof rest.threadStore.getContextResetBoundary !== 'function') {
+    // Older test doubles predate context reset boundaries. Keep their default
+    // behavior explicit instead of letting unrelated routing tests crash.
+    rest.threadStore.getContextResetBoundary = () => null;
+  }
   const agentRegistry = await createTestAgentRegistry({ claudeService, codexService, geminiService });
   return { agentRegistry, ...rest };
 }

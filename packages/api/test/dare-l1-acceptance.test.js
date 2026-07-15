@@ -138,6 +138,7 @@ describe('DARE L1 acceptance contract', () => {
     const spawnFn = mock.fn(() => proc);
     const oldTimeout = process.env.CLI_TIMEOUT_MS;
     process.env.CLI_TIMEOUT_MS = '20';
+    const keepAlive = setInterval(() => {}, 1000);
 
     try {
       const service = new DareAgentService({ catId: 'dare', spawnFn, model: 'test/model' });
@@ -147,6 +148,7 @@ describe('DARE L1 acceptance contract', () => {
       assert.ok(timeoutError, 'must emit timeout error when CLI is silent');
       assert.equal(messages.at(-1)?.type, 'done');
     } finally {
+      clearInterval(keepAlive);
       if (oldTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
       else process.env.CLI_TIMEOUT_MS = oldTimeout;
     }

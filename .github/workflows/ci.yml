@@ -24,6 +24,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -37,6 +38,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,9 +51,28 @@ jobs:
       - run: pnpm --filter @cat-cafe/api build
       - run: pnpm --filter @cat-cafe/web build
 
-  test:
-    name: Test (Public)
+  api-core:
+    name: API Core Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/api run test:public
+
+  api-lanes:
+    name: API ${{ matrix.lane }} Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [integration, slow]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -61,11 +82,33 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
-      - run: pnpm --filter @cat-cafe/api run test:public
+      - run: pnpm --filter @cat-cafe/mcp-server build
+      - run: pnpm --filter @cat-cafe/api build
+      - run: pnpm --filter @cat-cafe/api run test:lane:${{ matrix.lane }}
+
+  api-redis:
+    name: API Redis Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated Redis test dependency
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/mcp-server build
+      - run: pnpm --filter @cat-cafe/api build
+      - run: pnpm --filter @cat-cafe/api run test:lane:redis
 
   dir-size:
     name: Directory Size Guard
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/check-dir-size.sh

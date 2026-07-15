@@ -1,3 +1,4 @@
+// @ci-tier integration reason="wires provider services, router, callback routes, and stores"
 /**
  * Integration Wiring Tests
  * 验证 Phase 2.5 CLI 迁移后的组件接线

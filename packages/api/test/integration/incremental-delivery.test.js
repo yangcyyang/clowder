@@ -64,8 +64,8 @@ describe('Incremental Delivery', () => {
       }),
     );
 
-    await collect(router.route('u1', '@opus round-1', 'thread-inc-1'));
-    await collect(router.route('u1', '@opus round-2', 'thread-inc-1'));
+    await collect(router.route('u1', '@opus 标准工具箱 round-1', 'thread-inc-1'));
+    await collect(router.route('u1', '@opus 标准工具箱 round-2', 'thread-inc-1'));
 
     const p1 = opus.capturedPrompts[0] ?? '';
     const p2 = opus.capturedPrompts[1] ?? '';
@@ -95,8 +95,8 @@ describe('Incremental Delivery', () => {
     );
 
     await collect(router.route('u2', '@opus alpha', 'thread-inc-2'));
-    await collect(router.route('u2', '@codex beta', 'thread-inc-2'));
-    await collect(router.route('u2', '@codex gamma', 'thread-inc-2'));
+    await collect(router.route('u2', '@codex 标准工具箱 beta', 'thread-inc-2'));
+    await collect(router.route('u2', '@codex 标准工具箱 gamma', 'thread-inc-2'));
 
     const codexPrompt1 = codex.capturedPrompts[0] ?? '';
     const codexPrompt2 = codex.capturedPrompts[1] ?? '';
@@ -134,7 +134,7 @@ describe('Incremental Delivery', () => {
     // Round 1: long user message goes to opus (codex hasn't seen it yet)
     await collect(router.route('u3', longUserMsg, 'thread-inc-91'));
     // Round 2: codex is invoked — should see long user message via incremental context
-    await collect(router.route('u3', '@codex review this', 'thread-inc-91'));
+    await collect(router.route('u3', '@codex 重度工具箱 review this', 'thread-inc-91'));
 
     const codexPrompt = codex.capturedPrompts[0] ?? '';
     // The tail marker must survive — old `truncate: 2000` would chop it

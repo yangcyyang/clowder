@@ -331,11 +331,11 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
     }
   });
 
-  test('P1 (cloud Codex review): modern path — hasQueuedAgentForCat skip must NOT mutate streak even with substantive content', async () => {
+  test('P1 (cloud Codex review): modern path — exact replay dedup must NOT mutate streak even with substantive content', async () => {
     // Reward-hack vector cloud Codex flagged: substantive activity (long content)
     // triggers streak RESET even when the target is later skipped by
-    // `hasQueuedAgentForCat` dedup guard. After fix: streak only mutates when
-    // the target is about to actually enqueue (post-guards).
+    // exact-idempotency dedup guard. After fix: streak only mutates when the
+    // target is about to actually enqueue (post-guards).
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();
     try {
@@ -356,11 +356,12 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
         pushToWorklist(threadId, ['codex'], 'opus');
         entry.executedIndex = 3; // streak=3
 
-        // Preload InvocationQueue with 'opus' so dedup skips the callback.
+        // Preload the exact callback idempotency key so replay dedup skips it.
         const invocationQueue = new InvocationQueue();
         invocationQueue.enqueue({
           threadId,
           userId: 'user1',
+          idempotencyKey: 'a2a:msg-cb-codex-p1:codex:opus',
           content: 'existing',
           source: 'agent',
           targetCats: ['opus'],
@@ -368,7 +369,7 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
           autoExecute: true,
           callerCatId: 'somecat',
         });
-        assert.ok(invocationQueue.hasQueuedAgentForCat(threadId, 'opus'), 'precondition: opus already queued');
+        assert.equal(invocationQueue.list(threadId, 'user1').length, 1, 'precondition: exact replay key is queued');
 
         const socketManager = createMockSocketManager();
         const longContent = `${'详细架构分析'.repeat(40)}\n@opus 请看`; // >200 chars → substantive
@@ -399,13 +400,13 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
           },
         );
 
-        assert.deepStrictEqual(result.enqueued, [], 'dedup must skip — nothing enqueued');
+        assert.deepStrictEqual(result.enqueued, [], 'exact replay must not be reported as newly enqueued');
         // KEY assertion: streak must stay at 3 (no reset by substantive activity)
         const currentEntry = getWorklist(threadId);
         assert.equal(
           currentEntry?.streakPair?.count,
           3,
-          'streak must NOT reset to 1 when hasQueuedAgentForCat dedup skipped the enqueue (cloud Codex P1)',
+          'streak must NOT reset to 1 when exact replay dedup skipped the enqueue (cloud Codex P1)',
         );
       } finally {
         unregisterWorklist(threadId, entry);

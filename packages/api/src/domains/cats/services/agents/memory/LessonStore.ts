@@ -32,9 +32,9 @@ export async function readLessons(projectRoot = findMonorepoRoot()): Promise<Les
   };
 }
 
-export async function readLessonsForPrompt(): Promise<string | null> {
+export async function readLessonsForPrompt(projectRoot = findMonorepoRoot()): Promise<string | null> {
   try {
-    const record = await readLessons();
+    const record = await readLessons(projectRoot);
     const content = record.content.trim();
     return content ? content : null;
   } catch {

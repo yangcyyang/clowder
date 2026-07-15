@@ -223,11 +223,14 @@ describe('AC-A7: QueueProcessor slot-aware — opus completion dequeues only opu
     const processor = new QueueProcessor(deps);
 
     // Enqueue entries for both cats
-    enqueueEntry(deps.queue, { content: 'opus follow-up', targetCats: ['opus'] });
-    enqueueEntry(deps.queue, { content: 'codex work', targetCats: ['codex'] });
+    const opusEntry = enqueueEntry(deps.queue, { content: 'opus follow-up', targetCats: ['opus'] });
+    const codexEntry = enqueueEntry(deps.queue, { content: 'codex work', targetCats: ['codex'] });
+    deps.queue.backfillMessageId('t1', 'u1', opusEntry.id, 'msg-opus');
+    deps.queue.backfillMessageId('t1', 'u1', codexEntry.id, 'msg-codex');
 
     // Complete opus → should try to auto-dequeue
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Verify router was called (auto-dequeued an entry)
     assert.ok(deps.router.routeExecution.mock.calls.length > 0, 'auto-dequeue triggered execution');

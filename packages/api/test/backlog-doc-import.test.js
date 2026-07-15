@@ -291,10 +291,49 @@ describe('parseFeatureDocName', () => {
 
 describe('gitShowFile', () => {
   test('reads a file from origin/main', async () => {
-    const { gitShowFile } = await import('../dist/routes/git-doc-reader.js');
-    const content = await gitShowFile('docs/ROADMAP.md');
-    assert.ok(content, 'should return content');
-    assert.ok(content.includes('| ID |') || content.includes('backlog'), 'should contain expected content');
+    const { _resetFetchTimer, gitShowFile } = await import('../dist/routes/git-doc-reader.js');
+    const remoteDir = mkdtempSync(join(tmpdir(), 'git-doc-reader-remote-'));
+    const seedDir = mkdtempSync(join(tmpdir(), 'git-doc-reader-seed-'));
+    const clientDir = mkdtempSync(join(tmpdir(), 'git-doc-reader-client-'));
+    const roadmap = '| ID | Name |\n| --- | --- |\n| F001 | deterministic backlog |\n';
+
+    try {
+      execFileSync('git', ['init', '--bare', '-b', 'main'], { cwd: remoteDir });
+      execFileSync('git', ['init', '-b', 'main'], { cwd: seedDir });
+      execFileSync('git', ['config', 'user.name', 'Test Bot'], { cwd: seedDir });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: seedDir });
+      mkdirSync(join(seedDir, 'docs'), { recursive: true });
+      writeFileSync(join(seedDir, 'docs', 'ROADMAP.md'), roadmap);
+      execFileSync('git', ['add', '.'], { cwd: seedDir });
+      execFileSync('git', ['commit', '-m', 'seed origin main'], { cwd: seedDir });
+      execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: seedDir });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: seedDir, stdio: 'ignore' });
+
+      execFileSync('git', ['init', '-b', 'local'], { cwd: clientDir });
+      execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: clientDir });
+      assert.throws(
+        () =>
+          execFileSync('git', ['rev-parse', '--verify', 'origin/main^{commit}'], {
+            cwd: clientDir,
+            stdio: 'ignore',
+          }),
+        'precondition: client must fetch origin/main itself',
+      );
+
+      _resetFetchTimer();
+      const content = await gitShowFile('docs/ROADMAP.md', clientDir);
+      assert.strictEqual(content, roadmap);
+      assert.strictEqual(
+        execFileSync('git', ['show', 'origin/main:docs/ROADMAP.md'], { cwd: clientDir, encoding: 'utf8' }),
+        roadmap,
+        'gitShowFile should populate origin/main through its real fetch path',
+      );
+    } finally {
+      _resetFetchTimer();
+      rmSync(remoteDir, { recursive: true, force: true });
+      rmSync(seedDir, { recursive: true, force: true });
+      rmSync(clientDir, { recursive: true, force: true });
+    }
   });
 
   test('uses cached origin/main ref when fetch fails transiently', async () => {

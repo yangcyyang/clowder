@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis authorization stores"
 /**
  * Redis Authorization Stores tests (Rule + Pending + Audit)
  * 有 Redis → 测全量；无 Redis → skip

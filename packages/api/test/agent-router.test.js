@@ -1935,7 +1935,7 @@ describe('AgentRouter', () => {
       }),
     );
 
-    for await (const _ of router.route('user-1', '@opus follow up')) {
+    for await (const _ of router.route('user-1', '@opus 标准工具箱 follow up')) {
     }
 
     assert.ok(opusPrompt.includes('对话历史'), 'Prompt should contain context history header');
@@ -2060,7 +2060,7 @@ describe('AgentRouter', () => {
       }),
     );
 
-    for await (const _ of router.route('user-1', '@opus first message')) {
+    for await (const _ of router.route('user-1', '@opus 标准工具箱 first message')) {
     }
 
     assert.ok(opusPrompt.includes('对话历史增量'), 'Incremental mode should include delta header');

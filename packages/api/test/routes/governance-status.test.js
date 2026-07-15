@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="requires a local git executable and temporary repository"
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';

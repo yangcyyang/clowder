@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis PR tracking store"
 // @ts-check
 
 import assert from 'node:assert';

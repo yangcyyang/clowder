@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis message store"
 /**
  * RedisMessageStore tests
  * 有 Redis → 测全量；无 Redis → skip

@@ -291,7 +291,7 @@ process.stdin.on('data', (chunk) => {
 setTimeout(() => {
   initEmitted = true;
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'real-spawn-session' }) + '\\n');
-}, 100);
+}, 10);
 setTimeout(() => {
   console.error('NO_STDIN_AFTER_INIT');
   process.exit(9);
@@ -314,8 +314,14 @@ setTimeout(() => {
       }),
     );
 
-    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'real-spawn-ok'), true);
-    assert.equal(messages.some((m) => m.type === 'error'), false);
+    assert.equal(
+      messages.some((m) => m.type === 'text' && m.content === 'real-spawn-ok'),
+      true,
+    );
+    assert.equal(
+      messages.some((m) => m.type === 'error'),
+      false,
+    );
   } finally {
     clearClaudeRuntimeSteerChannelsForTests();
     rmSync(dir, { recursive: true, force: true });
@@ -373,8 +379,14 @@ setTimeout(() => {
       }),
     );
 
-    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'stdin-first-ok'), true);
-    assert.equal(messages.some((m) => m.type === 'error'), false);
+    assert.equal(
+      messages.some((m) => m.type === 'text' && m.content === 'stdin-first-ok'),
+      true,
+    );
+    assert.equal(
+      messages.some((m) => m.type === 'error'),
+      false,
+    );
   } finally {
     clearClaudeRuntimeSteerChannelsForTests();
     rmSync(dir, { recursive: true, force: true });
@@ -429,8 +441,14 @@ setTimeout(() => {
       }),
     );
 
-    assert.equal(messages.some((m) => m.type === 'text' && m.content === 'result-end-ok'), true);
-    assert.equal(messages.some((m) => m.type === 'error'), false);
+    assert.equal(
+      messages.some((m) => m.type === 'text' && m.content === 'result-end-ok'),
+      true,
+    );
+    assert.equal(
+      messages.some((m) => m.type === 'error'),
+      false,
+    );
   } finally {
     clearClaudeRuntimeSteerChannelsForTests();
     rmSync(dir, { recursive: true, force: true });
@@ -690,8 +708,14 @@ test('suppresses diagnostic-only EDE result without exposing raw runtime error',
   ]);
 
   const msgs = await promise;
-  assert.equal(msgs.some((m) => m.type === 'error'), false);
-  assert.equal(msgs.some((m) => m.type === 'done'), true);
+  assert.equal(
+    msgs.some((m) => m.type === 'error'),
+    false,
+  );
+  assert.equal(
+    msgs.some((m) => m.type === 'done'),
+    true,
+  );
 });
 
 test('includes exit signal in CLI error message when no exit code (stderr sanitized)', async () => {

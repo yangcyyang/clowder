@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="executes Bash restore flow with executable redis command stubs"
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="runs multi-route setup flow backed by local git and filesystem"
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';

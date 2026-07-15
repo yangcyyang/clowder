@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis read-state and message stores"
 /**
  * RedisThreadReadStateStore tests (F069)
  * 有 Redis → 测全量；无 Redis → skip

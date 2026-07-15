@@ -200,6 +200,7 @@ describe('F041 Cloud P1-1: bootstrap generates CLI configs', () => {
         CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
         CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
         CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
+        CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
         CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
         CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
       });

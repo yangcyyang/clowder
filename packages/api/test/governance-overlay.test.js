@@ -31,7 +31,7 @@ describe('governance overlay integration (#603)', () => {
       await initGovernanceOverlay();
       const digest = getGovernanceDigest();
 
-      assert.ok(digest.includes('家规'), 'base governance digest should be present');
+      assert.ok(digest.includes('协作规则'), 'base governance digest should be present');
       assert.ok(!digest.includes('Custom rule'), 'no overlay content when files absent');
     });
   });
@@ -45,7 +45,7 @@ describe('governance overlay integration (#603)', () => {
         await initGovernanceOverlay();
         const digest = getGovernanceDigest();
 
-        assert.ok(digest.includes('家规'), 'base governance digest should be present');
+        assert.ok(digest.includes('协作规则'), 'base governance digest should be present');
         assert.ok(digest.includes('Custom rule here'), '.local.md content should be appended');
       },
     );

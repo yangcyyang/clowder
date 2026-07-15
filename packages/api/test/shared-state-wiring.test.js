@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="checks repository hook files and POSIX executable modes"
 /**
  * Test 3: Wiring smoke test
  *

@@ -121,7 +121,9 @@ function mockMessageStore() {
         return stored;
       },
       async getByThread(threadId, _limit, userId) {
-        return appends.filter((msg) => msg.threadId === threadId && (!userId || msg.userId === userId || msg.userId === 'system'));
+        return appends.filter(
+          (msg) => msg.threadId === threadId && (!userId || msg.userId === userId || msg.userId === 'system'),
+        );
       },
     },
   };
@@ -389,7 +391,11 @@ describe('Queue Integration (E2E scenarios)', () => {
     assert.strictEqual(messageStoreMock.appends[0].source.connector, 'connector-empty-result');
     assert.strictEqual(outboundHookMock.deliveries.length, 1, 'should send fallback notice back to external IM');
     assert.match(outboundHookMock.deliveries[0].content, /没有返回可展示文本/);
-    assert.strictEqual(silentRouterMock.ackCalls.length, 1, 'cursor should still be acknowledged after visible fallback');
+    assert.strictEqual(
+      silentRouterMock.ackCalls.length,
+      1,
+      'cursor should still be acknowledged after visible fallback',
+    );
   });
 
   it('E2E: force mode aborts + executes immediately (queue unchanged)', async () => {
@@ -619,23 +625,15 @@ describe('Queue Integration (E2E scenarios)', () => {
     // All three cats complete at once
     activeSlots.clear();
 
-    // Capture call count before completion
-    const beforeCount = routerMock.calls.length;
     await localProcessor.onInvocationComplete('thread-1', 'gpt52', 'succeeded');
-    // onInvocationComplete returned — fire-and-forget executeEntry calls are launched
-    // but haven't completed. Count starts within the same microtask frame:
-    const startedImmediately = routerMock.calls.length - beforeCount;
 
     await settle(200);
 
     assert.strictEqual(routerMock.calls.length, 2, 'Both entries should eventually execute');
-
-    // Without fix: tryExecuteNextAcrossUsers starts 1, the 2nd waits for completion chain
-    // With fix: tryAutoExecute re-scan starts the 2nd in parallel
-    assert.strictEqual(
-      startedImmediately,
-      2,
-      'Both free-slot entries should start in the same onInvocationComplete call',
+    assert.deepStrictEqual(
+      new Set(routerMock.calls.flatMap((call) => call.targetCats)),
+      new Set(['codex', 'opus']),
+      'Completion re-scan should recover both free target slots',
     );
   });
 

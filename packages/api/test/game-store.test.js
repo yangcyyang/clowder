@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis for game-store persistence and CAS"
 /**
  * GameStore Tests (F101 Task A4)
  * Tests RedisGameStore with optimistic concurrency + single-game-per-thread (KD-15).

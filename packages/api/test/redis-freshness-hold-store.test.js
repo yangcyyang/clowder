@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis freshness hold store"
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { RedisFreshnessHoldStore } from '../dist/domains/cats/services/stores/redis/RedisFreshnessHoldStore.js';

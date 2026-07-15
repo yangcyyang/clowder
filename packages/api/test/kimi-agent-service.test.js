@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="requires POSIX shell stub resolution and filesystem symlinks"
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

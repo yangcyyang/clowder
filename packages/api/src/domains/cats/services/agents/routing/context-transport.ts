@@ -309,12 +309,16 @@ export function formatTombstone(tombstone: ContextTombstone): string {
  * The last message's tool content is preserved verbatim.
  * Earlier messages with tool_result events get their content replaced with a digest line.
  */
-export function scrubToolPayloads(messages: readonly StoredMessage[]): StoredMessage[] {
+export function scrubToolPayloads(
+  messages: readonly StoredMessage[],
+  options: { preserveLast?: boolean } = {},
+): StoredMessage[] {
   if (messages.length === 0) return [];
+  const preserveLast = options.preserveLast ?? true;
 
   return messages.map((msg, i) => {
     // Last message: preserve verbatim
-    if (i === messages.length - 1) return { ...msg };
+    if (preserveLast && i === messages.length - 1) return { ...msg };
 
     // Only scrub messages that have tool_result events
     if (!hasToolResult(msg)) return { ...msg };

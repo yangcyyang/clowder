@@ -208,6 +208,17 @@ export class InvocationQueue {
     return q;
   }
 
+  /** Exact replay guard matching enqueue()'s active idempotency semantics. */
+  hasActiveIdempotencyKey(threadId: string, userId: string, idempotencyKey: string): boolean {
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    return Boolean(
+      q?.some(
+        (entry) =>
+          entry.idempotencyKey === idempotencyKey && (entry.status === 'queued' || entry.status === 'processing'),
+      ),
+    );
+  }
+
   private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
   /** F175: multi-dimensional entry comparator for dequeue ordering.

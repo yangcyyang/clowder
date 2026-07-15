@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="executes Bash launchd helpers and checks executable file modes"
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

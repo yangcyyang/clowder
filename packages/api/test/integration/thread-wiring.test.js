@@ -1,3 +1,4 @@
+// @ci-tier integration reason="wires routes, router, sockets, callbacks, and thread stores"
 /**
  * Thread Wiring Integration Tests
  * 验证对话管理 + 图片 + WebSocket 分房间的完整闭环

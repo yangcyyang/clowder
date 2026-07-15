@@ -417,7 +417,7 @@ export async function* routeParallel(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
-        ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
+        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
@@ -1284,7 +1284,7 @@ export async function* routeParallel(
 
           const thinking = catThinking.get(msg.catId);
           try {
-            const publishTimestamp = Date.now();
+            const publishTimestamp = invocationStartedAt;
             const outboundDraft = {
               userId,
               catId: msg.catId as CatId,
@@ -1459,7 +1459,9 @@ export async function* routeParallel(
           const shouldPersistNoTextMessage = hasRichBlocks;
           const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
 
-          if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
+          // A synthetic silent-completion notice is runtime diagnostics, not a
+          // cat-authored response and must not acknowledge a pending guide.
+          if (shouldPersistNoTextMessage || sawUserFacingSystemInfo) {
             catProducedOutput = true;
           }
 

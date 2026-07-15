@@ -614,7 +614,7 @@ describe('ConnectorInvokeTrigger', () => {
     assert.deepStrictEqual(deliverOrder, ['opus', 'codex'], 'Should deliver in cat order, not race order');
   });
 
-  it('cloud-P1: does NOT deliver empty reply for silent invocation (no text, no richBlocks)', async () => {
+  it('delivers a visible diagnostic notice for a silent invocation', async () => {
     // Router yields only 'done' — no text, no richBlocks
     const silentRouter = /** @type {any} */ ({
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
@@ -640,7 +640,8 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
-    assert.strictEqual(deliverCalls.length, 0, 'Should NOT deliver empty reply for silent cat');
+    assert.strictEqual(deliverCalls.length, 1, 'Silent cat should produce one visible diagnostic notice');
+    assert.match(deliverCalls[0].content, /^\[执行提醒\]: .*本轮没有返回可展示文本/u);
   });
 
   it('does not add an empty-result reminder when the invocation already surfaced a real error', async () => {

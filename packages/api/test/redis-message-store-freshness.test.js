@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis freshness linearization"
 /**
  * Freshness Hold Task 1 — Redis linearization RED test.
  *

@@ -1,3 +1,4 @@
+// @ci-tier local-os reason="creates real local git repositories and worktrees"
 /**
  * Integration tests for project-aware workspace — F063 B1
  *

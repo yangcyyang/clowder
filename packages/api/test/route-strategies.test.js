@@ -169,6 +169,7 @@ function createMockDeps(services, appendCalls, threadStore = null, guideSessionS
   const safeThreadStore = threadStore
     ? {
         consumeMentionRoutingFeedback: async () => null,
+        getContextResetBoundary: async () => null,
         ...threadStore,
       }
     : null;
@@ -376,7 +377,7 @@ describe('incremental current-message fallback integration', () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const captureService = createCapturingService('opus', 'ack');
     const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
-    const currentText = 'CURRENT USER MESSAGE';
+    const currentText = '标准工具箱 CURRENT USER MESSAGE';
     const baseTs = Date.now() - 16 * 60_000;
 
     const unseen = Array.from({ length: 16 }, (_, i) => {
@@ -422,10 +423,9 @@ describe('incremental current-message fallback integration', () => {
     }
 
     const prompt = captureService.calls[0];
-    assert.equal(
-      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
-      1,
-      'current message should appear once even when anchor already contains it',
+    assert.ok(
+      prompt.trimEnd().endsWith('[/对话历史]'),
+      'raw current message should not be appended after the smart-window envelope',
     );
     assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
   });
@@ -434,7 +434,7 @@ describe('incremental current-message fallback integration', () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const captureService = createCapturingService('opus', 'ack');
     const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
-    const currentText = 'CURRENT USER MESSAGE';
+    const currentText = '标准工具箱 CURRENT USER MESSAGE';
     const baseTs = Date.now() - 16 * 60_000;
 
     const unseen = Array.from({ length: 16 }, (_, i) => {
@@ -480,12 +480,46 @@ describe('incremental current-message fallback integration', () => {
     }
 
     const prompt = captureService.calls[0];
-    assert.equal(
-      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
-      1,
-      'current message should appear once even when anchor already contains it',
+    assert.ok(
+      prompt.trimEnd().endsWith('[/对话历史]'),
+      'raw current message should not be appended after the smart-window envelope',
     );
     assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
+  });
+});
+
+describe('routeSerial chain tool policy', () => {
+  it('promotes agent-default minimal to standard for a multi-target serial chain', async () => {
+    const { resolveSerialChainToolPolicy } = await import(
+      '../dist/domains/cats/services/agents/routing/route-serial.js'
+    );
+
+    assert.deepEqual(resolveSerialChainToolPolicy({ toolPolicy: 'minimal', source: 'agent-default' }, 2), {
+      toolPolicy: 'standard',
+      source: 'agent-default',
+    });
+  });
+
+  it('keeps an explicit user minimal override for a multi-target serial chain', async () => {
+    const { resolveSerialChainToolPolicy } = await import(
+      '../dist/domains/cats/services/agents/routing/route-serial.js'
+    );
+
+    assert.deepEqual(resolveSerialChainToolPolicy({ toolPolicy: 'minimal', source: 'user-override' }, 2), {
+      toolPolicy: 'minimal',
+      source: 'user-override',
+    });
+  });
+
+  it('keeps agent-default minimal for a single-target route', async () => {
+    const { resolveSerialChainToolPolicy } = await import(
+      '../dist/domains/cats/services/agents/routing/route-serial.js'
+    );
+
+    assert.deepEqual(resolveSerialChainToolPolicy({ toolPolicy: 'minimal', source: 'agent-default' }, 1), {
+      toolPolicy: 'minimal',
+      source: 'agent-default',
+    });
   });
 });
 
@@ -637,9 +671,11 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 
     const STREAM_DELAY_MS = 50;
+    let serviceInvocationStartedAt = 0;
     // Service that delays before yielding done — simulates non-trivial stream time
     const delayedService = {
       async *invoke() {
+        serviceInvocationStartedAt = Date.now();
         yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: Date.now() };
         await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -649,7 +685,6 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
     const appendCalls = [];
     const deps = createMockDeps({ opus: delayedService }, appendCalls);
 
-    const beforeInvocation = Date.now();
     for await (const _ of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
@@ -657,11 +692,11 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
 
     assert.equal(appendCalls.length, 1, 'should persist one message');
     const storedTs = appendCalls[0].timestamp;
-    // Stored timestamp should be close to invocation start (within 20ms tolerance),
-    // NOT close to stream completion (which is ~50ms+ later)
+    // The route captures invocation start before prompt/context assembly, so the
+    // stored timestamp must not be later than the service call or stream end.
     assert.ok(
-      storedTs - beforeInvocation < 30,
-      `stored timestamp (${storedTs}) should be within 30ms of invocation start (${beforeInvocation}), got delta=${storedTs - beforeInvocation}ms`,
+      storedTs <= serviceInvocationStartedAt && serviceInvocationStartedAt - storedTs < 1000,
+      `stored timestamp (${storedTs}) should precede service invocation start (${serviceInvocationStartedAt})`,
     );
     assert.ok(
       afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
@@ -673,8 +708,10 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 
     const STREAM_DELAY_MS = 50;
+    let serviceInvocationStartedAt = 0;
     const delayedService = {
       async *invoke() {
+        serviceInvocationStartedAt = Date.now();
         yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: Date.now() };
         await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -684,7 +721,6 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
     const appendCalls = [];
     const deps = createMockDeps({ opus: delayedService }, appendCalls);
 
-    const beforeInvocation = Date.now();
     for await (const _ of routeParallel(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
@@ -693,8 +729,8 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
     assert.equal(appendCalls.length, 1, 'should persist one message');
     const storedTs = appendCalls[0].timestamp;
     assert.ok(
-      storedTs - beforeInvocation < 30,
-      `stored timestamp (${storedTs}) should be within 30ms of invocation start (${beforeInvocation}), got delta=${storedTs - beforeInvocation}ms`,
+      storedTs <= serviceInvocationStartedAt && serviceInvocationStartedAt - storedTs < 1000,
+      `stored timestamp (${storedTs}) should precede service invocation start (${serviceInvocationStartedAt})`,
     );
     assert.ok(
       afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
@@ -1244,7 +1280,7 @@ describe('routeSerial cursor ack on error', () => {
     ];
 
     const cursorBoundaries = new Map();
-    for await (const _ of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
+    for await (const _ of routeSerial(deps, ['opus'], '标准工具箱 test', 'user1', 'thread1', {
       currentUserMessageId: '0000000000000001-000001-aaaaaaaa',
       cursorBoundaries,
     })) {
@@ -1292,7 +1328,7 @@ describe('routeParallel cursor ack on error', () => {
     ];
 
     const cursorBoundaries = new Map();
-    for await (const _ of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', {
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '标准工具箱 test', 'user1', 'thread1', {
       currentUserMessageId: '0000000000000002-000001-bbbbbbbb',
       cursorBoundaries,
     })) {
@@ -2181,17 +2217,15 @@ describe('routeParallel tool events persistence', () => {
     const appendCalls = [];
     const deps = createMockDeps({ opus: toolOnlyService, codex: codexService }, appendCalls);
 
-    for await (const _msg of routeParallel(deps, ['opus', 'codex'], 'search', 'user1', 'thread1')) {
+    for await (const _msg of routeParallel(deps, ['opus', 'codex'], '标准工具箱 search', 'user1', 'thread1')) {
     }
 
-    // Even though opus had no text, it should still be persisted with tool events
+    // Tool-only turns now persist a visible system notice instead of a blank assistant bubble.
     const opusAppend = appendCalls.find((c) => c.catId === 'opus');
-    assert.ok(opusAppend, 'tool-only cat should still be persisted');
-    assert.equal(opusAppend.content, '', 'content should be empty');
-    assert.ok(opusAppend.toolEvents, 'should have toolEvents');
-    assert.equal(opusAppend.toolEvents.length, 2);
-    assert.equal(opusAppend.toolEvents[0].type, 'tool_use');
-    assert.equal(opusAppend.toolEvents[1].type, 'tool_result');
+    assert.equal(opusAppend, undefined, 'tool-only cat should not create a blank assistant bubble');
+    const notice = appendCalls.find((c) => c.userId === 'system' && c.source?.connector === 'silent-completion');
+    assert.ok(notice, 'tool-only cat should persist a silent-completion notice');
+    assert.match(notice.content, /工具调用 2 次/);
   });
 });
 
@@ -2379,7 +2413,7 @@ describe('routeSerial per-cat budget', () => {
       },
     ];
 
-    for await (const _ of routeSerial(deps, ['opus'], 'new message', 'user1', 'thread1', { history })) {
+    for await (const _ of routeSerial(deps, ['opus'], '标准工具箱 new message', 'user1', 'thread1', { history })) {
     }
 
     // Check that prompt includes context from history
@@ -2394,7 +2428,7 @@ describe('routeSerial per-cat budget', () => {
     const captureService = createCapturingService('opus', 'response');
     const deps = createMockDeps({ opus: captureService });
 
-    for await (const _ of routeSerial(deps, ['opus'], 'msg', 'user1', 'thread1', {
+    for await (const _ of routeSerial(deps, ['opus'], '标准工具箱 msg', 'user1', 'thread1', {
       contextHistory: '[对话历史] 测试上下文',
     })) {
     }
@@ -2423,7 +2457,7 @@ describe('routeParallel per-cat budget', () => {
       },
     ];
 
-    for await (const _ of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', { history })) {
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '标准工具箱 test', 'user1', 'thread1', { history })) {
     }
 
     // Both cats should receive history in their prompts
@@ -2557,7 +2591,7 @@ describe('routeSerial degradation notification', () => {
     }));
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', { history })) {
+    for await (const msg of routeSerial(deps, ['opus'], '标准工具箱 test', 'user1', 'thread1', { history })) {
       messages.push(msg);
     }
 
@@ -2642,7 +2676,7 @@ describe('routeSerial degradation notification', () => {
       }));
 
       const messages = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', { history })) {
+      for await (const msg of routeSerial(deps, ['opus'], '标准工具箱 test', 'user1', 'thread1', { history })) {
         messages.push(msg);
       }
 
@@ -2675,7 +2709,9 @@ describe('routeParallel degradation notification', () => {
     }));
 
     const messages = [];
-    for await (const msg of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', { history })) {
+    for await (const msg of routeParallel(deps, ['opus', 'codex'], '标准工具箱 test', 'user1', 'thread1', {
+      history,
+    })) {
       messages.push(msg);
     }
 
@@ -2705,7 +2741,9 @@ describe('routeParallel degradation notification', () => {
       }));
 
       const messages = [];
-      for await (const msg of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', { history })) {
+      for await (const msg of routeParallel(deps, ['opus', 'codex'], '标准工具箱 test', 'user1', 'thread1', {
+        history,
+      })) {
         messages.push(msg);
       }
 

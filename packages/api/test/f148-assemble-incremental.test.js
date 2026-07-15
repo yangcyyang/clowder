@@ -51,6 +51,7 @@ function mockThreadStore(title = 'Test Thread', threadMemory = null) {
     getParticipantsWithActivity: async () => [],
     updateParticipantActivity: async () => {},
     updateLastActive: async () => {},
+    getContextResetBoundary: async () => null,
     getThreadMemory: async () => threadMemory,
     updateThreadMemory: async () => {},
   };
@@ -249,7 +250,11 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
 
     assert.ok(result_is_smart_window(result), 'should use smart window path');
     // The 5000-char payload should be scrubbed (not present verbatim)
-    assert.ok(!result.contextText.includes('xxxxx'), 'large tool payload should be scrubbed');
+    const leakedPayloadIndex = result.contextText.indexOf('xxxxx');
+    assert.ok(
+      leakedPayloadIndex === -1,
+      `large tool payload should be scrubbed: ${result.contextText.slice(Math.max(0, leakedPayloadIndex - 80), leakedPayloadIndex + 120)}`,
+    );
     assert.ok(result.contextText.includes('truncated'), 'scrubbed content should have truncated marker');
   });
 
@@ -320,9 +325,10 @@ describe('F148 review fixes', () => {
     const tinyResult = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', undefined, undefined, {
       effectiveMaxContextTokens: 50,
     });
+    const tinyTokens = estimateTokens(tinyResult.contextText);
     assert.ok(
-      tinyResult.contextText === '' || estimateTokens(tinyResult.contextText) <= 60,
-      'hard cap: output must be empty or within budget',
+      tinyResult.contextText === '' || tinyTokens <= 60,
+      `hard cap: output must be empty or within budget, got ${tinyTokens} tokens: ${tinyResult.contextText}`,
     );
     assert.ok(tinyResult.degradation, 'hard cap: must report degradation');
 

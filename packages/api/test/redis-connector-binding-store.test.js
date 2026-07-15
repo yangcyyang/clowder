@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis connector binding store"
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';

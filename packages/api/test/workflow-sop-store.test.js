@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated REDIS_URL for workflow SOP store"
 /**
  * WorkflowSopStore tests (F073 P1)
  * Redis → full suite; no Redis → skip

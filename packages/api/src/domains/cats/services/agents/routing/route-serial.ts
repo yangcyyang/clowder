@@ -17,6 +17,7 @@ import { context, trace } from '@opentelemetry/api';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
 import {
+  type ResolvedToolPolicy,
   resolveEffectiveToolPolicy,
   shouldLoadFullContext,
   shouldLoadStandardContext,
@@ -134,9 +135,30 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 
 const log = createModuleLogger('route-serial');
+
+/**
+ * A serial chain promises that later cats can see earlier persisted replies.
+ * Keep an explicit user minimal override intact, but prevent the short-message
+ * auto downgrade from erasing that chain context. The caller still assembles
+ * context through the normal persisted incremental/freshness path.
+ */
+export function resolveSerialChainToolPolicy(
+  resolvedToolPolicy: ResolvedToolPolicy,
+  worklistSize: number,
+): ResolvedToolPolicy {
+  if (
+    worklistSize > 1 &&
+    resolvedToolPolicy.toolPolicy === 'minimal' &&
+    resolvedToolPolicy.source === 'agent-default'
+  ) {
+    return { toolPolicy: 'standard', source: 'agent-default' };
+  }
+  return resolvedToolPolicy;
+}
 
 async function synthesizePublishedVoiceBlocks(
   deps: RouteStrategyDeps,
@@ -478,7 +500,10 @@ export async function* routeSerial(
 
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only
       const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
-      const resolvedToolPolicy = resolveEffectiveToolPolicy(catConfig, message);
+      const resolvedToolPolicy = resolveSerialChainToolPolicy(
+        resolveEffectiveToolPolicy(catConfig, message),
+        worklist.length,
+      );
       const loadStandardContext = shouldLoadStandardContext(resolvedToolPolicy.toolPolicy);
       const loadFullContext = shouldLoadFullContext(resolvedToolPolicy.toolPolicy);
       const governanceTier = getGovernanceTierForToolPolicy(resolvedToolPolicy.toolPolicy);
@@ -641,7 +666,7 @@ export async function* routeSerial(
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
-        ...(loadFullContext ? guideContextForCat(guideCtx, catId, targetCatIds, threadId) : {}),
+        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         ...(worldContext ? { worldContext } : {}),
         threadId,
       };
@@ -1582,7 +1607,7 @@ export async function* routeSerial(
           }
         }
 
-        const storedTimestamp = Date.now();
+        const storedTimestamp = invocationStartedAt;
 
         // F061: Detect @co-creator mentions in agent response for browser notification
         mentionsUser = storedContent ? detectUserMention(storedContent) : false;
@@ -2143,7 +2168,9 @@ export async function* routeSerial(
           },
           'Cat produced no text — evaluating silent_completion',
         );
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldPersistSilentNotice) {
+        // A synthetic silent-completion notice is runtime diagnostics, not a
+        // cat-authored response and must not acknowledge a pending guide.
+        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo) {
           catProducedOutput = true;
         }
 

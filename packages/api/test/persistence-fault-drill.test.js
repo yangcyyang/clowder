@@ -1,3 +1,4 @@
+// @ci-tier slow reason="uses asynchronous outage and recovery polling drills"
 /**
  * Persistence fault-drill tests (#50)
  *

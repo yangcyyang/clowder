@@ -30,10 +30,10 @@ import {
 } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -60,6 +60,7 @@ export interface A2ATriggerDeps {
     | 'list'
     | 'persistEntry'
     | 'hasQueuedOrProcessingForCat'
+    | 'hasActiveIdempotencyKey'
   >;
   log: FastifyBaseLogger;
 }
@@ -126,6 +127,16 @@ export async function enqueueA2ATargets(
       createdAt?: number;
     }> = [];
     for (const catId of targetCats) {
+      const idempotencyKey = buildA2AIdempotencyKey({
+        triggerMessageId,
+        callerCatId,
+        targetCatId: catId,
+      });
+      if (deps.invocationQueue.hasActiveIdempotencyKey?.(threadId, opts.userId, idempotencyKey)) {
+        queueDiagnostics.push({ catId, outcome: 'deduped' });
+        log.info({ threadId, triggerMessageId, catId, idempotencyKey }, '[F122B] A2A callback: skipping exact replay');
+        continue;
+      }
       const wasBusy =
         deps.invocationTracker?.has(threadId, catId) === true ||
         deps.invocationQueue.hasQueuedOrProcessingForCat?.(threadId, catId) === true;
@@ -142,6 +153,7 @@ export async function enqueueA2ATargets(
       // mention messages targeting the same busy cat must all remain pending.
       // Callback path has no tool_use stream → fail-closed on hadSubstantiveToolCall
       // (routing tool ≠ work). outputLength from content still exempts long-form MCP.
+      const streakPairBeforePush = streakEntry?.streakPair ? { ...streakEntry.streakPair } : undefined;
       if (canTrackStreak && streakEntry) {
         const streak = updateStreakOnPush(streakEntry, callerCatId!, catId, {
           hadSubstantiveToolCall: false,
@@ -173,11 +185,7 @@ export async function enqueueA2ATargets(
       const result = deps.invocationQueue.enqueue({
         threadId,
         userId: opts.userId,
-        idempotencyKey: buildA2AIdempotencyKey({
-          triggerMessageId,
-          callerCatId,
-          targetCatId: catId,
-        }),
+        idempotencyKey,
         content: opts.content,
         messageEnvelope: {
           messageId: triggerMessageId,
@@ -193,18 +201,22 @@ export async function enqueueA2ATargets(
         autoExecute: true,
         callerCatId: callerCatId ?? undefined,
         a2aTriggerMessageId: triggerMessageId,
-        pendingMentionId: buildA2AIdempotencyKey({ triggerMessageId, callerCatId, targetCatId: catId }),
+        pendingMentionId: idempotencyKey,
         expiresAt: Date.now() + PENDING_MENTION_TTL_MS,
         callerTraceContext: dispatchTraceContext,
         freshnessProtected: opts.freshnessProtected,
       });
       queueDiagnostics.push({
         catId,
-        outcome: result.outcome,
+        outcome: result.deduped ? 'deduped' : result.outcome,
         entryId: result.entry?.id,
         createdAt: result.entry?.createdAt,
       });
-      if (result.outcome === 'enqueued') {
+      if (result.deduped && streakEntry) {
+        if (streakPairBeforePush) streakEntry.streakPair = streakPairBeforePush;
+        else delete streakEntry.streakPair;
+      }
+      if (result.outcome === 'enqueued' && !result.deduped) {
         enqueued.push(catId);
         if (result.entry) {
           deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);

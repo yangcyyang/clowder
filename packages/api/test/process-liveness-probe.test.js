@@ -1,3 +1,4 @@
+// @ci-tier slow reason="uses real CPU sampling and multi-second timing thresholds"
 /**
  * ProcessLivenessProbe Tests — F118 Phase B
  */

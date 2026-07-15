@@ -1,3 +1,4 @@
+// @ci-tier slow reason="mixes in-memory and Redis concurrency fault drills and needs later file split"
 /**
  * WT-5 Reliability: concurrent fault drills (4 scenarios x 2 levels).
  *

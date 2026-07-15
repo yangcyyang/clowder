@@ -1,3 +1,4 @@
+// @ci-tier integration reason="exercises AgentRouter and shared stores across multiple cats"
 /**
  * Cross-Cat Context Integration Tests (Phase 3.6)
  * 暗号测试 — 验证 ContextAssembler 让猫能看到其他猫的历史
@@ -70,8 +71,8 @@ describe('Cross-Cat Context (暗号测试)', () => {
     // Round 1: user → opus → opus replies with SECRET
     await collect(router.route('user-1', '@opus tell me the secret', thread.id));
 
-    // Round 2: user → codex — codex should see opus's reply in context history
-    await collect(router.route('user-1', '@codex what was the secret?', thread.id));
+    // Round 2: explicit standard context should carry opus's persisted reply to codex.
+    await collect(router.route('user-1', '@codex 标准工具箱 what was the secret?', thread.id));
 
     const codexPrompt = codexService.capturedPrompts[0];
     assert.ok(
@@ -104,14 +105,14 @@ describe('Cross-Cat Context (暗号测试)', () => {
 
     await collect(router.route('user-1', '@opus share your secret', thread.id));
     await collect(router.route('user-1', '@codex share your secret', thread.id));
-    await collect(router.route('user-1', '@gemini what secrets did they share?', thread.id));
+    await collect(router.route('user-1', '@gemini 标准工具箱 what secrets did they share?', thread.id));
 
     const geminiPrompt = geminiService.capturedPrompts[0];
     assert.ok(geminiPrompt.includes(SECRET_A), 'Gemini should see opus secret in history');
     assert.ok(geminiPrompt.includes(SECRET_B), 'Gemini should see codex secret in history');
   });
 
-  test('history delivery: includes unseen history without replay markers', async () => {
+  test('full context history delivery: includes all unseen history without replay markers', async () => {
     const opusService = createCapturingService('opus', 'final reply');
 
     const router = new AgentRouter(
@@ -136,17 +137,17 @@ describe('Cross-Cat Context (暗号测试)', () => {
       });
     }
 
-    await collect(router.route('user-1', '@opus summarize', 'thread-3'));
+    await collect(router.route('user-1', '@opus 重度工具箱 summarize', 'thread-3'));
 
     const prompt = opusService.capturedPrompts[0];
-    // Incremental mode should include unseen history and avoid old replay envelope marker.
+    // Full incremental context should include every unseen item and avoid the legacy replay envelope marker.
     assert.ok(prompt.includes('history-msg-24'), 'Should include most recent message');
     assert.ok(prompt.includes('history-msg-0'), 'Should include oldest unseen message as well');
     assert.ok(prompt.includes('对话历史增量'), 'Should use incremental history header');
     assert.ok(!prompt.includes('[对话历史 - 最近'), 'Should not carry legacy replay header');
   });
 
-  test('multi-round visibility: new cat sees full conversation', async () => {
+  test('standard context: new cat sees the bounded recent conversation', async () => {
     const opusService = createCapturingService('opus', 'Round 1 opus answer');
     const codexService = createCapturingService('codex', 'Round 2 codex answer');
     const geminiService = createCapturingService('gemini', 'I see everything');
@@ -169,8 +170,8 @@ describe('Cross-Cat Context (暗号测试)', () => {
     await collect(router.route('user-1', '@opus first question', thread.id));
     // Round 2
     await collect(router.route('user-1', '@codex second question', thread.id));
-    // Round 3: new cat joins
-    await collect(router.route('user-1', '@gemini what happened?', thread.id));
+    // Round 3: new cat joins with explicit standard context; all five recent items fit the bounded window.
+    await collect(router.route('user-1', '@gemini 标准工具箱 what happened?', thread.id));
 
     const geminiPrompt = geminiService.capturedPrompts[0];
     assert.ok(geminiPrompt.includes('first question'), 'Gemini sees round 1 user message');

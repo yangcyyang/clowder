@@ -281,7 +281,7 @@ describe('formatMessage — head+tail truncation (#91 regression)', () => {
 
 describe('cross-post sender variant: distinguish same-family cats', () => {
   before(async () => {
-    const { catRegistry } = await import('../node_modules/@cat-cafe/shared/dist/index.js');
+    const { catRegistry } = await import('@cat-cafe/shared');
     // Register variant cats that may not yet be in catRegistry
     if (!catRegistry.has('sonnet')) {
       catRegistry.register('sonnet', {
@@ -348,7 +348,7 @@ describe('cross-post sender variant: distinguish same-family cats', () => {
     // The reset() was originally safe, but after roster pruning the before() is a no-op
     // (all three are already registered), so reset() only clears everything without re-adding.
     // Fix: restore from template after reset so subsequent describe blocks (F052) find codex etc.
-    const { catRegistry } = await import('../node_modules/@cat-cafe/shared/dist/index.js');
+    const { catRegistry } = await import('@cat-cafe/shared');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const TEMPLATE_PATH = new URL('../../../cat-template.json', import.meta.url).pathname;
     catRegistry.reset();

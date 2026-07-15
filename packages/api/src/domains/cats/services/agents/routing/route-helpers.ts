@@ -1576,8 +1576,9 @@ export function buildAgentIntentSnapshot(
   messages: readonly StoredMessage[],
   currentUserMessageId?: string,
 ): AgentIntentSnapshot | undefined {
-  const userMessages = messages.filter(
-    (m) => m.catId === null && m.userId !== 'system' && !m.deletedAt && isDelivered(m),
+  const userMessages = scrubToolPayloads(
+    messages.filter((m) => m.catId === null && m.userId !== 'system' && !m.deletedAt && isDelivered(m)),
+    { preserveLast: false },
   );
   if (userMessages.length === 0) return undefined;
 
@@ -2998,10 +2999,13 @@ async function assembleSmartWindowContext(
   }
 
   // 3. Sanitize omitted content once (before tombstone keyword extraction + anchor formatting)
-  const sanitizedOmitted = omitted.map((m) => ({
-    ...m,
-    content: sanitizeInjectedContent(m.content),
-  }));
+  const sanitizedOmitted = scrubToolPayloads(
+    omitted.map((m) => ({
+      ...m,
+      content: sanitizeInjectedContent(m.content),
+    })),
+    { preserveLast: false },
+  );
 
   // 3.1 Tombstone (uses sanitized content for keyword extraction)
   const tombstone = buildTombstone(sanitizedOmitted, threadTitle, hcConfig, threadId);
@@ -3212,8 +3216,9 @@ async function assembleSmartWindowContext(
 
     // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
     if (totalTokens() > effectiveTokenBudget) {
+      const minimalContext = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
       return {
-        contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
+        contextText: estimateTokens(minimalContext) <= effectiveTokenBudget ? minimalContext : '',
         boundaryId,
         includedHistoryCount: 0,
         includesCurrentUserMessage: false,
@@ -3261,8 +3266,9 @@ async function assembleSmartWindowContext(
 
   // Final hard cap: envelope overhead may push total over budget
   if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
+    const minimalContext = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
     return {
-      contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
+      contextText: estimateTokens(minimalContext) <= effectiveTokenBudget ? minimalContext : '',
       boundaryId,
       includedHistoryCount: 0,
       includesCurrentUserMessage: false,

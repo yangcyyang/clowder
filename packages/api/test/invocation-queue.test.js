@@ -107,9 +107,11 @@ describe('InvocationQueue', () => {
   });
 
   it('same idempotencyKey replays are deduped to one active entry', () => {
+    assert.equal(queue.hasActiveIdempotencyKey('t1', 'u1', 'idem-1'), false);
     const first = queue.enqueue(entry({ content: 'first', idempotencyKey: 'idem-1' }));
     assert.equal(first.outcome, 'enqueued');
     assert.equal(first.deduped, undefined);
+    assert.equal(queue.hasActiveIdempotencyKey('t1', 'u1', 'idem-1'), true);
 
     const replay = queue.enqueue(entry({ content: 'replay', idempotencyKey: 'idem-1' }));
     assert.equal(replay.outcome, 'enqueued');

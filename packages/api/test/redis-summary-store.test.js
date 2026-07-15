@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis summary store"
 /**
  * RedisSummaryStore tests
  * 有 Redis → 测全量；无 Redis → skip

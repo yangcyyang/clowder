@@ -1359,7 +1359,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.deepEqual(result.enqueued, []);
   });
 
-  test('deduplicates — skips targets already queued as agent entries', async () => {
+  test('keeps distinct messages targeting the same already-queued cat', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
     const enqueueCalls = [];
@@ -1370,10 +1370,6 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
       countAgentEntriesForThread() {
         return 0;
-      },
-      // opus already has a queued agent entry
-      hasQueuedAgentForCat(_threadId, catId) {
-        return catId === 'opus';
       },
       backfillMessageId() {},
       list() {
@@ -1420,10 +1416,12 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
     );
 
-    // opus should be skipped (already queued), codex should enqueue
-    assert.equal(enqueueCalls.length, 1, 'should only enqueue non-duplicate cat');
-    assert.equal(enqueueCalls[0].targetCats[0], 'codex');
-    assert.deepEqual(result.enqueued, ['codex']);
+    assert.equal(enqueueCalls.length, 2, 'distinct messages for a busy cat must remain pending');
+    assert.deepEqual(
+      enqueueCalls.map((call) => call.targetCats[0]),
+      ['opus', 'codex'],
+    );
+    assert.deepEqual(result.enqueued, ['opus', 'codex']);
   });
 
   test('depth limit enforced per-target — multi-target stops at limit (cloud P1)', async () => {

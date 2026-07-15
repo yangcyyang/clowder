@@ -1,3 +1,4 @@
+// @ci-tier integration reason="runs Fastify route behavior against a real temporary filesystem"
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rm, stat } from 'node:fs/promises';

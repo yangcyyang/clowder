@@ -1,3 +1,4 @@
+// @ci-tier redis reason="requires isolated Redis session chain store"
 /**
  * RedisSessionChainStore tests
  * F24: Redis implementation of session chain store.

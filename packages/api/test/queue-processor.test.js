@@ -3829,11 +3829,10 @@ describe('QueueProcessor', () => {
       enqueueEntry(deps.queue, { content: 'conn-b', source: 'connector' });
 
       await processor.processNext('t1', 'u1');
-      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 2);
 
-      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
-      assert.equal(calledContent, 'conn-a', 'connector entries should not be batched');
-      assert.equal(deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length, 1);
+      const calledContents = deps.router.routeExecution.mock.calls.map((call) => call.arguments[1]);
+      assert.deepEqual(calledContents, ['conn-a', 'conn-b'], 'connector entries should drain as separate invocations');
     });
 
     it('stops batch at different intent', async () => {
@@ -3913,14 +3912,13 @@ describe('QueueProcessor', () => {
       enqueueEntry(deps.queue, { content: 'connector-msg', source: 'connector' });
 
       await processor.processNext('t1', 'u1');
-      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
+      await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 2);
 
-      const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
-      assert.equal(calledContent, 'user-msg', 'connector entry must not be batched into user content');
-      assert.equal(
-        deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length,
-        1,
-        'connector entry should remain queued',
+      const calledContents = deps.router.routeExecution.mock.calls.map((call) => call.arguments[1]);
+      assert.deepEqual(
+        calledContents,
+        ['user-msg', 'connector-msg'],
+        'connector entry must execute separately instead of being absorbed into user content',
       );
     });
 
