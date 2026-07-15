@@ -27,13 +27,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm check:ci
+        env:
+          CI_BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
 
   build:
     name: Build
@@ -63,7 +67,7 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @cat-cafe/api run test:public
+      - run: node scripts/run-ci-with-annotations.mjs --label "API Core Tests" -- pnpm --filter @cat-cafe/api run test:public
 
   api-lanes:
     name: API ${{ matrix.lane }} Tests
@@ -84,7 +88,7 @@ jobs:
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/mcp-server build
       - run: pnpm --filter @cat-cafe/api build
-      - run: pnpm --filter @cat-cafe/api run test:lane:${{ matrix.lane }}
+      - run: node scripts/run-ci-with-annotations.mjs --label "API ${{ matrix.lane }} Tests" -- pnpm --filter @cat-cafe/api run test:lane:${{ matrix.lane }}
 
   api-redis:
     name: API Redis Tests
@@ -103,7 +107,7 @@ jobs:
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/mcp-server build
       - run: pnpm --filter @cat-cafe/api build
-      - run: pnpm --filter @cat-cafe/api run test:lane:redis
+      - run: node scripts/run-ci-with-annotations.mjs --label "API Redis Tests" -- pnpm --filter @cat-cafe/api run test:lane:redis
 
   web-vitest:
     name: Web Vitest (Required)

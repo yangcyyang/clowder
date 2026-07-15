@@ -31,7 +31,7 @@ done
 EXCEPTED_DIRS=""
 EXCEPTION_ERRORS=""
 if [[ -f "$EXCEPTIONS_FILE" ]]; then
-  EXCEPTED_DIRS=$(node -e "
+  if ! EXCEPTED_DIRS=$(node -e "
     const fs = require('fs');
     const data = JSON.parse(fs.readFileSync('$EXCEPTIONS_FILE', 'utf8'));
     const today = new Date().toISOString().slice(0, 10);
@@ -56,8 +56,7 @@ if [[ -f "$EXCEPTIONS_FILE" ]]; then
       }
     });
     if (hasError) process.exitCode = 1;
-  ")
-  if [[ $? -ne 0 ]]; then
+  "); then
     EXCEPTION_ERRORS="1"
   fi
 fi

@@ -2,24 +2,45 @@
   "exceptions": [
     {
       "path": "packages/api/src/routes",
-      "owner": "opus",
-      "reason": "Routes 按功能已分文件，ADR-010 重构 scope 不含 routes，后续评估是否拆子目录",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：routes 当前 140 个文件；07-29 前必须拍板按子域拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
     },
     {
       "path": "packages/api/src/config",
-      "owner": "opus",
-      "reason": "Config 文件数接近 warn，均为独立配置项（cat-budgets/cat-config/env 等），暂不拆",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：config 当前 38 个文件；07-29 前必须拍板按配置域拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
     },
     {
       "path": "packages/api/src/domains/memory",
-      "owner": "gpt52",
-      "reason": "Memory 域已增长到 34 files；v0.8.0 发版先显式豁免，后续按 retrieval/indexing/distillation 子域拆分",
-      "expiresAt": "2026-05-17",
-      "ticket": "F102"
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：memory 当前 51 个文件；07-29 前必须拍板按 retrieval/indexing/distillation 拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
+    },
+    {
+      "path": "packages/api/src/utils",
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：utils 当前 28 个文件；07-29 前必须拍板按职责拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/invocation",
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：invocation 当前 28 个文件；07-29 前必须拍板拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/agents/providers",
+      "owner": "@yangcyyang",
+      "reason": "首次 CI baseline：providers 当前 27 个文件；07-29 前必须拍板按 provider 拆分或给出续期理由",
+      "expiresAt": "2026-07-29",
+      "ticket": "task #380"
     }
   ]
 }

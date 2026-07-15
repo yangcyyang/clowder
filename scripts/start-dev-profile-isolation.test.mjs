@@ -323,7 +323,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     }
   });
 
-  it('Unix status recognizes start:direct when daemon PID file is absent', async () => {
+  it('Unix status recognizes running API/Web ports when daemon PID file is absent', async () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-unix-status-'));
     try {
       const result = await buildUnixStatus({
@@ -341,8 +341,8 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       assert.deepEqual(result.lines, [
         'Cat Cafe Unix status',
         '  daemon: not running (missing PID file)',
-        '  direct api-3004: running (ready)',
-        '  direct web-3003: running',
+        '  api-3004: running (ready)',
+        '  web-3003: running',
       ]);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
