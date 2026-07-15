@@ -31,6 +31,19 @@ function collectResourceUrls(reason: unknown): string[] {
   return [candidate.src, candidate.href].filter((value): value is string => typeof value === 'string');
 }
 
+function collectNestedErrorText(reason: unknown): string {
+  const parts = [collectErrorText(reason)];
+  if (!reason || (typeof reason !== 'object' && typeof reason !== 'function')) return parts.join('\n');
+  for (const property of ['error', 'reason'] as const) {
+    try {
+      parts.push(collectErrorText((reason as Record<string, unknown>)[property]));
+    } catch {
+      // Host event getters can throw; other available text remains usable.
+    }
+  }
+  return parts.join('\n');
+}
+
 function activeOrigin(expectedOrigin?: string): string | null {
   if (expectedOrigin?.trim()) return expectedOrigin.trim();
   try {
@@ -52,10 +65,11 @@ function isSameOriginNextStaticResource(resourceUrl: string, expectedOrigin?: st
 }
 
 export function isRecoverableChunkLoadError(reason: unknown, expectedOrigin?: string): boolean {
-  return (
-    CHUNK_ERROR_RE.test(collectErrorText(reason)) ||
-    collectResourceUrls(reason).some((resourceUrl) => isSameOriginNextStaticResource(resourceUrl, expectedOrigin))
-  );
+  const resourceUrls = collectResourceUrls(reason);
+  if (resourceUrls.length > 0) {
+    return resourceUrls.some((resourceUrl) => isSameOriginNextStaticResource(resourceUrl, expectedOrigin));
+  }
+  return CHUNK_ERROR_RE.test(collectNestedErrorText(reason));
 }
 
 export function hasUnsavedUserWork(documentRef?: Pick<Document, 'querySelectorAll'>): boolean {

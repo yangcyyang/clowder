@@ -47,14 +47,29 @@ describe('chunk-load-recovery', () => {
     ).toBe(true);
     expect(
       isRecoverableChunkLoadError(
-        { target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' } },
+        {
+          target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' },
+          message: 'Loading chunk 77 failed.',
+          error: new Error('ChunkLoadError: foreign resource'),
+        },
         'http://localhost:3003',
       ),
     ).toBe(false);
     expect(
+      isRecoverableChunkLoadError(
+        {
+          target: { src: 'http://localhost:3003/_next/static/chunks/local.js' },
+          message: 'Loading chunk 77 failed.',
+          error: new Error('ChunkLoadError: local resource'),
+        },
+        'http://localhost:3003',
+      ),
+    ).toBe(true);
+    expect(
       isRecoverableChunkLoadError({ target: { src: 'http://localhost:3003/avatar.png' } }, 'http://localhost:3003'),
     ).toBe(false);
     expect(isRecoverableChunkLoadError(new TypeError('ordinary request failed'))).toBe(false);
+    expect(isRecoverableChunkLoadError({ error: new Error('Loading chunk 88 failed.') })).toBe(true);
   });
 
   it('allows one automatic recovery per target build, never a second after cooldown', () => {

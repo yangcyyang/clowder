@@ -296,6 +296,43 @@ describe('ChunkLoadRefreshGuard', () => {
     expect(textarea.value).toBe('chunk 前的草稿');
   });
 
+  it('lets a resource target exclusively decide recovery even with chunk-like error text', async () => {
+    let errorListener: ((event: ErrorEvent) => void) | null = null;
+    const addEventListener = window.addEventListener.bind(window);
+    const listenerSpy = vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+      if (type === 'error') errorListener = listener as (event: ErrorEvent) => void;
+      addEventListener(type, listener, options);
+    });
+    await renderGuard();
+    listenerSpy.mockRestore();
+    mocks.controllerRequestRecovery.mockClear();
+
+    await act(async () => {
+      errorListener?.({
+        target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' },
+        message: 'Loading chunk 77 failed.',
+        error: new Error('ChunkLoadError: foreign resource'),
+      } as unknown as ErrorEvent);
+      await Promise.resolve();
+    });
+
+    expect(mocks.controllerRequestRecovery).not.toHaveBeenCalled();
+    expect(mocks.reload).not.toHaveBeenCalled();
+
+    await act(async () => {
+      errorListener?.({
+        target: { src: `${window.location.origin}/_next/static/chunks/local.js` },
+        message: 'Loading chunk 77 failed.',
+        error: new Error('ChunkLoadError: local resource'),
+      } as unknown as ErrorEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.controllerRequestRecovery).toHaveBeenCalledWith('chunk', 'build-a');
+    expect(mocks.reload).toHaveBeenCalledTimes(1);
+  });
+
   it('hydrates a bootstrap session prompt into the visible draft-safe UI', async () => {
     const textarea = document.createElement('textarea');
     textarea.value = 'bootstrap 草稿';
@@ -336,7 +373,7 @@ describe('ChunkLoadRefreshGuard', () => {
     document.body.appendChild(textarea);
     sessionStorage.setItem(
       'clowder:recovery-prompt',
-      JSON.stringify({ kind: 'chunk', targetBuildId: 'build-a', reason: 'unsaved-draft' }),
+      JSON.stringify({ kind: 'chunk', targetBuildId: 'strict-build-a', reason: 'unsaved-draft' }),
     );
 
     await renderGuard(true);

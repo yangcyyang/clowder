@@ -31,7 +31,7 @@ export function createChunkLoadBootstrapScript(clientBuildId: string): string {
         return false;
       }
     });
-    if (sameOriginNextResource) return true;
+    if (resourceUrls.length > 0) return sameOriginNextResource;
     let reason = event;
     try {
       reason = event && (typeof event === 'object' || typeof event === 'function') && 'reason' in event

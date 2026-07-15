@@ -159,10 +159,7 @@ export function ChunkLoadRefreshGuard() {
       if (document.visibilityState === 'visible') resetFailuresAndProbe();
     };
     const onError = (event: ErrorEvent) => {
-      if (
-        isRecoverableChunkLoadError(event, window.location.origin) ||
-        isRecoverableChunkLoadError(event.error ?? event.message, window.location.origin)
-      ) {
+      if (isRecoverableChunkLoadError(event, window.location.origin)) {
         requestRecovery('chunk', CLIENT_WEB_BUILD_ID);
       }
     };

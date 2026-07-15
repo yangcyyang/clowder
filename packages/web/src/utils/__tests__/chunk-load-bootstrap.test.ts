@@ -106,9 +106,21 @@ describe('chunk-load-bootstrap', () => {
     await vi.waitFor(() => expect(sameOrigin.reload).toHaveBeenCalledTimes(1));
 
     const crossOrigin = fakeBrowser();
-    crossOrigin.emit('error', { target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' } });
+    crossOrigin.emit('error', {
+      target: { src: 'https://cdn.example/_next/static/chunks/foreign.js' },
+      message: 'Loading chunk 77 failed.',
+      error: new Error('ChunkLoadError: foreign resource'),
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(crossOrigin.reload).not.toHaveBeenCalled();
+
+    const sameOriginComposite = fakeBrowser();
+    sameOriginComposite.emit('error', {
+      target: { src: 'http://localhost:3003/_next/static/chunks/local.js' },
+      message: 'Loading chunk 77 failed.',
+      error: new Error('ChunkLoadError: local resource'),
+    });
+    await vi.waitFor(() => expect(sameOriginComposite.reload).toHaveBeenCalledTimes(1));
   });
 
   it('remembers all attempted targets across page reconstruction and rejects B after B to C to B', async () => {
