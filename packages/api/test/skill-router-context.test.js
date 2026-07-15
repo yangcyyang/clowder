@@ -141,32 +141,69 @@ describe('SkillRouter', () => {
 
   test('WI-12B routes common natural Chinese utterances before semantic fallback', async () => {
     const workDir = mkdtempSync(join(tmpdir(), 'skill-router-natural-utterances-'));
+    const skillDir = resolve(REPO_ROOT, 'cat-cafe-skills', `.router-content-writer-${Date.now()}`);
+    const skillPath = join(skillDir, 'SKILL.md');
     const manifestPath = join(workDir, 'skills-manifest.json');
-    writeFileSync(manifestPath, JSON.stringify({ skills: [] }, null, 2));
-
-    process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
-    const moduleUrl = new URL(
-      `../dist/domains/cats/services/context/SkillRouter.js?case=natural-${Date.now()}`,
-      import.meta.url,
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      skillPath,
+      [
+        '---',
+        'name: content-research-writer',
+        'description: Hermetic router fixture for research-backed writing.',
+        '---',
+        '',
+        '# Content Research Writer',
+      ].join('\n'),
     );
-    const { resolveSkillRouterContext } = await import(moduleUrl.href);
+    writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          skills: [
+            {
+              id: 'cat-cafe:content-research-writer',
+              name: 'content-research-writer',
+              description: 'Hermetic router fixture for research-backed writing.',
+              source: 'cat-cafe',
+              source_path: skillPath,
+              clowder_available: true,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
 
-    const cases = [
-      ['帮我发散一下思路', 'collaborative-thinking'],
-      ['帮我分析需求', 'writing-plans'],
-      ['帮我做个PPT', 'ppt-forge'],
-      ['跑一下代码', 'tdd'],
-      ['review 代码', 'request-review'],
-      ['帮我写个报告', 'content-research-writer'],
-    ];
-
-    for (const [utterance, expectedSkill] of cases) {
-      const context = resolveSkillRouterContext(utterance);
-      assert.ok(context, `${utterance}: context should exist`);
-      assert.ok(
-        context.matchedSkillNames.includes(expectedSkill),
-        `${utterance}: expected ${expectedSkill}, got ${context.matchedSkillNames.join(', ')}`,
+    try {
+      process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
+      const moduleUrl = new URL(
+        `../dist/domains/cats/services/context/SkillRouter.js?case=natural-${Date.now()}`,
+        import.meta.url,
       );
+      const { resolveSkillRouterContext } = await import(moduleUrl.href);
+
+      const cases = [
+        ['帮我发散一下思路', 'collaborative-thinking'],
+        ['帮我分析需求', 'writing-plans'],
+        ['帮我做个PPT', 'ppt-forge'],
+        ['跑一下代码', 'tdd'],
+        ['review 代码', 'request-review'],
+        ['帮我写个报告', 'content-research-writer'],
+      ];
+
+      for (const [utterance, expectedSkill] of cases) {
+        const context = resolveSkillRouterContext(utterance);
+        assert.ok(context, `${utterance}: context should exist`);
+        assert.ok(
+          context.matchedSkillNames.includes(expectedSkill),
+          `${utterance}: expected ${expectedSkill}, got ${context.matchedSkillNames.join(', ')}`,
+        );
+      }
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+      rmSync(skillDir, { recursive: true, force: true });
     }
   });
 

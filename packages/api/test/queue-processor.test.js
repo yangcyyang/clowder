@@ -67,6 +67,14 @@ function enqueueEntry(queue, overrides = {}) {
   return result.entry;
 }
 
+async function waitForCondition(predicate, timeoutMs = 5000, intervalMs = 25) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 describe('QueueProcessor', () => {
   let deps;
   let processor;
@@ -2379,13 +2387,12 @@ describe('QueueProcessor', () => {
         nestedDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-root');
 
         await nestedProcessor.tryAutoExecute('t1');
-        for (let attempt = 0; attempt < 20; attempt += 1) {
+        await waitForCondition(() => {
           const targets = nestedDeps.invocationRecordStore.create.mock.calls.map(
             (call) => call.arguments[0].targetCats[0],
           );
-          if (targets.includes('pi') && targets.includes('codex')) break;
-          await new Promise((r) => setTimeout(r, 25));
-        }
+          return targets.includes('pi') && targets.includes('codex');
+        });
 
         const createdTargets = nestedDeps.invocationRecordStore.create.mock.calls.map(
           (call) => call.arguments[0].targetCats[0],
