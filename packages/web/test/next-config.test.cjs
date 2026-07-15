@@ -5,6 +5,8 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
+const escapedBuildIdRoutePath = path.resolve(__dirname, '../src/app/%5Fclowder/build-id/route.ts');
+const privateBuildIdRoutePath = path.resolve(__dirname, '../src/app/_clowder/build-id/route.ts');
 const nextPwaPath = require.resolve('@ducanh2912/next-pwa');
 const ENV_KEYS = [
   'NEXT_PUBLIC_API_URL',
@@ -137,6 +139,22 @@ describe('next.config rewrites', () => {
       assert.equal(await config.generateBuildId(), 'build-a');
       assert.equal(config.env?.NEXT_PUBLIC_CLOWDER_WEB_BUILD_ID, 'build-a');
     });
+  });
+
+  it('escapes the private folder prefix so /_clowder/build-id is a public App Router route', () => {
+    assert.deepEqual(
+      {
+        decodedRouteSegment: decodeURIComponent(path.basename(path.dirname(path.dirname(escapedBuildIdRoutePath)))),
+        escapedRouteExists: fs.existsSync(escapedBuildIdRoutePath),
+        privateRouteExists: fs.existsSync(privateBuildIdRoutePath),
+      },
+      {
+        decodedRouteSegment: '_clowder',
+        escapedRouteExists: true,
+        privateRouteExists: false,
+      },
+      'Next treats app/_clowder as a private folder; app/%5Fclowder must own the public /_clowder URL',
+    );
   });
 
   it('keeps the build-id probe NetworkOnly before generic PWA runtime caching rules', async () => {
