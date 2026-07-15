@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   fetchServerBuildId: vi.fn<(fetchImpl?: typeof fetch, signal?: AbortSignal) => Promise<string | null>>(),
   prepareBrowserForReload: vi.fn<() => Promise<void>>(),
   reload: vi.fn(),
+  controllerFactory: vi.fn(),
+  controllerProbeResult: vi.fn(),
+  controllerRequestRecovery: vi.fn(),
+  controllerManualAction: vi.fn(),
 }));
 
 vi.mock('@/utils/web-build-version', () => ({
@@ -17,6 +21,32 @@ vi.mock('@/utils/chunk-load-recovery', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/chunk-load-recovery')>()),
   prepareBrowserForReload: mocks.prepareBrowserForReload,
 }));
+
+vi.mock('@/utils/build-recovery-controller', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/build-recovery-controller')>();
+  return {
+    ...actual,
+    createBuildRecoveryController: (...args: Parameters<typeof actual.createBuildRecoveryController>) => {
+      mocks.controllerFactory(...args);
+      const controller = actual.createBuildRecoveryController(...args);
+      return {
+        ...controller,
+        handleProbeResult: (...methodArgs: Parameters<typeof controller.handleProbeResult>) => {
+          mocks.controllerProbeResult(...methodArgs);
+          return controller.handleProbeResult(...methodArgs);
+        },
+        requestRecovery: (...methodArgs: Parameters<typeof controller.requestRecovery>) => {
+          mocks.controllerRequestRecovery(...methodArgs);
+          return controller.requestRecovery(...methodArgs);
+        },
+        manualPromptAction: () => {
+          mocks.controllerManualAction();
+          return controller.manualPromptAction();
+        },
+      };
+    },
+  };
+});
 
 import { ChunkLoadRefreshGuard } from '../ChunkLoadRefreshGuard';
 
@@ -64,6 +94,10 @@ describe('ChunkLoadRefreshGuard', () => {
     mocks.fetchServerBuildId.mockReset().mockResolvedValue('build-a');
     mocks.prepareBrowserForReload.mockReset().mockResolvedValue(undefined);
     mocks.reload.mockReset();
+    mocks.controllerFactory.mockClear();
+    mocks.controllerProbeResult.mockClear();
+    mocks.controllerRequestRecovery.mockClear();
+    mocks.controllerManualAction.mockClear();
     MockBroadcastChannel.instances = [];
     sessionStorage.clear();
     document.body.replaceChildren();
@@ -100,6 +134,19 @@ describe('ChunkLoadRefreshGuard', () => {
     });
     await flushEffects();
   }
+
+  it('delegates probe and external recovery requests to the production controller', async () => {
+    await renderGuard();
+
+    expect(mocks.controllerFactory).toHaveBeenCalledTimes(1);
+    expect(mocks.controllerProbeResult).toHaveBeenCalledWith('build-a');
+
+    await act(async () => {
+      MockBroadcastChannel.instances[0]?.emit({ type: 'build-changed', buildId: 'build-controller-wire' });
+      await Promise.resolve();
+    });
+    expect(mocks.controllerRequestRecovery).toHaveBeenCalledWith('broadcast', 'build-controller-wire');
+  });
 
   it('does nothing when the server build id matches the client', async () => {
     await renderGuard();
@@ -257,5 +304,6 @@ describe('ChunkLoadRefreshGuard', () => {
     });
 
     expect(order).toEqual(['cleanup', 'reload']);
+    expect(mocks.controllerManualAction).toHaveBeenCalledTimes(1);
   });
 });

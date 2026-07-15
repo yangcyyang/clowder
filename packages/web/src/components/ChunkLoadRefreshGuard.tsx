@@ -2,35 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  hasUnsavedUserWork,
-  isRecoverableChunkLoadError,
-  prepareBrowserForReload,
-  reserveAutomaticRecovery,
-} from '@/utils/chunk-load-recovery';
+  type BuildRecoveryAction,
+  type BuildRecoveryController,
+  createBuildRecoveryController,
+  type RecoveryRequest,
+} from '@/utils/build-recovery-controller';
+import { hasUnsavedUserWork, isRecoverableChunkLoadError, prepareBrowserForReload } from '@/utils/chunk-load-recovery';
 import { CLIENT_WEB_BUILD_ID, fetchServerBuildId } from '@/utils/web-build-version';
 
 const BUILD_CHANNEL_NAME = 'clowder:web-build';
 const BOOTSTRAP_PROMPT_KEY = 'clowder:recovery-prompt';
 const PROBE_INTERVAL_MS = 30_000;
-const MAX_CONSECUTIVE_PROBE_FAILURES = 3;
-
-type RecoveryKind = 'build' | 'broadcast' | 'chunk';
-
-type RecoveryRequest = {
-  kind: RecoveryKind;
-  targetBuildId: string;
-};
 
 type BuildChangedMessage = {
   type: 'build-changed';
   buildId: string;
 };
-
-function normalizeRecoveryTarget(kind: RecoveryKind, targetBuildId: string): string {
-  const normalizedBuildId = targetBuildId.trim();
-  if (kind !== 'chunk' || normalizedBuildId.startsWith('chunk:')) return normalizedBuildId;
-  return `chunk:${normalizedBuildId}`;
-}
 
 function parseBootstrapPrompt(value: unknown): RecoveryRequest | null {
   if (!value || typeof value !== 'object') return null;
@@ -53,6 +40,7 @@ export function ChunkLoadRefreshGuard() {
   const [prompt, setPrompt] = useState<RecoveryRequest | null>(null);
   const promptVisibleRef = useRef(false);
   const reloadStartedRef = useRef(false);
+  const controllerRef = useRef<BuildRecoveryController | null>(null);
 
   const beginReload = useCallback(async () => {
     if (reloadStartedRef.current) return;
@@ -66,47 +54,38 @@ export function ChunkLoadRefreshGuard() {
 
   useEffect(() => {
     let disposed = false;
-    let consecutiveProbeFailures = 0;
     let activeProbe: AbortController | null = null;
-    const announcedBuildIds = new Set<string>();
     const channel = openBuildChannel();
+    const controller = createBuildRecoveryController({
+      currentBuildId: CLIENT_WEB_BUILD_ID,
+      storage: window.sessionStorage,
+      hasUnsavedWork: () => hasUnsavedUserWork(document),
+    });
+    controllerRef.current = controller;
 
-    const requestRecovery = (kind: RecoveryKind, targetBuildId: string) => {
-      const recoveryTarget = normalizeRecoveryTarget(kind, targetBuildId);
-      if (!recoveryTarget || reloadStartedRef.current) return;
-
-      if (promptVisibleRef.current || hasUnsavedUserWork(document)) {
-        promptVisibleRef.current = true;
-        setPrompt((current) => current ?? { kind, targetBuildId: recoveryTarget });
-        return;
+    const applyActions = (actions: BuildRecoveryAction[]) => {
+      for (const action of actions) {
+        if (action.type === 'announce') {
+          channel?.postMessage({ type: 'build-changed', buildId: action.buildId } satisfies BuildChangedMessage);
+        } else if (action.type === 'prompt') {
+          promptVisibleRef.current = true;
+          setPrompt((current) => current ?? action.request);
+        } else if (action.type === 'reload') {
+          void beginReload();
+        }
       }
-
-      if (!reserveAutomaticRecovery(window.sessionStorage, recoveryTarget)) return;
-      void beginReload();
     };
+
+    const requestRecovery = (kind: RecoveryRequest['kind'], targetBuildId: string) =>
+      applyActions(controller.requestRecovery(kind, targetBuildId));
 
     const shouldSkipProbe = () =>
       Boolean(
-        disposed ||
-          activeProbe ||
-          promptVisibleRef.current ||
-          reloadStartedRef.current ||
-          consecutiveProbeFailures >= MAX_CONSECUTIVE_PROBE_FAILURES,
+        disposed || activeProbe || promptVisibleRef.current || reloadStartedRef.current || !controller.canProbe(),
       );
 
     const applyProbeResult = (serverBuildId: string | null) => {
-      if (!serverBuildId) {
-        consecutiveProbeFailures += 1;
-        return;
-      }
-
-      consecutiveProbeFailures = 0;
-      if (serverBuildId === CLIENT_WEB_BUILD_ID) return;
-      if (!announcedBuildIds.has(serverBuildId)) {
-        announcedBuildIds.add(serverBuildId);
-        channel?.postMessage({ type: 'build-changed', buildId: serverBuildId } satisfies BuildChangedMessage);
-      }
-      requestRecovery('build', serverBuildId);
+      applyActions(controller.handleProbeResult(serverBuildId));
     };
 
     const probeBuildId = async () => {
@@ -124,7 +103,7 @@ export function ChunkLoadRefreshGuard() {
     };
 
     const resetFailuresAndProbe = () => {
-      consecutiveProbeFailures = 0;
+      controller.resetProbeFailures();
       activeProbe?.abort();
       activeProbe = null;
       void probeBuildId();
@@ -186,6 +165,7 @@ export function ChunkLoadRefreshGuard() {
 
     return () => {
       disposed = true;
+      if (controllerRef.current === controller) controllerRef.current = null;
       activeProbe?.abort();
       window.clearInterval(intervalId);
       window.removeEventListener('focus', resetFailuresAndProbe);
@@ -200,8 +180,8 @@ export function ChunkLoadRefreshGuard() {
 
   const reloadAfterSaving = () => {
     if (!prompt || reloadStartedRef.current) return;
-    reserveAutomaticRecovery(window.sessionStorage, prompt.targetBuildId);
-    void beginReload();
+    const actions = controllerRef.current?.manualPromptAction() ?? [];
+    if (actions.some((action) => action.type === 'reload')) void beginReload();
   };
 
   if (!prompt) return null;

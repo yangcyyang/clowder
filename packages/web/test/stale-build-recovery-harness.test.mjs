@@ -7,6 +7,8 @@ import {
   createTextDraftDocument,
   emitRecoveryEvidence,
   readHarnessSource,
+  scanAutomationEscapeHatches,
+  scanAutomationSource,
 } from '../scripts/verify-stale-build-recovery.mjs';
 
 let fixture;
@@ -40,7 +42,7 @@ after(async () => {
 });
 
 test('A to B performs one product-originated navigation and prevents a same-target loop', async () => {
-  fixtureState.buildId = 'build-b';
+  fixtureState.buildId = 'build-a';
   fixtureState.status = 200;
   fixtureRequests.length = 0;
   const navigations = [];
@@ -50,6 +52,9 @@ test('A to B performs one product-originated navigation and prevents a same-targ
     onNavigate: (navigation) => navigations.push(navigation),
   });
 
+  const matchingEvidence = await harness.probe();
+  assert.equal(matchingEvidence.navigationCount, 0);
+  fixtureState.buildId = 'build-b';
   await harness.probe();
   const evidence = await harness.probe();
 
@@ -60,7 +65,17 @@ test('A to B performs one product-originated navigation and prevents a same-targ
   assert.equal(evidence.navigationCount, 1);
   assert.equal(evidence.draftProtected, false);
   assert.equal(evidence.loopPrevented, true);
-  assert.deepEqual(navigations, [{ source: 'product-recovery', fromBuildId: 'build-a', toBuildId: 'build-b' }]);
+  assert.deepEqual(navigations, [
+    {
+      type: 'reload',
+      source: 'product-recovery',
+      fromBuildId: 'build-a',
+      toBuildId: 'build-b',
+      trigger: 'automatic',
+    },
+  ]);
+  assert.deepEqual(harness.announcements, ['build-b']);
+  assert.deepEqual(harness.browserEffects, ['service-worker-update', 'cache-delete:old-shell', 'navigation']);
   assert.equal(fixtureRequests.length, 2);
   assert.ok(fixtureRequests.every((request) => request.accept === 'application/json'));
   emitRecoveryEvidence(evidence);
@@ -68,9 +83,13 @@ test('A to B performs one product-originated navigation and prevents a same-targ
 
 test('three 503 probes fail closed without navigation', async () => {
   fixtureState.buildId = 'build-b';
-  fixtureState.status = 503;
+  fixtureState.status = 200;
+  fixtureRequests.length = 0;
   const harness = await createProductRecoveryHarness({ origin, fromBuildId: 'build-b' });
 
+  await harness.probe();
+  fixtureState.status = 503;
+  await harness.probe();
   await harness.probe();
   await harness.probe();
   const evidence = await harness.probe();
@@ -79,16 +98,22 @@ test('three 503 probes fail closed without navigation', async () => {
     source: 'product-recovery',
     fromBuildId: 'build-b',
     toBuildId: null,
-    probeStatuses: [503, 503, 503],
+    probeStatuses: [200, 503, 503, 503],
     navigationCount: 0,
     draftProtected: false,
     loopPrevented: false,
   });
+  assert.equal(fixtureRequests.length, 4, 'the capped fourth failure must not issue HTTP');
+
+  harness.attention();
+  const retriedEvidence = await harness.probe();
+  assert.deepEqual(retriedEvidence.probeStatuses, [200, 503, 503, 503, 503]);
+  assert.equal(fixtureRequests.length, 5, 'attention resets the cap and permits one new probe');
   emitRecoveryEvidence(evidence);
 });
 
 test('B to C preserves a text draft until the product prompt action is clicked', async () => {
-  fixtureState.buildId = 'build-c';
+  fixtureState.buildId = 'build-b';
   fixtureState.status = 200;
   const navigations = [];
   const harness = await createProductRecoveryHarness({
@@ -98,20 +123,66 @@ test('B to C preserves a text draft until the product prompt action is clicked',
     onNavigate: (navigation) => navigations.push(navigation),
   });
 
+  await harness.probe();
+  fixtureState.buildId = 'build-c';
   const protectedEvidence = await harness.probe();
   assert.equal(protectedEvidence.navigationCount, 0);
   assert.equal(protectedEvidence.draftProtected, true);
 
-  harness.clickPromptAction();
-  const evidence = harness.clickPromptAction();
+  await harness.clickPromptAction();
+  const evidence = await harness.clickPromptAction();
   assert.equal(evidence.navigationCount, 1);
   assert.equal(evidence.loopPrevented, true);
-  assert.deepEqual(navigations, [{ source: 'product-recovery', fromBuildId: 'build-b', toBuildId: 'build-c' }]);
+  assert.deepEqual(navigations, [
+    {
+      type: 'reload',
+      source: 'product-recovery',
+      fromBuildId: 'build-b',
+      toBuildId: 'build-c',
+      trigger: 'manual',
+    },
+  ]);
+  assert.deepEqual(harness.announcements, ['build-c']);
+  assert.deepEqual(harness.browserEffects, ['service-worker-update', 'cache-delete:old-shell', 'navigation']);
   emitRecoveryEvidence(evidence);
 });
 
 test('harness contains no automation-side hard-refresh escape hatch', async () => {
-  const source = await readHarnessSource();
-  const forbidden = ['page' + '.reload', 'Cmd+' + 'Shift+R', 'Meta+' + 'Shift+R', 'location' + '.reload'];
-  for (const token of forbidden) assert.equal(source.includes(token), false, token);
+  const scannedFiles = await readHarnessSource();
+  assert.deepEqual(scannedFiles.sort(), [
+    'scripts/verify-stale-build-recovery.mjs',
+    'test/stale-build-recovery-harness.test.mjs',
+  ]);
+  assert.deepEqual(await scanAutomationEscapeHatches(), []);
+});
+
+test('escape scanner rejects direct, optional, computed reloads and hard-refresh shortcuts', () => {
+  const member = (owner, operator, property) => `${owner}${operator}${property}()`;
+  const computed = (owner, property) => `${owner}[${JSON.stringify(property)}]()`;
+  const optionalComputed = (owner, property) => `${owner}?.[${JSON.stringify(property)}]()`;
+  const shortcut = (...parts) => JSON.stringify(parts.join('+'));
+  const forbiddenSources = [
+    member('page', '.', 'reload'),
+    member('page', '?.', 'reload'),
+    computed('page', 'reload'),
+    optionalComputed('page', 'reload'),
+    member('location', '.', 'reload'),
+    member('location', '?.', 'reload'),
+    computed('location', 'reload'),
+    optionalComputed('location', 'reload'),
+    shortcut('Cmd', 'Shift', 'R'),
+    shortcut('Meta', 'Shift', 'R'),
+  ];
+
+  for (const source of forbiddenSources) {
+    assert.notDeepEqual(scanAutomationSource(source, 'negative-fixture.mjs'), [], source);
+  }
+});
+
+test('harness delegates recovery decisions to the production controller', async () => {
+  const [automationSource] = await readHarnessSource({ includeContents: true });
+  assert.match(automationSource, /createBuildRecoveryController/);
+  assert.match(automationSource, /controller\.handleProbeResult/);
+  assert.match(automationSource, /controller\.manualPromptAction/);
+  assert.doesNotMatch(automationSource, /reserveAutomaticRecovery/);
 });
