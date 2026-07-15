@@ -495,11 +495,23 @@ describe('MCP callback end-to-end flow', () => {
   let registry;
   let messageStore;
   let socketManager;
+  let fakeCliDir;
+  const originalPath = process.env.PATH ?? '';
+
+  before(() => {
+    fakeCliDir = installFakeCliPath();
+    process.env.PATH = `${fakeCliDir}${process.platform === 'win32' ? ';' : ':'}${originalPath}`;
+  });
 
   beforeEach(() => {
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
+  });
+
+  after(() => {
+    process.env.PATH = originalPath;
+    if (fakeCliDir) rmSync(fakeCliDir, { recursive: true, force: true });
   });
 
   async function createApp() {
