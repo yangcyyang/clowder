@@ -1,3 +1,4 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
@@ -91,7 +92,7 @@ describe('F194 POST /api/messages work admission', () => {
         idempotencyKey: '19419419-4194-4194-8194-194194194194',
       },
     });
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 200, response.body);
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     const tasks = await taskStore.listByThread(parent.id);
@@ -175,6 +176,79 @@ describe('F194 POST /api/messages work admission', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal((await taskStore.listByThread(parent.id)).length, 0);
     assert.equal(routeCalls[0][2], parent.id);
+    await app.close();
+  });
+
+  test('an unrevealed whisper never copies its sentinel into task-derived surfaces', async () => {
+    const events = [];
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const parent = await threadStore.create('alice', '大厅');
+    const sentinel = 'WHISPER-SECRET-194';
+    process.env.CLOWDER_AUTO_TASK_THREAD_THREADS = parent.id;
+    const app = Fastify();
+    await app.register(messagesRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore,
+      taskStore,
+      threadStore,
+      socketManager: socketManager(events),
+      invocationTracker: invocationTracker(),
+      invocationRecordStore: {
+        async create() {
+          return { outcome: 'created', invocationId: 'inv-whisper-f194' };
+        },
+        async update() {},
+      },
+      router: {
+        async resolveTargetsAndIntent() {
+          return {
+            targetCats: ['opus'],
+            hasMentions: true,
+            intent: { intent: 'execute', explicit: true, promptTags: [] },
+          };
+        },
+        async *routeExecution() {
+          yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+        },
+        async ackCollectedCursors() {},
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: {
+        threadId: parent.id,
+        content: `@opus 修复 ${sentinel}`,
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const [task] = await taskStore.listByThread(parent.id);
+    assert.ok(task);
+    assert.equal(task.title, '私密工作指令');
+    assert.equal(task.why.includes(sentinel), false);
+    const taskThread = await threadStore.get(task.taskThreadId);
+    assert.ok(taskThread);
+    const derivedSurfaces = { task, taskThread, events };
+    assert.equal(JSON.stringify(derivedSurfaces).includes(sentinel), false);
+
+    const allMessages = [
+      ...(await messageStore.getByThread(parent.id, 100)),
+      ...(await messageStore.getByThread(task.taskThreadId, 100)),
+    ];
+    const sentinelMessages = allMessages.filter((message) => message.content.includes(sentinel));
+    assert.equal(sentinelMessages.length, 2);
+    for (const message of sentinelMessages) {
+      assert.equal(message.visibility, 'whisper');
+      assert.deepEqual(message.whisperTo, ['opus']);
+    }
     await app.close();
   });
 

@@ -48,6 +48,14 @@ function initialClaimEvents(ownerCatId: CatId | undefined, timestamp: number): r
   ];
 }
 
+function taskTitleForSource(sourceMessage: StoredMessage, classifiedTitle: string): string {
+  // Task metadata is injected into every cat's navigation context. An
+  // unrevealed whisper body therefore cannot be reused as the task title even
+  // though the source copy itself is protected by canViewMessage().
+  if (sourceMessage.visibility === 'whisper' && !sourceMessage.revealedAt) return '私密工作指令';
+  return classifiedTitle;
+}
+
 export async function admitWorkMessage(input: {
   decision: Exclude<WorkAdmissionDecision, { kind: 'reply_only' }>;
   sourceMessage: StoredMessage;
@@ -62,7 +70,7 @@ export async function admitWorkMessage(input: {
     kind: 'work',
     threadId: sourceMessage.threadId,
     subjectKey,
-    title: decision.taskTitle,
+    title: taskTitleForSource(sourceMessage, decision.taskTitle),
     why:
       decision.kind === 'resume_pending_plan'
         ? `用户批准挂起方案 ${decision.pendingPlanMessageId}`
