@@ -1492,6 +1492,38 @@ describe('routeParallel resilience', () => {
     assert.ok(yielded.some((msg) => msg.type === 'done' && msg.isFinal));
   });
 
+  it('fails closed when a task-thread binding is ambiguous', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    const task = (id) => ({
+      id,
+      threadId: 'thread-parallel-parent',
+      taskThreadId: 'thread-parallel-task',
+      title: id,
+      why: 'test',
+      kind: 'work',
+      subjectKey: `work-intake:thread-parallel-parent:${id}`,
+      ownerCatId: 'opus',
+      status: 'doing',
+      createdBy: 'user',
+      userId: 'user1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    deps.taskStore = {
+      listByThread: () => [],
+      listByKind: () => [task('task-parallel-a'), task('task-parallel-b')],
+    };
+
+    await assert.rejects(async () => {
+      for await (const _ of routeParallel(deps, ['opus'], 'continue', 'user1', 'thread-parallel-task')) {
+        // exhaust stream
+      }
+    }, /Ambiguous task surface/);
+    assert.equal(service.calls.length, 0);
+  });
+
   it('yields done even when messageStore.append throws (Redis failure)', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 
