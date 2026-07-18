@@ -51,6 +51,10 @@ export function listChangedFiles(base, { cwd = process.cwd() } = {}) {
   return diff.stdout.split('\0').filter(Boolean);
 }
 
+export function buildBiomeArgs(candidates) {
+  return ['biome', 'check', '--diagnostic-level=error', '--no-errors-on-unmatched', '--', ...candidates];
+}
+
 export function runChangedBiome({ cwd = process.cwd(), baseCandidate = process.env.CI_BASE_SHA } = {}) {
   const base = resolveDiffBase(baseCandidate, { cwd });
   const changed = listChangedFiles(base, { cwd });
@@ -62,7 +66,7 @@ export function runChangedBiome({ cwd = process.cwd(), baseCandidate = process.e
     return 0;
   }
 
-  const result = spawnSync('pnpm', ['biome', 'check', '--diagnostic-level=error', '--', ...candidates], {
+  const result = spawnSync('pnpm', buildBiomeArgs(candidates), {
     cwd,
     stdio: 'inherit',
   });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { filterBiomeCandidates, resolveDiffBase } from './check-biome-changed.mjs';
+import { buildBiomeArgs, filterBiomeCandidates, resolveDiffBase } from './check-biome-changed.mjs';
 
 describe('CI changed-file Biome gate', () => {
   it('falls back from an all-zero GitHub before SHA to HEAD parent', () => {
@@ -28,6 +28,17 @@ describe('CI changed-file Biome gate', () => {
     assert.deepEqual(filterBiomeCandidates(paths, { lstat }), [
       './packages/api/src/index.ts',
       './packages/web/src/components/ChatInput.tsx',
+    ]);
+  });
+
+  it('lets a docs-only diff pass when every existing candidate is ignored by Biome', () => {
+    assert.deepEqual(buildBiomeArgs(['./docs/features/F194-channel-task-thread-routing.md']), [
+      'biome',
+      'check',
+      '--diagnostic-level=error',
+      '--no-errors-on-unmatched',
+      '--',
+      './docs/features/F194-channel-task-thread-routing.md',
     ]);
   });
 });
