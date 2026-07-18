@@ -240,19 +240,19 @@ export function ChunkLoadRefreshGuard() {
       aria-modal="true"
       aria-labelledby="clowder-recovery-title"
       aria-describedby="clowder-recovery-description"
-      className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-[var(--console-overlay-backdrop)] p-4"
     >
-      <div className="w-full max-w-md rounded-xl bg-white p-6 text-slate-950 shadow-2xl">
+      <div className="w-full max-w-md rounded-xl bg-cafe-surface p-6 text-cafe shadow-2xl">
         <h2 id="clowder-recovery-title" className="text-lg font-semibold">
           检测到 Clowder 新版本
         </h2>
-        <p id="clowder-recovery-description" className="mt-2 text-sm leading-6 text-slate-700">
+        <p id="clowder-recovery-description" className="mt-2 text-sm leading-6 text-cafe-secondary">
           当前页面仍有未发送内容。请先保存草稿，再手动刷新以加载新版本。
         </p>
         <button
           type="button"
           onClick={reloadAfterSaving}
-          className="mt-5 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white"
+          className="mt-5 rounded-lg bg-cafe-accent px-4 py-2 text-sm font-medium text-[var(--cafe-accent-foreground)]"
         >
           保存好草稿并刷新
         </button>
