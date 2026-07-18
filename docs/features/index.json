@@ -1169,6 +1169,12 @@
       "name": "输出提交协议与 Freshness Hold",
       "status": "in-progress | **Owner**: Maine Coon / Codex | **Priority**: P0",
       "file": "F193-output-publication-freshness-hold.md"
+    },
+    {
+      "id": "F194",
+      "name": "Channel Task Thread Routing — 频道任务线程路由协议",
+      "status": "in-progress | **Owner**: Maine Coon / Codex | **Priority**: P0",
+      "file": "F194-channel-task-thread-routing.md"
     }
   ]
 }
