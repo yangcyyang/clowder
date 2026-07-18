@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { before, beforeEach, describe, test } from 'node:test';
+import { beforeEach, describe, test } from 'node:test';
 import '../helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
 
@@ -24,6 +24,9 @@ function createMockSocketManager() {
     },
     broadcastToRoom(room, event, data) {
       events.push({ room, event, data });
+    },
+    emitToUser(userId, event, data) {
+      events.push({ userId, event, data });
     },
     getEvents() {
       return events;
@@ -291,6 +294,295 @@ describe('Task Callback Integration', () => {
     assert.ok(createEvent, 'task_created event should be broadcast');
     assert.equal(createEvent.room, 'thread:thread-1');
     assert.equal(createEvent.data.taskThreadId, body.task.taskThreadId);
+  });
+
+  test('MCP task-thread invocation reuses its admitted auto-task instead of creating a duplicate', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'c6b parent');
+    const taskThread = await threadStore.create('user-1', 'auto task branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: '私密工作指令',
+      why: 'work intake',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+    const before = taskStore.listByKind('work');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: '再次执行原始自动任务', why: '模型误调用 create_task' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().status, 'existing_task');
+    assert.equal(response.json().task.id, root.id);
+    assert.equal(taskStore.listByKind('work').length, before.length);
+    assert.equal(socketManager.getEvents().filter((event) => event.event === 'task_created').length, 0);
+  });
+
+  test('MCP task-thread reuse still rejects a disabled requested owner', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'disabled owner parent');
+    const taskThread = await threadStore.create('user-1', 'auto task branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'auto task',
+      why: 'work intake',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+    const before = taskStore.listByKind('work').length;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'must be rejected before reuse', ownerCatId: 'antigravity' },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().kind, 'cat_disabled');
+    assert.equal(taskStore.listByKind('work').length, before);
+  });
+
+  test('MCP manual task-thread invocation preserves legacy childless create behavior', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'manual parent');
+    const taskThread = await threadStore.create('user-1', 'manual task branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'manual root',
+      why: 'manual',
+      createdBy: 'user',
+      userId: 'user-1',
+      subjectKey: null,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'legacy direct task' },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.json().status, 'ok');
+    assert.equal(response.json().task.threadId, taskThread.id);
+    assert.equal(response.json().task.parentTaskId, undefined);
+  });
+
+  test('MCP task-thread invocation may create an explicit child task', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'root branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'root task',
+      why: 'root',
+      createdBy: 'user',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'explicit child', parentTaskId: root.id },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.json().task.parentTaskId, root.id);
+    assert.equal(response.json().task.threadId, taskThread.id);
+  });
+
+  test('MCP task-thread invocation lists and updates the owning parent task', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'root branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'root task',
+      why: 'root',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/list-tasks?threadId=${taskThread.id}`,
+      headers,
+    });
+    assert.equal(listed.statusCode, 200);
+    assert.deepEqual(
+      listed.json().tasks.map((task) => task.id),
+      [root.id],
+    );
+
+    const updated = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-task',
+      headers,
+      payload: { taskId: root.id, status: 'in_review' },
+    });
+    assert.equal(updated.statusCode, 200, updated.body);
+    assert.equal(updated.json().task.status, 'in_review');
+  });
+
+  test('MCP task-thread invocation may claim its unowned parent task', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'root branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'unowned root',
+      why: 'root',
+      createdBy: 'user',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/claim-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { taskId: root.id },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().task.ownerCatId, 'opus');
+    assert.equal(response.json().task.status, 'doing');
+  });
+
+  test('MCP create-task rejects a parentTaskId not bound to the current task thread', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'root branch');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'root',
+      why: 'root',
+      createdBy: 'user',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const other = taskStore.create({
+      threadId: parent.id,
+      title: 'other',
+      why: 'other',
+      createdBy: 'user',
+      userId: 'user-1',
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+    const before = taskStore.listByKind('work').length;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'invalid child', parentTaskId: other.id },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(taskStore.listByKind('work').length, before);
+  });
+
+  test('MCP task-thread mutations fail closed when multiple tasks claim the same task thread', async () => {
+    const app = await createApp();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'ambiguous branch');
+    const taskIds = [];
+    for (const title of ['root-a', 'root-b']) {
+      const task = taskStore.create({
+        threadId: parent.id,
+        title,
+        why: title,
+        createdBy: 'user',
+        userId: 'user-1',
+        subjectKey: `work-intake:${parent.id}:${title}`,
+      });
+      taskStore.linkTaskThreadIfAbsent(task.id, { taskThreadId: taskThread.id });
+      taskIds.push(task.id);
+    }
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', taskThread.id);
+    const before = taskStore.listByKind('work').length;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'must not be created' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(taskStore.listByKind('work').length, before);
+    assert.equal(response.json().taskIds.length, 2);
+
+    const updated = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-task',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { taskId: taskIds[0], status: 'doing' },
+    });
+    assert.equal(updated.statusCode, 403);
+  });
+
+  test('MCP task-thread alias does not expose a foreign parent task', async () => {
+    const app = await createApp();
+    const actorThread = await threadStore.create('user-1', 'actor branch');
+    const foreignParent = await threadStore.create('user-2', 'foreign parent');
+    const foreignTask = taskStore.create({
+      threadId: foreignParent.id,
+      title: 'foreign root',
+      why: 'foreign',
+      createdBy: 'user',
+      userId: 'user-2',
+    });
+    taskStore.linkTaskThreadIfAbsent(foreignTask.id, { taskThreadId: actorThread.id });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', actorThread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/list-tasks?threadId=${actorThread.id}`,
+      headers,
+    });
+    assert.equal(listed.statusCode, 200);
+    assert.deepEqual(listed.json().tasks, []);
+
+    const updated = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-task',
+      headers,
+      payload: { taskId: foreignTask.id, status: 'doing' },
+    });
+    assert.equal(updated.statusCode, 403);
   });
 
   test('MCP create-task rejects invalid credentials', async () => {

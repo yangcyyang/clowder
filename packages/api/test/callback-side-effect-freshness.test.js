@@ -161,6 +161,70 @@ describe('protected callback side effects', () => {
     assert.equal(taskStore.listByThread(currentThreadId).length, 1);
   });
 
+  test('create-task: auto-task reuse is protected and replay is inert', async () => {
+    const parent = threadStore.create('user-1', 'auto parent');
+    const taskThread = threadStore.create('user-1', 'auto task thread');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'auto root',
+      why: 'freshness',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const auth = await createProtectedInvocation(taskThread.id);
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { title: 'model duplicate create' },
+    };
+
+    const first = await app.inject(request);
+    const replay = await app.inject(request);
+
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.json().status, 'existing_task');
+    assert.equal(first.json().task.id, root.id);
+    assert.equal(replay.json().status, 'duplicate');
+    assert.equal(taskStore.listByKind('work').length, 1);
+  });
+
+  test('create-task: invalid parentTaskId remains a stable 409 across retries', async () => {
+    const parent = threadStore.create('user-1', 'invalid parent');
+    const taskThread = threadStore.create('user-1', 'invalid task thread');
+    const root = taskStore.create({
+      threadId: parent.id,
+      title: 'auto root',
+      why: 'freshness',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(root.id, { taskThreadId: taskThread.id });
+    const auth = await createProtectedInvocation(taskThread.id);
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/create-task',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { title: 'invalid child', parentTaskId: 'task-wrong' },
+    };
+
+    const first = await app.inject(request);
+    const retry = await app.inject(request);
+
+    assert.equal(first.statusCode, 409);
+    assert.equal(retry.statusCode, 409);
+    assert.match(first.json().error, /parentTaskId/);
+    assert.match(retry.json().error, /parentTaskId/);
+    assert.equal(taskStore.listByKind('work').length, 1);
+  });
+
   test('generate-document: stale is inert, current executes once, replay is inert', async () => {
     const payload = { markdown: '# Protected', format: 'md', baseName: 'protected' };
     const staleAuth = await createProtectedInvocation('doc-stale');

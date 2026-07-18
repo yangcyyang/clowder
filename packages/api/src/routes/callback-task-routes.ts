@@ -12,6 +12,10 @@ import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-ta
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  resolveTaskSurfaceBinding,
+  taskIsAccessibleFromExecutionSurface,
+} from '../domains/cats/services/tasks/task-surface-resolver.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
@@ -37,6 +41,7 @@ const createTaskSchema = z.object({
   title: z.string().min(1).max(200),
   why: z.string().max(1000).optional().default(''),
   ownerCatId: z.string().min(1).optional(),
+  parentTaskId: z.string().min(1).optional(),
 });
 
 const listTasksQuerySchema = z.object({
@@ -88,7 +93,15 @@ export function registerCallbackTaskRoutes(
       reply.status(404);
       return { error: 'Task not found' };
     }
-    if (existing.threadId !== actor.threadId) {
+    if (
+      !(await taskIsAccessibleFromExecutionSurface({
+        taskStore,
+        task: existing,
+        threadStore,
+        userId: actor.userId,
+        executionThreadId: actor.threadId,
+      }))
+    ) {
       reply.status(403);
       return { error: 'Task belongs to a different thread' };
     }
@@ -141,7 +154,15 @@ export function registerCallbackTaskRoutes(
       reply.status(404);
       return { error: 'Task not found' };
     }
-    if (existing.threadId !== actor.threadId) {
+    if (
+      !(await taskIsAccessibleFromExecutionSurface({
+        taskStore,
+        task: existing,
+        threadStore,
+        userId: actor.userId,
+        executionThreadId: actor.threadId,
+      }))
+    ) {
       reply.status(403);
       return { error: 'Task belongs to a different thread' };
     }
@@ -186,7 +207,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { title, why, ownerCatId } = parsed.data;
+    const { title, why, ownerCatId, parentTaskId } = parsed.data;
 
     // F182 AC-C2: B class — validate ownerCatId is available (contract 400 on disabled)
     let resolvedOwnerCatId: CatId | null = null;
@@ -199,6 +220,26 @@ export function registerCallbackTaskRoutes(
       resolvedOwnerCatId = createCatId(resolved.ok);
     }
 
+    // Pure surface validation runs before freshness authorization so a
+    // retryable business 409 does not consume the invocation side-effect
+    // claim. The successful existing-task reuse remains freshness-protected.
+    const binding = await resolveTaskSurfaceBinding({
+      taskStore,
+      threadStore,
+      userId: actor.userId,
+      executionThreadId: actor.threadId,
+    });
+    if (binding.outcome === 'ambiguous') {
+      reply.status(409);
+      return { error: 'Task thread has multiple owning tasks', taskIds: binding.taskIds };
+    }
+    if (parentTaskId) {
+      if (binding.outcome !== 'bound' || binding.surface !== 'task_thread' || binding.task.id !== parentTaskId) {
+        reply.status(409);
+        return { error: 'parentTaskId is not the task bound to this thread' };
+      }
+    }
+
     const freshness = await claimCallbackSideEffect({
       freshnessGate: deps.freshnessGate,
       registry: deps.registry,
@@ -207,6 +248,15 @@ export function registerCallbackTaskRoutes(
       requestBody: parsed.data,
     });
     if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
+
+    if (
+      !parentTaskId &&
+      binding.outcome === 'bound' &&
+      binding.surface === 'task_thread' &&
+      binding.task.subjectKey?.startsWith('work-intake:')
+    ) {
+      return { status: 'existing_task', code: 'TASK_ALREADY_ACTIVE', task: binding.task };
+    }
 
     const created = await taskStore.create({
       threadId: actor.threadId,
@@ -217,6 +267,7 @@ export function registerCallbackTaskRoutes(
       subjectKey: null,
       ownerCatId: resolvedOwnerCatId,
       userId: actor.userId,
+      ...(parentTaskId ? { parentTaskId } : {}),
     });
     const task =
       threadStore && messageStore
@@ -277,6 +328,25 @@ export function registerCallbackTaskRoutes(
 
     const perThreadTasks = await Promise.all(scopedThreadIds.map((id) => taskStore.listByThread(id)));
     let tasks = perThreadTasks.flat();
+    if (threadId) {
+      const executionThreadId = scopedThreadIds[0];
+      if (!executionThreadId) {
+        reply.status(500);
+        return { error: 'Resolved task thread scope is empty' };
+      }
+      const binding = await resolveTaskSurfaceBinding({
+        taskStore,
+        threadStore,
+        userId: actor.userId,
+        executionThreadId,
+      });
+      if (binding.outcome === 'ambiguous') {
+        reply.status(409);
+        return { error: 'Task thread has multiple owning tasks', taskIds: binding.taskIds };
+      }
+      if (binding.outcome === 'bound' && binding.surface === 'task_thread') tasks.push(binding.task);
+    }
+    tasks = [...new Map(tasks.map((task) => [task.id, task])).values()];
     if (catId) tasks = tasks.filter((item) => item.ownerCatId === catId);
     if (status) tasks = tasks.filter((item) => item.status === status);
     if (kind) tasks = tasks.filter((item) => item.kind === kind);

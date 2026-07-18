@@ -38,6 +38,7 @@ import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredMessage, StoredToolEvent, ThreadAppendWatermark } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { resolveTaskSurfaceBinding, taskSurfacePromptContext } from '../../tasks/task-surface-resolver.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
@@ -236,6 +237,25 @@ export async function* routeParallel(
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
+  const taskStore = deps.taskStore ?? deps.invocationDeps.taskStore;
+  let taskSurfaceBinding = { outcome: 'none' as const } as Awaited<ReturnType<typeof resolveTaskSurfaceBinding>>;
+  try {
+    if (taskStore) {
+      taskSurfaceBinding = await resolveTaskSurfaceBinding({
+        taskStore,
+        threadStore: deps.invocationDeps.threadStore ?? undefined,
+        userId,
+        executionThreadId: threadId,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
+      });
+    }
+  } catch (err) {
+    log.warn({ err, threadId }, 'task surface lookup failed; continuing without task prompt binding');
+  }
+  if (taskSurfaceBinding.outcome === 'ambiguous') {
+    throw new Error(`Ambiguous task surface ${threadId}: ${taskSurfaceBinding.taskIds.join(',')}`);
+  }
+  const currentTask = taskSurfacePromptContext(taskSurfaceBinding);
 
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
@@ -405,6 +425,7 @@ export async function* routeParallel(
         mcpAvailable,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         ...(currentUserMessageId ? { currentUserMessageId } : {}),
+        ...(currentTask ? { currentTask } : {}),
         ...(governanceSourceContext ? { governanceSourceContext } : {}),
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         ...(skillRouterContext ? { skillRouterBlock: skillRouterContext.promptBlock } : {}),

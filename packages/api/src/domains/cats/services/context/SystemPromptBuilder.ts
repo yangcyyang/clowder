@@ -170,6 +170,15 @@ export interface InvocationContext {
    * exact triggering message instead of asking the model to infer it from text.
    */
   currentUserMessageId?: string;
+  /** Server-derived task binding for task-thread and resumed invocations. */
+  currentTask?: {
+    readonly id: string;
+    readonly parentThreadId: string;
+    readonly taskThreadId?: string;
+    readonly sourceMessageId?: string;
+    readonly ownerCatId: string | null;
+    readonly status: string;
+  };
   /**
    * A2A handoff trigger — when another cat explicitly routed the ball to this cat.
    * This must outrank the latest human message when deciding the current task.
@@ -475,9 +484,25 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
     context.currentUserMessageId ? ` msg=${context.currentUserMessageId}` : ''
   }`;
 
+  const currentTaskLines = context.currentTask
+    ? [
+        `current task: taskId=${context.currentTask.id} parentThread=${context.currentTask.parentThreadId}${
+          context.currentTask.taskThreadId ? ` taskThread=${context.currentTask.taskThreadId}` : ''
+        }${context.currentTask.sourceMessageId ? ` sourceMessage=${context.currentTask.sourceMessageId}` : ''}`,
+        `current task state: owner=${context.currentTask.ownerCatId ?? 'unassigned'} status=${context.currentTask.status}`,
+        context.currentTask.ownerCatId === context.catId
+          ? '当前 task 已经由系统创建并认领给你；直接执行并更新这张 task，不要再次认领当前 child copy，也不得为同一工作再次创建 task。'
+          : context.currentTask.ownerCatId === null
+            ? '当前 task 已经由系统创建但尚未认领；认领这张既有 task，不要认领当前 child copy，也不得为同一工作再次创建 task。'
+            : `当前 task 由 @${context.currentTask.ownerCatId} 持有；不得认领、更新或为同一工作再创建根 task。仅执行对方明确委派给你的工作，并将结果回报给该 owner。`,
+        '只有确需拆成独立子任务时，才可显式调用 create_task 并传入当前 taskId 作为 parentTaskId。',
+      ]
+    : [];
+
   return [
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
+    ...currentTaskLines,
     '阶段先判：用户只在陈述目标、发散讨论或征求意见，且未明确“开工/按这个做/安排/执行”时，只分析和收敛；不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单。明确执行口令出现后才进入下面的行动纪律。',
     '行动任务先认领当前消息或匹配任务；未认领前不写文件、不改代码、不启动构建；如果任务被别人认领，停止并说明冲突。',
     '文件删除权限：用户或 A2A 派工已明确要求删除，且文件受 git 版本控制时，可直接删除并用 git diff/status 留证；这不是不可逆操作。§10.4 的“删数据”指数据库、生产资源或不可恢复数据。',
@@ -487,7 +512,10 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
 }
 
 function formatA2ATriggerContent(content: string | undefined): string {
-  const normalized = (content ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = (content ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized) return '';
   const limit = 360;
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
@@ -929,10 +957,7 @@ export function buildInvocationContext(context: InvocationContext): string {
 
   // A2A: lightweight routing reminder from simplified shared-rules.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
-    lines.push(
-      'A2A 路由：行首 @ 才触发；需要行动才 @；无明确执行任务只短确认，不做全量接续检查。',
-      '',
-    );
+    lines.push('A2A 路由：行首 @ 才触发；需要行动才 @；无明确执行任务只短确认，不做全量接续检查。', '');
   }
 
   // F064: One-shot feedback when previous @mention was not routed.

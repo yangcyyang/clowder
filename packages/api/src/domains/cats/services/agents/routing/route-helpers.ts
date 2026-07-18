@@ -35,6 +35,7 @@ import {
 } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../../stores/visibility.js';
+import { resolveTaskSurfaceBinding } from '../../tasks/task-surface-resolver.js';
 import type { AgentMessage, AgentService, DeliveryOnlyDegradedIssue } from '../../types.js';
 
 export type { DeliveryOnlyDegradedIssue } from '../../types.js';
@@ -2602,9 +2603,21 @@ export async function assembleIncrementalContext(
   const baton = extractBatonContext(batonCandidates, catId);
   let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
   let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
-  if (deps.taskStore) {
+  const navigationTaskStore = deps.taskStore ?? deps.invocationDeps.taskStore;
+  if (navigationTaskStore) {
     try {
-      const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
+      const directTasks = await Promise.resolve(navigationTaskStore.listByThread(threadId));
+      const binding = await resolveTaskSurfaceBinding({
+        taskStore: navigationTaskStore,
+        threadStore: deps.invocationDeps.threadStore ?? undefined,
+        userId,
+        executionThreadId: threadId,
+        ...(currentUserMessageId ? { currentUserMessageId } : {}),
+      });
+      const tasks =
+        binding.outcome === 'bound'
+          ? [...new Map([...directTasks, binding.task].map((task) => [task.id, task])).values()]
+          : directTasks;
       activeTasks = summarizeActiveTasks(tasks);
       allThreadTasks = tasks;
     } catch {

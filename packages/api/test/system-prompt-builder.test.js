@@ -668,6 +668,82 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('§10.4 的“删数据”指数据库'), 'Should scope irreversible data deletion');
   });
 
+  test('buildInvocationContext binds an existing task-thread task and forbids duplicate create', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      threadId: 'thread_task',
+      currentUserMessageId: 'msg_copy',
+      currentTask: {
+        id: 'task_root',
+        parentThreadId: 'thread_parent',
+        taskThreadId: 'thread_task',
+        sourceMessageId: 'msg_root',
+        ownerCatId: 'codex',
+        status: 'doing',
+      },
+    });
+
+    assert.match(ctx, /taskId=task_root/);
+    assert.match(ctx, /parentThread=thread_parent/);
+    assert.match(ctx, /taskThread=thread_task/);
+    assert.match(ctx, /sourceMessage=msg_root/);
+    assert.match(ctx, /owner=codex status=doing/);
+    assert.match(ctx, /已经由系统创建并认领/);
+    assert.match(ctx, /不得为同一工作再次创建 task/);
+    assert.match(ctx, /parentTaskId/);
+  });
+
+  test('buildInvocationContext tells an unowned task to claim the existing task', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      threadId: 'thread_task',
+      currentTask: {
+        id: 'task_unowned',
+        parentThreadId: 'thread_parent',
+        taskThreadId: 'thread_task',
+        ownerCatId: null,
+        status: 'todo',
+      },
+    });
+
+    assert.match(ctx, /owner=unassigned status=todo/);
+    assert.match(ctx, /尚未认领/);
+    assert.match(ctx, /认领这张既有 task/);
+    assert.doesNotMatch(ctx, /认领给你/);
+  });
+
+  test('buildInvocationContext protects a task owned by another cat', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      threadId: 'thread_task',
+      currentTask: {
+        id: 'task_opus',
+        parentThreadId: 'thread_parent',
+        taskThreadId: 'thread_task',
+        ownerCatId: 'opus',
+        status: 'doing',
+      },
+    });
+
+    assert.match(ctx, /owner=opus status=doing/);
+    assert.match(ctx, /由 @opus 持有/);
+    assert.match(ctx, /不得认领、更新/);
+    assert.match(ctx, /回报给该 owner/);
+    assert.doesNotMatch(ctx, /直接执行并更新/);
+  });
+
   test('buildSystemPrompt includes Slock-like visible output and pull-context guidance', async () => {
     const build = await getBuilder();
     const prompt = build({

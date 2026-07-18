@@ -14,6 +14,7 @@ const {
 } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 
 function structuredSummary(extra = '') {
@@ -90,6 +91,37 @@ describe('history critical seal intent', () => {
 });
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
+  test('task-thread navigation resolves and displays its owning parent task id', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadStore = new ThreadStore();
+    const taskStore = new TaskStore();
+    const parent = await threadStore.create('user-1', 'parent');
+    const taskThread = await threadStore.create('user-1', 'task branch');
+    const current = messageStore.append(mockMsg({ threadId: taskThread.id, content: '继续执行当前任务' }));
+    const task = taskStore.create({
+      threadId: parent.id,
+      title: '私密工作指令',
+      why: 'auto admission',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+      userId: 'user-1',
+      subjectKey: `work-intake:${parent.id}:root`,
+    });
+    taskStore.linkTaskThreadIfAbsent(task.id, { taskThreadId: taskThread.id });
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    deps.taskStore = taskStore;
+    deps.invocationDeps.threadStore = threadStore;
+
+    const result = await assembleIncrementalContext(deps, 'user-1', taskThread.id, 'opus', current.id, 'play');
+
+    assert.ok(result.contextText.includes(`taskId=${task.id}`));
+    assert.ok(result.contextText.includes('私密工作指令'));
+    assert.ok(result.contextText.includes('[doing]'));
+  });
+
   test('uses the durable reset boundary as the floor for raw history and summary reads', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const messageStore = new MessageStore();

@@ -524,6 +524,96 @@ describe('routeSerial chain tool policy', () => {
 });
 
 describe('routeSerial', () => {
+  it('injects the authoritative task-thread binding into the final provider prompt', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    deps.taskStore = {
+      listByThread: () => [],
+      listByKind: () => [
+        {
+          id: 'task-root',
+          threadId: 'thread-parent',
+          taskThreadId: 'thread-task',
+          sourceMessageId: 'msg-root',
+          title: 'root',
+          why: 'test',
+          kind: 'work',
+          subjectKey: 'work-intake:thread-parent:root',
+          ownerCatId: 'opus',
+          status: 'doing',
+          createdBy: 'user',
+          userId: 'user1',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+    };
+
+    for await (const _ of routeSerial(deps, ['opus'], 'continue', 'user1', 'thread-task')) {
+      // exhaust stream
+    }
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /taskId=task-root/);
+    assert.match(service.calls[0], /parentThread=thread-parent/);
+    assert.match(service.calls[0], /taskThread=thread-task/);
+    assert.match(service.calls[0], /owner=opus status=doing/);
+  });
+
+  it('fails open when task-surface lookup is unavailable on an ordinary thread', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    deps.taskStore = {
+      listByThread: () => {
+        throw new Error('task store unavailable');
+      },
+      listByKind: () => {
+        throw new Error('task store unavailable');
+      },
+    };
+
+    for await (const _ of routeSerial(deps, ['opus'], 'ordinary chat', 'user1', 'thread-ordinary')) {
+      // exhaust stream
+    }
+
+    assert.equal(service.calls.length, 1);
+    assert.doesNotMatch(service.calls[0], /current task: taskId=/);
+  });
+
+  it('fails closed when a task-thread binding is ambiguous', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    const task = (id) => ({
+      id,
+      threadId: 'thread-parent',
+      taskThreadId: 'thread-task',
+      title: id,
+      why: 'test',
+      kind: 'work',
+      subjectKey: `work-intake:thread-parent:${id}`,
+      ownerCatId: 'opus',
+      status: 'doing',
+      createdBy: 'user',
+      userId: 'user1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    deps.taskStore = {
+      listByThread: () => [],
+      listByKind: () => [task('task-a'), task('task-b')],
+    };
+
+    await assert.rejects(async () => {
+      for await (const _ of routeSerial(deps, ['opus'], 'continue', 'user1', 'thread-task')) {
+        // exhaust stream
+      }
+    }, /Ambiguous task surface/);
+    assert.equal(service.calls.length, 0);
+  });
+
   it('executes single cat and yields text + done', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'serial response') });
@@ -1340,6 +1430,68 @@ describe('routeParallel cursor ack on error', () => {
 });
 
 describe('routeParallel resilience', () => {
+  it('injects the authoritative task-thread binding into the final provider prompt', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    deps.taskStore = {
+      listByThread: () => [],
+      listByKind: () => [
+        {
+          id: 'task-parallel-root',
+          threadId: 'thread-parallel-parent',
+          taskThreadId: 'thread-parallel-task',
+          title: 'root',
+          why: 'test',
+          kind: 'work',
+          subjectKey: 'work-intake:thread-parallel-parent:root',
+          ownerCatId: 'opus',
+          status: 'doing',
+          createdBy: 'user',
+          userId: 'user1',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+    };
+
+    for await (const _ of routeParallel(deps, ['opus'], 'continue', 'user1', 'thread-parallel-task')) {
+      // exhaust stream
+    }
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /taskId=task-parallel-root/);
+    assert.match(service.calls[0], /parentThread=thread-parallel-parent/);
+    assert.match(service.calls[0], /taskThread=thread-parallel-task/);
+  });
+
+  it('fails open when task-surface lookup is unavailable on an ordinary thread', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const service = createCapturingService('opus');
+    const deps = createMockDeps({ opus: service });
+    let calls = 0;
+    deps.taskStore = {
+      listByThread: () => {
+        calls += 1;
+        throw new Error('task store unavailable');
+      },
+      listByKind: () => {
+        throw new Error('task store unavailable');
+      },
+    };
+
+    const yielded = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'ordinary chat', 'user1', 'thread-ordinary')) {
+      yielded.push(msg);
+    }
+
+    assert.equal(calls, 1);
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /ordinary chat/);
+    assert.doesNotMatch(service.calls[0], /task store unavailable|current task: taskId=/);
+    assert.ok(yielded.some((msg) => msg.type === 'done' && msg.isFinal));
+  });
+
   it('yields done even when messageStore.append throws (Redis failure)', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 

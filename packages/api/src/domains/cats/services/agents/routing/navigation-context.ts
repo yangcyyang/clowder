@@ -122,7 +122,7 @@ export function formatNavigationHeader(ctx: NavigationContext): string {
     lines.push('活跃毛线球:');
     for (const t of ctx.tasks) {
       const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
-      lines.push(`  - [${t.status}] ${t.title} (${owner})`);
+      lines.push(`  - [${t.status}] taskId=${t.id} ${t.title} (${owner})`);
     }
   }
 

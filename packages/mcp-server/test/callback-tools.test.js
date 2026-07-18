@@ -475,6 +475,33 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.why, 'Taking ownership');
   });
 
+  test('handleCreateTask forwards parentTaskId only for an explicit child', async () => {
+    const { handleCreateTask } = await import('../dist/tools/callback-tools.js');
+
+    const bodies = [];
+    globalThis.fetch = async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok' }),
+      };
+    };
+
+    await handleCreateTask({ title: 'child', parentTaskId: 'task-root' });
+    await handleCreateTask({ title: 'root' });
+
+    assert.equal(bodies[0].parentTaskId, 'task-root');
+    assert.equal(Object.hasOwn(bodies[1], 'parentTaskId'), false);
+  });
+
+  test('create-task schema rejects an empty parentTaskId', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const tool = callbackTools.find((item) => item.name === 'cat_cafe_create_task');
+    assert.ok(tool);
+    assert.equal(tool.inputSchema.parentTaskId.safeParse('').success, false);
+    assert.equal(tool.inputSchema.parentTaskId.safeParse('task-root').success, true);
+  });
+
   test('handleFeatIndex forwards limit/featId/query filters', async () => {
     const { handleFeatIndex } = await import('../dist/tools/callback-tools.js');
 
