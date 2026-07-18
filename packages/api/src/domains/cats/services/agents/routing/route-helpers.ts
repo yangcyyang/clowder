@@ -2218,7 +2218,10 @@ export function selectUnreadMessagesForCat(
   catId: CatId,
   thinkingMode: 'debug' | 'play' = 'play',
 ): StoredMessage[] {
-  const viewer = thinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  // Thinking mode may change which public agent messages are useful, but it must
+  // never elevate an agent to the human viewer. Whisper authorization is always
+  // evaluated for the cat whose invocation context we are assembling.
+  const viewer = { type: 'cat' as const, catId };
   return unseen.filter((m) => {
     if (m.userId === 'system' || m.origin === 'briefing' || m.origin === 'progress') return false;
     if (!canViewMessage(m, viewer)) return false;
@@ -2582,8 +2585,9 @@ export async function assembleIncrementalContext(
     };
   }
 
-  // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
-  const viewer = effectiveThinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  // Navigation/baton extraction is another invocation-context surface. Debug
+  // mode may retain public stream rows, but it must not elevate the cat viewer.
+  const viewer = { type: 'cat' as const, catId };
   const intentSnapshot = buildAgentIntentSnapshot(relevant, currentUserMessageId);
   const intentSnapshotText = formatAgentIntentSnapshot(intentSnapshot);
 

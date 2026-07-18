@@ -42,7 +42,7 @@ function findSourceCopyIndex(sourceMessage: StoredMessage, branchMessages: reado
 export function deriveThreadReplySummary(
   sourceMessage: StoredMessage,
   branchMessages: readonly StoredMessage[],
-  viewer: Viewer = { type: 'user' },
+  viewer: Viewer,
 ): ThreadReplySummary {
   // Branch 复制的是“截至 source 的全部上下文”；内容/时间完全相同的旧消息可能重复，
   // 因而必须以最后一个匹配项作为 source copy 边界。

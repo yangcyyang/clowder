@@ -25,7 +25,7 @@ describe('deriveThreadReplySummary', () => {
       message({ id: 'reply-2', catId: 'opus', content: '  最新\n回复  ', timestamp: 120, threadId: 'thread-branch' }),
     ];
 
-    assert.deepEqual(deriveThreadReplySummary(source, branchMessages), {
+    assert.deepEqual(deriveThreadReplySummary(source, branchMessages, { type: 'user' }), {
       replyCount: 2,
       latestReply: {
         id: 'reply-2',
@@ -52,7 +52,7 @@ describe('deriveThreadReplySummary', () => {
       }),
     ];
 
-    assert.deepEqual(deriveThreadReplySummary(source, branchMessages), {
+    assert.deepEqual(deriveThreadReplySummary(source, branchMessages, { type: 'user' }), {
       replyCount: 1,
       latestReply: {
         id: 'visible',
@@ -65,9 +65,12 @@ describe('deriveThreadReplySummary', () => {
 
   it('returns an empty fold when the source copy has no visible replies', () => {
     const source = message();
-    assert.deepEqual(deriveThreadReplySummary(source, [message({ id: 'source-copy', threadId: 'thread-branch' })]), {
-      replyCount: 0,
-    });
+    assert.deepEqual(
+      deriveThreadReplySummary(source, [message({ id: 'source-copy', threadId: 'thread-branch' })], { type: 'user' }),
+      {
+        replyCount: 0,
+      },
+    );
   });
 
   it('uses per-viewer whisper visibility when choosing count and latest preview', () => {
@@ -105,7 +108,7 @@ describe('deriveThreadReplySummary', () => {
       message({ id: 'actual-reply', content: '真正回复', timestamp: 120, threadId: 'thread-branch' }),
     ];
 
-    assert.deepEqual(deriveThreadReplySummary(source, branchMessages), {
+    assert.deepEqual(deriveThreadReplySummary(source, branchMessages, { type: 'user' }), {
       replyCount: 1,
       latestReply: { id: 'actual-reply', catId: null, content: '真正回复', timestamp: 120 },
     });

@@ -32,6 +32,30 @@ describe('F004 Phase 2 content-free inbox', () => {
     );
   });
 
+  test('debug-mode invocation context excludes a non-recipient whisper body', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const secret = 'WHISPER-SECRET-DEBUG-VIEWER';
+    const hidden = messageStore.append({
+      ...mockMsg({ content: `@codex ${secret}` }),
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+    });
+    const trigger = messageStore.append(mockMsg({ content: 'public follow-up for codex' }));
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+
+    assert.deepEqual(
+      selectUnreadMessagesForCat([hidden, trigger], 'codex', 'debug').map((message) => message.content),
+      ['public follow-up for codex'],
+    );
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'codex', trigger.id, 'debug');
+
+    assert.ok(result.contextText.includes('public follow-up for codex'));
+    assert.ok(!result.contextText.includes(secret), 'non-recipient whisper reached the actual invocation context');
+    assert.equal(result.currentMessageFilteredOut, false);
+  });
+
   test('prompt is under 50 tokens and never contains message bodies', () => {
     const messageStore = new MessageStore();
     const rows = [

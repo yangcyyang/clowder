@@ -2157,7 +2157,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         const link = message.extra?.slockThread;
         if (!link) return;
         const branchMessages = await opts.messageStore.getByThread(link.branchThreadId, 10000, userId);
-        threadReplySummaries.set(message.id, deriveThreadReplySummary(message, branchMessages));
+        threadReplySummaries.set(message.id, deriveThreadReplySummary(message, branchMessages, { type: 'user' }));
       }),
     );
 
