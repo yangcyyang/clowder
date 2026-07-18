@@ -48,6 +48,17 @@ describe('Tasks Routes', () => {
       async getByThread(threadId) {
         return this.messages.filter((message) => message.threadId === threadId);
       },
+      async updateExtra(id, extra) {
+        const message = this.messages.find((item) => item.id === id);
+        if (!message) return null;
+        message.extra = extra;
+        return message;
+      },
+      async deleteByThread(threadId) {
+        const before = this.messages.length;
+        this.messages = this.messages.filter((message) => message.threadId !== threadId);
+        return before - this.messages.length;
+      },
     };
   });
 
@@ -87,6 +98,45 @@ describe('Tasks Routes', () => {
     assert.equal(taskThreadMessages.length, 1);
     assert.equal(taskThreadMessages[0].id, body.sourceMessageId);
     assert.match(taskThreadMessages[0].content, /📌 Task: 重构 AgentRouter/);
+  });
+
+  test('POST preserves source visibility and links the parent root to the task thread', async () => {
+    const source = await messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: '@opus 修复私密问题',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      threadId: 'thread-1',
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+      revealedAt: 123,
+    });
+    const app = await createApp();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: '修复私密问题',
+        why: 'F194 source copy',
+        createdBy: 'user',
+        userId: 'alice',
+        sourceMessageId: source.id,
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    const task = response.json();
+    const copied = messageStore.messages.find(
+      (message) => message.threadId === task.taskThreadId && message.id !== source.id,
+    );
+    assert.ok(copied);
+    assert.equal(copied.visibility, 'whisper');
+    assert.deepEqual(copied.whisperTo, ['opus']);
+    assert.equal(copied.revealedAt, 123);
+    assert.deepEqual(source.extra?.slockThread, { branchThreadId: task.taskThreadId, replyCount: 0 });
   });
 
   test('POST task capability authorization appends task-scoped audit event', async () => {

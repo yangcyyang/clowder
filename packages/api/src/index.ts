@@ -1462,6 +1462,7 @@ async function main(): Promise<void> {
     deliveryCursorStore,
     ...(sessionStore ? { sessionStore } : {}),
     threadStore,
+    taskStore,
     invocationTracker,
     invocationRecordStore,
     summaryStore,

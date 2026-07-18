@@ -146,6 +146,14 @@ export interface ITaskStore {
 
   /** Patch automationState without touching other fields. */
   patchAutomationState(taskId: string, patch: Partial<AutomationState>): TaskItem | null | Promise<TaskItem | null>;
+
+  /** F194: atomically attach the first task thread; later contenders observe the winner. */
+  linkTaskThreadIfAbsent(
+    taskId: string,
+    input: { taskThreadId: string; sourceMessageId?: string },
+  ):
+    | { task: TaskItem | null; linked: boolean }
+    | Promise<{ task: TaskItem | null; linked: boolean }>;
 }
 
 /**
@@ -173,7 +181,7 @@ export class TaskStore implements ITaskStore {
       subjectKey: input.subjectKey ?? null,
       title: input.title,
       ownerCatId: input.ownerCatId ?? null,
-      status: 'todo',
+      status: input.status ?? 'todo',
       failureClass: input.failureClass,
       failureReason: input.failureReason,
       why: input.why,
@@ -282,6 +290,23 @@ export class TaskStore implements ITaskStore {
     };
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  linkTaskThreadIfAbsent(
+    taskId: string,
+    input: { taskThreadId: string; sourceMessageId?: string },
+  ): { task: TaskItem | null; linked: boolean } {
+    const existing = this.tasks.get(taskId);
+    if (!existing) return { task: null, linked: false };
+    if (existing.taskThreadId) return { task: existing, linked: false };
+    const updated: TaskItem = {
+      ...existing,
+      taskThreadId: input.taskThreadId,
+      sourceMessageId: existing.sourceMessageId ?? input.sourceMessageId,
+      updatedAt: Date.now(),
+    };
+    this.tasks.set(taskId, updated);
+    return { task: updated, linked: true };
   }
 
   update(taskId: string, input: UpdateTaskInput): TaskItem | null {

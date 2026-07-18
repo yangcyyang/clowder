@@ -37,7 +37,7 @@ export async function ensureTaskDiscussionThread(
     socketManager: SocketManager;
   },
   options: { userId?: string; broadcastUpdate?: boolean } = {},
-): Promise<{ threadId: string; sourceMessage: ReturnType<typeof toTaskThreadMessage>; task: TaskItem }> {
+): Promise<{ threadId: string; sourceMessage: ReturnType<typeof toTaskThreadMessage>; task: TaskItem; created: boolean }> {
   const { taskStore, threadStore, messageStore, socketManager } = deps;
   if (task.taskThreadId) {
     const existingThread = await threadStore.get(task.taskThreadId);
@@ -45,7 +45,7 @@ export async function ensureTaskDiscussionThread(
       const messages = await messageStore.getByThread(task.taskThreadId, 100);
       const sourceMessage = messages[0];
       if (sourceMessage) {
-        return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task };
+        return { threadId: task.taskThreadId, sourceMessage: toTaskThreadMessage(sourceMessage), task, created: false };
       }
     }
   }
@@ -70,24 +70,51 @@ export async function ensureTaskDiscussionThread(
     ...(originalSource?.metadata ? { metadata: originalSource.metadata } : {}),
     ...(originalSource?.origin ? { origin: originalSource.origin } : {}),
     ...(originalSource?.source ? { source: originalSource.source } : {}),
+    ...(originalSource?.visibility ? { visibility: originalSource.visibility } : {}),
+    ...(originalSource?.whisperTo ? { whisperTo: [...originalSource.whisperTo] } : {}),
+    ...(originalSource?.revealedAt !== undefined ? { revealedAt: originalSource.revealedAt } : {}),
   });
 
-  const updated = await taskStore.update(task.id, {
+  const linked = await taskStore.linkTaskThreadIfAbsent(task.id, {
     taskThreadId: taskThread.id,
     ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
   });
-  if (updated && options.broadcastUpdate !== false) {
-    socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', updated);
+  if (!linked.task) {
+    await Promise.resolve(messageStore.deleteByThread(taskThread.id)).catch(() => undefined);
+    await Promise.resolve(threadStore.delete(taskThread.id)).catch(() => undefined);
+    throw new Error(`Task disappeared while linking discussion thread: ${task.id}`);
+  }
+
+  if (!linked.linked) {
+    await Promise.resolve(messageStore.deleteByThread(taskThread.id)).catch(() => undefined);
+    await Promise.resolve(threadStore.delete(taskThread.id)).catch(() => undefined);
+    const winnerThreadId = linked.task.taskThreadId;
+    if (!winnerThreadId) throw new Error(`Task discussion thread race produced no winner: ${task.id}`);
+    const winnerMessages = await messageStore.getByThread(winnerThreadId, 100);
+    const winnerSource = winnerMessages[0];
+    if (!winnerSource) throw new Error(`Task discussion thread winner has no source message: ${winnerThreadId}`);
+    return { threadId: winnerThreadId, sourceMessage: toTaskThreadMessage(winnerSource), task: linked.task, created: false };
+  }
+
+  if (
+    originalSource &&
+    originalSource.threadId === task.threadId &&
+    (!originalSource.extra?.slockThread || originalSource.extra.slockThread.branchThreadId === taskThread.id)
+  ) {
+    await messageStore.updateExtra(originalSource.id, {
+      ...(originalSource.extra ?? {}),
+      slockThread: { branchThreadId: taskThread.id, replyCount: 0 },
+    });
+  }
+
+  if (options.broadcastUpdate !== false) {
+    socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', linked.task);
   }
 
   return {
     threadId: taskThread.id,
     sourceMessage: toTaskThreadMessage(sourceMessage),
-    task:
-      updated ?? {
-        ...task,
-        taskThreadId: taskThread.id,
-        ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-      },
+    task: linked.task,
+    created: true,
   };
 }

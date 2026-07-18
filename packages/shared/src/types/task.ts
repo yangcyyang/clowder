@@ -142,6 +142,8 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   kind?: TaskKind;
   subjectKey?: string | null;
   ownerCatId?: CatId | null;
+  /** Internal admission paths may create an already-claimed task atomically. */
+  status?: TaskStatus;
   failureClass?: TaskFailureClass;
   failureReason?: string;
   automationState?: AutomationState;

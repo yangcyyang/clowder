@@ -64,6 +64,7 @@ import {
   type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
+import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
@@ -114,6 +115,12 @@ import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 import { deriveThreadReplySummary, type ThreadReplySummary } from './thread-reply-summary.js';
+import { classifyWorkAdmission } from './work-admission.js';
+import {
+  admitWorkMessage,
+  type ExecutionRouteV1,
+  isAutoTaskThreadRoutingEnabled,
+} from './work-admission-service.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
 const DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS = 30_000;
@@ -150,6 +157,8 @@ export interface MessagesRoutesOptions {
   sessionStore?: SessionStore;
   deliveryCursorStore?: DeliveryCursorStore;
   threadStore?: IThreadStore;
+  /** F194: durable work admission and task-thread routing. */
+  taskStore?: ITaskStore;
   uploadDir?: string;
   invocationTracker?: InvocationTracker;
   invocationRecordStore?: IInvocationRecordStore;
@@ -594,6 +603,97 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
 
+    let executionThreadId = resolvedThreadId;
+    let executionMessageId: string | undefined;
+    let rootUserMessage: StoredMessage | undefined;
+    let executionRoute: ExecutionRouteV1 | undefined;
+    let admittedInvocation: { outcome: string; invocationId: string } | undefined;
+
+    const autoTaskDecision =
+      isAutoTaskThreadRoutingEnabled(resolvedThreadId) &&
+      opts.taskStore &&
+      opts.threadStore &&
+      opts.invocationRecordStore &&
+      !validatedReplyTo
+        ? classifyWorkAdmission({
+            content,
+            targetCatIds: hasMentions ? targetCats : [],
+          })
+        : { kind: 'reply_only' as const, reason: 'rollout_or_dependencies_unavailable' };
+
+    if (autoTaskDecision.kind !== 'reply_only' && opts.taskStore && opts.threadStore) {
+      rootUserMessage = await opts.messageStore.append({
+        userId,
+        catId: null,
+        content,
+        mentions: targetCats,
+        timestamp: Date.now(),
+        threadId: resolvedThreadId,
+        idempotencyKey: resolvedIdempotencyKey,
+        ...(contentBlocks ? { contentBlocks } : {}),
+        ...(whisperVisibility && whisperRecipients
+          ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+          : {}),
+      });
+      void deliverWebUserMessageToConnector(resolvedThreadId, content, rootUserMessage.id, opts, log, {
+        visibility: whisperVisibility,
+      });
+      try {
+        const admitted = await admitWorkMessage({
+          decision: autoTaskDecision,
+          sourceMessage: rootUserMessage,
+          userId,
+          deps: {
+            taskStore: opts.taskStore,
+            threadStore: opts.threadStore,
+            messageStore: opts.messageStore,
+            socketManager: opts.socketManager,
+          },
+        });
+        executionRoute = admitted.route;
+        executionThreadId = admitted.route.replyTargetThreadId;
+        executionMessageId = admitted.route.executionMessageId;
+
+        if (!admitted.route.ownerCatId) {
+          reply.status(202);
+          return {
+            status: 'task_created',
+            taskId: admitted.task.id,
+            userMessageId: rootUserMessage.id,
+            threadId: admitted.route.replyTargetThreadId,
+          };
+        }
+
+        // F194: acquire the durable invocation idempotency key before the in-memory
+        // slot. Concurrent HTTP replays therefore cannot fall into the queue path
+        // while the first request is between slot acquisition and record creation.
+        admittedInvocation = await opts.invocationRecordStore!.create({
+          threadId: executionThreadId,
+          userId,
+          targetCats,
+          intent: intent.intent,
+          idempotencyKey: resolvedIdempotencyKey,
+        });
+        if (admittedInvocation.outcome === 'duplicate') {
+          reply.status(200);
+          return {
+            status: 'duplicate',
+            invocationId: admittedInvocation.invocationId,
+            userMessageId: rootUserMessage.id,
+          };
+        }
+      } catch (err) {
+        log.error({ err, threadId: resolvedThreadId, messageId: rootUserMessage.id }, '[F194] work admission failed');
+        reply.status(503);
+        return {
+          error: '任务线程创建失败，未启动执行',
+          detail: '消息已保留，请稍后重试或手动转为任务。',
+          code: 'WORK_ADMISSION_FAILED',
+          userMessageId: rootUserMessage.id,
+        };
+      }
+    }
+
     // F39+F108B: Slot-aware delivery mode routing
     // Whisper → check target cat's slot (side-dispatch to idle cat)
     // Broadcast with explicit @mention → any target busy = queue (P1 review fix)
@@ -604,39 +704,43 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // not queued leftovers, to avoid enqueue-only dead ends.
     const hasActive = (() => {
       if (!opts.invocationTracker) {
-        return opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false;
+        return opts.queueProcessor?.hasActiveExecution?.(executionThreadId) ?? false;
       }
       if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
         return (
-          opts.invocationTracker.has(resolvedThreadId, primaryCat) ||
-          (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, primaryCat) ?? false)
+          opts.invocationTracker.has(executionThreadId, primaryCat) ||
+          (opts.queueProcessor?.isCatBusy?.(executionThreadId, primaryCat) ?? false)
         );
       }
       if (hasMentions) {
         return targetCats.some(
           (cat) =>
             cat !== 'unknown' &&
-            (opts.invocationTracker!.has(resolvedThreadId, cat) ||
-              (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, cat) ?? false)),
+            (opts.invocationTracker!.has(executionThreadId, cat) ||
+              (opts.queueProcessor?.isCatBusy?.(executionThreadId, cat) ?? false)),
         );
       }
       return (
-        opts.invocationTracker.has(resolvedThreadId) ||
-        (opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false)
+        opts.invocationTracker.has(executionThreadId) ||
+        (opts.queueProcessor?.hasActiveExecution?.(executionThreadId) ?? false)
       );
     })();
     // Design four canary: eligible messages enter the same queue even while idle,
     // so the first message can own a fixed 5–10s batching window. Structured
     // overrides and complex/whisper payloads remain hard bypasses.
     const batchEligible =
+      !executionRoute &&
       isMessageBatchCanaryThread(resolvedThreadId) &&
       deliveryMode !== 'immediate' &&
       deliveryMode !== 'force' &&
       whisperVisibility !== 'whisper' &&
       !validatedReplyTo &&
       !contentBlocks?.length;
-    const mode = deliveryMode ?? (hasActive || batchEligible ? 'queue' : 'immediate');
-    log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
+    const mode = executionRoute ? 'immediate' : (deliveryMode ?? (hasActive || batchEligible ? 'queue' : 'immediate'));
+    log.debug(
+      { threadId: executionThreadId, sourceThreadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive },
+      'Dispatch decision',
+    );
 
     if (mode === 'queue' && (hasActive || batchEligible) && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
@@ -781,8 +885,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // F122 AC-A8 + task #81: atomic per-target busy gate + slot registration.
         // Explicit @mention dispatch should only queue when the requested cat slot
         // is busy; other cats may keep running in the same thread.
-        const tryResult = opts.invocationTracker.tryStartThreadAll(resolvedThreadId, targetCats, userId);
+        const tryResult = opts.invocationTracker.tryStartThreadAll(executionThreadId, targetCats, userId);
         if (tryResult === null) {
+          if (admittedInvocation) {
+            await opts.invocationRecordStore.update(admittedInvocation.invocationId, {
+              status: 'failed',
+              error: 'Task execution thread became busy before dispatch',
+            });
+            reply.status(409);
+            return { error: '任务线程正在执行其他请求，本次未重复排队', code: 'WORK_ROUTE_BUSY' };
+          }
           // TOCTOU: one requested target became busy between has() and here — degrade to queue
           if (opts.invocationQueue) {
             const enqueueResult = opts.invocationQueue.enqueue({
@@ -875,26 +987,30 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // The background coroutine has its own finally for normal completion, but if we
       // throw before entering it, the slot would leak (thread stuck as "busy").
       let createResult: { outcome: string; invocationId: string };
-      try {
-        createResult = await opts.invocationRecordStore.create({
-          threadId: resolvedThreadId,
-          userId,
-          targetCats,
-          intent: intent.intent,
-          idempotencyKey: resolvedIdempotencyKey,
-        });
-      } catch (createErr) {
-        // Release slots occupied by tryStartThreadAll — prevent "假忙" leak
-        if (controller) {
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+      if (admittedInvocation) {
+        createResult = admittedInvocation;
+      } else {
+        try {
+          createResult = await opts.invocationRecordStore.create({
+            threadId: executionThreadId,
+            userId,
+            targetCats,
+            intent: intent.intent,
+            idempotencyKey: resolvedIdempotencyKey,
+          });
+        } catch (createErr) {
+          // Release slots occupied by tryStartThreadAll — prevent "假忙" leak
+          if (controller) {
+            opts.invocationTracker?.completeAll(executionThreadId, targetCats, controller);
+          }
+          throw createErr;
         }
-        throw createErr;
       }
 
       if (createResult.outcome === 'duplicate') {
         // AC-A11: tryStartThreadAll succeeded but create returned duplicate — release slots
         if (controller) {
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+          opts.invocationTracker?.completeAll(executionThreadId, targetCats, controller);
         }
         const duplicateRecord = await Promise.resolve(opts.invocationRecordStore.get(createResult.invocationId)).catch(
           (error) => {
@@ -909,13 +1025,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         return {
           status: 'duplicate',
           invocationId: createResult.invocationId,
-          ...(duplicateRecord?.userMessageId ? { userMessageId: duplicateRecord.userMessageId } : {}),
+          ...(rootUserMessage?.id
+            ? { userMessageId: rootUserMessage.id }
+            : duplicateRecord?.userMessageId
+              ? { userMessageId: duplicateRecord.userMessageId }
+              : {}),
         };
       }
 
       // Force path: still uses startAll() (preemptive — cancel already happened above)
       if (!controller) {
-        controller = opts.invocationTracker?.startAll(resolvedThreadId, targetCats, userId);
+        controller = opts.invocationTracker?.startAll(executionThreadId, targetCats, userId);
       }
 
       // Race: thread entered deleting between isDeleting() and start()
@@ -936,30 +1056,34 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       let storedUserMessage: { id: string };
       try {
         // ② Write user message (decoupled from cat execution)
-        storedUserMessage = await opts.messageStore.append({
-          userId,
-          catId: null,
-          content,
-          mentions: targetCats,
-          timestamp: Date.now(),
-          threadId: resolvedThreadId,
-          ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
-          ...(contentBlocks ? { contentBlocks } : {}),
-          ...(whisperVisibility && whisperRecipients
-            ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-            : {}),
-        });
+        storedUserMessage =
+          rootUserMessage ??
+          (await opts.messageStore.append({
+            userId,
+            catId: null,
+            content,
+            mentions: targetCats,
+            timestamp: Date.now(),
+            threadId: resolvedThreadId,
+            ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+            ...(contentBlocks ? { contentBlocks } : {}),
+            ...(whisperVisibility && whisperRecipients
+              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+              : {}),
+          }));
 
         // ③ Backfill InvocationRecord.userMessageId
         await opts.invocationRecordStore.update(createResult.invocationId, {
-          userMessageId: storedUserMessage.id,
+          userMessageId: executionMessageId ?? storedUserMessage.id,
         });
-        void deliverWebUserMessageToConnector(resolvedThreadId, content, storedUserMessage.id, opts, log, {
-          visibility: whisperVisibility,
-        });
+        if (!rootUserMessage) {
+          void deliverWebUserMessageToConnector(resolvedThreadId, content, storedUserMessage.id, opts, log, {
+            visibility: whisperVisibility,
+          });
+        }
       } catch (preExecErr) {
         // Release slots — we haven't entered background coroutine yet
-        opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+        opts.invocationTracker?.completeAll(executionThreadId, targetCats, controller);
         // Mark record as failed if it was created
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, { status: 'failed' });
@@ -977,14 +1101,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         timestamp: Date.now(),
       });
 
-      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+      tryAutoCancelPendingHolds(executionThreadId, opts.holdBallCancelDeps);
 
       // ⑤ Background: execute cat invocation via routeExecution
       void (async () => {
         const HEARTBEAT_INTERVAL_MS = 30_000;
         const heartbeatInterval = setInterval(() => {
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'heartbeat', {
-            threadId: resolvedThreadId,
+          opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'heartbeat', {
+            threadId: executionThreadId,
             timestamp: Date.now(),
           });
         }, HEARTBEAT_INTERVAL_MS);
@@ -1030,9 +1154,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           // F088 ISSUE-15: Start streaming placeholder on external platforms
           if (opts.streamingHook) {
             streamStartPromise = opts.streamingHook
-              .onStreamStart(resolvedThreadId, primaryCat, createResult.invocationId)
+              .onStreamStart(executionThreadId, primaryCat, createResult.invocationId)
               .catch((err) => {
-                log.warn({ err, threadId: resolvedThreadId }, '[messages] StreamingHook.onStreamStart failed');
+                log.warn({ err, threadId: executionThreadId }, '[messages] StreamingHook.onStreamStart failed');
               });
           }
 
@@ -1043,7 +1167,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
             });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
             return;
           }
 
@@ -1051,7 +1175,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             const singleCatId = targetCats[0]!;
             try {
               const prepared = await opts.sessionContinuationCoordinator.prepareInvocationContext({
-                threadId: resolvedThreadId,
+                threadId: executionThreadId,
                 catId: singleCatId,
                 userId,
                 content,
@@ -1060,7 +1184,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               consumedContinuation = prepared.consumedContinuation;
             } catch (err) {
               log.warn(
-                { err, threadId: resolvedThreadId, catId: singleCatId },
+                { err, threadId: executionThreadId, catId: singleCatId },
                 '[messages] F224: prepareInvocationContext failed, proceeding without continuation context',
               );
             }
@@ -1070,14 +1194,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           // intent_mode only fires after the first CLI NDJSON event (0–2 min delay).
           // spawn_started fires here, before routeExecution, so the UI can show
           // per-cat "spawning" indicators without waiting for CLI to come alive.
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'spawn_started', {
-            threadId: resolvedThreadId,
+          opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'spawn_started', {
+            threadId: executionThreadId,
             targetCats,
             invocationId: createResult.invocationId,
           });
           await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'runtime_starting' });
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
-            threadId: resolvedThreadId,
+          opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'invocation_phase', {
+            threadId: executionThreadId,
             invocationId: createResult.invocationId,
             targetCats,
             phase: 'runtime_starting',
@@ -1085,8 +1209,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           void opts.catSupervisor?.markProcessing(targetCats);
 
           await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'first_token_waiting' });
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
-            threadId: resolvedThreadId,
+          opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'invocation_phase', {
+            threadId: executionThreadId,
             invocationId: createResult.invocationId,
             targetCats,
             phase: 'first_token_waiting',
@@ -1095,8 +1219,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           for await (const msg of router.routeExecution(
             userId,
             content,
-            resolvedThreadId,
-            storedUserMessage.id,
+            executionThreadId,
+            executionMessageId ?? storedUserMessage.id,
             targetCats,
             intent,
             {
@@ -1217,8 +1341,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             if (msg.type === 'tool_use') {
               await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'tool_calling' });
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
-                threadId: resolvedThreadId,
+              opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'invocation_phase', {
+                threadId: executionThreadId,
                 invocationId: createResult.invocationId,
                 targetCats,
                 phase: 'tool_calling',
@@ -1226,8 +1350,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
             if (!intentModeBroadcast) {
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'intent_mode', {
-                threadId: resolvedThreadId,
+              opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'intent_mode', {
+                threadId: executionThreadId,
                 mode: intent.intent,
                 targetCats,
                 invocationId: createResult.invocationId,
@@ -1237,10 +1361,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               // for @mention flows; non-mention routing (preferredCats/default) skips it.
               // Merge stored participants with targetCats so sidebar always gets the
               // responding cats, regardless of how they were resolved.
-              const existingParticipants = (await opts.threadStore?.get(resolvedThreadId))?.participants ?? [];
+              const existingParticipants = (await opts.threadStore?.get(executionThreadId))?.participants ?? [];
               const mergedParticipants = [...new Set([...existingParticipants, ...targetCats])];
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'thread_updated', {
-                threadId: resolvedThreadId,
+              opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'thread_updated', {
+                threadId: executionThreadId,
                 participants: mergedParticipants,
               });
             }
@@ -1268,7 +1392,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               governanceErrorCode = msg.errorCode;
             }
             if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
-              opts.invocationTracker?.completeSlot?.(resolvedThreadId, msg.catId, controller);
+              opts.invocationTracker?.completeSlot?.(executionThreadId, msg.catId, controller);
             }
 
             // F088 ISSUE-15: Collect outbound turns (same pattern as QueueProcessor)
@@ -1308,10 +1432,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 const accumulated =
                   outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
                 opts.streamingHook
-                  .onStreamChunk(resolvedThreadId, accumulated, createResult.invocationId)
+                  .onStreamChunk(executionThreadId, accumulated, createResult.invocationId)
                   .catch((streamErr) => {
                     log.warn(
-                      { err: streamErr, threadId: resolvedThreadId },
+                      { err: streamErr, threadId: executionThreadId },
                       '[messages] StreamingHook.onStreamChunk failed',
                     );
                   });
@@ -1324,11 +1448,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             };
 
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, executionThreadId);
               if (storedId) broadcastPayload.messageId = storedId;
             }
 
-            opts.socketManager.broadcastAgentMessage(broadcastPayload, resolvedThreadId);
+            opts.socketManager.broadcastAgentMessage(broadcastPayload, executionThreadId);
           }
 
           // F39 P1 fix (砚砚 R1): abort guard after loop — when signal is aborted
@@ -1356,15 +1480,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   }),
                   timestamp: Date.now(),
                 },
-                resolvedThreadId,
+                executionThreadId,
               );
             }
             // F148 fix: ack cursors for cats that completed before abort (monotonic CAS, safe to call)
             if (cursorBoundaries.size > 0) {
-              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+              await router.ackCollectedCursors(userId, executionThreadId, cursorBoundaries);
             }
             // P1 fix: finalize streaming session on abort so external placeholders are cleaned up
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (persistenceContext.failed) {
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
             await opts.invocationRecordStore?.update(createResult.invocationId, {
@@ -1379,7 +1503,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 error: '消息已发送但未能保存，刷新后可能丢失。可点击重试。',
                 timestamp: Date.now(),
               },
-              resolvedThreadId,
+              executionThreadId,
             );
 
             const pushSvcErr = getPushNotificationService();
@@ -1388,12 +1512,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 .notifyUser(userId, {
                   title: '猫猫消息保存失败',
                   body: '消息已发送但未能保存，请检查',
-                  tag: `cat-error-${resolvedThreadId}`,
-                  data: { threadId: resolvedThreadId, url: `/?thread=${resolvedThreadId}` },
+                  tag: `cat-error-${executionThreadId}`,
+                  data: { threadId: executionThreadId, url: `/?thread=${executionThreadId}` },
                 })
                 .catch(() => {});
             }
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (governanceErrorCode) {
             // F070: Governance gate blocked — mark as failed with errorCode for retry
             await opts.invocationRecordStore?.update(createResult.invocationId, {
@@ -1406,11 +1530,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   }
                 : {}),
             });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (pendingProviderErrors.size > 0) {
             const providerErrorText = [...pendingProviderErrors.values()].join('\n');
             if (cursorBoundaries.size > 0) {
-              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+              await router.ackCollectedCursors(userId, executionThreadId, cursorBoundaries);
             }
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
@@ -1422,18 +1546,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   }
                 : {}),
             });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {
             await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'persisting' });
-            opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'invocation_phase', {
-              threadId: resolvedThreadId,
+            opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'invocation_phase', {
+              threadId: executionThreadId,
               invocationId: createResult.invocationId,
               targetCats,
               phase: 'persisting',
             });
             // ADR-008 S3: ack cursors before marking succeeded so that if ack
             // throws, the catch block sees running→failed (valid transition).
-            await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+            await router.ackCollectedCursors(userId, executionThreadId, cursorBoundaries);
 
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'succeeded',
@@ -1451,7 +1575,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             for (const continuationCapsule of continuationCapsules.values()) {
               if (isNewFreshnessPublicationForCat(persistenceContext, continuationCapsule.catId)) {
                 opts.queueProcessor?.enqueueContinuation({
-                  threadId: resolvedThreadId,
+                  threadId: executionThreadId,
                   userId,
                   catId: continuationCapsule.catId,
                   capsule: continuationCapsule,
@@ -1473,10 +1597,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   title: needsDecision ? `${catNames} 需要你决策` : `${catNames} 回复了`,
                   body: pushBodySource.slice(0, 80),
                   icon: targetCats.length === 1 ? `/avatars/${targetCats[0]}.png` : '/icons/icon-192x192.png',
-                  tag: `${needsDecision ? 'cat-decision' : 'cat-reply'}-${resolvedThreadId}`,
+                  tag: `${needsDecision ? 'cat-decision' : 'cat-reply'}-${executionThreadId}`,
                   data: {
-                    threadId: resolvedThreadId,
-                    url: `/?thread=${resolvedThreadId}`,
+                    threadId: executionThreadId,
+                    url: `/?thread=${executionThreadId}`,
                     ...(needsDecision ? { requiresDecision: true } : {}),
                   },
                 })
@@ -1488,7 +1612,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // F088 ISSUE-15: Outbound delivery to connector platforms (Feishu/Telegram)
             // P2 fix: fire-and-forget so delivery latency doesn't block invocationTracker.complete()
             deliverOutboundFromWeb(
-              resolvedThreadId,
+              executionThreadId,
               primaryCat,
               createResult.invocationId,
               collectedTextParts,
@@ -1498,7 +1622,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               opts,
               log,
             ).catch((deliverErr) => {
-              log.error({ err: deliverErr, threadId: resolvedThreadId }, '[messages] deliverOutboundFromWeb failed');
+              log.error({ err: deliverErr, threadId: executionThreadId }, '[messages] deliverOutboundFromWeb failed');
             });
           }
         } catch (err) {
@@ -1512,19 +1636,19 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // F148 fix: ack cursors for cats that completed before the exception
             if (cursorBoundaries.size > 0) {
               try {
-                await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+                await router.ackCollectedCursors(userId, executionThreadId, cursorBoundaries);
               } catch {
                 /* best-effort — don't mask the original error */
               }
             }
             // Don't broadcast error for intentional cancel
             // P1-A fix: clean up streaming placeholder even on abort/cancel
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else {
             // F148 fix: ack cursors for cats that completed before the exception
             if (cursorBoundaries.size > 0) {
               try {
-                await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+                await router.ackCollectedCursors(userId, executionThreadId, cursorBoundaries);
               } catch {
                 /* best-effort — don't mask the original error */
               }
@@ -1544,7 +1668,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 isFinal: true,
                 timestamp: Date.now(),
               },
-              resolvedThreadId,
+              executionThreadId,
             );
 
             const pushSvcCatch = getPushNotificationService();
@@ -1553,12 +1677,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 .notifyUser(userId, {
                   title: '猫猫出错了',
                   body: errorMsg.slice(0, 100),
-                  tag: `cat-error-${resolvedThreadId}`,
-                  data: { threadId: resolvedThreadId, url: `/?thread=${resolvedThreadId}` },
+                  tag: `cat-error-${executionThreadId}`,
+                  data: { threadId: executionThreadId, url: `/?thread=${executionThreadId}` },
                 })
                 .catch(() => {});
             }
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+            await cleanupStreamingOnFailure(executionThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } // end else (non-abort error)
         } finally {
           clearInterval(heartbeatInterval);
@@ -1567,7 +1691,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             try {
               await opts.sessionContinuationCoordinator.commitInvocationOutcome({
                 finalStatus,
-                threadId: resolvedThreadId,
+                threadId: executionThreadId,
                 catId: primaryCat,
                 userId,
                 consumedContinuation,
@@ -1575,16 +1699,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               });
             } catch (err) {
               log.warn(
-                { err, threadId: resolvedThreadId, targetCats },
+                { err, threadId: executionThreadId, targetCats },
                 '[messages] F224: commitInvocationOutcome failed',
               );
             }
           }
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+          opts.invocationTracker?.completeAll(executionThreadId, targetCats, controller);
           // F39: Notify queue processor for auto-dequeue chain
-          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch((err) => {
+          opts.queueProcessor?.onInvocationComplete(executionThreadId, primaryCat, finalStatus).catch((err) => {
             log.error(
-              { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus },
+              { err, threadId: executionThreadId, catId: primaryCat, finalStatus },
               '[messages] onInvocationComplete failed — queued messages may be stuck (#595)',
             );
           });

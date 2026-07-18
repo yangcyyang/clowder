@@ -54,6 +54,18 @@ class FakeRedisForTaskStore {
   }
 
   async eval(script, _numKeys, ...keysAndArgs) {
+    if (script.includes("hget', KEYS[1], 'taskThreadId'") && script.includes("return 1")) {
+      const [detailKey, taskThreadId, updatedAt, sourceMessageId] = keysAndArgs;
+      const hash = this.hashes.get(detailKey);
+      if (!hash) return -1;
+      if (hash.taskThreadId) return 0;
+      hash.taskThreadId = taskThreadId;
+      hash.updatedAt = updatedAt;
+      if (!hash.sourceMessageId && sourceMessageId) hash.sourceMessageId = sourceMessageId;
+      this.hashes.set(detailKey, hash);
+      this.bumpVersion(detailKey);
+      return 1;
+    }
     if (script.includes("redis.call('HSET'") && script.includes("redis.call('ZADD'")) {
       // Atomic owned write: KEYS=[subject, detail, thread, kind], ARGV=[taskId, score, ...fields]
       const [subjectKey, detailKey, threadKey, kindKey, expectedId, score, ...flatFields] = keysAndArgs;
@@ -329,6 +341,35 @@ describe('TaskStoreFactory', () => {
 });
 
 describe('RedisTaskStore unit behavior', () => {
+  it('links the first task thread atomically and returns the durable winner', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      threadId: 'thread-parent',
+      title: 'Fix timeout',
+      why: 'F194 CAS',
+      createdBy: 'user',
+    });
+
+    const [first, second] = await Promise.all([
+      store.linkTaskThreadIfAbsent(task.id, {
+        taskThreadId: 'thread-winner',
+        sourceMessageId: 'message-source',
+      }),
+      store.linkTaskThreadIfAbsent(task.id, {
+        taskThreadId: 'thread-loser',
+        sourceMessageId: 'message-other',
+      }),
+    ]);
+
+    assert.equal(Number(first.linked) + Number(second.linked), 1);
+    assert.equal(first.task?.taskThreadId, 'thread-winner');
+    assert.equal(second.task?.taskThreadId, 'thread-winner');
+    assert.equal((await store.get(task.id))?.sourceMessageId, 'message-source');
+  });
+
   it('re-registering a done pr_tracking task resets it back to todo', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const redis = new FakeRedisForTaskStore();

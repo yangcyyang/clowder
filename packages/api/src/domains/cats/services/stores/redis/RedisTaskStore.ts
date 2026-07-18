@@ -69,7 +69,7 @@ export class RedisTaskStore implements ITaskStore {
       subjectKey: input.subjectKey ?? null,
       title: input.title,
       ownerCatId: input.ownerCatId ?? null,
-      status: 'todo',
+      status: input.status ?? 'todo',
       failureClass: input.failureClass,
       failureReason: input.failureReason,
       why: input.why,
@@ -134,7 +134,7 @@ export class RedisTaskStore implements ITaskStore {
         subjectKey: sk,
         title: input.title,
         ownerCatId: input.ownerCatId ?? null,
-        status: 'todo',
+        status: input.status ?? 'todo',
         failureClass: input.failureClass,
         failureReason: input.failureReason,
         why: input.why,
@@ -197,7 +197,7 @@ export class RedisTaskStore implements ITaskStore {
         subjectKey: sk,
         title: input.title,
         ownerCatId: input.ownerCatId ?? null,
-        status: 'todo',
+        status: input.status ?? 'todo',
         failureClass: input.failureClass,
         failureReason: input.failureReason,
         why: input.why,
@@ -320,6 +320,36 @@ export class RedisTaskStore implements ITaskStore {
     // Update TTL based on new status
     await this.applyTtl(updated);
     return updated;
+  }
+
+  async linkTaskThreadIfAbsent(
+    taskId: string,
+    input: { taskThreadId: string; sourceMessageId?: string },
+  ): Promise<{ task: TaskItem | null; linked: boolean }> {
+    const detailKey = TaskKeys.detail(taskId);
+    const now = Date.now();
+    const linked = Number(
+      await this.redis.eval(
+        [
+          "if redis.call('exists', KEYS[1]) == 0 then return -1 end",
+          "local current = redis.call('hget', KEYS[1], 'taskThreadId')",
+          "if current and current ~= '' then return 0 end",
+          "redis.call('hset', KEYS[1], 'taskThreadId', ARGV[1], 'updatedAt', ARGV[2])",
+          "local source = redis.call('hget', KEYS[1], 'sourceMessageId')",
+          "if (not source or source == '') and ARGV[3] ~= '' then redis.call('hset', KEYS[1], 'sourceMessageId', ARGV[3]) end",
+          'return 1',
+        ].join('\n'),
+        1,
+        detailKey,
+        input.taskThreadId,
+        String(now),
+        input.sourceMessageId ?? '',
+      ),
+    );
+    if (linked < 0) return { task: null, linked: false };
+    const task = await this.get(taskId);
+    if (task) await this.applyTtl(task);
+    return { task, linked: linked === 1 };
   }
 
   async listByThread(threadId: string): Promise<TaskItem[]> {
