@@ -195,9 +195,9 @@ export class GrokAgentService implements AgentService {
       'streaming-json',
       '--model',
       this.model,
-      // Keep unlisted side-effect tools behind the permission gate; explicit allow rules below stay headless-safe.
+      // Run headless tools without approval prompts; explicit allow rules below remain as capability documentation.
       '--permission-mode',
-      'default',
+      'bypassPermissions',
       // The isolated GROK_HOME exposes only Cat Cafe's MCP server; approve that namespace explicitly.
       '--allow',
       'MCPTool(cat-cafe-clowder-runtime__*)',

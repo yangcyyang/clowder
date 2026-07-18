@@ -67,18 +67,13 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   assert.ok(spawnOptions.args.includes('grok-4.5'));
   const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
   assert.ok(permissionModeIndex >= 0);
-  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'default');
+  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'bypassPermissions');
   const allowedTools = spawnOptions.args.flatMap((value, index, args) =>
     value === '--allow' && args[index + 1] ? [args[index + 1]] : [],
   );
-  assert.deepEqual(allowedTools, [
-    'MCPTool(cat-cafe-clowder-runtime__*)',
-    'Bash',
-    'Write',
-    'Edit',
-  ]);
+  assert.deepEqual(allowedTools, ['MCPTool(cat-cafe-clowder-runtime__*)', 'Bash', 'Write', 'Edit']);
   assert.equal(spawnOptions.args.includes('--always-approve'), false);
-  assert.equal(spawnOptions.args.includes('bypassPermissions'), false);
+  assert.equal(spawnOptions.args.includes('bypassPermissions'), true);
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
   assert.equal(spawnOptions.env.CUSTOM_ENV, 'enabled');
 });
