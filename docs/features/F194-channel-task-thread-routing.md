@@ -151,30 +151,30 @@ in_context_observability:
 
 ### Phase A（Strict Work Admission）
 
-- [ ] AC-A1: 52 条供货语料 + 反问/转述/条件各 2 条负例参数化通过；批准 4 例只有 pending-plan fixture 时才 resume。
-- [ ] AC-A2: 讨论、疑问、状态、问题报告、否定、转述、条件和非人类消息均为零 task/零 thread。
-- [ ] AC-A3: 单一行首 @Agent 的明确任务在 invocation 前得到 exactly-one work task、owner+doing 与 claim event。
-- [ ] AC-A4: admission 失败不启动 invocation；无目标明确任务可未认领，多目标不明确 fail-quiet。
+- [x] AC-A1: 52 条供货语料 + 反问/转述/条件各 2 条负例参数化通过；批准 4 例只有 pending-plan fixture 时才 resume。
+- [x] AC-A2: 讨论、疑问、状态、问题报告、否定、转述、条件和非人类消息均为零 task/零 thread。
+- [x] AC-A3: 单一行首 @Agent 的明确任务在 invocation 前得到 exactly-one work task、owner+doing 与 claim event。
+- [x] AC-A4: admission 失败不启动 invocation；无目标明确任务可未认领，多目标不明确 fail-quiet。
 
 ### Phase B（Exactly-Once Task Thread Link）
 
-- [ ] AC-B1: 重试/并发/队列重放只产生一个 task、一个 task thread、一个 create notice 与一个 claim event。
-- [ ] AC-B2: root `extra.slockThread.branchThreadId === task.taskThreadId`，刷新/Redis round-trip 后不丢。
-- [ ] AC-B3: task source copy 保留 public/whisper/attachment/mentions/visibility 语义；无权 viewer 不泄摘要或地址。
-- [ ] AC-B4: 自动 task 首轮 invocation 使用 task thread + copy message ID；ACK、自然 final、callback final 均只落 task thread，root substantive agent reply 为零。
+- [x] AC-B1: 重试/并发/队列重放只产生一个 task、一个 task thread、一个 create notice 与一个 claim event。
+- [x] AC-B2: root `extra.slockThread.branchThreadId === task.taskThreadId`，刷新/Redis round-trip 后不丢。
+- [x] AC-B3: task source copy 保留 public/whisper/attachment/mentions/visibility 语义；无权 viewer 不泄摘要或地址。
+- [x] AC-B4: 自动 task 首轮 invocation 使用 task thread + copy message ID；ACK、自然 final、callback final 均只落 task thread，root substantive agent reply 为零。
 
 ### Phase C（Thread Address Contract）
 
 - [ ] AC-C1: 折叠行可引用/复制完整 token；刷新后保持；desktop 与 390px 可用且无嵌套 button/a11y 回归。
-- [ ] AC-C2: 单一合法 token 精确解析 root→branch；点击 token 打开相同 branch。
-- [ ] AC-C3: 畸形/多 token/删除/陈旧/无权限/不可见 whisper 地址 fail-closed，不启动或继续误投，不泄存在性。
-- [ ] AC-C4: 显式 cross-thread ACK/final 只落目标 thread，并保留 crossPost 审计；replyTo 只能引用目标 thread 内消息。
+- [x] AC-C2: 单一合法 token 精确解析 root→branch；点击 token 打开相同 branch。
+- [x] AC-C3: 畸形/多 token/删除/陈旧/无权限/不可见 whisper 地址 fail-closed，不启动或继续误投，不泄存在性。
+- [x] AC-C4: 显式 cross-thread ACK/final 只落目标 thread，并保留 crossPost 审计；replyTo 只能引用目标 thread 内消息。
 
 ### Phase D（Conversation Placement and Rollout）
 
 - [ ] AC-D1: 真实 E2E：主频道单一明确 @Agent 工作指令 → 自动 task/thread/claim → ACK + 交付在线程 → 主频道仅 root + 单一 marker。
 - [ ] AC-D2: 真实负例：同频道讨论消息 → task 数量不变、无 task thread、正常讨论回复仍在当前 thread。
-- [ ] AC-D3: rollout/canary 默认关闭；关闭时现有手工 As Task、inline thread、#374/#376 未读与折叠契约不回归。
+- [x] AC-D3: rollout/canary 默认关闭；关闭时现有手工 As Task、inline thread、#374/#376 未读与折叠契约不回归。
 - [ ] AC-D4: API/Web build、目标测试、完整 required gates 与隔离 canary 全绿后，才允许进入 Claude merge gate。
 
 ## 需求点 Checklist
@@ -252,6 +252,20 @@ in_context_observability:
 | 2026-07-14 | 用户批准 Thread Address Contract 纳入执行计划 |
 | 2026-07-18 | 用户要求分工；Claude 将自动 task、地址协议、对话归线程合并交给 Codex |
 | 2026-07-18 | Phase 0 取证、关系判定、设计矩阵与 F194 立项 |
+| 2026-07-18 | Phase A/B/C 实现完成：严格 admission、exactly-once task thread link、Thread Address Contract 与全出口 cross-post 审计 |
+| 2026-07-18 | 独立整分支复核 PASS，P0/P1=0；代码快照 SHA-256 `9b3ee3eaf4a07cc8d82931c0b28a9fea9b87fb352daef1142437bd5f72ce9c77`，提交 `9f4d0b8` |
+| 2026-07-18 | 本地门禁：API focused 130/130、Web focused 76/76、API/shared/Web build、Biome、feature truth 与 diff-check 全绿 |
+| 2026-07-18 | API Core 首轮 10,902 tests 中 10,898 pass、2 fail、2 skip；两项分别为 MCP dist 前置缺失与 Node runner clone 瞬态，补 build 后精确复跑 74/74 pass；未宣称单次完整 Core 全绿 |
+
+## Local Verification Snapshot
+
+- **独立 review**：PASS；P0/P1=0。未发现合并阻断项。
+- **API focused**：6 suites / 130 tests 全绿。
+- **Web focused**：reviewer 复跑 5 files / 76 tests 全绿；production build 全绿。
+- **Build/static**：API、shared、Web production build、changed-file Biome、feature truth（196 features / 51 active）、`git diff --check` 全绿。
+- **API Core**：Node 22 下首轮 10,902 tests 为 10,898 pass / 2 fail / 2 skip；补齐 `packages/mcp-server/dist` 后，对两个失败文件精确复跑 8 suites / 74 tests 全绿。该证据证明两个首轮失败已消除，但不等同于一次不中断的完整 Core 全绿。
+- **尚未完成**：desktop + 390px 视觉验收、隔离 Redis/required 11 jobs、真实 D1/D2 E2E、Claude merge gate、默认关闭 live canary。因此 AC-C1、AC-D1、AC-D2、AC-D4 保持未勾选，状态继续 `in-progress`。
+- **已知非阻断残余**：显式跨线程 source/target 写入与 invocation admission 尚非单事务（失败可留下 no-execution branch copy，重试幂等）；Web 地址解析按消息探测可能形成 N+1；保守 Markdown/HTML masker 对罕见混合 HTML 行可能 fail-quiet。
 
 ## Review Gate
 
