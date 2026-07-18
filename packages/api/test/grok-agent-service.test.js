@@ -213,6 +213,7 @@ test('injects an isolated native MCP config without persisting callback or accou
   let bridge = '';
   let authPath;
   let runtimeSessions;
+  let runtimeModelCacheExists;
   let configMode;
   let bridgeMode;
 
@@ -223,6 +224,7 @@ test('injects an isolated native MCP config without persisting callback or accou
       config = readFileSync(join(runtimeHome, 'config.toml'), 'utf8');
       bridge = readFileSync(join(runtimeHome, 'cat-cafe-mcp-bridge.mjs'), 'utf8');
       runtimeSessions = realpathSync(join(runtimeHome, 'sessions'));
+      runtimeModelCacheExists = existsSync(join(runtimeHome, 'models_cache.json'));
       configMode = statSync(join(runtimeHome, 'config.toml')).mode & 0o777;
       bridgeMode = statSync(join(runtimeHome, 'cat-cafe-mcp-bridge.mjs')).mode & 0o777;
     }
@@ -265,6 +267,7 @@ test('injects an isolated native MCP config without persisting callback or accou
     assert.equal(bridgeMode, 0o600);
     assert.equal(authPath, join(runtimeHome, 'auth.json'));
     assert.equal(runtimeSessions, realpathSync(join(sourceGrokHome, 'sessions')));
+    assert.equal(runtimeModelCacheExists, false, 'API-key mode must not inherit the subscription model cache');
     assert.equal(existsSync(runtimeHome), false, 'ephemeral Grok home should be removed after invocation');
   } finally {
     rmSync(sourceGrokHome, { recursive: true, force: true });
@@ -275,20 +278,26 @@ test('subscription native MCP mode reuses the existing Grok auth and session sto
   const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-subscription-home-'));
   const sourceSessions = join(sourceGrokHome, 'sessions');
   const sourceAuth = join(sourceGrokHome, 'auth.json');
+  const sourceModelCache = join(sourceGrokHome, 'models_cache.json');
   const mcpServerPath = join(sourceGrokHome, 'mcp-server.js');
   mkdirSync(sourceSessions);
   writeFileSync(sourceAuth, '{}\n');
+  writeFileSync(sourceModelCache, '{"models":[{"id":"grok-4.5"}]}\n');
   writeFileSync(mcpServerPath, '// test MCP entry\n');
   let runtimeHome;
   let authPath;
   let xaiApiKey;
   let runtimeSessions;
+  let runtimeModelCache;
 
   async function* spawnCliOverride(options) {
     runtimeHome = options.env.GROK_HOME;
     authPath = options.env.GROK_AUTH_PATH;
     xaiApiKey = options.env.XAI_API_KEY;
-    if (runtimeHome) runtimeSessions = realpathSync(join(runtimeHome, 'sessions'));
+    if (runtimeHome) {
+      runtimeSessions = realpathSync(join(runtimeHome, 'sessions'));
+      runtimeModelCache = readFileSync(join(runtimeHome, 'models_cache.json'), 'utf8');
+    }
     yield { type: 'text', data: 'ok' };
     yield { type: 'end', sessionId: 'grok-subscription-native-mcp-session' };
   }
@@ -311,6 +320,7 @@ test('subscription native MCP mode reuses the existing Grok auth and session sto
     assert.equal(xaiApiKey, null);
     assert.equal(authPath, sourceAuth);
     assert.equal(runtimeSessions, realpathSync(sourceSessions));
+    assert.equal(runtimeModelCache, readFileSync(sourceModelCache, 'utf8'));
   } finally {
     rmSync(sourceGrokHome, { recursive: true, force: true });
   }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -129,6 +129,15 @@ startup_timeout_sec = 30
     const sourceSessions = join(options.sourceGrokHome, 'sessions');
     mkdirSync(sourceSessions, { recursive: true, mode: 0o700 });
     symlinkSync(sourceSessions, join(runtimeHome, 'sessions'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    // A fresh isolated home starts with Grok's bootstrap-only `grok-build` catalog.
+    // Seed it from the authenticated subscription cache on every invocation so
+    // `--resume --model grok-4.5` cannot race the asynchronous catalog refresh.
+    // Copying preserves the runtime-home isolation if the CLI rewrites its cache.
+    const sourceModelCache = join(options.sourceGrokHome, 'models_cache.json');
+    if (options.profileMode === 'subscription' && existsSync(sourceModelCache)) {
+      copyFileSync(sourceModelCache, join(runtimeHome, 'models_cache.json'));
+    }
 
     const configuredAuthPath = process.env.GROK_AUTH_PATH?.trim();
     const subscriptionAuthPath = configuredAuthPath || join(options.sourceGrokHome, 'auth.json');
