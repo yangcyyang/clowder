@@ -11,10 +11,12 @@ const addTaskMock = vi.fn();
 const updateTaskMock = vi.fn();
 const addMessageMock = vi.fn();
 const addActiveInvocationMock = vi.fn();
+const patchMessageMock = vi.fn();
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: () => ({
     updateThreadTitle: vi.fn(),
+    updateThreadParticipants: vi.fn(),
     setLoading: vi.fn(),
     setHasActiveInvocation: vi.fn(),
     setIntentMode: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock('@/stores/chatStore', () => ({
     addActiveInvocation: addActiveInvocationMock,
     removeMessage: vi.fn(),
     removeThreadMessage: vi.fn(),
+    patchMessage: patchMessageMock,
     requestStreamCatchUp: vi.fn(),
   }),
 }));
@@ -70,6 +73,7 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
     updateTaskMock.mockClear();
     addMessageMock.mockClear();
     addActiveInvocationMock.mockClear();
+    patchMessageMock.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -133,5 +137,16 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
 
     expect(addMessageMock).not.toHaveBeenCalled();
     expect(addActiveInvocationMock).toHaveBeenCalledWith('inv-kimi-1', 'kimi', 'execute', expect.any(Number));
+  });
+
+  it('patches the live parent root when the server creates a task thread branch', () => {
+    captured!.onThreadBranched!({
+      sourceThreadId: 'thread-1',
+      newThreadId: 'thread-task',
+      fromMessageId: 'message-root',
+    });
+    expect(patchMessageMock).toHaveBeenCalledWith('message-root', {
+      extra: { slockThread: { branchThreadId: 'thread-task', replyCount: 0 } },
+    });
   });
 });

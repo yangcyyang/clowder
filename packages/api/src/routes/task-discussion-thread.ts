@@ -37,7 +37,12 @@ export async function ensureTaskDiscussionThread(
     socketManager: SocketManager;
   },
   options: { userId?: string; broadcastUpdate?: boolean } = {},
-): Promise<{ threadId: string; sourceMessage: ReturnType<typeof toTaskThreadMessage>; task: TaskItem; created: boolean }> {
+): Promise<{
+  threadId: string;
+  sourceMessage: ReturnType<typeof toTaskThreadMessage>;
+  task: TaskItem;
+  created: boolean;
+}> {
   const { taskStore, threadStore, messageStore, socketManager } = deps;
   if (task.taskThreadId) {
     const existingThread = await threadStore.get(task.taskThreadId);
@@ -93,7 +98,12 @@ export async function ensureTaskDiscussionThread(
     const winnerMessages = await messageStore.getByThread(winnerThreadId, 100);
     const winnerSource = winnerMessages[0];
     if (!winnerSource) throw new Error(`Task discussion thread winner has no source message: ${winnerThreadId}`);
-    return { threadId: winnerThreadId, sourceMessage: toTaskThreadMessage(winnerSource), task: linked.task, created: false };
+    return {
+      threadId: winnerThreadId,
+      sourceMessage: toTaskThreadMessage(winnerSource),
+      task: linked.task,
+      created: false,
+    };
   }
 
   if (

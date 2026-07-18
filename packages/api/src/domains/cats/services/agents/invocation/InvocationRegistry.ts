@@ -30,6 +30,8 @@ export interface InvocationRecord {
   a2aTriggerMessageId?: string;
   /** Opaque per-thread append watermark captured before this invocation reads context. */
   freshnessBaseline?: string;
+  /** Original human thread for an explicitly cross-thread routed invocation. */
+  crossPostSourceThreadId?: string;
   traceContext?: CallerTraceContext;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
@@ -83,6 +85,7 @@ export type VerifyResult = { ok: true; record: InvocationRecord } | { ok: false;
 export interface InvocationCreateOptions {
   /** Keep this value opaque; callers and backends must not coerce it to number. */
   freshnessBaseline?: string;
+  crossPostSourceThreadId?: string;
 }
 
 /**
@@ -126,6 +129,7 @@ export class InvocationRegistry {
         ...(parentInvocationId ? { parentInvocationId } : {}),
         ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
         ...(options?.freshnessBaseline !== undefined ? { freshnessBaseline: options.freshnessBaseline } : {}),
+        ...(options?.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
         clientMessageIds: new Set<string>(),
         createdAt: now,
       },

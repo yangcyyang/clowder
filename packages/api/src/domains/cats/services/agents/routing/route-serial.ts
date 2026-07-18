@@ -1041,6 +1041,7 @@ export async function* routeSerial(
           ...(signal ? { signal } : {}),
           ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+          ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
           continuityCapsule,
           // F121: Pass A2A trigger message ID for auto-replyTo threading
           ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
@@ -1639,6 +1640,14 @@ export async function* routeSerial(
               extra: {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(options.crossPostSourceThreadId
+                  ? {
+                      crossPost: {
+                        sourceThreadId: options.crossPostSourceThreadId,
+                        ...(persistedInvocationId ? { sourceInvocationId: persistedInvocationId } : {}),
+                      },
+                    }
+                  : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
                 ...(options.responsePresentation === 'silent_receipt' ? { scheduler: { hiddenReceipt: true } } : {}),
               },
@@ -1735,6 +1744,14 @@ export async function* routeSerial(
               const extraParts = {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(options.crossPostSourceThreadId
+                  ? {
+                      crossPost: {
+                        sourceThreadId: options.crossPostSourceThreadId,
+                        ...(persistedInvocationId ? { sourceInvocationId: persistedInvocationId } : {}),
+                      },
+                    }
+                  : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               };
               if (Object.keys(extraParts).length > 0) metadataPatch.extra = extraParts;
@@ -2194,6 +2211,14 @@ export async function* routeSerial(
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(options.crossPostSourceThreadId
+                  ? {
+                      crossPost: {
+                        sourceThreadId: options.crossPostSourceThreadId,
+                        ...(persistedInvocationId ? { sourceInvocationId: persistedInvocationId } : {}),
+                      },
+                    }
+                  : {}),
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
             } as const;
@@ -2411,11 +2436,21 @@ export async function* routeSerial(
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             ...(firstMetadata ? { metadata: firstMetadata } : {}),
             toolEvents: collectedToolEvents,
-            ...((options.parentInvocationId ?? ownInvocationId) || doneMsg?.tracing
+            ...((options.parentInvocationId ?? ownInvocationId) || doneMsg?.tracing || options.crossPostSourceThreadId
               ? {
                   extra: {
                     ...((options.parentInvocationId ?? ownInvocationId)
                       ? { stream: { invocationId: (options.parentInvocationId ?? ownInvocationId) as string } }
+                      : {}),
+                    ...(options.crossPostSourceThreadId
+                      ? {
+                          crossPost: {
+                            sourceThreadId: options.crossPostSourceThreadId,
+                            ...((options.parentInvocationId ?? ownInvocationId)
+                              ? { sourceInvocationId: (options.parentInvocationId ?? ownInvocationId) as string }
+                              : {}),
+                          },
+                        }
                       : {}),
                     ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
                   },

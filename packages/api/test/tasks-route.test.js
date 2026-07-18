@@ -170,7 +170,10 @@ describe('Tasks Routes', () => {
     assert.ok(event);
     assert.equal(event.data.capabilityId, 'opencli');
     assert.equal(event.data.authorizedBy, 'alice');
-    assert.equal(socketManager.getEvents().some((event) => event.event === 'task_updated'), true);
+    assert.equal(
+      socketManager.getEvents().some((event) => event.event === 'task_updated'),
+      true,
+    );
   });
 
   test('POST task capability authorization requires identity', async () => {

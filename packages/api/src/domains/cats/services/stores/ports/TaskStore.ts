@@ -151,9 +151,7 @@ export interface ITaskStore {
   linkTaskThreadIfAbsent(
     taskId: string,
     input: { taskThreadId: string; sourceMessageId?: string },
-  ):
-    | { task: TaskItem | null; linked: boolean }
-    | Promise<{ task: TaskItem | null; linked: boolean }>;
+  ): { task: TaskItem | null; linked: boolean } | Promise<{ task: TaskItem | null; linked: boolean }>;
 }
 
 /**

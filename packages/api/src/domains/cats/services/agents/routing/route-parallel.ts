@@ -704,6 +704,7 @@ export async function* routeParallel(
         ...(signal ? { signal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
         continuityCapsule,
         isLastCat: false,
         toolPolicy: resolvedToolPolicy.toolPolicy,
@@ -1301,6 +1302,14 @@ export async function* routeParallel(
               extra: {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
                 ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                ...(options.crossPostSourceThreadId
+                  ? {
+                      crossPost: {
+                        sourceThreadId: options.crossPostSourceThreadId,
+                        ...(persistedInvocationId ? { sourceInvocationId: persistedInvocationId } : {}),
+                      },
+                    }
+                  : {}),
                 ...(msg.tracing ? { tracing: msg.tracing } : {}),
                 ...(options.responsePresentation === 'silent_receipt' ? { scheduler: { hiddenReceipt: true } } : {}),
               },
@@ -1484,6 +1493,14 @@ export async function* routeParallel(
                 extra: {
                   ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
                   ...(persistedInvocationId ? { stream: { invocationId: persistedInvocationId } } : {}),
+                  ...(options.crossPostSourceThreadId
+                    ? {
+                        crossPost: {
+                          sourceThreadId: options.crossPostSourceThreadId,
+                          ...(persistedInvocationId ? { sourceInvocationId: persistedInvocationId } : {}),
+                        },
+                      }
+                    : {}),
                   ...(msg.tracing ? { tracing: msg.tracing } : {}),
                 },
               } as const;

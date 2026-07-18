@@ -1,6 +1,7 @@
 'use client';
 
-import type { TaskItem } from '@cat-cafe/shared';
+import { parseThreadAddressToken, type TaskItem } from '@cat-cafe/shared';
+import { useEffect, useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
@@ -8,6 +9,7 @@ import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
+import { apiFetch } from '@/utils/api-client';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
@@ -83,16 +85,88 @@ function getTaskMetaLabels(task: TaskItem): string[] {
   return labels.slice(0, 2);
 }
 
+function ThreadAddressActions({
+  token,
+  onReference,
+  onCopy,
+}: {
+  token?: string;
+  onReference?: () => void;
+  onCopy?: () => void;
+}) {
+  const sourceThreadId = useChatStore((state) => state.currentThreadId);
+  const [authorized, setAuthorized] = useState(false);
+  const parsed = token ? parseThreadAddressToken(token) : { kind: 'none' as const };
+  const rootMessageId = parsed.kind === 'valid' ? parsed.rootMessageId : null;
+
+  useEffect(() => {
+    setAuthorized(false);
+    if (!rootMessageId) return;
+    const controller = new AbortController();
+    void apiFetch(
+      `/api/thread-address/resolve?rootMessageId=${encodeURIComponent(rootMessageId)}&sourceThreadId=${encodeURIComponent(sourceThreadId)}`,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (response.ok) setAuthorized(true);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [rootMessageId, sourceThreadId]);
+
+  if (!token || !authorized || (!onReference && !onCopy)) return null;
+  return (
+    <span className="inline-flex shrink-0 items-stretch gap-1" data-thread-address-actions>
+      {onReference && (
+        <button
+          type="button"
+          aria-label="引用 Thread 地址"
+          title={`引用 ${token}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onReference();
+          }}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-sm font-black shadow-[var(--slock-shadow-chip)] hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
+        >
+          ↩
+        </button>
+      )}
+      {onCopy && (
+        <button
+          type="button"
+          aria-label="复制 Thread 地址"
+          title={`复制 ${token}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onCopy();
+          }}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-sm font-black shadow-[var(--slock-shadow-chip)] hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
+        >
+          ⧉
+        </button>
+      )}
+    </span>
+  );
+}
+
 function MessageTaskBadge({
   task,
   seq,
   assigneeLabel,
   onOpen,
+  addressToken,
+  onReferenceAddress,
+  onCopyAddress,
 }: {
   task: TaskItem;
   seq: number;
   assigneeLabel?: string;
   onOpen?: (task: TaskItem) => void;
+  addressToken?: string;
+  onReferenceAddress?: () => void;
+  onCopyAddress?: () => void;
 }) {
   const metaLabels = getTaskMetaLabels(task);
   const chipLabel = assigneeLabel ? `任务 #${seq} @${assigneeLabel}` : `任务 #${seq}`;
@@ -112,7 +186,7 @@ function MessageTaskBadge({
 
   if (onOpen) {
     return (
-      <div className="mt-1.5">
+      <div className="mt-1.5 flex max-w-full items-stretch gap-1">
         <button
           type="button"
           onClick={(event) => {
@@ -126,6 +200,7 @@ function MessageTaskBadge({
         >
           {content}
         </button>
+        <ThreadAddressActions token={addressToken} onReference={onReferenceAddress} onCopy={onCopyAddress} />
       </div>
     );
   }
@@ -148,17 +223,23 @@ function ThreadReplyBadge({
   latestReply,
   latestAuthorLabel,
   onOpen,
+  addressToken,
+  onReferenceAddress,
+  onCopyAddress,
 }: {
   count: number;
   newCount?: number;
   latestReply?: { content: string };
   latestAuthorLabel?: string;
   onOpen: () => void;
+  addressToken?: string;
+  onReferenceAddress?: () => void;
+  onCopyAddress?: () => void;
 }) {
   if (count <= 0) return null;
 
   return (
-    <div className="mt-2 w-full max-w-xl">
+    <div className="mt-2 flex w-full max-w-xl items-stretch gap-1">
       <button
         type="button"
         aria-label={`打开 Thread，${count} 条回复${newCount > 0 ? `，${newCount} 条新回复` : ''}`}
@@ -167,7 +248,7 @@ function ThreadReplyBadge({
           event.stopPropagation();
           onOpen();
         }}
-        className="flex min-h-11 w-full items-center gap-2 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1.5 text-left text-[11px] font-semibold text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1.5 text-left text-[11px] font-semibold text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
       >
         <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path
@@ -207,6 +288,7 @@ function ThreadReplyBadge({
           ›
         </span>
       </button>
+      <ThreadAddressActions token={addressToken} onReference={onReferenceAddress} onCopy={onCopyAddress} />
     </div>
   );
 }
@@ -245,6 +327,9 @@ interface ChatMessageProps {
   };
   onOpenThread?: (messageId: string) => void;
   onOpenTaskThread?: (task: TaskItem) => void;
+  threadAddressToken?: string;
+  onReferenceThreadAddress?: () => void;
+  onCopyThreadAddress?: () => void;
   isEditing?: boolean;
   editDraft?: string;
   isSavingEdit?: boolean;
@@ -264,6 +349,9 @@ export function ChatMessage({
   threadReplyInfo,
   onOpenThread,
   onOpenTaskThread,
+  threadAddressToken,
+  onReferenceThreadAddress,
+  onCopyThreadAddress,
   isEditing = false,
   editDraft = '',
   isSavingEdit = false,
@@ -566,6 +654,9 @@ export function ChatMessage({
               seq={taskEntry.seq}
               assigneeLabel={taskAssigneeLabel}
               onOpen={onOpenTaskThread}
+              addressToken={(threadReplyInfo?.replyCount ?? 0) <= 0 ? threadAddressToken : undefined}
+              onReferenceAddress={onReferenceThreadAddress}
+              onCopyAddress={onCopyThreadAddress}
             />
           )}
           {message.sendStatus === 'failed' && (
@@ -594,6 +685,9 @@ export function ChatMessage({
                   : '你'
               }
               onOpen={() => onOpenThread(message.id)}
+              addressToken={threadAddressToken}
+              onReferenceAddress={onReferenceThreadAddress}
+              onCopyAddress={onCopyThreadAddress}
             />
           )}
         </div>
@@ -744,6 +838,9 @@ export function ChatMessage({
             seq={taskEntry.seq}
             assigneeLabel={taskAssigneeLabel}
             onOpen={onOpenTaskThread}
+            addressToken={(threadReplyInfo?.replyCount ?? 0) <= 0 ? threadAddressToken : undefined}
+            onReferenceAddress={onReferenceThreadAddress}
+            onCopyAddress={onCopyThreadAddress}
           />
         )}
         <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
@@ -758,6 +855,9 @@ export function ChatMessage({
                 : '你'
             }
             onOpen={() => onOpenThread(message.id)}
+            addressToken={threadAddressToken}
+            onReferenceAddress={onReferenceThreadAddress}
+            onCopyAddress={onCopyThreadAddress}
           />
         )}
       </div>

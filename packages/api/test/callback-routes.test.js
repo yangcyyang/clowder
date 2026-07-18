@@ -45,12 +45,8 @@ describe('Callback Routes', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
-    const { DeliveryCursorStore } = await import(
-      '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'
-    );
-    const { InvocationQueue } = await import(
-      '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
-    );
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
@@ -140,6 +136,48 @@ describe('Callback Routes', () => {
     assert.equal(broadcasted[0].origin, 'progress');
     assert.equal(broadcasted[0].invocationId, invocationId);
     assert.equal(broadcasted[0].messageId, recent[0].id);
+  });
+
+  test('explicit address invocations preserve crossPost audit on ACK and callback final', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'opus',
+      'thread-target',
+      undefined,
+      undefined,
+      { crossPostSourceThreadId: 'thread-source' },
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const ack = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-progress',
+      headers,
+      payload: { content: '开始处理', kind: 'ack', clientMessageId: `ack:${invocationId}:opus` },
+    });
+    const final = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: { content: '处理完成', clientMessageId: `final:${invocationId}:opus` },
+    });
+
+    assert.equal(ack.statusCode, 200);
+    assert.equal(final.statusCode, 200);
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 2);
+    for (const message of recent) {
+      assert.equal(message.threadId, 'thread-target');
+      assert.deepEqual(message.extra.crossPost, {
+        sourceThreadId: 'thread-source',
+        sourceInvocationId: invocationId,
+      });
+    }
+    assert.equal(socketManager.getMessages().length, 2);
+    assert.ok(
+      socketManager.getMessages().every((message) => message.extra?.crossPost?.sourceThreadId === 'thread-source'),
+    );
   });
 
   test('POST post-progress is idempotent and never routes A2A mentions', async () => {
@@ -833,7 +871,10 @@ describe('Callback Routes', () => {
 
     const context = await app.inject({ method: 'GET', url: '/api/callbacks/thread-context', headers });
     assert.equal(context.statusCode, 200);
-    assert.deepEqual(JSON.parse(context.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(context.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const inbox = await app.inject({ method: 'GET', url: '/api/callbacks/check-inbox', headers });
     assert.equal(inbox.statusCode, 200);
@@ -841,7 +882,10 @@ describe('Callback Routes', () => {
 
     const recent = await app.inject({ method: 'GET', url: '/api/callbacks/fetch-thread-history', headers });
     assert.equal(recent.statusCode, 200);
-    assert.deepEqual(JSON.parse(recent.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(recent.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const explicitOld = await app.inject({
       method: 'GET',
@@ -856,7 +900,10 @@ describe('Callback Routes', () => {
       headers,
     });
     assert.equal(mentions.statusCode, 200);
-    assert.deepEqual(JSON.parse(mentions.body).mentions.map((mention) => mention.message), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(mentions.body).mentions.map((mention) => mention.message),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const search = await app.inject({
       method: 'GET',
@@ -864,7 +911,10 @@ describe('Callback Routes', () => {
       headers,
     });
     assert.equal(search.statusCode, 200);
-    assert.deepEqual(JSON.parse(search.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(search.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
   });
 
   test('GET thread-context respects limit parameter', async () => {

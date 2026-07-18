@@ -118,8 +118,11 @@ export function useChatSocketCallbacks({
         }
         requestStreamCatchUp(data.threadId);
       },
-      onThreadBranched: () => {
-        /* branch navigation handled by the action initiator */
+      onThreadBranched: (data) => {
+        if (data.sourceThreadId !== threadId) return;
+        patchMessage(data.fromMessageId, {
+          extra: { slockThread: { branchThreadId: data.newThreadId, replyCount: 0 } },
+        });
       },
       onAuthorizationRequest: handleAuthRequest,
       onAuthorizationResponse: handleAuthResponse,

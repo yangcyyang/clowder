@@ -7,6 +7,11 @@ import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
+const apiFetchMock = vi.fn();
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: (...args: unknown[]) => apiFetchMock(...args),
+}));
+
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
@@ -76,6 +81,8 @@ describe('ChatMessage thread reply badge', () => {
   });
 
   beforeEach(() => {
+    apiFetchMock.mockReset();
+    apiFetchMock.mockResolvedValue({ ok: false });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -164,6 +171,65 @@ describe('ChatMessage thread reply badge', () => {
     expect(replyButton?.textContent).toContain('你 · 这是用户发出的最后一条回复');
     expect(replyButton?.querySelector('[data-thread-unread-dot="true"]')).toBeNull();
     expect(replyButton?.querySelector('[data-thread-reply-summary="true"]')?.className).toContain('truncate');
+  });
+
+  it('keeps authorized open, reference and copy as sibling controls with full-id address payload', async () => {
+    const onReference = vi.fn();
+    const onCopy = vi.fn();
+    const token = '#大厅:0001784400000000-000001-ab12cd34';
+    apiFetchMock.mockResolvedValue({ ok: true });
+    await act(async () => {
+      root.render(
+        <ChatMessage
+          message={makeUserMessage()}
+          getCatById={() => undefined}
+          threadReplyInfo={{ branchThreadId: 'thread-branch', replyCount: 2 }}
+          onOpenThread={vi.fn()}
+          threadAddressToken={token}
+          onReferenceThreadAddress={onReference}
+          onCopyThreadAddress={onCopy}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const referenceButton = container.querySelector<HTMLButtonElement>('button[aria-label="引用 Thread 地址"]');
+    const copyButton = container.querySelector<HTMLButtonElement>('button[aria-label="复制 Thread 地址"]');
+    expect(referenceButton?.title).toContain(token);
+    expect(copyButton?.title).toContain(token);
+    expect(container.querySelector('button button')).toBeNull();
+
+    act(() => {
+      referenceButton?.click();
+      copyButton?.click();
+    });
+    expect(onReference).toHaveBeenCalledOnce();
+    expect(onCopy).toHaveBeenCalledOnce();
+  });
+
+  it('does not render address actions when the viewer-safe capability check denies them', async () => {
+    await act(async () => {
+      root.render(
+        <ChatMessage
+          message={makeUserMessage()}
+          getCatById={() => undefined}
+          threadReplyInfo={{ branchThreadId: 'thread-stale', replyCount: 2 }}
+          onOpenThread={vi.fn()}
+          threadAddressToken="#大厅:0001784400000000-000001-ab12cd34"
+          onReferenceThreadAddress={vi.fn()}
+          onCopyThreadAddress={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-thread-address-actions]')).toBeNull();
+    expect(apiFetchMock).toHaveBeenCalled();
+    expect(
+      apiFetchMock.mock.calls.some(([url]) => String(url).includes('/api/thread-address/resolve?')),
+    ).toBe(true);
   });
 
   it('renders a slock-like task dispatch chip with assignee and opens the task thread', () => {

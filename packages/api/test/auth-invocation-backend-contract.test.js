@@ -67,11 +67,12 @@ for (const [name, factory] of backends) {
     test('create + verify round-trip returns ok:true with record', async () => {
       const { backend, cleanup } = await factory();
       try {
-        await backend.create(fixture('inv-1', 'tok-1'), 60_000);
+        await backend.create({ ...fixture('inv-1', 'tok-1'), crossPostSourceThreadId: 'thread-source' }, 60_000);
         const result = await backend.verify('inv-1', 'tok-1', 60_000);
         assert.equal(result.ok, true);
         assert.equal(result.record.callbackToken, 'tok-1');
         assert.equal(result.record.userId, 'u-1');
+        assert.equal(result.record.crossPostSourceThreadId, 'thread-source');
       } finally {
         await cleanup();
       }

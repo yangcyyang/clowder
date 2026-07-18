@@ -309,6 +309,8 @@ export interface InvocationParams {
   readonly parentInvocationId?: string;
   /** F121: The A2A trigger message ID for auto-replyTo */
   readonly a2aTriggerMessageId?: string;
+  /** Original human thread for an explicitly cross-thread routed invocation. */
+  readonly crossPostSourceThreadId?: string;
   /** F153 Phase E: Parent route span — invocation span becomes its child */
   readonly routeSpan?: import('@opentelemetry/api').Span;
   /** F153: mutable ref so caller can capture the invocation span for trace propagation */
@@ -368,7 +370,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     threadId,
     params.parentInvocationId,
     params.a2aTriggerMessageId,
-    freshnessProtected ? { freshnessBaseline: params.freshnessBaseline } : undefined,
+    freshnessProtected || params.crossPostSourceThreadId
+      ? {
+          ...(freshnessProtected ? { freshnessBaseline: params.freshnessBaseline } : {}),
+          ...(params.crossPostSourceThreadId ? { crossPostSourceThreadId: params.crossPostSourceThreadId } : {}),
+        }
+      : undefined,
   );
 
   // F153: Record cat invocation count with trigger type

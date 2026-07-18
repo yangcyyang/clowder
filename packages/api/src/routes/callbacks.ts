@@ -586,6 +586,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       kind,
       ...(effectiveInvocationId ? { invocationId: effectiveInvocationId } : {}),
     } as const;
+    const progressCrossPost =
+      principal.kind === 'invocation' && request.callbackAuth?.crossPostSourceThreadId
+        ? {
+            crossPost: {
+              sourceThreadId: request.callbackAuth.crossPostSourceThreadId,
+              ...(effectiveInvocationId ? { sourceInvocationId: effectiveInvocationId } : {}),
+            },
+          }
+        : {};
     const invocationAckKey =
       principal.kind === 'invocation' && kind === 'ack'
         ? `agent-progress:ack:${principal.catId}`
@@ -605,6 +614,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       timestamp: Date.now(),
       extra: {
         agentCommunication,
+        ...progressCrossPost,
       },
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       idempotencyKey: storageIdempotencyKey,
@@ -632,7 +642,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         origin: 'progress',
         messageId: storedMsg.id,
         ...(effectiveInvocationId ? { invocationId: effectiveInvocationId } : {}),
-        extra: { agentCommunication },
+        extra: { agentCommunication, ...progressCrossPost },
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(replyPreview ? { replyPreview } : {}),
         timestamp: Date.now(),
@@ -974,14 +984,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    // F52: Detect cross-thread post (used for both A2A exemption and crossPost metadata)
-    const isCrossThread = effectiveThreadId !== actor.threadId;
+    // F52/F194: Detect both model-selected cross-thread posts and server-bound
+    // explicit-address routes. In the latter case the callback writes natively to
+    // actor.threadId, but still carries the original human thread as audit lineage.
+    const isModelSelectedCrossThread = effectiveThreadId !== actor.threadId;
+    const inheritedCrossPostSourceThreadId = record.crossPostSourceThreadId;
+    const crossPostSourceThreadId = isModelSelectedCrossThread ? actor.threadId : inheritedCrossPostSourceThreadId;
 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
     // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
     const senderCatId = createCatId(actor.catId);
-    const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
+    const contentAnalysis = analyzeA2AMentions(storedContent, isModelSelectedCrossThread ? undefined : senderCatId);
     const contentTargets = contentAnalysis.mentions;
     // F098-C1: Merge explicit targetCats with content-parsed mentions (deduped)
     // F182: use resolveCatTarget to distinguish disabled vs unknown — collect routing_warnings
@@ -1040,8 +1054,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       );
     }
     const mentionsUser = detectUserMention(storedContent);
-    const crossPostExtra = isCrossThread
-      ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: invocationId } }
+    const crossPostExtra = crossPostSourceThreadId
+      ? { crossPost: { sourceThreadId: crossPostSourceThreadId, sourceInvocationId: invocationId } }
       : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
@@ -1251,11 +1265,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // (catId, invocationId) dedup matches stream broadcasts.
           invocationId: effectiveInvId,
           // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
-          ...(isCrossThread || validExplicitTargets.length
+          ...(crossPostSourceThreadId || validExplicitTargets.length
             ? {
                 extra: {
-                  ...(isCrossThread
-                    ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
+                  ...(crossPostSourceThreadId
+                    ? { crossPost: { sourceThreadId: crossPostSourceThreadId, sourceInvocationId: effectiveInvId } }
                     : {}),
                   ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
                 },

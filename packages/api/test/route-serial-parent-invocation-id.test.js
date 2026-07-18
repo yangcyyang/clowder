@@ -135,4 +135,26 @@ describe('#573: route-serial parentInvocationId vs ownInvocationId', () => {
     // Registry mock creates ids like `inv-N` — verify shape (not specific value).
     assert.match(persistedInv, /^inv-\d+$/, 'fallback id matches registry-created shape');
   });
+
+  it('persists explicit address stream output with crossPost audit lineage', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      { opus: createMockServiceWithInvocationCreated('opus', '完成', 'cli-inner') },
+      appendCalls,
+    );
+
+    for await (const _ of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread-target', {
+      parentInvocationId: 'inv-parent',
+      crossPostSourceThreadId: 'thread-source',
+    })) {
+      // exhaust generator so the stream publication is persisted
+    }
+
+    assert.equal(appendCalls.length, 1);
+    assert.deepEqual(appendCalls[0].extra.crossPost, {
+      sourceThreadId: 'thread-source',
+      sourceInvocationId: 'inv-parent',
+    });
+  });
 });

@@ -12,8 +12,8 @@ export interface ExecutionRouteV1 {
   rootMessageId: string;
   replyTargetThreadId: string;
   executionMessageId: string;
-  mode: 'task_thread';
-  taskId: string;
+  mode: 'task_thread' | 'explicit_cross_thread';
+  taskId?: string;
   ownerCatId?: CatId;
 }
 

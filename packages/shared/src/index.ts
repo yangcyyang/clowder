@@ -20,6 +20,8 @@ export * from './registry/index.js';
 export * from './schemas/index.js';
 // Export shared text helpers
 export * from './text-utils.js';
+// Export the F194 human-readable Thread Address Contract.
+export * from './thread-address.js';
 // Export all types
 export * from './types/index.js';
 // Export shared cat capability contract helpers

@@ -1,12 +1,16 @@
 'use client';
 
+import { parseThreadAddressToken } from '@cat-cafe/shared';
 import {
   Children,
   cloneElement,
+  createContext,
   isValidElement,
   type ReactElement,
   type ReactNode,
   useCallback,
+  useContext,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -18,7 +22,10 @@ import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
+
+const ThreadAddressContentContext = createContext<{ token: string; rootMessageId: string } | null>(null);
 
 /* ── @mention highlighting ─────────────────────────────────── */
 const GENERIC_MENTION_RE = /@[^\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+/g;
@@ -469,33 +476,94 @@ function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
   );
 }
 
+function ThreadAddressReferenceLink({ token, rootMessageId }: { token: string; rootMessageId: string }) {
+  const allowedAddress = useContext(ThreadAddressContentContext);
+  const sourceThreadId = useChatStore((state) => state.currentThreadId);
+  const addToast = useToastStore((state) => state.addToast);
+  const [targetThreadId, setTargetThreadId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTargetThreadId(null);
+    const controller = new AbortController();
+    if (allowedAddress?.token !== token || allowedAddress.rootMessageId !== rootMessageId) return;
+    void apiFetch(
+      `/api/thread-address/resolve?rootMessageId=${encodeURIComponent(rootMessageId)}&sourceThreadId=${encodeURIComponent(sourceThreadId)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json()) as { threadId?: string };
+        if (body.threadId) setTargetThreadId(body.threadId);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [allowedAddress, rootMessageId, sourceThreadId, token]);
+
+  if (allowedAddress?.token !== token || allowedAddress.rootMessageId !== rootMessageId || !targetThreadId) {
+    return <span data-thread-address-text>{token}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      data-thread-address-link
+      onClick={(event) => {
+        event.preventDefault();
+        pushThreadRouteWithHistory(targetThreadId, window);
+        addToast({ type: 'info', title: '已打开 Thread', message: token, duration: 1800 });
+      }}
+      className="inline cursor-pointer rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1 py-0.5 font-mono text-[0.85em] font-semibold text-[var(--clowder-markdown-chip-text)] hover:underline"
+      title={`打开 ${token}`}
+    >
+      {token}
+    </button>
+  );
+}
+
+function linkifyThreadAddressReferences(text: string): ReactNode[] {
+  const parsed = parseThreadAddressToken(text);
+  if (parsed.kind !== 'valid') return [text];
+  const index = text.indexOf(parsed.token);
+  if (index < 0) return [text];
+  return [
+    text.slice(0, index),
+    <ThreadAddressReferenceLink
+      key={`thread-address-${index}`}
+      token={parsed.token}
+      rootMessageId={parsed.rootMessageId}
+    />,
+    text.slice(index + parsed.token.length),
+  ].filter((part) => part !== '');
+}
+
 /** Process string children → @mentions + file path links */
 function withMentionsAndLinks(children: ReactNode): ReactNode {
   return Children.map(children, (child) => {
     if (typeof child !== 'string') return child;
-    // First pass: file paths → ReactNode[]
-    const linked = linkifyFilePaths(child);
-    // Second pass: highlight @mentions in remaining text nodes
     return (
       <>
-        {linked.map((node, i) => {
-          if (typeof node !== 'string') return node;
-          const localLinked = linkifyLocalFileNames(node);
-          return (
-            <span key={i}>
-              {localLinked.map((localNode, j) => {
-                if (typeof localNode !== 'string') return localNode;
-                const taskLinked = linkifyTaskReferences(localNode);
-                return (
-                  <span key={j}>
-                    {taskLinked.map((taskNode, k) =>
-                      typeof taskNode === 'string' ? <span key={k}>{highlightMentions(taskNode)}</span> : taskNode,
-                    )}
-                  </span>
-                );
-              })}
-            </span>
-          );
+        {linkifyThreadAddressReferences(child).map((addressNode, addressIndex) => {
+          if (typeof addressNode !== 'string') return addressNode;
+          const linked = linkifyFilePaths(addressNode);
+          return linked.map((node, i) => {
+            if (typeof node !== 'string') return node;
+            const localLinked = linkifyLocalFileNames(node);
+            return (
+              <span key={`${addressIndex}-${i}`}>
+                {localLinked.map((localNode, j) => {
+                  if (typeof localNode !== 'string') return localNode;
+                  const taskLinked = linkifyTaskReferences(localNode);
+                  return (
+                    <span key={j}>
+                      {taskLinked.map((taskNode, k) =>
+                        typeof taskNode === 'string' ? <span key={k}>{highlightMentions(taskNode)}</span> : taskNode,
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+            );
+          });
         })}
       </>
     );
@@ -826,6 +894,11 @@ export function MarkdownContent({
 }: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = cmdMatch ? content.slice(cmdMatch[1].length) : content;
+  const parsedThreadAddress = parseThreadAddressToken(md);
+  const allowedThreadAddress =
+    parsedThreadAddress.kind === 'valid'
+      ? { token: parsedThreadAddress.token, rootMessageId: parsedThreadAddress.rootMessageId }
+      : null;
 
   let components = createSearchMdComponents(searchHighlight);
   if (basePath != null) {
@@ -838,9 +911,11 @@ export function MarkdownContent({
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
       {cmdMatch && <span className="font-semibold text-cocreator-primary">{cmdMatch[1]}</span>}
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
-        {md}
-      </ReactMarkdown>
+      <ThreadAddressContentContext.Provider value={allowedThreadAddress}>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+          {md}
+        </ReactMarkdown>
+      </ThreadAddressContentContext.Provider>
     </div>
   );
 }

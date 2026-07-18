@@ -54,7 +54,7 @@ class FakeRedisForTaskStore {
   }
 
   async eval(script, _numKeys, ...keysAndArgs) {
-    if (script.includes("hget', KEYS[1], 'taskThreadId'") && script.includes("return 1")) {
+    if (script.includes("hget', KEYS[1], 'taskThreadId'") && script.includes('return 1')) {
       const [detailKey, taskThreadId, updatedAt, sourceMessageId] = keysAndArgs;
       const hash = this.hashes.get(detailKey);
       if (!hash) return -1;

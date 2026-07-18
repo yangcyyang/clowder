@@ -896,6 +896,8 @@ export class AgentRouter {
       replyToMessageId?: string;
       /** Scheduler bookkeeping presentation metadata; keeps the existing message type. */
       responsePresentation?: 'silent_receipt';
+      /** Original human thread for explicit address-routing audit. */
+      crossPostSourceThreadId?: string;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
       /** Internal queue lineage: force this descendant route to remain Freshness-protected. */
@@ -957,6 +959,7 @@ export class AgentRouter {
       currentUserMessageId: userMessageId,
       ...(options?.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
       ...(options?.responsePresentation ? { responsePresentation: options.responsePresentation } : {}),
+      ...(options?.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
