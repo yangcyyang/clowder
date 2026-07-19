@@ -25,3 +25,8 @@ export const AuthAuditKeys = {
   /** SortedSet of all audit entry IDs by createdAt: auth-audit:all */
   ALL: 'auth-audit:all',
 } as const;
+
+export const AuthReceiptKeys = {
+  /** Hash with receipt claims and token hash. The bearer secret is never stored. */
+  detail: (id: string) => `auth-receipt:v1:${id}`,
+} as const;
