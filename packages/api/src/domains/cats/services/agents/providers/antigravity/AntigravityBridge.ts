@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { dirname, join } from 'node:path';
+import type { CapabilityIntentV1, CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import type { CapabilityReceiptGateDecision } from '../../../auth/CapabilityReceiptExecutionGate.js';
+import { digestCapabilityArguments } from '../../../stores/ports/CapabilityReceiptStore.js';
 import { discoverAntigravityLS } from './antigravity-ls-discovery.js';
 import { diffDeliveredSteps } from './antigravity-step-delta.js';
 import { RAW_RESPONSE_CAP, TRACE_ENABLED, TRACED_METHODS, traceLog } from './antigravity-trace.js';
@@ -19,6 +22,44 @@ const HARDCODED_MODEL_MAP: Record<string, string> = {
   'claude-opus-4-6': 'MODEL_PLACEHOLDER_M26',
   'claude-sonnet-4-6': 'MODEL_PLACEHOLDER_M35',
 };
+
+type CapabilityExecutionAuditReason =
+  | 'capability_execution_completed'
+  | 'capability_execution_failed'
+  | 'capability_execution_refused';
+
+function redactCapabilityExecutorResult(result: ExecutorResult<unknown>): ExecutorResult<unknown> {
+  if (result.status === 'success') {
+    return {
+      status: 'success',
+      output: { reason: 'capability_execution_completed' satisfies CapabilityExecutionAuditReason },
+      durationMs: 0,
+    };
+  }
+  if (result.status === 'error') {
+    return {
+      status: 'error',
+      error: 'capability_execution_failed' satisfies CapabilityExecutionAuditReason,
+      durationMs: 0,
+    };
+  }
+  return {
+    status: 'refused',
+    reason: 'capability_execution_refused' satisfies CapabilityExecutionAuditReason,
+  };
+}
+
+function createCapabilityAuditSink(delegate: AuditSink, receiptId: string, argumentDigest: string): AuditSink {
+  return {
+    async record(entry) {
+      await delegate.record({
+        ...entry,
+        input: { receiptId, argumentDigest },
+        result: redactCapabilityExecutorResult(entry.result),
+      });
+    },
+  };
+}
 
 export interface BridgeConnection {
   port: number;
@@ -101,6 +142,18 @@ export interface StepBatch {
 
 export interface BridgeOptions {
   sessionStorePath?: string;
+  capabilityReceiptGate?: {
+    authorize(intent: CapabilityIntentV1, reason: string): Promise<CapabilityReceiptGateDecision>;
+    isInScope?(scope: Pick<CapabilityIntentV1, 'executorId' | 'catId' | 'threadId'>): boolean;
+  };
+}
+
+export interface NativeExecutionAuthorizationContext {
+  invocationId: string;
+  threadId: string;
+  userId: string;
+  catId: CatId;
+  taskId?: string;
 }
 
 const DEFAULT_SESSION_STORE = join(process.cwd(), 'data', 'antigravity-sessions.json');
@@ -115,12 +168,14 @@ export class AntigravityBridge {
   private modelMapRefreshed = false;
   private executorRegistry: ExecutorRegistry | null = null;
   private executorAudit: AuditSink | null = null;
+  private readonly capabilityReceiptGate?: NonNullable<BridgeOptions['capabilityReceiptGate']>;
 
   constructor(
     private readonly connection?: Partial<BridgeConnection>,
     options?: BridgeOptions,
   ) {
     this.sessionStorePath = options?.sessionStorePath ?? DEFAULT_SESSION_STORE;
+    this.capabilityReceiptGate = options?.capabilityReceiptGate;
   }
 
   attachExecutors(registry: ExecutorRegistry, audit: AuditSink): void {
@@ -140,15 +195,21 @@ export class AntigravityBridge {
    * F061 Phase 2c Task 5: Coordinator for native tool execution.
    * Dispatches a WAITING RUN_COMMAND step through the executor registry,
    * then pushes the result back via pushToolResult.
-   * Returns true on success, 'approval_pending' when SafeToAutoRun is not set,
-   * 'no_executor' when no executor matches (caller should fail-fast), or false for
-   * all other early exits (kill-switch, missing registry, bad args — caller should not fail-fast).
+   * Returns true on success, 'approval_pending' for the legacy LS approval path,
+   * 'capability_pending' when the exact A1 receipt awaits its owner, 'no_executor'
+   * when no executor matches (caller should fail-fast), or false for all other
+   * early exits (kill-switch, missing registry, bad args — caller should not fail-fast).
    * Opt out via `ANTIGRAVITY_NATIVE_EXECUTOR=0` env var.
    */
   async nativeExecuteAndPush(
     step: TrajectoryStep,
-    opts: { cascadeId: string; cwd: string; modelName?: string },
-  ): Promise<true | 'approval_pending' | 'no_executor' | false> {
+    opts: {
+      cascadeId: string;
+      cwd: string;
+      modelName?: string;
+      authorizationContext?: NativeExecutionAuthorizationContext;
+    },
+  ): Promise<true | 'approval_pending' | 'capability_pending' | 'capability_blocked' | 'no_executor' | false> {
     if (process.env.ANTIGRAVITY_NATIVE_EXECUTOR === '0') return false;
     if (!this.executorRegistry || !this.executorAudit) return false;
     if (step.status !== 'CORTEX_STEP_STATUS_WAITING') return false;
@@ -165,12 +226,6 @@ export class AntigravityBridge {
       log.warn(`nativeExecuteAndPush: failed to parse argumentsJson: ${err}`);
       return false;
     }
-
-    // Respect Antigravity's approval metadata: only auto-execute steps the model
-    // explicitly marked as safe-to-auto-run. SafeToAutoRun=false / missing → fall
-    // back to normal approval flow (user or autoApprove via HandleCascadeUserInteraction).
-    // Return 'approval_pending' (truthy) so callers can distinguish from genuinely unsupported steps (false).
-    if (args.SafeToAutoRun !== true) return 'approval_pending';
 
     const commandLine = ((args.CommandLine as string | undefined) ?? (args.commandLine as string | undefined))?.trim();
     if (!commandLine) return false;
@@ -191,18 +246,61 @@ export class AntigravityBridge {
     // executor decides to refuse it.
     const refusalReason = getRunCommandRefusalReason(commandLine);
     if (refusalReason) {
-      const result: ExecutorResult<unknown> = { status: 'refused', reason: refusalReason };
-      await this.executorAudit.record({
-        tool: executor.toolName,
-        cascadeId: opts.cascadeId,
-        stepIndex,
-        input,
-        result,
-        timestamp: new Date(),
-      });
-      await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName);
-      return true;
+      return this.writeRefusalOrBlock(executor.toolName, stepIndex, input, refusalReason, opts);
     }
+
+    // A1 canary: the capability receipt is consumed immediately before the
+    // LS approval and native executor boundary. Local absolute refusals above
+    // remain authoritative and never create approval noise.
+    let exactCapabilityGrant = false;
+    let consumedReceiptId: string | undefined;
+    let capabilityArgumentDigest: string | undefined;
+    if (this.capabilityReceiptGate) {
+      capabilityArgumentDigest = digestCapabilityArguments(input);
+      const auth = opts.authorizationContext;
+      let gateDecision: CapabilityReceiptGateDecision;
+      if (!auth) {
+        gateDecision = { allowed: false, state: 'error' };
+      } else {
+        const intent: CapabilityIntentV1 = {
+          version: 1,
+          executorId: 'antigravity.native.run_command',
+          action: 'run_command',
+          invocationId: auth.invocationId,
+          threadId: auth.threadId,
+          catId: auth.catId,
+          userId: auth.userId,
+          ...(auth.taskId ? { taskId: auth.taskId } : {}),
+          argumentDigest: capabilityArgumentDigest,
+        };
+        gateDecision = await this.capabilityReceiptGate.authorize(intent, 'Approve Antigravity native run_command');
+      }
+
+      if (!gateDecision.allowed) {
+        if (gateDecision.state === 'pending') return 'capability_pending';
+
+        const reason =
+          gateDecision.state === 'denied'
+            ? (gateDecision.reason ?? 'Capability authorization denied')
+            : 'Capability authorization unavailable';
+        return this.writeRefusalOrBlock(executor.toolName, stepIndex, input, reason, opts, {
+          argumentDigest: capabilityArgumentDigest,
+          reason:
+            gateDecision.state === 'denied'
+              ? 'capability_authorization_denied'
+              : 'capability_authorization_unavailable',
+        });
+      }
+      if (gateDecision.state === 'granted') {
+        exactCapabilityGrant = true;
+        consumedReceiptId = gateDecision.receiptId;
+      }
+    }
+
+    // Preserve the legacy LS approval path outside enforce grants. An exact
+    // once-only human capability grant supersedes SafeToAutoRun metadata; the
+    // receipt has already been consumed and must lead directly to execution.
+    if (!exactCapabilityGrant && args.SafeToAutoRun !== true) return 'approval_pending';
 
     // Stage 1: try to satisfy LS PermissionManager before invoking the native executor.
     // If the hint RPC itself fails, still continue to the writeback fallback path.
@@ -216,16 +314,125 @@ export class AntigravityBridge {
       log.warn(`nativeExecuteAndPush: permission guard RPC failed (continuing): ${err}`);
     }
 
-    const result = await executor.execute(input, {
-      cascadeId: opts.cascadeId,
-      trajectoryId,
-      stepIndex,
-      cwd,
-      audit: this.executorAudit,
-    });
+    const executorAudit =
+      consumedReceiptId && capabilityArgumentDigest
+        ? createCapabilityAuditSink(this.executorAudit, consumedReceiptId, capabilityArgumentDigest)
+        : this.executorAudit;
+    let result: ExecutorResult<unknown>;
+    try {
+      result = await executor.execute(input, {
+        cascadeId: opts.cascadeId,
+        trajectoryId,
+        stepIndex,
+        cwd,
+        audit: executorAudit,
+      });
+    } catch (error) {
+      if (consumedReceiptId) {
+        await this.recordCapabilityCompletionMarker(
+          executor.toolName,
+          stepIndex,
+          input,
+          consumedReceiptId,
+          'consumed_without_completion',
+          opts,
+        );
+      }
+      throw error;
+    }
 
-    await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName);
-    return true;
+    try {
+      await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName);
+      return true;
+    } catch (error) {
+      if (consumedReceiptId) {
+        await this.recordCapabilityCompletionMarker(
+          executor.toolName,
+          stepIndex,
+          input,
+          consumedReceiptId,
+          'consumed_with_unconfirmed_writeback',
+          opts,
+        );
+      }
+      throw error;
+    }
+  }
+
+  isCapabilityReceiptScope(context: NativeExecutionAuthorizationContext | undefined): boolean {
+    return (
+      context !== undefined &&
+      this.capabilityReceiptGate?.isInScope?.({
+        executorId: 'antigravity.native.run_command',
+        catId: context.catId,
+        threadId: context.threadId,
+      }) === true
+    );
+  }
+
+  private async recordCapabilityCompletionMarker(
+    tool: string,
+    stepIndex: number,
+    input: { commandLine: string; cwd?: string },
+    receiptId: string,
+    reasonCode: 'consumed_without_completion' | 'consumed_with_unconfirmed_writeback',
+    opts: { cascadeId: string },
+  ): Promise<void> {
+    try {
+      await this.executorAudit?.record({
+        tool,
+        cascadeId: opts.cascadeId,
+        stepIndex,
+        input: {
+          receiptId,
+          argumentDigest: digestCapabilityArguments(input),
+        },
+        result: {
+          status: 'error',
+          error: `${reasonCode} receipt=${receiptId}`,
+          durationMs: 0,
+        },
+        timestamp: new Date(),
+      });
+    } catch {
+      log.error(`${reasonCode} audit failed`);
+    }
+  }
+
+  private async writeRefusalOrBlock(
+    tool: string,
+    stepIndex: number,
+    input: { commandLine: string; cwd?: string },
+    reason: string,
+    opts: { cascadeId: string; modelName?: string },
+    capabilityAudit?: {
+      argumentDigest: string;
+      reason: 'capability_authorization_denied' | 'capability_authorization_unavailable';
+    },
+  ): Promise<true | 'capability_blocked'> {
+    const result: ExecutorResult<unknown> = { status: 'refused', reason };
+    try {
+      await this.executorAudit?.record({
+        tool,
+        cascadeId: opts.cascadeId,
+        stepIndex,
+        input: capabilityAudit ? { argumentDigest: capabilityAudit.argumentDigest } : input,
+        result: capabilityAudit ? { status: 'refused', reason: capabilityAudit.reason } : result,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      log.error(`refusal audit failed closed: ${error}`);
+    }
+
+    try {
+      await this.pushToolResult(opts.cascadeId, stepIndex, result, input, opts.modelName, {
+        requireCancellation: true,
+      });
+      return true;
+    } catch (error) {
+      log.error(`refusal writeback failed closed: ${error}`);
+      return 'capability_blocked';
+    }
   }
 
   async ensureConnected(): Promise<BridgeConnection> {
@@ -481,14 +688,20 @@ export class AntigravityBridge {
     result: import('./executors/AntigravityToolExecutor.js').ExecutorResult<unknown>,
     input: { commandLine: string; cwd?: string },
     modelName?: string,
+    options?: { requireCancellation?: boolean },
   ): Promise<void> {
+    let cancellationError: unknown;
     try {
       await this.rpcSafe('CancelCascadeSteps', { cascadeId, stepIndices: [stepIndex] });
     } catch (err) {
+      cancellationError = err;
       log.warn(`pushToolResult: CancelCascadeSteps failed (continuing): ${err}`);
     }
     const text = formatToolResult(input, result);
     await this.sendMessage(cascadeId, text, modelName);
+    if (options?.requireCancellation && cancellationError !== undefined) {
+      throw new Error(`strict refusal cancellation failed: ${String(cancellationError)}`);
+    }
     log.info(`pushed tool result for cascade=${cascadeId} step=${stepIndex} status=${result.status}`);
   }
 

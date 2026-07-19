@@ -95,6 +95,24 @@ describe('Antigravity waiting approval', () => {
     assert.equal(texts[0].content, 'browser approved');
   });
 
+  test('an exact receipt scope preserves generic auto-approval when no RUN_COMMAND is present', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('open browser'));
+
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 1);
+    assert.equal(
+      messages.some((msg) => msg.errorCode === 'waiting_capability_approval'),
+      false,
+    );
+    assert.equal(messages.find((msg) => msg.type === 'text')?.content, 'browser approved');
+  });
+
   test('service falls back to liveness_signal when auto-approve fails', async () => {
     const resolveOutstandingSteps = mock.fn(async () => {
       throw new Error('ResolveOutstandingSteps: 400 — invalid');
@@ -182,6 +200,7 @@ describe('Antigravity waiting approval', () => {
     const resolveOutstandingSteps = mock.fn(async () => {});
     const bridge = {
       ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
       pollForSteps: mock.fn(async function* () {
         // Simulate stall: RUNNING but no awaitingUserInput flag, bridge throws stall
         throw new Error('Antigravity stall: no activity for 60213ms (steps=5, status=CASCADE_RUN_STATUS_RUNNING)');
@@ -266,6 +285,150 @@ describe('Antigravity waiting approval', () => {
     );
     const text = messages.find((msg) => msg.type === 'text');
     assert.equal(text?.content, 'approved without waiting for stall');
+  });
+
+  test('capability_pending never enters the legacy auto-approve path and retries the exact step', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const waitingStep = {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_capability_pending',
+          name: 'run_command',
+          argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: true }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'trajectory-1', stepIndex: 7 },
+      },
+    };
+    let nativeCalls = 0;
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+      nativeExecuteAndPush: mock.fn(async (step) => {
+        if (step.type !== 'CORTEX_STEP_TYPE_RUN_COMMAND') return false;
+        nativeCalls += 1;
+        return nativeCalls === 1 ? 'capability_pending' : true;
+      }),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [waitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: true,
+          },
+        };
+        yield {
+          steps: [waitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: true,
+          },
+        };
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'capability approved' },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('run command'));
+
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 0);
+    assert.equal(nativeCalls, 2, 'capability pending must remain retryable until the exact grant is consumed');
+    const waiting = messages.find((msg) => msg.errorCode === 'waiting_capability_approval');
+    assert.ok(waiting, 'must surface the capability-specific wait without LS auto-approval');
+    assert.equal(messages.find((msg) => msg.type === 'text')?.content, 'capability approved');
+  });
+
+  test('capability_pending also disables the generic stall auto-approve probe', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const waitingStep = {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_capability_stall',
+          name: 'run_command',
+          argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: true }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'trajectory-1', stepIndex: 8 },
+      },
+    };
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      nativeExecuteAndPush: mock.fn(async () => 'capability_pending'),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [waitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: false,
+          },
+        };
+        throw new Error('Antigravity stall: capability approval is still pending');
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('run command'));
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 0);
+    assert.match(messages.find((msg) => msg.type === 'error')?.error ?? '', /capability approval is still pending/);
+  });
+
+  test('capability_blocked terminates without any legacy auto-approve fallback', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const waitingStep = {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_capability_blocked',
+          name: 'run_command',
+          argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp', SafeToAutoRun: true }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'trajectory-1', stepIndex: 9 },
+      },
+    };
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+      nativeExecuteAndPush: mock.fn(async () => 'capability_blocked'),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [waitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: false,
+          },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('run command'));
+
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 0);
+    assert.ok(messages.some((msg) => msg.errorCode === 'capability_authorization_blocked'));
   });
 
   test('P1: probe retry resumes from last delivered cursor, not from stepsBefore', async () => {

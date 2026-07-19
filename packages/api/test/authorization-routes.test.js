@@ -284,6 +284,11 @@ describe('POST /api/authorization/respond', () => {
 
   async function createApp() {
     const app = Fastify();
+    app.addHook('onRequest', (request, _reply, done) => {
+      const userId = request.headers['x-test-session-user'];
+      if (typeof userId === 'string' && userId.trim()) request.sessionUserId = userId.trim();
+      done();
+    });
     await app.register(authorizationRoutes, {
       authManager,
       ruleStore,
@@ -308,7 +313,7 @@ describe('POST /api/authorization/respond', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/authorization/respond',
-      headers: { 'x-cat-cafe-user': 'user-1' },
+      headers: { 'x-test-session-user': 'user-1' },
       payload: {
         requestId: record.requestId,
         granted: true,
@@ -327,7 +332,7 @@ describe('POST /api/authorization/respond', () => {
     assert.equal(events[0].event, 'authorization:response');
   });
 
-  test('accepts X-Cat-Cafe-User header (frontend default)', async () => {
+  test('rejects spoofable X-Cat-Cafe-User header without a session', async () => {
     const app = await createApp();
 
     const record = pendingStore.create({
@@ -349,10 +354,8 @@ describe('POST /api/authorization/respond', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    assert.equal(body.status, 'ok');
-    assert.equal(body.record.status, 'granted');
+    assert.equal(res.statusCode, 401);
+    assert.equal((await pendingStore.get(record.requestId)).status, 'waiting');
   });
 
   test('returns 404 for nonexistent request', async () => {
@@ -360,7 +363,7 @@ describe('POST /api/authorization/respond', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/authorization/respond',
-      headers: { 'x-cat-cafe-user': 'user-1' },
+      headers: { 'x-test-session-user': 'user-1' },
       payload: { requestId: 'nonexistent', granted: true, scope: 'once' },
     });
 
@@ -377,9 +380,162 @@ describe('POST /api/authorization/respond', () => {
 
     assert.equal(res.statusCode, 401);
   });
+
+  test('session principal wins over a conflicting spoof header', async () => {
+    const app = await createApp();
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-owner',
+      threadId: 'thread-owner',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: 'a'.repeat(64),
+    };
+    const record = pendingStore.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'approve',
+      requesterUserId: 'owner-1',
+      capabilityIntent,
+      capabilitySubjectDigest: 'b'.repeat(64),
+      requestExpiresAt: Date.now() + 60_000,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: {
+        'x-test-session-user': 'owner-1',
+        'x-cat-cafe-user': 'attacker',
+      },
+      payload: { requestId: record.requestId, granted: true, scope: 'once' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal((await pendingStore.get(record.requestId)).respondedBy, 'owner-1');
+  });
+
+  test('foreign session is forbidden without mutating pending or broadcasting', async () => {
+    const app = await createApp();
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-owner-2',
+      threadId: 'thread-owner',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: 'c'.repeat(64),
+    };
+    const record = pendingStore.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'approve',
+      requesterUserId: 'owner-1',
+      capabilityIntent,
+      capabilitySubjectDigest: 'd'.repeat(64),
+      requestExpiresAt: Date.now() + 60_000,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: { 'x-test-session-user': 'attacker' },
+      payload: { requestId: record.requestId, granted: true, scope: 'once' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal((await pendingStore.get(record.requestId)).status, 'waiting');
+    assert.equal(socketManager.getEvents().length, 0);
+  });
+
+  test('A1 capability approval rejects thread scope', async () => {
+    const app = await createApp();
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-once',
+      threadId: 'thread-owner',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: 'e'.repeat(64),
+    };
+    const record = pendingStore.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'approve',
+      requesterUserId: 'owner-1',
+      capabilityIntent,
+      capabilitySubjectDigest: 'f'.repeat(64),
+      requestExpiresAt: Date.now() + 60_000,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { requestId: record.requestId, granted: true, scope: 'thread' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal((await pendingStore.get(record.requestId)).status, 'waiting');
+  });
+
+  test('expired A1 capability approval returns 410 without fake grant or broadcast', async () => {
+    const app = await createApp();
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-expired',
+      threadId: 'thread-owner',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: '1'.repeat(64),
+    };
+    const record = pendingStore.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'approve',
+      requesterUserId: 'owner-1',
+      capabilityIntent,
+      capabilitySubjectDigest: '2'.repeat(64),
+      requestExpiresAt: Date.now() - 1,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { requestId: record.requestId, granted: true, scope: 'once' },
+    });
+
+    assert.equal(res.statusCode, 410);
+    assert.equal((await pendingStore.get(record.requestId)).status, 'waiting');
+    assert.equal(socketManager.getEvents().length, 0);
+  });
 });
 
 describe('GET /api/authorization/pending', () => {
+  function installTestSession(app) {
+    app.addHook('onRequest', (request, _reply, done) => {
+      const userId = request.headers['x-test-session-user'];
+      if (typeof userId === 'string' && userId.trim()) request.sessionUserId = userId.trim();
+      done();
+    });
+  }
+
   test('lists waiting requests', async () => {
     const ruleStore = new AuthorizationRuleStore();
     const pendingStore = new PendingRequestStore();
@@ -396,12 +552,13 @@ describe('GET /api/authorization/pending', () => {
     pendingStore.create({ invocationId: 'i2', catId: 'opus', threadId: 't2', action: 'a2', reason: 'r2' });
 
     const app = Fastify();
+    installTestSession(app);
     await app.register(authorizationRoutes, { authManager, ruleStore, auditStore, socketManager });
 
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/pending',
-      headers: { 'x-cat-cafe-user': 'user-1' },
+      headers: { 'x-test-session-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -425,19 +582,20 @@ describe('GET /api/authorization/pending', () => {
     pendingStore.create({ invocationId: 'i2', catId: 'opus', threadId: 't2', action: 'a2', reason: 'r2' });
 
     const app = Fastify();
+    installTestSession(app);
     await app.register(authorizationRoutes, { authManager, ruleStore, auditStore, socketManager });
 
     const res = await app.inject({
       method: 'GET',
       url: '/api/authorization/pending?threadId=t1',
-      headers: { 'x-cat-cafe-user': 'user-1' },
+      headers: { 'x-test-session-user': 'user-1' },
     });
 
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).pending.length, 1);
   });
 
-  test('accepts X-Cat-Cafe-User header for pending list', async () => {
+  test('rejects spoofable X-Cat-Cafe-User header for pending list', async () => {
     const ruleStore = new AuthorizationRuleStore();
     const pendingStore = new PendingRequestStore();
     const auditStore = new AuthorizationAuditStore();
@@ -460,8 +618,74 @@ describe('GET /api/authorization/pending', () => {
       headers: { 'x-cat-cafe-user': 'frontend-user' },
     });
 
+    assert.equal(res.statusCode, 401);
+  });
+
+  test('only exposes capability requests owned by the authenticated session', async () => {
+    const ruleStore = new AuthorizationRuleStore();
+    const pendingStore = new PendingRequestStore();
+    const auditStore = new AuthorizationAuditStore();
+    const authManager = new AuthorizationManager({
+      ruleStore,
+      pendingStore,
+      auditStore,
+      timeoutMs: 5000,
+    });
+    const socketManager = createMockSocketManager();
+
+    const createCapability = (owner, suffix) => {
+      const capabilityIntent = {
+        version: 1,
+        executorId: 'antigravity.native.run_command',
+        action: 'run_command',
+        invocationId: `inv-${suffix}`,
+        threadId: 'thread-shared',
+        catId: 'antig-opus',
+        userId: owner,
+        argumentDigest: suffix.repeat(64).slice(0, 64),
+      };
+      return pendingStore.create({
+        invocationId: capabilityIntent.invocationId,
+        catId: capabilityIntent.catId,
+        threadId: capabilityIntent.threadId,
+        action: capabilityIntent.action,
+        reason: 'approve',
+        requesterUserId: owner,
+        capabilityIntent,
+        capabilitySubjectDigest: suffix.repeat(64).slice(0, 64),
+        requestExpiresAt: Date.now() + 60_000,
+      });
+    };
+    const owned = createCapability('owner-1', 'a');
+    createCapability('owner-2', 'b');
+    pendingStore.create({
+      invocationId: 'legacy-invocation',
+      catId: 'codex',
+      threadId: 'thread-shared',
+      action: 'legacy-action',
+      reason: 'legacy request remains compatible',
+    });
+
+    const app = Fastify();
+    installTestSession(app);
+    await app.register(authorizationRoutes, { authManager, ruleStore, auditStore, socketManager });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/authorization/pending?threadId=thread-shared',
+      headers: {
+        'x-test-session-user': 'owner-1',
+        'x-cat-cafe-user': 'owner-2',
+      },
+    });
+
     assert.equal(res.statusCode, 200);
-    assert.equal(JSON.parse(res.body).pending.length, 1);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(
+      body.pending.filter((record) => record.capabilityIntent).map((record) => record.requestId),
+      [owned.requestId],
+    );
+    assert.equal(body.pending.filter((record) => !record.capabilityIntent).length, 1);
   });
 });
 

@@ -5,6 +5,62 @@
 
 import type { CatId } from './ids.js';
 
+// ---- Capability receipt v1 ----
+
+/**
+ * Exact execution subject authorized by a capability receipt.
+ *
+ * `argumentDigest` is SHA-256 over canonical JSON. Raw tool arguments are not
+ * persisted in the receipt or its audit trail.
+ */
+export interface CapabilityIntentV1 {
+  readonly version: 1;
+  readonly executorId: string;
+  readonly action: string;
+  readonly invocationId: string;
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly userId: string;
+  readonly taskId?: string;
+  readonly argumentDigest: string;
+}
+
+export type CapabilityReceiptStatus = 'issued' | 'consumed' | 'expired' | 'revoked';
+
+/** Server-side receipt record. The bearer secret is deliberately absent. */
+export interface CapabilityReceiptV1 extends CapabilityIntentV1 {
+  readonly receiptId: string;
+  readonly tokenHash: string;
+  readonly requestId: string;
+  readonly subjectDigest: string;
+  readonly issuedAt: number;
+  readonly expiresAt: number;
+  readonly status: CapabilityReceiptStatus;
+  readonly approvedBy: string;
+  readonly approvalScope: RespondScope;
+  readonly matchedRuleId?: string;
+  readonly consumedAt?: number;
+  readonly consumedBy?: string;
+}
+
+export type CapabilityReceiptConsumeFailureCode =
+  | 'not_found'
+  | 'invalid'
+  | 'expired'
+  | 'revoked'
+  | 'already_used'
+  | 'scope_mismatch';
+
+export type CapabilityReceiptConsumeResult =
+  | { readonly ok: true; readonly receipt: CapabilityReceiptV1 }
+  | { readonly ok: false; readonly code: CapabilityReceiptConsumeFailureCode };
+
+export interface CapabilityReceiptIssueResult {
+  /** One-time secret. Callers must never log, persist, or expose it to a model. */
+  readonly bearer: string;
+  readonly receipt: CapabilityReceiptV1;
+}
+
 // ---- 请求/响应契约 ----
 
 /** 猫猫发起的权限请求 (Callback POST body) */
@@ -50,6 +106,14 @@ export interface PendingRequestRecord {
   readonly respondedAt?: number;
   readonly respondReason?: string;
   readonly respondScope?: RespondScope;
+  /** Verified invocation owner for high-privilege approval binding. */
+  readonly requesterUserId?: string;
+  /** A1 exact capability subject; raw executor arguments are never stored. */
+  readonly capabilityIntent?: CapabilityIntentV1;
+  readonly capabilitySubjectDigest?: string;
+  readonly requestExpiresAt?: number;
+  readonly respondedBy?: string;
+  readonly grantClaimedAt?: number;
 }
 
 /** 铲屎官审批时的 scope 选择 */

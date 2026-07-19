@@ -1,9 +1,10 @@
 /**
  * Authorization Management Routes — 铲屎官审批 + 规则管理 + 审计查询
- * 安全: X-Cat-Cafe-User header（兼容 legacy x-user-id）
+ * 安全: approval 与 capability pending 只信任 authenticated session；
+ * legacy rules/audit 端点暂时兼容 identity header。
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, PendingRequestRecord } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { AuthorizationManager } from '../domains/cats/services/auth/AuthorizationManager.js';
@@ -21,6 +22,12 @@ export interface AuthorizationRoutesOptions {
 
 function resolveAuthorizationUserId(request: import('fastify').FastifyRequest): string | null {
   return resolveHeaderUserId(request);
+}
+
+/** High-privilege approvals require an authenticated browser session. */
+function resolveApprovalUserId(request: import('fastify').FastifyRequest): string | null {
+  const userId = request.sessionUserId?.trim();
+  return userId ? userId : null;
 }
 
 const respondSchema = z.object({
@@ -44,10 +51,10 @@ export const authorizationRoutes: FastifyPluginAsync<AuthorizationRoutesOptions>
 
   // POST /api/authorization/respond — 铲屎官审批
   app.post('/api/authorization/respond', async (request, reply) => {
-    const userId = resolveAuthorizationUserId(request);
+    const userId = resolveApprovalUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+      return { error: 'Authenticated session required' };
     }
 
     const parseResult = respondSchema.safeParse(request.body);
@@ -57,7 +64,25 @@ export const authorizationRoutes: FastifyPluginAsync<AuthorizationRoutesOptions>
     }
 
     const { requestId, granted, scope, reason } = parseResult.data;
-    const updated = await authManager.respond(requestId, granted, scope, userId, reason);
+    let updated: PendingRequestRecord | null;
+    try {
+      updated = await authManager.respond(requestId, granted, scope, userId, reason);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/owner mismatch/i.test(message)) {
+        reply.status(403);
+        return { error: 'Forbidden' };
+      }
+      if (/only support once/i.test(message)) {
+        reply.status(400);
+        return { error: 'Capability approvals only support once scope' };
+      }
+      if (/request expired/i.test(message)) {
+        reply.status(410);
+        return { error: 'Capability approval request expired' };
+      }
+      throw error;
+    }
     if (!updated) {
       reply.status(404);
       return { error: 'Request not found or already resolved' };
@@ -76,15 +101,17 @@ export const authorizationRoutes: FastifyPluginAsync<AuthorizationRoutesOptions>
 
   // GET /api/authorization/pending — 待审批列表
   app.get('/api/authorization/pending', async (request, reply) => {
-    const userId = resolveAuthorizationUserId(request);
+    const userId = resolveApprovalUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+      return { error: 'Authenticated session required' };
     }
 
     const threadId = (request.query as Record<string, string>).threadId;
     const pending = await authManager.getPending(threadId);
-    return { pending };
+    return {
+      pending: pending.filter((record) => !record.capabilityIntent || record.requesterUserId === userId),
+    };
   });
 
   // GET /api/authorization/rules — 规则列表

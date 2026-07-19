@@ -57,6 +57,10 @@ import { AntigravityAgentService } from './domains/cats/services/agents/provider
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
+  CapabilityReceiptExecutionGate,
+  resolveCapabilityReceiptRolloutPolicy,
+} from './domains/cats/services/auth/CapabilityReceiptExecutionGate.js';
+import {
   AgentRouter,
   AuditEventTypes,
   ClaudeAgentService,
@@ -84,6 +88,7 @@ import { TranscriptWriter } from './domains/cats/services/session/TranscriptWrit
 import { createAuthorizationAuditStore } from './domains/cats/services/stores/factories/AuthorizationAuditStoreFactory.js';
 import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
+import { createCapabilityReceiptStore } from './domains/cats/services/stores/factories/CapabilityReceiptStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
 import { createFreshnessHoldStore } from './domains/cats/services/stores/factories/FreshnessHoldStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
@@ -459,6 +464,38 @@ async function main(): Promise<void> {
   }
   const storageResult = assertStorageReady(!!redis);
   app.log.info(`[api] Storage mode: ${storageResult.mode}`);
+
+  // A1 capability receipt composition. Defaults to off with match-none
+  // allowlists. Enforce mode refuses startup without Redis.
+  const authRuleStore = createAuthorizationRuleStore(redis);
+  const authPendingStore = createPendingRequestStore(redis);
+  const authAuditStore = createAuthorizationAuditStore(redis);
+  const authManager = new AuthorizationManager({
+    ruleStore: authRuleStore,
+    pendingStore: authPendingStore,
+    auditStore: authAuditStore,
+    io: socketManager.getIO(),
+  });
+  const capabilityReceiptPolicy = resolveCapabilityReceiptRolloutPolicy(process.env);
+  const capabilityReceiptStore = createCapabilityReceiptStore({
+    mode: capabilityReceiptPolicy.mode,
+    ...(redis ? { redis } : {}),
+  });
+  const capabilityReceiptGate = new CapabilityReceiptExecutionGate({
+    policy: capabilityReceiptPolicy,
+    authorize: (intent, reason) => authManager.requestCapability(intent, reason),
+    ...(capabilityReceiptStore ? { receiptStore: capabilityReceiptStore } : {}),
+  });
+  app.log.info(
+    {
+      mode: capabilityReceiptPolicy.mode,
+      executors: [...capabilityReceiptPolicy.executorAllowlist],
+      cats: [...capabilityReceiptPolicy.catAllowlist],
+      threads: [...capabilityReceiptPolicy.threadAllowlist],
+      emergencyBlock: capabilityReceiptPolicy.emergencyBlock === true,
+    },
+    '[api] Capability receipt A1 policy',
+  );
 
   const catSupervisor = new CatSupervisor({
     ...(redis ? { redis } : {}),
@@ -1151,6 +1188,7 @@ async function main(): Promise<void> {
         case 'antigravity':
           service = new AntigravityAgentService({
             catId,
+            capabilityReceiptGate,
           });
           break;
         case 'opencode':
@@ -1685,15 +1723,6 @@ async function main(): Promise<void> {
   registerCallbackAuthDebugRoute(app, { notifier: callbackAuthNotifier });
 
   // Authorization system — 猫猫动态权限 (Redis-backed when available)
-  const authRuleStore = createAuthorizationRuleStore(redis);
-  const authPendingStore = createPendingRequestStore(redis);
-  const authAuditStore = createAuthorizationAuditStore(redis);
-  const authManager = new AuthorizationManager({
-    ruleStore: authRuleStore,
-    pendingStore: authPendingStore,
-    auditStore: authAuditStore,
-    io: socketManager.getIO(),
-  });
   await app.register(callbackAuthRoutes, {
     authManager,
     registry,

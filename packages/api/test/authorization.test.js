@@ -183,6 +183,33 @@ describe('PendingRequestStore', () => {
     assert.equal(again, null);
   });
 
+  test('respond returns null for an expired capability request', () => {
+    const store = new PendingRequestStore();
+    const record = store.create({
+      invocationId: 'inv-expired',
+      catId: 'antig-opus',
+      threadId: 'thread-owner',
+      action: 'run_command',
+      reason: 'approve',
+      requesterUserId: 'owner-1',
+      capabilityIntent: {
+        version: 1,
+        executorId: 'antigravity.native.run_command',
+        action: 'run_command',
+        invocationId: 'inv-expired',
+        threadId: 'thread-owner',
+        catId: 'antig-opus',
+        userId: 'owner-1',
+        argumentDigest: 'a'.repeat(64),
+      },
+      capabilitySubjectDigest: 'b'.repeat(64),
+      requestExpiresAt: Date.now() - 1,
+    });
+
+    assert.equal(store.respond(record.requestId, 'granted', 'once', undefined, 'owner-1'), null);
+    assert.equal(store.get(record.requestId).status, 'waiting');
+  });
+
   test('listWaiting filters by status and thread', () => {
     const store = new PendingRequestStore();
     store.create({ invocationId: 'i1', catId: 'codex', threadId: 't1', action: 'a1', reason: 'r1' });
