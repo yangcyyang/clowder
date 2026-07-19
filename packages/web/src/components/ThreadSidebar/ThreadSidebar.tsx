@@ -20,6 +20,7 @@ import {
 import { CatAvatar } from '../CatAvatar';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, pushThreadRouteWithHistory } from './thread-navigation';
+import { buildChannelRowModels, type ChannelRowModel } from './thread-perceptibility';
 import {
   formatRelativeTime,
   getProjectPaths,
@@ -423,7 +424,12 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   }, [searchQuery]);
 
   const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
-  const sidebarThreads = useMemo(() => liveThreads.filter((thread) => !isSidebarBranchThread(thread)), [liveThreads]);
+  // D2: threads with a durable branch relation stay visible (rendered indented
+  // under their parent); only legacy title-only "(分支)" threads remain hidden.
+  const sidebarThreads = useMemo(
+    () => liveThreads.filter((thread) => !isSidebarBranchThread(thread) || !!thread.relation),
+    [liveThreads],
+  );
   const dmThreadByCatId = useMemo(() => {
     const map = new Map<string, Thread>();
     for (const thread of sidebarThreads) {
@@ -578,6 +584,10 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     });
   }, [flatChannelThreads, sortOrder]);
 
+  // D2: order channel rows by durable relations (children right after parent)
+  // and flag branch/orphan rows for indentation and the ↳ glyph.
+  const channelRowModels = useMemo(() => buildChannelRowModels(sortedChannelThreads), [sortedChannelThreads]);
+
   // Hydrate sort order from localStorage after mount (avoids SSR hydration mismatch)
   useEffect(() => {
     try {
@@ -682,7 +692,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
 
-  const renderChannelRow = (thread: Pick<Thread, 'id' | 'title' | 'lastActiveAt'>) => {
+  const renderChannelRow = (row: ChannelRowModel) => {
+    const { thread, branch, orphaned } = row;
     const threadState = getThreadState(thread.id);
     const unreadCount = threadState?.unreadCount ?? 0;
     const isActive = currentThreadId === thread.id;
@@ -692,14 +703,23 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         type="button"
         data-thread-id={thread.id}
         data-active={isActive ? 'true' : 'false'}
+        data-branch={branch ? 'true' : undefined}
+        data-orphaned={orphaned ? 'true' : undefined}
         onClick={() => handleSelect(thread.id)}
-        className={`slock-channel-row group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 px-3 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
+        className={`slock-channel-row group mx-2 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-md border-l-2 ${
+          branch ? 'pl-6 pr-3' : 'px-3'
+        } text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors ${
           isActive
             ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
             : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
         }`}
         title={thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
       >
+        {branch && (
+          <span aria-hidden="true" className="shrink-0 text-[var(--clowder-sidebar-row-muted)]">
+            ↳
+          </span>
+        )}
         <span className={`min-w-0 flex-1 truncate ${isActive ? 'font-semibold' : ''}`}>
           {thread.title ?? (thread.id === 'default' ? '大厅' : '未命名对话')}
         </span>
@@ -895,9 +915,15 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
             {!channelsCollapsed && (
             <>
-              {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
+              {showDefaultThread &&
+                renderChannelRow({
+                  thread: { id: 'default', title: '大厅', lastActiveAt: Date.now() } as Thread,
+                  depth: 0,
+                  branch: false,
+                  orphaned: false,
+                })}
 
-              {sortedChannelThreads.map(renderChannelRow)}
+              {channelRowModels.map(renderChannelRow)}
             </>
             )}
           </div>
