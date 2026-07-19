@@ -67,6 +67,43 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('claimBranchThreadLink() chooses one winner across concurrent retries', async () => {
+    const msg = await store.append({
+      userId: 'user1',
+      catId: null,
+      content: 'branch root',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-parent',
+    });
+    const claims = await Promise.all(
+      Array.from({ length: 20 }, (_, index) => store.claimBranchThreadLink(msg.id, `thread-candidate-${index}`)),
+    );
+
+    assert.equal(claims.filter((claim) => claim?.claimed).length, 1);
+    assert.equal(new Set(claims.map((claim) => claim?.branchThreadId)).size, 1);
+    const stored = await store.getById(msg.id);
+    assert.equal(stored.extra.slockThread.branchThreadId, claims[0].branchThreadId);
+  });
+
+  it('claimBranchThreadLink() replaces only the expected stale branch id', async () => {
+    const msg = await store.append({
+      userId: 'user1',
+      catId: null,
+      content: 'stale branch root',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-parent',
+      extra: { slockThread: { branchThreadId: 'thread-stale', replyCount: 0 } },
+    });
+
+    const replacement = await store.claimBranchThreadLink(msg.id, 'thread-new', 'thread-stale');
+    const lateRetry = await store.claimBranchThreadLink(msg.id, 'thread-late', 'thread-stale');
+
+    assert.deepEqual(replacement, { claimed: true, branchThreadId: 'thread-new' });
+    assert.deepEqual(lateRetry, { claimed: false, branchThreadId: 'thread-new' });
+  });
+
   it('getRecent() returns messages in chronological order', async () => {
     const now = Date.now();
     await store.append({ userId: 'u', catId: null, content: 'first', mentions: [], timestamp: now });

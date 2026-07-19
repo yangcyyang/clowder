@@ -95,6 +95,34 @@ export interface ThreadMentionRoutingFeedback {
 }
 
 /**
+ * Server-derived relationship for a durable conversation branch.
+ *
+ * This intentionally stores identifiers only. Parent title/content remain
+ * viewer-scoped data and must be resolved through the normal visibility path.
+ */
+export interface ThreadRelationV1 {
+  readonly v: 1;
+  readonly kind: 'inline_reply' | 'edit_branch';
+  readonly parentThreadId: string;
+  readonly rootMessageId: string;
+}
+
+/** Internal creation metadata. HTTP callers must not control this input. */
+export interface ThreadCreateOptions {
+  readonly relation?: ThreadRelationV1;
+}
+
+/** Copy only the v1 contract fields so accidental parent metadata cannot enter persistence. */
+export function copyThreadRelation(relation: ThreadRelationV1): ThreadRelationV1 {
+  return {
+    v: 1,
+    kind: relation.kind,
+    parentThreadId: relation.parentThreadId,
+    rootMessageId: relation.rootMessageId,
+  };
+}
+
+/**
  * A conversation thread
  */
 export interface Thread {
@@ -105,6 +133,8 @@ export interface Thread {
   participants: CatId[];
   lastActiveAt: number;
   createdAt: number;
+  /** Durable, server-derived branch identity. Missing means root/legacy thread. */
+  readonly relation?: ThreadRelationV1;
   pinned?: boolean;
   pinnedAt?: number | null;
   favorited?: boolean;
@@ -296,7 +326,7 @@ export interface VotingStateV1 {
  * Common interface for thread stores (in-memory and future Redis).
  */
 export interface IThreadStore {
-  create(userId: string, title?: string, projectPath?: string): Thread | Promise<Thread>;
+  create(userId: string, title?: string, projectPath?: string, options?: ThreadCreateOptions): Thread | Promise<Thread>;
   get(threadId: string): Thread | null | Promise<Thread | null>;
   list(userId: string): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
@@ -445,7 +475,7 @@ export class ThreadStore implements IThreadStore {
     return `${catId}:${userId}`;
   }
 
-  create(userId: string, title?: string, projectPath?: string): Thread {
+  create(userId: string, title?: string, projectPath?: string, options?: ThreadCreateOptions): Thread {
     this.evictIfNeeded();
 
     const thread: Thread = {
@@ -456,6 +486,7 @@ export class ThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: Date.now(),
       createdAt: Date.now(),
+      ...(options?.relation ? { relation: copyThreadRelation(options.relation) } : {}),
     };
 
     this.threads.set(thread.id, thread);

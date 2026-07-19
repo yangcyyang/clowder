@@ -17,6 +17,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type {
   AppendMessageInput,
+  BranchThreadLinkClaimResult,
   ConditionalAppendResult,
   FreshnessAudience,
   FreshnessDelta,
@@ -51,6 +52,35 @@ const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+
+const CLAIM_BRANCH_THREAD_LINK_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
+  return {'not_found', ''}
+end
+
+local extra = {}
+local rawExtra = redis.call('HGET', KEYS[1], 'extra')
+if rawExtra then
+  local ok, parsed = pcall(cjson.decode, rawExtra)
+  if ok and type(parsed) == 'table' then
+    extra = parsed
+  end
+end
+
+local current = ''
+if type(extra.slockThread) == 'table' and type(extra.slockThread.branchThreadId) == 'string' then
+  current = extra.slockThread.branchThreadId
+end
+
+local replaceBranchThreadId = ARGV[2] or ''
+if current ~= '' and current ~= replaceBranchThreadId then
+  return {'existing', current}
+end
+
+extra.slockThread = { branchThreadId = ARGV[1], replyCount = 0 }
+redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
+return {'claimed', ARGV[1]}
+`;
 
 const MARK_DELIVERED_LUA = `
 if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
@@ -1431,6 +1461,23 @@ export class RedisMessageStore {
     await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
     msg.extra = merged;
     return msg;
+  }
+
+  async claimBranchThreadLink(
+    id: string,
+    candidateBranchThreadId: string,
+    replaceBranchThreadId?: string,
+  ): Promise<BranchThreadLinkClaimResult | null> {
+    const result = (await this.redis.eval(
+      CLAIM_BRANCH_THREAD_LINK_LUA,
+      1,
+      MessageKeys.detail(id),
+      candidateBranchThreadId,
+      replaceBranchThreadId ?? '',
+    )) as [string, string];
+    const [status, branchThreadId] = result;
+    if (status === 'not_found') return null;
+    return { claimed: status === 'claimed', branchThreadId };
   }
 
   async updateContent(id: string, content: string, editedAt: number): Promise<StoredMessage | null> {

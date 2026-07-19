@@ -22,13 +22,15 @@ import type {
   MentionActionabilityMode,
   PendingContinuationEntry,
   Thread,
+  ThreadCreateOptions,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
   ThreadParticipantActivity,
+  ThreadRelationV1,
   ThreadRoutingPolicyV1,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
-import { DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
+import { copyThreadRelation, DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 
@@ -142,6 +144,36 @@ function parseThreadMemoryJson(raw: string): ThreadMemoryV1 | null {
   }
 }
 
+function parseThreadRelationJson(raw: string): ThreadRelationV1 | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'v' in parsed &&
+      parsed.v === 1 &&
+      'kind' in parsed &&
+      (parsed.kind === 'inline_reply' || parsed.kind === 'edit_branch') &&
+      'parentThreadId' in parsed &&
+      typeof parsed.parentThreadId === 'string' &&
+      parsed.parentThreadId.length > 0 &&
+      'rootMessageId' in parsed &&
+      typeof parsed.rootMessageId === 'string' &&
+      parsed.rootMessageId.length > 0
+    ) {
+      return {
+        v: 1,
+        kind: parsed.kind,
+        parentThreadId: parsed.parentThreadId,
+        rootMessageId: parsed.rootMessageId,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export class RedisThreadStore implements IThreadStore {
   private static readonly LIST_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
   private readonly redis: RedisClient;
@@ -160,7 +192,7 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async create(userId: string, title?: string, projectPath?: string): Promise<Thread> {
+  async create(userId: string, title?: string, projectPath?: string, options?: ThreadCreateOptions): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
       id: generateThreadId(),
@@ -170,6 +202,7 @@ export class RedisThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: now,
       createdAt: now,
+      ...(options?.relation ? { relation: copyThreadRelation(options.relation) } : {}),
     };
 
     const key = ThreadKeys.detail(thread.id);
@@ -1050,6 +1083,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.phase) {
       result.phase = thread.phase;
     }
+    if (thread.relation) {
+      result.relation = JSON.stringify(thread.relation);
+    }
     if (thread.backlogItemId) {
       result.backlogItemId = thread.backlogItemId;
     }
@@ -1092,6 +1128,7 @@ export class RedisThreadStore implements IThreadStore {
   private hydrateThread(data: Record<string, string>): Thread {
     const pinnedAt = parseInt(data.pinnedAt ?? '0', 10);
     const favoritedAt = parseInt(data.favoritedAt ?? '0', 10);
+    const relation = data.relation ? parseThreadRelationJson(data.relation) : null;
     const result: Thread = {
       id: data.id ?? '',
       projectPath: data.projectPath ?? 'default',
@@ -1106,6 +1143,7 @@ export class RedisThreadStore implements IThreadStore {
       favoritedAt: favoritedAt || null,
       isDM: data.isDM === 'true',
       thinkingMode: (data.thinkingMode === 'debug' ? 'debug' : 'play') as 'debug' | 'play',
+      ...(relation ? { relation } : {}),
     };
     if (data.mentionActionabilityMode === 'relaxed') {
       result.mentionActionabilityMode = 'relaxed';

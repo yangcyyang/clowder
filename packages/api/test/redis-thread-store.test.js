@@ -151,6 +151,54 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('persists branch relation across rename and store reconstruction', async () => {
+    const relation = {
+      v: 1,
+      kind: 'inline_reply',
+      parentThreadId: 'thread-parent',
+      rootMessageId: 'msg-root',
+      parentTitle: 'must not persist',
+      parentContent: 'must not persist',
+    };
+    const created = await store.create('user1', 'Branch', '/home/user/project', { relation });
+
+    await store.updateTitle(created.id, 'Renamed Branch');
+    const reloadedStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const fetched = await reloadedStore.get(created.id);
+
+    assert.equal(fetched.title, 'Renamed Branch');
+    const expectedRelation = {
+      v: 1,
+      kind: 'inline_reply',
+      parentThreadId: 'thread-parent',
+      rootMessageId: 'msg-root',
+    };
+    assert.deepEqual(fetched.relation, expectedRelation);
+    const raw = await redis.hgetall(threadDetailKey(created.id));
+    assert.equal(raw.relation, JSON.stringify(expectedRelation));
+    assert.equal(raw.parentTitle, undefined);
+    assert.equal(raw.parentContent, undefined);
+  });
+
+  it('treats legacy and malformed relation payloads as ordinary root threads', async () => {
+    const legacy = await store.create('user1', 'Legacy root');
+    assert.equal((await store.get(legacy.id)).relation, undefined);
+
+    const malformedCases = [
+      '{broken-json',
+      JSON.stringify({ v: 2, kind: 'inline_reply', parentThreadId: 'parent', rootMessageId: 'msg' }),
+      JSON.stringify({ v: 1, kind: 'unknown', parentThreadId: 'parent', rootMessageId: 'msg' }),
+      JSON.stringify({ v: 1, kind: 'edit_branch', parentThreadId: '', rootMessageId: 'msg' }),
+      JSON.stringify({ v: 1, kind: 'edit_branch', parentThreadId: 'parent', rootMessageId: '' }),
+    ];
+
+    for (const [index, relation] of malformedCases.entries()) {
+      const thread = await store.create('user1', `Malformed ${index}`);
+      await redis.hset(threadDetailKey(thread.id), { relation });
+      assert.equal((await store.get(thread.id)).relation, undefined);
+    }
+  });
+
   it('get("default") auto-creates default thread', async () => {
     const thread = await store.get('default');
     assert.ok(thread);
