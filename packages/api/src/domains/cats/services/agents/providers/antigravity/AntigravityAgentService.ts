@@ -22,7 +22,12 @@ import { normalizeModel } from '../../../../../../infrastructure/telemetry/model
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { appendLocalImagePathHints } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
-import { AntigravityBridge, type BridgeConnection, type TrajectoryStep } from './AntigravityBridge.js';
+import {
+  AntigravityBridge,
+  type BridgeConnection,
+  type BridgeOptions,
+  type TrajectoryStep,
+} from './AntigravityBridge.js';
 import { classifyStep, transformTrajectorySteps } from './antigravity-event-transformer.js';
 import {
   collectImagePathsFromSteps,
@@ -98,6 +103,8 @@ export interface AntigravityAgentServiceOptions {
   connection?: Partial<BridgeConnection>;
   /** Inject bridge for testing */
   bridge?: AntigravityBridge;
+  /** A1 exact-scope receipt gate, wired by the API composition root. */
+  capabilityReceiptGate?: BridgeOptions['capabilityReceiptGate'];
   /** Idle stall timeout in ms — resets on each new step (default: 60s) */
   pollTimeoutMs?: number;
   /** Auto-approve pending Antigravity interactions — YOLO mode (default: true) */
@@ -125,7 +132,12 @@ export class AntigravityAgentService implements AgentService {
       : createCatId('antigravity');
     this.model = options?.model ?? getCatModel(this.catId as string);
     const injectedBridge = options?.bridge;
-    this.bridge = injectedBridge ?? new AntigravityBridge(options?.connection);
+    this.bridge =
+      injectedBridge ??
+      new AntigravityBridge(
+        options?.connection,
+        options?.capabilityReceiptGate ? { capabilityReceiptGate: options.capabilityReceiptGate } : undefined,
+      );
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     this.autoApprove = options?.autoApprove ?? process.env['ANTIGRAVITY_AUTO_APPROVE'] !== 'false';
     this.streamErrorGraceWindowMs = options?.streamErrorGraceWindowMs ?? STREAM_ERROR_GRACE_WINDOW_MS;
@@ -215,6 +227,10 @@ export class AntigravityAgentService implements AgentService {
         let attemptHasResolvedToolishStep = false;
         let modelCapacityRetryDelayMs: number | null = null;
         const handledToolCallIds = new Set<string>();
+        const capabilityPendingStepKeys = new Set<string>();
+        const capabilityReceiptScopeActive =
+          typeof this.bridge.isCapabilityReceiptScope === 'function' &&
+          this.bridge.isCapabilityReceiptScope(options?.auditContext);
         let pendingStreamError: AgentMessage | null = null;
         let streamErrorGraceDeadline = 0;
         let pendingStreamErrorMetricAttrs: Record<string, string> = {
@@ -297,7 +313,18 @@ export class AntigravityAgentService implements AgentService {
             if (nextBatch.done) return;
             const batch = nextBatch.value;
             if (batch.cursor.awaitingUserInput) {
-              if (self.autoApprove && !autoApproveAttempted) {
+              const hasReceiptGatedWaitingStep =
+                capabilityReceiptScopeActive &&
+                batch.steps.some(
+                  (step) =>
+                    step.status === 'CORTEX_STEP_STATUS_WAITING' && step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND',
+                );
+              if (
+                !hasReceiptGatedWaitingStep &&
+                capabilityPendingStepKeys.size === 0 &&
+                self.autoApprove &&
+                !autoApproveAttempted
+              ) {
                 autoApproveAttempted = true;
                 try {
                   await self.bridge.resolveOutstandingSteps(cascadeId);
@@ -307,15 +334,23 @@ export class AntigravityAgentService implements AgentService {
                   log.warn(`auto-approve failed: ${err}`);
                 }
               }
-              yield {
-                type: 'liveness_signal' as const,
-                catId: self.catId,
-                content: JSON.stringify({ type: 'info', message: 'Antigravity 正在等待权限批准' }),
-                metadata,
-                errorCode: 'waiting_approval',
-                timestamp: Date.now(),
-              };
-              continue;
+              if (!hasReceiptGatedWaitingStep) {
+                yield {
+                  type: 'liveness_signal' as const,
+                  catId: self.catId,
+                  content: JSON.stringify({
+                    type: 'info',
+                    message:
+                      capabilityPendingStepKeys.size > 0
+                        ? 'Antigravity 正在等待 capability 所有者批准'
+                        : 'Antigravity 正在等待权限批准',
+                  }),
+                  metadata,
+                  errorCode: capabilityPendingStepKeys.size > 0 ? 'waiting_capability_approval' : 'waiting_approval',
+                  timestamp: Date.now(),
+                };
+                continue;
+              }
             }
             if (batch.steps.length > 0) {
               const previousLastDelivered = lastDelivered;
@@ -660,17 +695,52 @@ export class AntigravityAgentService implements AgentService {
               for (const step of batch.steps) {
                 const toolCallId = step.metadata?.toolCall?.id;
                 if (toolCallId && handledToolCallIds.has(toolCallId)) continue;
+                const stepKey =
+                  toolCallId ??
+                  `${step.metadata?.sourceTrajectoryStepInfo?.trajectoryId ?? 'unknown'}:${step.metadata?.sourceTrajectoryStepInfo?.stepIndex ?? 'unknown'}`;
                 try {
                   const handled = await self.bridge.nativeExecuteAndPush(step, {
                     cascadeId,
                     cwd: sanitizedDir,
                     modelName: self.model,
+                    ...(options?.auditContext ? { authorizationContext: options.auditContext } : {}),
                   });
                   if (handled === true) {
+                    capabilityPendingStepKeys.delete(stepKey);
                     // Any truthy native step handling means this invoke already
                     // advanced a local tool path, so later capacity errors must
                     // not be treated as safely undispatched.
                     attemptHasNativeDispatch = true;
+                  }
+                  if (handled === 'capability_pending') {
+                    capabilityPendingStepKeys.add(stepKey);
+                    yield {
+                      type: 'liveness_signal' as const,
+                      catId: self.catId,
+                      content: JSON.stringify({
+                        type: 'info',
+                        message: 'Antigravity 正在等待 capability 所有者批准',
+                      }),
+                      metadata,
+                      errorCode: 'waiting_capability_approval',
+                      timestamp: Date.now(),
+                    };
+                    continue;
+                  }
+                  if (handled === 'capability_blocked') {
+                    capabilityPendingStepKeys.add(stepKey);
+                    fatalSeen = true;
+                    terminalAbort = true;
+                    yield {
+                      type: 'error' as const,
+                      catId: self.catId,
+                      error:
+                        'Capability authorization failed closed and the refusal could not be written back; execution remains blocked.',
+                      errorCode: 'capability_authorization_blocked',
+                      metadata,
+                      timestamp: Date.now(),
+                    };
+                    break;
                   }
                   if (handled === 'approval_pending') {
                     if (self.autoApprove && !autoApproveAttempted) {
@@ -753,7 +823,7 @@ export class AntigravityAgentService implements AgentService {
               terminalAbort = true;
               break;
             }
-            if (isStall && this.autoApprove && !stallProbed) {
+            if (isStall && capabilityPendingStepKeys.size === 0 && this.autoApprove && !stallProbed) {
               stallProbed = true;
               try {
                 await this.bridge.resolveOutstandingSteps(cascadeId);

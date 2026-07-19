@@ -106,6 +106,14 @@ export interface PendingRequestRecord {
   readonly respondedAt?: number;
   readonly respondReason?: string;
   readonly respondScope?: RespondScope;
+  /** Verified invocation owner for high-privilege approval binding. */
+  readonly requesterUserId?: string;
+  /** A1 exact capability subject; raw executor arguments are never stored. */
+  readonly capabilityIntent?: CapabilityIntentV1;
+  readonly capabilitySubjectDigest?: string;
+  readonly requestExpiresAt?: number;
+  readonly respondedBy?: string;
+  readonly grantClaimedAt?: number;
 }
 
 /** 铲屎官审批时的 scope 选择 */

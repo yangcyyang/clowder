@@ -24,7 +24,8 @@ const DEFAULT_MAX = 1000;
  * KEYS[1] = pending-req:{requestId} hash
  * KEYS[2] = pending-reqs:waiting sorted set
  * ARGV[1] = requestId (for ZREM)
- * ARGV[2..N] = field/value pairs to HSET
+ * ARGV[2] = response timestamp
+ * ARGV[3..N] = field/value pairs to HSET
  *
  * Returns 1 on success, 0 if status is not 'waiting' (already responded or missing).
  *
@@ -35,14 +36,41 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if current ~= 'waiting' then
   return 0
 end
+local expiresAt = tonumber(redis.call('HGET', KEYS[1], 'requestExpiresAt'))
+local respondedAt = tonumber(ARGV[2])
+if expiresAt and respondedAt and expiresAt < respondedAt then
+  return 0
+end
 local fields = {}
-for i = 2, #ARGV do
+for i = 3, #ARGV do
   fields[#fields + 1] = ARGV[i]
 end
 if #fields > 0 then
   redis.call('HSET', KEYS[1], unpack(fields))
 end
 redis.call('ZREM', KEYS[2], ARGV[1])
+return 1
+`;
+
+const CLAIM_CAPABILITY_GRANT_LUA = `
+if redis.call('HGET', KEYS[1], 'status') ~= 'granted' then
+  return 0
+end
+if redis.call('HEXISTS', KEYS[1], 'grantClaimedAt') == 1 then
+  return 0
+end
+if redis.call('HGET', KEYS[1], 'capabilitySubjectDigest') ~= ARGV[1] then
+  return 0
+end
+if redis.call('HGET', KEYS[1], 'requesterUserId') ~= ARGV[2] then
+  return 0
+end
+local expiresAt = tonumber(redis.call('HGET', KEYS[1], 'requestExpiresAt'))
+local claimedAt = tonumber(ARGV[3])
+if not expiresAt or not claimedAt or expiresAt < claimedAt then
+  return 0
+end
+redis.call('HSET', KEYS[1], 'grantClaimedAt', ARGV[3])
 return 1
 `;
 
@@ -76,6 +104,10 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
       action: input.action,
       reason: input.reason,
       ...(input.context ? { context: input.context } : {}),
+      ...(input.requesterUserId ? { requesterUserId: input.requesterUserId } : {}),
+      ...(input.capabilityIntent ? { capabilityIntent: { ...input.capabilityIntent } } : {}),
+      ...(input.capabilitySubjectDigest ? { capabilitySubjectDigest: input.capabilitySubjectDigest } : {}),
+      ...(input.requestExpiresAt !== undefined ? { requestExpiresAt: input.requestExpiresAt } : {}),
       createdAt: now,
       status: 'waiting',
     };
@@ -104,6 +136,7 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
     decision: 'granted' | 'denied',
     scope: RespondScope,
     reason?: string,
+    respondedBy?: string,
   ): Promise<PendingRequestRecord | null> {
     const now = Date.now();
     const key = PendingReqKeys.detail(requestId);
@@ -111,9 +144,18 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
     // Build field/value pairs for atomic HSET inside Lua
     const pairs: string[] = ['status', decision, 'respondedAt', String(now), 'respondScope', scope];
     if (reason) pairs.push('respondReason', reason);
+    if (respondedBy) pairs.push('respondedBy', respondedBy);
 
     // Lua CAS: atomically check status='waiting' → HSET + ZREM
-    const ok = (await this.redis.eval(CAS_RESPOND_LUA, 2, key, PendingReqKeys.WAITING, requestId, ...pairs)) as number;
+    const ok = (await this.redis.eval(
+      CAS_RESPOND_LUA,
+      2,
+      key,
+      PendingReqKeys.WAITING,
+      requestId,
+      String(now),
+      ...pairs,
+    )) as number;
 
     if (ok === 0) return null;
 
@@ -145,6 +187,57 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
     }
 
     return records.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async findCapabilityRequest(
+    subjectDigest: string,
+    requesterUserId: string,
+    now: number,
+  ): Promise<PendingRequestRecord | null> {
+    const ids = await this.redis.zrevrange(PendingReqKeys.ALL, 0, -1);
+    if (ids.length === 0) return null;
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(PendingReqKeys.detail(id));
+    const results = await pipeline.exec();
+    if (!results) return null;
+
+    const waiting: PendingRequestRecord[] = [];
+    for (const [error, raw] of results) {
+      if (error || !raw || typeof raw !== 'object') continue;
+      const data = raw as Record<string, string>;
+      if (!data.requestId) continue;
+      const record = this.hydrateRecord(data);
+      if (
+        record.capabilitySubjectDigest !== subjectDigest ||
+        record.requesterUserId !== requesterUserId ||
+        record.requestExpiresAt === undefined ||
+        record.requestExpiresAt < now
+      ) {
+        continue;
+      }
+      if (record.status === 'granted' && record.grantClaimedAt === undefined) return record;
+      if (record.status === 'waiting') waiting.push(record);
+    }
+    return waiting[0] ?? null;
+  }
+
+  async claimCapabilityGrant(
+    requestId: string,
+    subjectDigest: string,
+    requesterUserId: string,
+    claimedAt: number,
+  ): Promise<PendingRequestRecord | null> {
+    const key = PendingReqKeys.detail(requestId);
+    const claimed = (await this.redis.eval(
+      CLAIM_CAPABILITY_GRANT_LUA,
+      1,
+      key,
+      subjectDigest,
+      requesterUserId,
+      String(claimedAt),
+    )) as number;
+    if (claimed !== 1) return null;
+    return this.get(requestId);
   }
 
   private async evictIfFull(): Promise<void> {
@@ -189,9 +282,21 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
       record.status,
     ];
     if (record.context) fields.push('context', record.context);
+    if (record.requesterUserId) fields.push('requesterUserId', record.requesterUserId);
+    if (record.capabilityIntent) fields.push('capabilityIntent', JSON.stringify(record.capabilityIntent));
+    if (record.capabilitySubjectDigest) {
+      fields.push('capabilitySubjectDigest', record.capabilitySubjectDigest);
+    }
+    if (record.requestExpiresAt !== undefined) {
+      fields.push('requestExpiresAt', String(record.requestExpiresAt));
+    }
     if (record.respondedAt) fields.push('respondedAt', String(record.respondedAt));
     if (record.respondReason) fields.push('respondReason', record.respondReason);
     if (record.respondScope) fields.push('respondScope', record.respondScope);
+    if (record.respondedBy) fields.push('respondedBy', record.respondedBy);
+    if (record.grantClaimedAt !== undefined) {
+      fields.push('grantClaimedAt', String(record.grantClaimedAt));
+    }
     return fields;
   }
 
@@ -206,9 +311,17 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
       createdAt: parseInt(data.createdAt!, 10),
       status: data.status! as 'waiting' | 'granted' | 'denied',
       ...(data.context ? { context: data.context } : {}),
+      ...(data.requesterUserId ? { requesterUserId: data.requesterUserId } : {}),
+      ...(data.capabilityIntent
+        ? { capabilityIntent: JSON.parse(data.capabilityIntent) as PendingRequestRecord['capabilityIntent'] }
+        : {}),
+      ...(data.capabilitySubjectDigest ? { capabilitySubjectDigest: data.capabilitySubjectDigest } : {}),
+      ...(data.requestExpiresAt ? { requestExpiresAt: parseInt(data.requestExpiresAt, 10) } : {}),
       ...(data.respondedAt ? { respondedAt: parseInt(data.respondedAt, 10) } : {}),
       ...(data.respondReason ? { respondReason: data.respondReason } : {}),
       ...(data.respondScope ? { respondScope: data.respondScope as RespondScope } : {}),
+      ...(data.respondedBy ? { respondedBy: data.respondedBy } : {}),
+      ...(data.grantClaimedAt ? { grantClaimedAt: parseInt(data.grantClaimedAt, 10) } : {}),
     };
   }
 }

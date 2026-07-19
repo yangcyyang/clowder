@@ -119,6 +119,12 @@ export const antigravityStreamErrorExpired = lazy(() =>
   }),
 );
 
+export const capabilityReceiptGateDecisions = lazy(() =>
+  meter().createCounter('cat_cafe.capability_receipt.gate_total', {
+    description: 'Capability receipt gate decisions by bounded status',
+  }),
+);
+
 export const invocationCompleted = lazy(() =>
   meter().createCounter('cat_cafe.invocation.completed', {
     description: 'Invocation completion count by cat and outcome',

@@ -8,6 +8,7 @@
  */
 
 import type {
+  CapabilityIntentV1,
   CatId,
   PendingRequestRecord,
   PermissionRequest,
@@ -18,9 +19,13 @@ import type { Server as SocketIOServer } from 'socket.io';
 import { getPushNotificationService } from '../push/PushNotificationService.js';
 import type { IAuthorizationAuditStore } from '../stores/ports/AuthorizationAuditStore.js';
 import type { IAuthorizationRuleStore } from '../stores/ports/AuthorizationRuleStore.js';
+import { digestCapabilityIntent } from '../stores/ports/CapabilityReceiptStore.js';
 import type { IPendingRequestStore } from '../stores/ports/PendingRequestStore.js';
+import type { CapabilityApproval } from './CapabilityReceiptExecutionGate.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_CAPABILITY_REQUEST_TTL_MS = 10 * 60_000;
+const DEFAULT_CAPABILITY_RECEIPT_TTL_MS = 30_000;
 
 interface InFlightWaiter {
   resolve: (response: PermissionResponse) => void;
@@ -139,6 +144,120 @@ export class AuthorizationManager {
   }
 
   /**
+   * A1 exact one-shot capability approval. Persistent rules are deliberately
+   * ignored; a granted request is atomically claimable once, including after
+   * the original HTTP waiter timed out.
+   */
+  async requestCapability(
+    intent: CapabilityIntentV1,
+    reason: string,
+    options?: { requestTtlMs?: number; receiptTtlMs?: number },
+  ): Promise<CapabilityApproval> {
+    const now = Date.now();
+    const subjectDigest = digestCapabilityIntent(intent);
+    const existing = await this.pendingStore.findCapabilityRequest(subjectDigest, intent.userId, now);
+
+    if (existing?.status === 'granted') {
+      const claimed = await this.pendingStore.claimCapabilityGrant(
+        existing.requestId,
+        subjectDigest,
+        intent.userId,
+        now,
+      );
+      return this.capabilityApprovalFromClaim(claimed, options?.receiptTtlMs);
+    }
+
+    const record =
+      existing?.status === 'waiting'
+        ? existing
+        : await this.pendingStore.create({
+            invocationId: intent.invocationId,
+            catId: intent.catId,
+            threadId: intent.threadId,
+            action: intent.action,
+            reason,
+            requesterUserId: intent.userId,
+            capabilityIntent: intent,
+            capabilitySubjectDigest: subjectDigest,
+            requestExpiresAt: now + (options?.requestTtlMs ?? DEFAULT_CAPABILITY_REQUEST_TTL_MS),
+          });
+
+    if (!existing && this.io) {
+      this.io.to(`thread:${intent.threadId}`).emit('authorization:request', {
+        requestId: record.requestId,
+        catId: intent.catId,
+        threadId: intent.threadId,
+        action: intent.action,
+        reason,
+      });
+    }
+
+    const response = await this.waitForCapability(record);
+    if (response.status !== 'granted') {
+      return {
+        status: response.status,
+        requestId: record.requestId,
+        ...(response.reason ? { reason: response.reason } : {}),
+      };
+    }
+
+    const claimed = await this.pendingStore.claimCapabilityGrant(
+      record.requestId,
+      subjectDigest,
+      intent.userId,
+      Date.now(),
+    );
+    return this.capabilityApprovalFromClaim(claimed, options?.receiptTtlMs);
+  }
+
+  private async waitForCapability(record: PendingRequestRecord): Promise<PermissionResponse> {
+    return new Promise<PermissionResponse>((resolve) => {
+      const timer = setTimeout(() => {
+        this.inFlightWaiters.delete(record.requestId);
+        void this.auditStore.append({
+          requestId: record.requestId,
+          invocationId: record.invocationId,
+          catId: record.catId,
+          threadId: record.threadId,
+          action: record.action,
+          reason: record.reason,
+          decision: 'pending',
+        });
+        resolve({ status: 'pending', requestId: record.requestId });
+      }, this.timeoutMs);
+      this.inFlightWaiters.set(record.requestId, { resolve, timer });
+    });
+  }
+
+  private capabilityApprovalFromClaim(
+    claimed: PendingRequestRecord | null,
+    receiptTtlMs = DEFAULT_CAPABILITY_RECEIPT_TTL_MS,
+  ): CapabilityApproval {
+    const now = Date.now();
+    if (
+      !claimed ||
+      !claimed.respondedBy ||
+      claimed.respondScope !== 'once' ||
+      claimed.requestExpiresAt === undefined ||
+      claimed.requestExpiresAt < now
+    ) {
+      return {
+        status: 'denied',
+        requestId: claimed?.requestId ?? '',
+        reason: 'Capability grant unavailable or already claimed',
+      };
+    }
+    const expiresAt = Math.min(claimed.requestExpiresAt, now + Math.max(1, receiptTtlMs));
+    return {
+      status: 'granted',
+      requestId: claimed.requestId,
+      approvedBy: claimed.respondedBy,
+      scope: 'once',
+      expiresAt,
+    };
+  }
+
+  /**
    * 铲屎官审批 — 更新 record + 可选创建规则 + resolve waiter
    */
   async respond(
@@ -150,12 +269,31 @@ export class AuthorizationManager {
   ): Promise<PendingRequestRecord | null> {
     const decision = granted ? 'granted' : 'denied';
 
+    const existing = await this.pendingStore.get(requestId);
+    if (existing?.capabilityIntent) {
+      if (!existing.requesterUserId || existing.requesterUserId !== userId) {
+        throw new Error('Capability approval owner mismatch');
+      }
+      if (scope !== 'once') {
+        throw new Error('A1 capability approvals only support once scope');
+      }
+      if (existing.requestExpiresAt === undefined || existing.requestExpiresAt < Date.now()) {
+        throw new Error('Capability approval request expired');
+      }
+    }
+
     // 更新 pending record
-    const updated = await this.pendingStore.respond(requestId, decision, scope, reason);
-    if (!updated) return null;
+    const updated = await this.pendingStore.respond(requestId, decision, scope, reason, userId);
+    if (!updated) {
+      const latest = await this.pendingStore.get(requestId);
+      if (latest?.capabilityIntent && (latest.requestExpiresAt === undefined || latest.requestExpiresAt < Date.now())) {
+        throw new Error('Capability approval request expired');
+      }
+      return null;
+    }
 
     // 如果 scope 不是 'once'，创建持久化规则
-    if (scope !== 'once') {
+    if (scope !== 'once' && !updated.capabilityIntent) {
       await this.ruleStore.add({
         catId: updated.catId,
         action: updated.action,

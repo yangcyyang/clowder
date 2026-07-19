@@ -357,6 +357,103 @@ describe('RedisPendingRequestStore', { skip: redisIsolationSkipReason(REDIS_URL)
     assert.equal(fromRedis.respondReason, 'ok');
     assert.ok(fromRedis.respondedAt > 0);
   });
+
+  it('persists and finds an exact capability request after store reconstruction', async () => {
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-cap-redis',
+      threadId: 'thread-cap-redis',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: 'a'.repeat(64),
+    };
+    const created = await store.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'capability approval',
+      requesterUserId: capabilityIntent.userId,
+      capabilityIntent,
+      capabilitySubjectDigest: 'b'.repeat(64),
+      requestExpiresAt: Date.now() + 60_000,
+    });
+    const reconstructed = new RedisPendingRequestStore(redis);
+
+    const found = await reconstructed.findCapabilityRequest('b'.repeat(64), capabilityIntent.userId, Date.now());
+
+    assert.equal(found.requestId, created.requestId);
+    assert.deepEqual(found.capabilityIntent, capabilityIntent);
+    assert.equal(found.requesterUserId, capabilityIntent.userId);
+  });
+
+  it('capability grant claim is atomic and exact-scope', async () => {
+    const created = await store.create({
+      invocationId: 'inv-cap-race',
+      catId: 'antig-opus',
+      threadId: 'thread-cap-race',
+      action: 'run_command',
+      reason: 'capability approval',
+      requesterUserId: 'owner-1',
+      capabilityIntent: {
+        version: 1,
+        executorId: 'antigravity.native.run_command',
+        action: 'run_command',
+        invocationId: 'inv-cap-race',
+        threadId: 'thread-cap-race',
+        catId: 'antig-opus',
+        userId: 'owner-1',
+        argumentDigest: 'c'.repeat(64),
+      },
+      capabilitySubjectDigest: 'd'.repeat(64),
+      requestExpiresAt: Date.now() + 60_000,
+    });
+    await store.respond(created.requestId, 'granted', 'once', undefined, 'owner-1');
+
+    const mismatch = await store.claimCapabilityGrant(created.requestId, 'wrong-digest', 'owner-1', Date.now());
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        store.claimCapabilityGrant(created.requestId, 'd'.repeat(64), 'owner-1', Date.now()),
+      ),
+    );
+
+    assert.equal(mismatch, null, 'wrong scope must not burn the grant');
+    assert.equal(results.filter(Boolean).length, 1);
+    const final = await store.get(created.requestId);
+    assert.equal(final.respondedBy, 'owner-1');
+    assert.ok(final.grantClaimedAt > 0);
+  });
+
+  it('expired capability requests cannot be responded into a fake grant', async () => {
+    const capabilityIntent = {
+      version: 1,
+      executorId: 'antigravity.native.run_command',
+      action: 'run_command',
+      invocationId: 'inv-expired',
+      threadId: 'thread-owner',
+      catId: 'antig-opus',
+      userId: 'owner-1',
+      argumentDigest: 'e'.repeat(64),
+    };
+    const created = await store.create({
+      invocationId: capabilityIntent.invocationId,
+      catId: capabilityIntent.catId,
+      threadId: capabilityIntent.threadId,
+      action: capabilityIntent.action,
+      reason: 'approve',
+      requesterUserId: capabilityIntent.userId,
+      capabilityIntent,
+      capabilitySubjectDigest: 'f'.repeat(64),
+      requestExpiresAt: Date.now() - 1,
+    });
+
+    const responded = await store.respond(created.requestId, 'granted', 'once', undefined, 'owner-1');
+
+    assert.equal(responded, null);
+    assert.equal((await store.get(created.requestId)).status, 'waiting');
+  });
 });
 
 describe('RedisAuthorizationAuditStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
