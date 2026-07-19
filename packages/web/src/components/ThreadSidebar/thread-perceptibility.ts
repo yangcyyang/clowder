@@ -47,6 +47,83 @@ export function deriveActualThreadParticipants(
   return participantIds.map((catId) => ({ catId, active: activeCatIds.has(catId) }));
 }
 
+const RELATION_KINDS: ReadonlySet<string> = new Set(['inline_reply', 'edit_branch']);
+
+export type ResolvedThreadBranch =
+  | { readonly kind: 'root' }
+  | { readonly kind: 'branch'; readonly parent: Thread }
+  | { readonly kind: 'orphan' };
+
+/**
+ * Resolve a thread's durable branch identity for display.
+ * - No relation → root.
+ * - Malformed/legacy relation (bad version, unknown kind, empty/self parent)
+ *   degrades to ROOT display — never trusted, never widens any association.
+ * - Well-formed relation with a missing parent → orphan (render as a standalone
+ *   root-level thread with an orphan marker; the raw parentThreadId is never shown).
+ */
+export function resolveThreadBranch(
+  thread: Pick<Thread, 'id' | 'relation'> | undefined,
+  allThreads: readonly Thread[],
+): ResolvedThreadBranch {
+  if (!thread) return { kind: 'root' };
+  const relation = thread.relation;
+  if (!relation) return { kind: 'root' };
+  if (
+    relation.v !== 1 ||
+    !RELATION_KINDS.has(relation.kind) ||
+    typeof relation.parentThreadId !== 'string' ||
+    relation.parentThreadId.length === 0 ||
+    relation.parentThreadId === thread.id
+  ) {
+    return { kind: 'root' };
+  }
+  const parent = allThreads.find((candidate) => candidate.id === relation.parentThreadId);
+  if (!parent) return { kind: 'orphan' };
+  return { kind: 'branch', parent };
+}
+
+export interface ChannelRowModel {
+  readonly thread: Thread;
+  /** Display depth. Orphans and malformed relations flatten to 0 (root display). */
+  readonly depth: number;
+  /** True only for well-formed branch relations with a known parent. */
+  readonly branch: boolean;
+  readonly orphaned: boolean;
+}
+
+/** Sidebar row models: relation ordering + validated branch/orphan display flags. */
+export function buildChannelRowModels(threads: readonly Thread[]): ChannelRowModel[] {
+  return buildRelationOrderedThreadRows(threads).map((row) => {
+    const resolved = resolveThreadBranch(row.thread, threads);
+    if (resolved.kind === 'branch') {
+      return { thread: row.thread, depth: row.depth, branch: true, orphaned: false };
+    }
+    if (resolved.kind === 'orphan') {
+      return { thread: row.thread, depth: 0, branch: false, orphaned: true };
+    }
+    return { thread: row.thread, depth: 0, branch: false, orphaned: false };
+  });
+}
+
+/**
+ * D3: Agents actually present in a thread — derived ONLY from the viewer-visible
+ * message set of THIS thread (posted or @-mentioned), plus active-invocation
+ * decoration. The config roster (participatingCats/preferredCats) is never used;
+ * whisper participants stay invisible to non-recipients because the visibility
+ * filter runs before any derivation.
+ */
+export function derivePresentThreadAgents(
+  threadState: Pick<ThreadState, 'messages' | 'activeInvocations'> | undefined,
+  viewer: ThreadViewer,
+): ActualThreadParticipant[] {
+  if (!threadState) return [];
+  return deriveActualThreadParticipants(threadState.messages, {
+    viewer,
+    activeInvocations: threadState.activeInvocations,
+  });
+}
+
 /** Preserve root ordering while placing durable relation children directly after their parent. */
 export function buildRelationOrderedThreadRows(threads: readonly Thread[]): RelationOrderedThreadRow[] {
   const byId = new Map(threads.map((thread) => [thread.id, thread]));
