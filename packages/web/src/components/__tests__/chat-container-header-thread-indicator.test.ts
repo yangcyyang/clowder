@@ -124,4 +124,63 @@ describe('ChatContainerHeader thread indicator', () => {
     expect(container.textContent).toContain('讨论 F095 设计');
     expect(container.querySelector('[data-testid="channel-stamp"]')).toBeNull();
   });
+
+  it('shows a durable branch badge and parent breadcrumb after rename', () => {
+    mockStore.threads = [
+      ...TEST_THREADS,
+      {
+        ...TEST_THREADS[0],
+        id: 'thread_branch',
+        title: '已经改名',
+        relation: {
+          v: 1,
+          kind: 'inline_reply',
+          parentThreadId: 'thread_xyz',
+          rootMessageId: '0000000000000001-000001-aabbccdd',
+        },
+      },
+    ];
+
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(ThreadIndicator, { threadId: 'thread_branch', showChannelStamp: true }),
+    );
+
+    expect(container.querySelector('[data-testid="branch-badge"]')?.textContent).toContain('分支');
+    expect(container.querySelector('[data-testid="branch-breadcrumb"]')?.textContent).toContain('讨论 F095 设计');
+    expect(container.querySelector('[data-testid="channel-stamp"]')).toBeNull();
+  });
+
+  it('treats a missing parent as an orphan without inventing a parent title', () => {
+    mockStore.threads = [
+      {
+        ...TEST_THREADS[0],
+        id: 'thread_orphan',
+        title: '孤儿分支',
+        relation: {
+          v: 1,
+          kind: 'edit_branch',
+          parentThreadId: 'PRIVATE_PARENT_ID',
+          rootMessageId: '0000000000000002-000001-aabbccdd',
+        },
+      },
+    ];
+
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(ThreadIndicator, { threadId: 'thread_orphan', showChannelStamp: true }),
+    );
+
+    expect(container.querySelector('[data-testid="branch-breadcrumb"]')?.textContent).toContain('孤立 Thread');
+    expect(container.textContent).not.toContain('PRIVATE_PARENT_ID');
+  });
+
+  it('does not infer branch identity from a branch-like title', () => {
+    mockStore.threads = [{ ...TEST_THREADS[0], id: 'title_only', title: '预算 (分支)' }];
+
+    container.innerHTML = renderToStaticMarkup(
+      React.createElement(ThreadIndicator, { threadId: 'title_only', showChannelStamp: true }),
+    );
+
+    expect(container.querySelector('[data-testid="branch-badge"]')).toBeNull();
+    expect(container.querySelector('[data-testid="channel-stamp"]')?.textContent).toBe('#');
+  });
 });
