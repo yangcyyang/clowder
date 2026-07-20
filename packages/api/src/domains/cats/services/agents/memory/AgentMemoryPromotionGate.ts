@@ -334,14 +334,31 @@ export function evaluateMemoryPromotion(input: MemoryPromotionInput): MemoryProm
   }
 
   // 2. Dedup against durable memory and the pending queue.
+  // Per-entry comparison, not whole-blob substring: a candidate embedded in a
+  // longer entry is a duplicate only when the extra characters are wrapper
+  // decoration (message/invocation prefix, date). Extra negation characters
+  // (不/无/没/未/别/禁/勿) flip polarity — '恢复 X' inside '不恢复 X' is a
+  // contradiction to be held (rule 3), never a duplicate.
+  const DEDUP_NEGATION_RE = /[不无没未别禁勿]/;
   const needle = normalizeForDedup(candidate);
+  const isDuplicateOf = (existing: string): boolean =>
+    existing
+      .split(/\r?\n/)
+      .map((line) => normalizeForDedup(line))
+      .some((entry) => {
+        if (!entry) return false;
+        if (entry === needle) return true;
+        if (!entry.includes(needle)) return false;
+        const extra = entry.split(needle).join('');
+        return !DEDUP_NEGATION_RE.test(extra);
+      });
   if (needle) {
-    if (normalizeForDedup(input.existingMemory).includes(needle)) {
+    if (isDuplicateOf(input.existingMemory)) {
       rules.push('dedup:durable');
       return { ...base, action: 'skip', skipReason: 'duplicate', rules };
     }
     for (const queued of input.queuedContents ?? []) {
-      if (normalizeForDedup(queued).includes(needle)) {
+      if (isDuplicateOf(queued)) {
         rules.push('dedup:queue');
         return { ...base, action: 'skip', skipReason: 'duplicate', rules };
       }
