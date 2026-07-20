@@ -97,6 +97,27 @@ export function isCapabilityReceiptPolicyMatch(
   );
 }
 
+/**
+ * A1 startup invariant: enforce mode forbids the legacy LS-side auto-approve
+ * (ANTIGRAVITY_AUTO_APPROVE). With autoApprove on, the Antigravity LS could
+ * still execute run_command via the legacy approval path without a receipt,
+ * defeating the gate — a silent misconfiguration. Fail fast at startup with a
+ * human-readable error instead. Call from the composition root right after
+ * resolveCapabilityReceiptRolloutPolicy.
+ */
+export function assertCapabilityReceiptStartupInvariants(
+  policy: CapabilityReceiptRolloutPolicy,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (policy.mode === 'enforce' && env['ANTIGRAVITY_AUTO_APPROVE'] !== 'false') {
+    throw new Error(
+      'Capability receipt enforce mode requires ANTIGRAVITY_AUTO_APPROVE=false: ' +
+        'the legacy LS-side auto-approve would bypass the receipt gate. ' +
+        'Set ANTIGRAVITY_AUTO_APPROVE=false, or run with CLOWDER_CAPABILITY_RECEIPT_MODE=observe/off.',
+    );
+  }
+}
+
 export class CapabilityReceiptExecutionGate {
   private readonly policy: CapabilityReceiptRolloutPolicy;
   private readonly authorizeIntent: CapabilityReceiptExecutionGateDeps['authorize'];

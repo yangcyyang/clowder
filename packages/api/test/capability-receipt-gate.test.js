@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 
-const { CapabilityReceiptExecutionGate, resolveCapabilityReceiptRolloutPolicy } = await import(
+const { CapabilityReceiptExecutionGate, resolveCapabilityReceiptRolloutPolicy, assertCapabilityReceiptStartupInvariants } = await import(
   '../dist/domains/cats/services/auth/CapabilityReceiptExecutionGate.js'
 );
 const { CapabilityReceiptStore, digestCapabilityArguments } = await import(
@@ -190,5 +190,35 @@ describe('CapabilityReceiptExecutionGate rollout policy', () => {
 
     assert.deepEqual(result, { allowed: false, state: 'error' });
     assert.deepEqual(decisions, ['store_error']);
+  });
+});
+
+describe('A1 startup invariant: enforce mode forbids legacy LS auto-approve', () => {
+  test('enforce + ANTIGRAVITY_AUTO_APPROVE unset throws with human-readable error', () => {
+    assert.throws(
+      () => assertCapabilityReceiptStartupInvariants(policy({ mode: 'enforce' }), {}),
+      /ANTIGRAVITY_AUTO_APPROVE=false/,
+    );
+  });
+
+  test('enforce + ANTIGRAVITY_AUTO_APPROVE=true throws', () => {
+    assert.throws(
+      () => assertCapabilityReceiptStartupInvariants(policy({ mode: 'enforce' }), { ANTIGRAVITY_AUTO_APPROVE: 'true' }),
+      /ANTIGRAVITY_AUTO_APPROVE=false/,
+    );
+  });
+
+  test('enforce + ANTIGRAVITY_AUTO_APPROVE=false passes', () => {
+    assert.doesNotThrow(() =>
+      assertCapabilityReceiptStartupInvariants(policy({ mode: 'enforce' }), { ANTIGRAVITY_AUTO_APPROVE: 'false' }),
+    );
+  });
+
+  test('observe mode allows auto-approve (no throw)', () => {
+    assert.doesNotThrow(() => assertCapabilityReceiptStartupInvariants(policy({ mode: 'observe' }), {}));
+  });
+
+  test('off mode allows auto-approve (no throw)', () => {
+    assert.doesNotThrow(() => assertCapabilityReceiptStartupInvariants(policy({ mode: 'off' }), {}));
   });
 });
