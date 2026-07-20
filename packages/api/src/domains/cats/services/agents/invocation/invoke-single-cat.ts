@@ -134,12 +134,19 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
+import {
+  formatSanityHandoffMarkdown,
+  generateSanityHandoffCapsule,
+  isSanityHandoffEnabled,
+} from '../../session/HandoffCapsuleGenerator.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import { computeSanityTransition, getSanityThresholdsFromEnv } from '../../session/SessionSanityMonitor.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
+import { isSummaryCompactionEligibleMessage } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, DeliveryOnlyDegradedIssue } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import { completeCapsuleForSeal, type RouteStateContinuityCapsule } from './CollaborationContinuityCapsule.js';
@@ -234,6 +241,50 @@ const _needsReinjection = new Set<string>();
 const _staticIdentityRegistryRevision = new Map<string, number>();
 const _handoffDraftWindowSessions = new Set<string>();
 
+const SANITY_HANDOFF_MESSAGE_WINDOW = 200;
+
+/**
+ * 理智线 T4 (task #386): 生成 9 字段轻交接包 + 写进当前 thread（结构化消息）。
+ * 安全钉：源消息在这里先过 isSummaryCompactionEligibleMessage 再传给生成器——未 reveal
+ * 的 whisper 在这一步就被剔除，生成器本身不再做二次可见性判断（唯一防线，见调用点注释）。
+ * 注意：不能用 canViewMessage(msg, {type:'user'})——那个函数对 user viewer 直接短路
+ * `return true`（"铲屎官看见一切"是它的设计意图，不是过滤器），会让 whisper 照样通过。
+ * isSummaryCompactionEligibleMessage 是 viewer-agnostic 的"这条消息能不能进线程级摘要"
+ * 判断，专门为这种场景设计（stores/visibility.ts 原有注释就是防"摘要泄漏 whisper"）。
+ * 只在 T3 跨档到 yellow/red 时被调用（由调用方保证幂等，这里不重复判断）。
+ */
+async function generateAndPersistSanityHandoff(
+  deps: { messageStore?: IMessageStore },
+  input: { threadId: string; catId: CatId; triggerState: 'yellow' | 'red'; userId: string },
+): Promise<import('@cat-cafe/shared').SanityHandoffCapsuleV1 | null> {
+  if (!isSanityHandoffEnabled() || !deps.messageStore) return null;
+  try {
+    const raw = await deps.messageStore.getByThread(input.threadId, SANITY_HANDOFF_MESSAGE_WINDOW, input.userId);
+    const visible = raw
+      .filter((m) => isSummaryCompactionEligibleMessage(m))
+      .map((m) => ({ content: m.content, catId: m.catId, timestamp: m.timestamp }));
+    const capsule = generateSanityHandoffCapsule({
+      threadId: input.threadId,
+      catId: input.catId,
+      triggerState: input.triggerState,
+      messages: visible,
+    });
+    await deps.messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: formatSanityHandoffMarkdown(capsule),
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: input.threadId,
+      extra: { systemKind: 'sanity_handoff' },
+    });
+    return capsule;
+  } catch {
+    /* best-effort — a failed handoff generation must not break the invocation */
+    return null;
+  }
+}
+
 /** @internal Exposed for testing */
 export function _resetCompressionDetection(): void {
   _prevContextFill.clear();
@@ -261,6 +312,10 @@ export interface InvocationDeps {
   readonly taskProgressStore?: TaskProgressStore;
   /** F24: Session chain store for context health tracking */
   readonly sessionChainStore?: ISessionChainStore;
+  /** 理智线 T4 (task #386): message store for reading thread context to build the
+   *  sanity handoff capsule + writing the handoff message itself. Optional so
+   *  existing test/deps construction sites keep compiling without it. */
+  readonly messageStore?: IMessageStore;
   /** F24 Phase B: Session sealer for auto-seal when context threshold reached */
   readonly sessionSealer?: ISessionSealer;
   /** F24 Phase C: Transcript writer for event collection + flush on seal */
@@ -1834,9 +1889,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                         timestamp: Date.now(),
                       });
                     }
+                    // 理智线 T4 (task #386): 只在跨档进入 yellow/red 时生成一次（红→绿的
+                    // "恢复"事件不触发——不需要交接包）；跨档判定已经在 T3 做了幂等，这里
+                    // 不重复加锁。
+                    let sanityHandoff = activeRecord.sanityHandoff;
+                    if (
+                      sanityTransition.event &&
+                      (sanityTransition.event.to === 'yellow' || sanityTransition.event.to === 'red')
+                    ) {
+                      const generated = await generateAndPersistSanityHandoff(deps, {
+                        threadId,
+                        catId: catId as CatId,
+                        triggerState: sanityTransition.event.to,
+                        userId,
+                      });
+                      if (generated) sanityHandoff = generated;
+                    }
                     await deps.sessionChainStore.update(activeRecord.id, {
                       contextHealth: health,
                       sanityState: sanityTransition.state,
+                      ...(sanityHandoff ? { sanityHandoff } : {}),
                       lastUsage: {
                         ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
                         ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),

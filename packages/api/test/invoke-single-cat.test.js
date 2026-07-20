@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
 async function collect(iterable) {
@@ -1268,6 +1268,254 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(t4Events[0].to, 'red');
 
     assert.equal(sessionChainStore.getActive('opus', threadId).sanityState, 'red');
+  });
+
+  // ── 理智线 T4 (task #386): sanity handoff capsule ─────────────────────────
+
+  describe('理智线 T4: sanity handoff capsule', () => {
+    let savedHandoffEnv;
+    before(() => {
+      savedHandoffEnv = process.env.CAT_CAFE_SANITY_HANDOFF;
+      process.env.CAT_CAFE_SANITY_HANDOFF = '1';
+    });
+    after(() => {
+      if (savedHandoffEnv === undefined) delete process.env.CAT_CAFE_SANITY_HANDOFF;
+      else process.env.CAT_CAFE_SANITY_HANDOFF = savedHandoffEnv;
+    });
+
+    function findHandoffMessages(messages) {
+      return messages.filter((m) => m.extra?.systemKind === 'sanity_handoff');
+    }
+
+    it('does nothing when CAT_CAFE_SANITY_HANDOFF is off (default)', async () => {
+      const prev = process.env.CAT_CAFE_SANITY_HANDOFF;
+      delete process.env.CAT_CAFE_SANITY_HANDOFF;
+      try {
+        const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+        const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+        const sessionChainStore = new SessionChainStore();
+        const messageStore = new MessageStore();
+        const threadId = 'thread-handoff-off';
+        await messageStore.append({
+          userId: 'user1',
+          catId: null,
+          content: '帮我实现一个新功能',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        });
+
+        const service = {
+          async *invoke() {
+            yield { type: 'session_init', catId: 'opus', sessionId: 'cli-off', timestamp: Date.now() };
+            yield {
+              type: 'done',
+              catId: 'opus',
+              timestamp: Date.now(),
+              metadata: {
+                provider: 'anthropic',
+                model: 'claude-opus-4-6',
+                usage: { inputTokens: 150000, outputTokens: 500, contextWindowSize: 1_000_000 },
+              },
+            };
+          },
+        };
+        const deps = { ...makeDeps(), sessionChainStore, messageStore };
+        await collect(
+          invokeSingleCat(deps, { catId: 'opus', service, prompt: 'test', userId: 'user1', threadId, isLastCat: true }),
+        );
+
+        const stored = await messageStore.getByThread(threadId, 50, 'user1');
+        assert.equal(findHandoffMessages(stored).length, 0, 'handoff must not be generated while the flag is off');
+        assert.equal(sessionChainStore.getActive('opus', threadId).sanityHandoff, undefined);
+      } finally {
+        if (prev === undefined) delete process.env.CAT_CAFE_SANITY_HANDOFF;
+        else process.env.CAT_CAFE_SANITY_HANDOFF = prev;
+      }
+    });
+
+    it('generates a 9-field handoff message + persists sanityHandoff on green→yellow', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const threadId = 'thread-handoff-yellow';
+
+      for (const content of [
+        '帮我实现理智线 T4 的黄区自动交接包',
+        '禁止把 whisper 内容塞进交接包',
+        '已经确定用规则抽取,不调 LLM',
+        '修复了 packages/api/src/domains/cats/services/session/HandoffCapsuleGenerator.ts',
+        '测试通过,回归全绿',
+      ]) {
+        await messageStore.append({
+          userId: 'user1',
+          catId: null,
+          content,
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        });
+      }
+
+      const service = {
+        async *invoke() {
+          yield { type: 'session_init', catId: 'opus', sessionId: 'cli-handoff-yellow', timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens: 150000, outputTokens: 500, contextWindowSize: 1_000_000 },
+            },
+          };
+        },
+      };
+      const deps = { ...makeDeps(), sessionChainStore, messageStore };
+      await collect(
+        invokeSingleCat(deps, { catId: 'opus', service, prompt: 'test', userId: 'user1', threadId, isLastCat: true }),
+      );
+
+      const stored = await messageStore.getByThread(threadId, 50, 'user1');
+      const handoffMsgs = findHandoffMessages(stored);
+      assert.equal(handoffMsgs.length, 1);
+      const md = handoffMsgs[0].content;
+      for (const label of ['目标', '背景', '约束', '已完成', '已验证', '废弃方案', '未解决', '下一步', '必读文件']) {
+        assert.match(md, new RegExp(label), `handoff markdown should include the ${label} field`);
+      }
+      assert.match(md, /黄区/);
+
+      const active = sessionChainStore.getActive('opus', threadId);
+      assert.ok(active.sanityHandoff, 'SessionRecord should persist the sanityHandoff capsule');
+      assert.equal(active.sanityHandoff.triggerState, 'yellow');
+      assert.equal(active.sanityHandoff.goalIsInferred, true);
+    });
+
+    it('WHISPER SENTINEL: unrevealed whisper content must never leak into the handoff capsule', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const threadId = 'thread-handoff-whisper';
+      const SECRET_MARKER = 'SECRET-WHISPER-CONTENT-should-never-appear-1a2b3c';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T4 的黄区自动交接包',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+      // Unrevealed whisper — must be excluded from extraction entirely.
+      await messageStore.append({
+        userId: 'user1',
+        catId: 'opus',
+        content: `已完成 ${SECRET_MARKER}，这条是悄悄话不该被任何人看到`,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      });
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '已经确定用规则抽取，不调 LLM',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const service = {
+        async *invoke() {
+          yield { type: 'session_init', catId: 'opus', sessionId: 'cli-handoff-whisper', timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens: 150000, outputTokens: 500, contextWindowSize: 1_000_000 },
+            },
+          };
+        },
+      };
+      const deps = { ...makeDeps(), sessionChainStore, messageStore };
+      await collect(
+        invokeSingleCat(deps, { catId: 'opus', service, prompt: 'test', userId: 'user1', threadId, isLastCat: true }),
+      );
+
+      const stored = await messageStore.getByThread(threadId, 50, 'user1');
+      const handoffMsgs = findHandoffMessages(stored);
+      assert.equal(handoffMsgs.length, 1);
+      assert.ok(
+        !handoffMsgs[0].content.includes(SECRET_MARKER),
+        'whisper content must not leak into the handoff message',
+      );
+
+      const active = sessionChainStore.getActive('opus', threadId);
+      const serialized = JSON.stringify(active.sanityHandoff);
+      assert.ok(!serialized.includes(SECRET_MARKER), 'whisper content must not leak into the persisted capsule');
+    });
+
+    it('does not regenerate while staying in the same tier (idempotent), but does regenerate on yellow→red', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const threadId = 'thread-handoff-idempotent';
+      const cliSessionId = 'cli-handoff-idempotent';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T4',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      async function turn(inputTokens) {
+        const service = {
+          async *invoke() {
+            yield { type: 'session_init', catId: 'opus', sessionId: cliSessionId, timestamp: Date.now() };
+            yield {
+              type: 'done',
+              catId: 'opus',
+              timestamp: Date.now(),
+              metadata: {
+                provider: 'anthropic',
+                model: 'claude-opus-4-6',
+                usage: { inputTokens, outputTokens: 500, contextWindowSize: 1_000_000 },
+              },
+            };
+          },
+        };
+        const deps = { ...makeDeps(), sessionChainStore, messageStore };
+        await collect(
+          invokeSingleCat(deps, { catId: 'opus', service, prompt: 'test', userId: 'user1', threadId, isLastCat: true }),
+        );
+      }
+
+      await turn(100000); // green, no handoff
+      await turn(150000); // green→yellow, generates #1
+      await turn(160000); // still yellow, no new handoff
+      let stored = await messageStore.getByThread(threadId, 50, 'user1');
+      assert.equal(findHandoffMessages(stored).length, 1, 'should still be exactly 1 handoff after a same-tier turn');
+
+      await turn(192000); // yellow→red, generates #2 (update)
+      stored = await messageStore.getByThread(threadId, 50, 'user1');
+      const handoffMsgs = findHandoffMessages(stored);
+      assert.equal(handoffMsgs.length, 2, 'red transition should generate a second (updated) handoff message');
+      assert.match(handoffMsgs[1].content, /红区/);
+
+      const active = sessionChainStore.getActive('opus', threadId);
+      assert.equal(active.sanityHandoff.triggerState, 'red');
+    });
   });
 
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {

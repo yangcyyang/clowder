@@ -739,6 +739,11 @@ export class AgentRouter {
         apiUrl: `http://127.0.0.1:${apiPort}`,
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
+        // 理智线 T4 (task #386): this.messageStore already exists (required field, used
+        // below at the RouteStrategyDeps top level) — just also threading it into
+        // invocationDeps so invoke-single-cat.ts can read thread history to build the
+        // sanity handoff capsule.
+        messageStore: this.messageStore,
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),

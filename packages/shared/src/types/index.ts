@@ -471,6 +471,7 @@ export { getSanityLineFallback, resolveSanityLine, resolveSanityLineDefault } fr
 export type {
   ContextHealth,
   ContextHealthConfig,
+  SanityHandoffCapsuleV1,
   SealReason,
   SealResult,
   SessionRecord,

@@ -29,6 +29,12 @@ export interface SessionRecord {
    * （分母是 sanityLine 不是 windowTokens）。用于跨轮判断是否跨档发事件。
    */
   sanityState?: 'green' | 'yellow' | 'red';
+  /**
+   * 理智线 T4（task #386）：黄/红区触发的 9 字段轻交接包。**独立字段，不复用
+   * continuityCapsule**——那个字段是 A2A 路由续接状态（ballState/mode/chainIndex），
+   * 在正常 A2A 链路调用中会被写入；塞进同一个字段会跟 A2A 状态互相覆盖。
+   */
+  sanityHandoff?: SanityHandoffCapsuleV1;
   /** Latest token usage snapshot (persisted for frontend display after reload) */
   lastUsage?: SessionUsageSnapshot;
   messageCount: number;
@@ -43,6 +49,33 @@ export interface SessionRecord {
   readonly createdAt: number;
   updatedAt: number;
   sealedAt?: number;
+}
+
+/**
+ * 理智线 T4（task #386）：黄/红区自动轻交接包，9 个字段（cy 定死）。
+ * V0 全部字段走规则化消息内容抽取（跟 AutoSummarizer 同技法，零 LLM 调用）；
+ * `goal` 特别标 `goalIsInferred: true`——它是从近期消息推断的近似值，不是精确
+ * task 标题（精确关联需要 ITaskStore 反查方法，本批不做，见 follow-up）。
+ * 缺源字段显式标"未明确"，不留空字符串。
+ */
+export interface SanityHandoffCapsuleV1 {
+  readonly v: 1;
+  readonly threadId: string;
+  readonly catId: CatId;
+  /** 触发这次生成的理智线档位（黄区首次生成 / 红区更新）。 */
+  readonly triggerState: 'yellow' | 'red';
+  readonly goal: string;
+  /** true = goal 是消息内容推断的近似值，不是精确 task 标题（V0 恒为 true）。 */
+  readonly goalIsInferred: true;
+  readonly background: string;
+  readonly constraints: string;
+  readonly completed: string;
+  readonly verified: string;
+  readonly abandonedApproaches: string;
+  readonly openIssues: string;
+  readonly nextSteps: string;
+  readonly mustReadFiles: string;
+  readonly generatedAt: number;
 }
 
 /** Slim usage snapshot persisted per session (subset of full TokenUsage). */

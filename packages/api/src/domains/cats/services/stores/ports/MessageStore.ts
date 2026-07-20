@@ -129,7 +129,7 @@ export interface StoredMessage {
       kind: 'ack' | 'heartbeat';
       invocationId?: string;
     };
-    systemKind?: 'a2a_routing' | 'progress_heartbeat';
+    systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'sanity_handoff';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
     /** P2-3: Aggregated emoji reactions for this message. */

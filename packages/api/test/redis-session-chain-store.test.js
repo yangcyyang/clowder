@@ -184,6 +184,50 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(reread.sanityState, 'yellow');
   });
 
+  it('理智线 T4 (task #386): update() stores and rehydrates sanityHandoff (independent of continuityCapsule)', async () => {
+    const record = await store.create(BASE_INPUT);
+    assert.equal(record.sanityHandoff, undefined, 'fresh record should have no sanityHandoff yet');
+
+    const handoff = {
+      v: 1,
+      threadId: record.threadId,
+      catId: record.catId,
+      triggerState: 'yellow',
+      goal: '（消息推断）测试目标',
+      goalIsInferred: true,
+      background: '未明确',
+      constraints: '未明确',
+      completed: '未明确',
+      verified: '未明确',
+      abandonedApproaches: '未明确',
+      openIssues: '未明确',
+      nextSteps: '未明确',
+      mustReadFiles: '未明确',
+      generatedAt: Date.now(),
+    };
+
+    // Also write a continuityCapsule at the same time — proves the two fields
+    // persist independently and don't clobber each other (the whole reason T4 uses
+    // a separate field instead of reusing continuityCapsule).
+    const routingCapsule = {
+      v: 1,
+      threadId: record.threadId,
+      catId: record.catId,
+      mode: 'independent',
+      a2aEnabled: false,
+      ballState: 'in_progress',
+      continuationReason: 'manual',
+    };
+    const updated = await store.update(record.id, { sanityHandoff: handoff, continuityCapsule: routingCapsule });
+    assert.ok(updated);
+    assert.deepEqual(updated.sanityHandoff, handoff);
+    assert.deepEqual(updated.continuityCapsule, routingCapsule);
+
+    const reread = await store.get(record.id);
+    assert.deepEqual(reread.sanityHandoff, handoff);
+    assert.deepEqual(reread.continuityCapsule, routingCapsule);
+  });
+
   it('update() persists continuityCapsule across hydrated lookup paths', async () => {
     const record = await store.create(BASE_INPUT);
     const capsule = {
