@@ -44,9 +44,12 @@ export async function readAgentMemory(catId: string, projectRoot = findMonorepoR
   };
 }
 
-export async function readAgentMemoryForPrompt(catId: string): Promise<string | null> {
+export async function readAgentMemoryForPrompt(
+  catId: string,
+  projectRoot = findMonorepoRoot(),
+): Promise<string | null> {
   try {
-    const record = await readAgentMemory(catId);
+    const record = await readAgentMemory(catId, projectRoot);
     const content = record.content.trim();
     return content ? content : null;
   } catch {

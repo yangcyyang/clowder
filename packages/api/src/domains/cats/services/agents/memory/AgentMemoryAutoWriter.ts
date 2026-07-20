@@ -1,16 +1,28 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { AGENT_MEMORY_MAX_CHARS, getAgentMemoryDir, getAgentMemoryPath } from './AgentMemoryStore.js';
+import {
+  appendMemoryCandidate,
+  evaluateMemoryPromotion,
+  listMemoryCandidates,
+  recordPromotionDecision,
+  resolveMemoryPromotionMode,
+  type MemoryPromotionEvaluation,
+} from './AgentMemoryPromotionGate.js';
 
 export const MEMORY_AUTO_WRITE_MIN_INTERVAL_MS = 60_000;
 const MAX_SUMMARY_CHARS = 500;
 const MAX_RECENT_VALIDATION_ITEMS = 20;
 
+const gateLog = createModuleLogger('agent-memory-auto-writer');
+
 const lastWriteAtByMemoryPath = new Map<string, number>();
 const writeLockByMemoryPath = new Map<string, Promise<void>>();
 let tempFileSequence = 0;
+let candidateSequence = 0;
 
 export interface AgentMemoryInvocationSummary {
   catId: string;
@@ -20,13 +32,25 @@ export interface AgentMemoryInvocationSummary {
   assistantText?: string | undefined;
   error?: string | undefined;
   completedAt?: number | undefined;
+  /** Raw user message text (when available) — grounds user-stated source grading. */
+  userMessageText?: string | undefined;
 }
 
 export interface AgentMemoryAutoWriteResult {
-  status: 'updated' | 'skipped';
-  reason?: 'rate_limited' | 'empty_summary' | 'write_disabled';
+  status: 'updated' | 'skipped' | 'held';
+  reason?:
+    | 'rate_limited'
+    | 'empty_summary'
+    | 'write_disabled'
+    | 'duplicate'
+    | 'low_confidence'
+    | 'session_temp'
+    | 'pending_review'
+    | 'conflict_hold';
   path?: string;
   content?: string;
+  /** 票C: attached in shadow/enforce modes — the gate's decision for this write. */
+  evaluation?: MemoryPromotionEvaluation;
 }
 
 export interface AgentMemoryAutoWriterOptions {
@@ -231,6 +255,7 @@ export async function autoUpdateAgentMemory(
   const projectRoot = options.projectRoot ?? findMonorepoRoot();
   const memoryDir = getAgentMemoryDir(projectRoot);
   const memoryPath = getAgentMemoryPath(summary.catId, projectRoot);
+  const promotionMode = resolveMemoryPromotionMode();
   return withMemoryWriteLock(memoryPath, async () => {
     const lastWriteAt = lastWriteAtByMemoryPath.get(memoryPath) ?? 0;
     if (!options.force && now - lastWriteAt < minIntervalMs) {
@@ -238,6 +263,55 @@ export async function autoUpdateAgentMemory(
     }
 
     const oldContent = existsSync(memoryPath) ? await readFile(memoryPath, 'utf-8') : '';
+
+    // 票C (P1-4): promotion review gate. off = legacy behavior (zero change);
+    // shadow = evaluate + record but write as today; enforce = candidate queue
+    // + hold-on-conflict, durable memory only via explicit user fast-track.
+    let evaluation: MemoryPromotionEvaluation | undefined;
+    if (promotionMode !== 'off') {
+      const queued = await listMemoryCandidates(summary.catId, projectRoot);
+      evaluation = evaluateMemoryPromotion({
+        candidateText: trimOneLine(summary.assistantText ?? '', MAX_SUMMARY_CHARS),
+        existingMemory: oldContent,
+        userMessageText: summary.userMessageText,
+        queuedContents: queued.map((record) => record.content),
+      });
+      recordPromotionDecision(promotionMode, evaluation);
+      writeGateLog({ catId: summary.catId, invocationId: summary.invocationId, mode: promotionMode, evaluation });
+
+      const appendLedger = async (status: 'pending_review' | 'promoted') => {
+        await appendMemoryCandidate(
+          {
+            id: `cand-${now}-${candidateSequence++}`,
+            catId: summary.catId,
+            invocationId: summary.invocationId,
+            threadId: summary.threadId,
+            content: delivery,
+            evaluation: evaluation!,
+            status,
+            ...(evaluation!.reviewer ? { reviewer: evaluation!.reviewer } : {}),
+            createdAt: now,
+          },
+          projectRoot,
+        );
+      };
+
+      if (promotionMode === 'shadow') {
+        // Observe-first: decision logged + metric recorded above; write as today.
+      } else if (evaluation.action === 'hold') {
+        await appendLedger('pending_review');
+        return { status: 'held', reason: 'conflict_hold', evaluation };
+      } else if (evaluation.action === 'candidate') {
+        await appendLedger('pending_review');
+        return { status: 'held', reason: 'pending_review', evaluation };
+      } else if (evaluation.action === 'skip') {
+        return { status: 'skipped', reason: evaluation.skipReason ?? 'low_confidence', evaluation };
+      } else {
+        // promote (explicit user instruction fast-track): write durable AND ledger.
+        await appendLedger('promoted');
+      }
+    }
+
     const nextContent = updateAgentMemoryContent(oldContent, { ...summary, completedAt: now });
 
     await mkdir(memoryDir, { recursive: true });
@@ -248,12 +322,36 @@ export async function autoUpdateAgentMemory(
       status: 'updated',
       path: join(memoryDir, basename(memoryPath)),
       content: nextContent,
+      ...(evaluation ? { evaluation } : {}),
     };
   });
+}
+
+function writeGateLog(input: {
+  catId: string;
+  invocationId: string;
+  mode: 'shadow' | 'enforce';
+  evaluation: MemoryPromotionEvaluation;
+}): void {
+  gateLog.info(
+    {
+      catId: input.catId,
+      invocationId: input.invocationId,
+      mode: input.mode,
+      action: input.evaluation.action,
+      sourceGrade: input.evaluation.sourceGrade,
+      contentClass: input.evaluation.contentClass,
+      confidence: input.evaluation.confidence,
+      conflict: input.evaluation.conflict,
+      rules: input.evaluation.rules,
+    },
+    input.mode === 'shadow' ? 'memory promotion shadow decision (write proceeds as today)' : 'memory promotion decision',
+  );
 }
 
 export function resetAgentMemoryAutoWriterForTests(): void {
   lastWriteAtByMemoryPath.clear();
   writeLockByMemoryPath.clear();
   tempFileSequence = 0;
+  candidateSequence = 0;
 }
