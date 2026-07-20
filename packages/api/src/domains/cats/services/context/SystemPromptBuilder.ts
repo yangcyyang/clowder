@@ -364,6 +364,21 @@ const GOVERNANCE_CORE_DIGEST = `## 核心协作规则（摘要）
 行为约束写各猫 memory，不靠全局品种规则。
 完整规则按需查阅：cat-cafe-skills/refs/shared-rules.md。`;
 
+/**
+ * 理智线 T1（task #383）：会话理智线与换班纪律，编译自 cat-cafe-skills/refs/session-sanity.md
+ * （single source of truth）。这是纯静态规则文本——不含任何每轮/每会话变化的数字（理智线
+ * 先验表的具体阈值、当前用量等是 T2/T3 的动态值，接在 buildInvocationContext 末尾，不进这里，
+ * 否则前缀字节漂移会废掉 KV-cache）。
+ * 不按 toolPolicy 分级：跟只给 standard/full 的 operational digest 不同，"到线换班"是普适认知
+ * 底座，minimal 配置的猫也该知道。
+ */
+const SESSION_SANITY_DIGEST = `## 会话理智线（自检）
+你是持久身份，但每次唤醒的 session 只是上一个班的临时工；任务可以跨班，单个班不硬撑。
+Context Window 是投递口尺寸，理智线才是还能稳定干活的边界：窗口没满 ≠ 还能干，到线就换班，不当预警区间。
+自检：🟢 约束/事实/格式稳定→继续；🟡 开始漏项/被纠正/历史被摘要压缩→停止堆料，写轻交接包准备换班；🔴 同一错误重复/关键约束丢失→立即 critical seal + 新 session，不许原地反复重试。
+Memory 不是记忆，是会议纪要：跨班事实靠交接包和项目档案落地，当班写回 \`.cat-cafe/memory/{catId}.md\`，下一班没有义务"记得"你没写下的东西。
+完整规则（理智线先验表、换班动作细节、任务设计纪律、模型评分卡）按需查阅：cat-cafe-skills/refs/session-sanity.md。`;
+
 export type GovernanceTier = 'core' | 'operational';
 
 const GOVERNANCE_MAGIC_WORDS = [] as const;
@@ -796,6 +811,11 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // L0 Governance Digest — always-on principles from shared-rules.md (F086 post-completion fix)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local-override, #603)
   lines.push('', getGovernanceDigest(toolPolicy));
+
+  // 理智线 T1（task #383）— always-on regardless of toolPolicy, source of truth:
+  // cat-cafe-skills/refs/session-sanity.md. Static rule text only — dynamic per-session
+  // sanity-line values (T2/T3) belong in buildInvocationContext, not here (KV-cache prefix stability).
+  lines.push('', SESSION_SANITY_DIGEST);
 
   const agentMemory = summarizeAgentMemoryForPrompt(options?.agentMemoryContext ?? '');
   if (agentMemory) {

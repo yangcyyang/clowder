@@ -419,6 +419,57 @@ describe('SystemPromptBuilder', () => {
     assert.equal(buildStaticIdentity('unknown-cat'), '');
   });
 
+  // --- 理智线 T1（task #383）：会话理智线注入进静态前缀，不进末尾动态块 ---
+
+  test('buildStaticIdentity includes session-sanity digest (standard toolPolicy)', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const identity = buildStaticIdentity('opus', { toolPolicy: 'standard' });
+    assert.ok(identity.includes('会话理智线'), 'Should contain session-sanity digest heading');
+    assert.ok(
+      identity.includes('只是上一个班的临时工'),
+      'Should carry the persistent-identity-vs-session cognitive floor',
+    );
+    assert.ok(identity.includes('🟡'), 'Should carry the green/yellow/red self-check');
+    assert.ok(identity.includes('会议纪要'), 'Should carry the memory-is-meeting-minutes framing');
+    assert.ok(
+      identity.includes('cat-cafe-skills/refs/session-sanity.md'),
+      'Should point back to the full ref for details',
+    );
+  });
+
+  test('buildStaticIdentity injects session-sanity digest regardless of toolPolicy (not gated like operational governance)', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const minimal = buildStaticIdentity('opus', { toolPolicy: 'minimal' });
+    const standard = buildStaticIdentity('opus', { toolPolicy: 'standard' });
+    assert.ok(minimal.includes('会话理智线'), 'minimal toolbox should still see the session-sanity floor');
+    assert.ok(standard.includes('会话理智线'), 'standard toolbox should still see the session-sanity floor');
+  });
+
+  test('session-sanity digest does not leak per-session dynamic values (KV-cache prefix stability)', async () => {
+    const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const identity = buildStaticIdentity('opus', { toolPolicy: 'standard' });
+    // T1 只注入静态规则文本；理智线先验表的具体阈值数字/当前用量是 T2/T3 才接的动态值，
+    // 不该出现在这段（那才是真出问题——静态前缀里混进了会变的数）。
+    assert.ok(
+      !identity.includes('200K'),
+      'static prefix should not carry per-model numeric sanity-line thresholds (that is T2/T3 dynamic territory)',
+    );
+  });
+
+  test('buildInvocationContext (dynamic tail) does not carry the session-sanity digest', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+    });
+    assert.ok(
+      !ctx.includes('会话理智线'),
+      'session-sanity digest belongs in the cacheable static prefix, not the dynamic per-invocation tail',
+    );
+  });
+
   test('buildStaticIdentity includes workflow triggers', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const opusId = buildStaticIdentity('opus');

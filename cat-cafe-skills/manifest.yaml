@@ -1275,6 +1275,10 @@ refs:
     description: "三猫共用协作规则（A2A 交接六项、Loop 完成回报、工兵优先、提问原则、开放邀请、技术债务、Review 立场等）"
     path: "refs/shared-rules.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 去重合并"
+  session-sanity:
+    description: "会话理智线与换班纪律（认知底座三句话、理智线先验表、绿黄红自检、换班动作、任务设计纪律、模型评分卡）"
+    path: "refs/session-sanity.md"
+    source: "理智线批四 T1（task #383），草案：AI项目协作基础课-会话理智线-猫咖家规补充草案.md"
 
 # ─── 三条铁律（仅此三条） ──────────────────────────────
 iron_laws:
