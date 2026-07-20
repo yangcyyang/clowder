@@ -30,6 +30,7 @@
     "project:init": "node dist/scripts/project-init.js",
     "test:redis": "bash ./scripts/with-test-home.sh bash ./scripts/run-isolated-redis-tests.sh",
     "test:redis:repeat": "bash ./scripts/with-test-home.sh bash ./scripts/run-isolated-redis-tests.sh --repeat 2",
+    "test:redis:security": "bash ./scripts/run-isolated-redis-tests.sh bash ./scripts/run-redis-security-tests.sh",
     "test:integration": "bash ./scripts/with-test-home.sh node --test test/integration/*.test.js",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"

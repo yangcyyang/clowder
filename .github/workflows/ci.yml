@@ -109,6 +109,26 @@ jobs:
       - run: pnpm --filter @cat-cafe/api build
       - run: node scripts/run-ci-with-annotations.mjs --label "API Redis Tests" -- pnpm --filter @cat-cafe/api run test:lane:redis
 
+  api-redis-security:
+    name: API Redis Security Tests (fail-closed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated Redis test dependency
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/api build
+      # Fail-closed: the runner refuses to start without an isolated REDIS_URL
+      # and fails loudly if any security suite runs 0 tests or skips (F-3).
+      - run: node scripts/run-ci-with-annotations.mjs --label "API Redis Security Tests" -- pnpm --filter @cat-cafe/api run test:redis:security
+
   web-vitest:
     name: Web Vitest (Required)
     runs-on: ubuntu-latest
