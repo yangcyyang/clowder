@@ -1,7 +1,10 @@
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
+import { derivePresentThreadAgents, resolveThreadBranch } from './ThreadSidebar/thread-perceptibility';
+import { getThreadHref } from './ThreadSidebar/thread-navigation';
 
 interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
@@ -74,7 +77,7 @@ export function ChatContainerHeader({
         </button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <ThreadIndicator threadId={threadId} showChannelStamp={threadKind === 'channel'} />
-          <ThreadMemberAvatars threadId={threadId} />
+          <PresentAgentsIndicator threadId={threadId} />
         </div>
         <ExportButton threadId={threadId} />
         <button
@@ -163,11 +166,54 @@ export function ChatContainerHeader({
   );
 }
 
-/** Thread indicator: pairs confirmed channel titles with the Raft-style # stamp. */
+/** Thread indicator: pairs confirmed channel titles with the Raft-style # stamp.
+ *  D2: durable branch threads render a 分支 badge + parent breadcrumb (link back)
+ *  instead of the # stamp; orphaned branches degrade to an orphan marker without
+ *  ever exposing the raw parentThreadId. */
 export function ThreadIndicator({ threadId, showChannelStamp }: { threadId: string; showChannelStamp: boolean }) {
   const threads = useChatStore((s) => s.threads);
   const currentThread = threads.find((t) => t.id === threadId);
   const title = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
+  const branch = threadId === 'default' ? { kind: 'root' as const } : resolveThreadBranch(currentThread, threads);
+
+  if (branch.kind !== 'root') {
+    const parentTitle =
+      branch.kind === 'branch' ? (branch.parent.title ?? (branch.parent.id === 'default' ? '大厅' : '未命名对话')) : null;
+    return (
+      <div className="slock-channel-title flex min-w-0 items-center gap-1.5">
+        <span
+          className="slock-branch-badge inline-flex shrink-0 items-center gap-0.5 rounded-md bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-cafe-accent"
+          data-testid="branch-badge"
+          title="这是一个分支对话"
+        >
+          <svg aria-hidden="true" className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3 2.5a.75.75 0 011.5 0v3.025A4.751 4.751 0 008.75 10h2.95a1.75 1.75 0 110 1.5H8.75A6.25 6.25 0 013 5.525V2.5z" transform="rotate(180 8 8)" />
+          </svg>
+          分支
+        </span>
+        {branch.kind === 'branch' ? (
+          <Link
+            href={getThreadHref(branch.parent.id)}
+            data-testid="branch-breadcrumb"
+            className="shrink-0 truncate max-w-32 text-xs text-cafe-secondary underline decoration-dotted underline-offset-2 hover:text-cafe-accent"
+            title={`返回父对话：${parentTitle}`}
+          >
+            {parentTitle}
+          </Link>
+        ) : (
+          <span data-testid="branch-breadcrumb" className="shrink-0 text-xs text-cafe-muted" title="父对话已不可用">
+            孤立 Thread
+          </span>
+        )}
+        <span aria-hidden="true" className="shrink-0 text-cafe-muted">
+          /
+        </span>
+        <p className="min-w-0 truncate text-base font-bold text-cafe" title={title}>
+          {title}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="slock-channel-title flex min-w-0 items-center gap-2">
@@ -183,28 +229,48 @@ export function ThreadIndicator({ threadId, showChannelStamp }: { threadId: stri
   );
 }
 
-function ThreadMemberAvatars({ threadId }: { threadId: string }) {
-  const threads = useChatStore((s) => s.threads);
-  const currentThread = threads.find((t) => t.id === threadId);
-  const memberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? [];
+/**
+ * D3: Present-agents indicator — which agents are ACTUALLY in this thread.
+ * Derived from the visible message set (posted or @-mentioned in THIS thread),
+ * never from the config roster (participatingCats/preferredCats). The web client
+ * is the user viewer; whisper safety is enforced upstream by the API and mirrored
+ * by derivePresentThreadAgents' visibility filter.
+ */
+export function PresentAgentsIndicator({ threadId }: { threadId: string }) {
+  const threadState = useChatStore((s) => s.threadStates?.[threadId]);
   const { getCatById } = useCatData();
-  const members = memberIds.map((id) => getCatById(id)).filter((cat): cat is CatData => Boolean(cat));
+  const present = derivePresentThreadAgents(threadState, { type: 'user' });
+  const members = present
+    .map((entry) => ({ ...entry, cat: getCatById(entry.catId) }))
+    .filter((entry): entry is typeof entry & { cat: CatData } => Boolean(entry.cat));
   if (members.length === 0) return null;
 
   const visibleMembers = members.slice(0, 5);
   const overflow = members.length - visibleMembers.length;
-  const title = members.map((cat) => formatCatName(cat)).join('、');
+  const title = members
+    .map((entry) => `${formatCatName(entry.cat)}${entry.active ? '（进行中）' : ''}`)
+    .join('、');
 
   return (
-    <div className="hidden shrink-0 items-center sm:flex" title={`频道成员：${title}`}>
+    <div className="hidden shrink-0 items-center sm:flex" data-testid="present-agents" title={`在场成员：${title}`}>
       <div className="flex -space-x-1.5">
-        {visibleMembers.map((cat) => (
+        {visibleMembers.map((entry) => (
           <span
-            key={cat.id}
-            className="flex h-6 w-6 items-center justify-center rounded-md border-2 border-[var(--console-shell-bg)] text-[10px] font-bold text-[var(--cafe-accent-foreground)] shadow-sm"
-            style={{ backgroundColor: cat.color.primary }}
+            key={entry.catId}
+            data-testid={`present-agent-${entry.catId}`}
+            data-active={entry.active ? 'true' : 'false'}
+            className={`relative flex h-6 w-6 items-center justify-center rounded-md border-2 border-[var(--console-shell-bg)] text-[10px] font-bold text-[var(--cafe-accent-foreground)] shadow-sm ${
+              entry.active ? 'ring-1 ring-cafe-accent' : ''
+            }`}
+            style={{ backgroundColor: entry.cat.color.primary }}
           >
-            {formatCatName(cat).slice(0, 1)}
+            {formatCatName(entry.cat).slice(0, 1)}
+            {entry.active && (
+              <span
+                aria-hidden="true"
+                className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-cafe-accent animate-pulse-subtle"
+              />
+            )}
           </span>
         ))}
       </div>

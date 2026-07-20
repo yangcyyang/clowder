@@ -373,6 +373,8 @@ export interface ChatMessage {
   origin?: 'stream' | 'callback' | 'briefing' | 'progress';
   /** F35: Message visibility. undefined/public = visible to all */
   visibility?: 'public' | 'whisper';
+  /** Viewer-scoped, server-derived explicit Agent mentions. */
+  mentions?: string[];
   /** F35: Whisper recipients (cat IDs). Only meaningful when visibility='whisper' */
   whisperTo?: string[];
   /** F35: Timestamp when whisper was revealed (made public) */
@@ -395,6 +397,13 @@ export interface ChatMessage {
 
 export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;
 
+export interface ThreadRelationV1 {
+  readonly v: 1;
+  readonly kind: 'inline_reply' | 'edit_branch';
+  readonly parentThreadId: string;
+  readonly rootMessageId: string;
+}
+
 export interface Thread {
   id: string;
   projectPath: string;
@@ -403,6 +412,8 @@ export interface Thread {
   participants: string[];
   lastActiveAt: number;
   createdAt: number;
+  /** Server-derived durable branch identity. Missing means root/legacy thread. */
+  readonly relation?: ThreadRelationV1;
   pinned?: boolean;
   pinnedAt?: number | null;
   favorited?: boolean;

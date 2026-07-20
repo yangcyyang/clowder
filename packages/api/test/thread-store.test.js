@@ -77,6 +77,29 @@ describe('ThreadStore', () => {
     assert.ok(thread.createdAt > 0);
   });
 
+  test('create() keeps server-derived branch relation stable across rename', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const relation = {
+      v: 1,
+      kind: 'edit_branch',
+      parentThreadId: 'thread-parent',
+      rootMessageId: 'msg-root',
+      parentTitle: 'must not persist',
+      parentContent: 'must not persist',
+    };
+    const thread = store.create('user-1', 'Branch', '/project', { relation });
+
+    store.updateTitle(thread.id, 'Renamed Branch');
+
+    assert.deepEqual(store.get(thread.id)?.relation, {
+      v: 1,
+      kind: 'edit_branch',
+      parentThreadId: 'thread-parent',
+      rootMessageId: 'msg-root',
+    });
+  });
+
   test('get() returns null for nonexistent thread', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 

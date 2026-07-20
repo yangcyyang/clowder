@@ -29,7 +29,7 @@ function createMockThreadStore() {
   const threads = {};
   let seq = 0;
   return {
-    create(userId, title, projectPath) {
+    create(userId, title, projectPath, options) {
       const id = `thread-branch-${++seq}`;
       const thread = {
         id,
@@ -39,6 +39,7 @@ function createMockThreadStore() {
         participants: [],
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
+        ...(options?.relation ? { relation: structuredClone(options.relation) } : {}),
       };
       threads[id] = thread;
       return thread;
@@ -59,7 +60,9 @@ function createMockThreadStore() {
     list: () => Object.values(threads),
     listByProject: () => [],
     getParticipants: (id) => threads[id]?.participants ?? [],
-    updateTitle: () => {},
+    updateTitle(id, title) {
+      if (threads[id]) threads[id].title = title;
+    },
     updateLastActive: () => {},
     delete: (id) => {
       const existed = !!threads[id];
@@ -184,6 +187,38 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     await app.close();
   });
 
+  it('derives inline relation from the route and ignores caller-supplied relation', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    const msgs = seedThread(messageStore, threadStore);
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: {
+        fromMessageId: msgs[2].id,
+        userId: 'user-1',
+        relation: {
+          v: 1,
+          kind: 'edit_branch',
+          parentThreadId: 'attacker-parent',
+          rootMessageId: 'attacker-message',
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    assert.deepEqual(threadStore.get(res.json().threadId)?.relation, {
+      v: 1,
+      kind: 'inline_reply',
+      parentThreadId: 'thread-orig',
+      rootMessageId: msgs[2].id,
+    });
+
+    await app.close();
+  });
+
   it('preserves whisper visibility when copying branch context', async () => {
     const messageStore = new MessageStore();
     const threadStore = createMockThreadStore();
@@ -244,11 +279,76 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     assert.equal(second.statusCode, 200);
     assert.equal(second.json().threadId, firstBody.threadId);
     assert.equal(second.json().reused, true);
+    const relationBeforeRename = structuredClone(threadStore.get(firstBody.threadId)?.relation);
+    threadStore.updateTitle(firstBody.threadId, '重命名后的分支');
+    assert.deepEqual(threadStore.get(firstBody.threadId)?.relation, relationBeforeRename);
     assert.equal(
       threadStore.list().filter((thread) => thread.id !== 'thread-orig').length,
       1,
       'refresh/retry must not create an orphan second branch',
     );
+
+    await app.close();
+  });
+
+  it('linearizes concurrent inline branch retries to one durable thread', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    const msgs = seedThread(messageStore, threadStore);
+    const createThread = threadStore.create.bind(threadStore);
+    let arrivals = 0;
+    let releaseBarrier;
+    const barrier = new Promise((resolve) => {
+      releaseBarrier = resolve;
+    });
+    threadStore.create = async (...args) => {
+      arrivals += 1;
+      if (arrivals === 2) releaseBarrier();
+      await barrier;
+      return createThread(...args);
+    };
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const request = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/threads/thread-orig/branch',
+        payload: { fromMessageId: msgs[2].id, userId: 'user-1' },
+      });
+    const [first, second] = await Promise.all([request(), request()]);
+    const responses = [first, second];
+    const branchIds = new Set(responses.map((response) => response.json().threadId));
+
+    assert.deepEqual(responses.map((response) => response.statusCode).sort(), [200, 201]);
+    assert.equal(branchIds.size, 1, 'both retries must converge on the same branch id');
+    assert.equal(
+      threadStore.list().filter((thread) => thread.id !== 'thread-orig').length,
+      1,
+      'the losing candidate must be removed',
+    );
+    assert.equal(messageStore.getById(msgs[2].id).extra?.slockThread?.branchThreadId, [...branchIds][0]);
+
+    await app.close();
+  });
+
+  it('atomically replaces a stale inline branch link', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    const msgs = seedThread(messageStore, threadStore);
+    messageStore.updateExtra(msgs[2].id, {
+      slockThread: { branchThreadId: 'thread-missing', replyCount: 0 },
+    });
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: msgs[2].id, userId: 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 201);
+    assert.notEqual(res.json().threadId, 'thread-missing');
+    assert.equal(messageStore.getById(msgs[2].id).extra?.slockThread?.branchThreadId, res.json().threadId);
 
     await app.close();
   });
@@ -271,6 +371,12 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
 
     assert.equal(res.statusCode, 201);
     assert.equal(messageStore.getById(msgs[2].id).extra?.slockThread, undefined);
+    assert.deepEqual(threadStore.get(res.json().threadId)?.relation, {
+      v: 1,
+      kind: 'edit_branch',
+      parentThreadId: 'thread-orig',
+      rootMessageId: msgs[2].id,
+    });
 
     await app.close();
   });

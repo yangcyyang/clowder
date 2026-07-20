@@ -9,7 +9,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore, ThreadRelationV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface ThreadBranchRoutesOptions {
@@ -141,8 +141,10 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // Inline Thread 使用现有 extra.slockThread 持久化父子关联；编辑分支保持原语义，
     // 不出现在父消息的 Thread 折叠行里。
+    let replaceBranchThreadId: string | undefined;
     if (editedContent === undefined && fromMessage.extra?.slockThread) {
-      const existingBranch = await threadStore.get(fromMessage.extra.slockThread.branchThreadId);
+      const linkedBranchThreadId = fromMessage.extra.slockThread.branchThreadId;
+      const existingBranch = await threadStore.get(linkedBranchThreadId);
       if (existingBranch) {
         reply.status(200);
         return {
@@ -152,6 +154,7 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
           reused: true,
         };
       }
+      replaceBranchThreadId = linkedBranchThreadId;
     }
 
     // ③ Get all visible messages up to and including fromMessage
@@ -166,7 +169,13 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
-    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath);
+    const relation: ThreadRelationV1 = {
+      v: 1,
+      kind: editedContent === undefined ? 'inline_reply' : 'edit_branch',
+      parentThreadId: id,
+      rootMessageId: fromMessageId,
+    };
+    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath, { relation });
 
     // ⑤ Copy participants + messages inside guarded block; rollback on any failure
     try {
@@ -198,11 +207,25 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       }
 
       if (editedContent === undefined) {
-        const linked = await messageStore.updateExtra(fromMessage.id, {
-          ...(fromMessage.extra ?? {}),
-          slockThread: { branchThreadId: newThread.id, replyCount: 0 },
-        });
-        if (!linked) throw new Error('Source message disappeared while linking inline thread');
+        const claim = await messageStore.claimBranchThreadLink(fromMessage.id, newThread.id, replaceBranchThreadId);
+        if (!claim) throw new Error('Source message disappeared while linking inline thread');
+        if (!claim.claimed) {
+          const cleanup = await attemptRollbackCleanup(newThread.id, messageStore, threadStore);
+          if (!rollbackCleanupDone(cleanup)) {
+            scheduleRollbackReconcile(newThread.id, messageStore, threadStore, request.log);
+          }
+          const existingBranch = await threadStore.get(claim.branchThreadId);
+          if (!existingBranch) {
+            throw new Error('Winning inline branch disappeared after link claim');
+          }
+          reply.status(200);
+          return {
+            threadId: existingBranch.id,
+            messageCount: 0,
+            title: existingBranch.title ?? '分支对话',
+            reused: true,
+          };
+        }
       }
     } catch (err) {
       // Best-effort cleanup: sync/async failure-safe

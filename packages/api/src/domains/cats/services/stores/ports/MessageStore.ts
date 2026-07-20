@@ -359,6 +359,12 @@ export interface IMessageStore {
     id: string,
     extra: NonNullable<StoredMessage['extra']>,
   ): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Atomically install one inline-branch link, or return the winner chosen by another retry. */
+  claimBranchThreadLink(
+    id: string,
+    candidateBranchThreadId: string,
+    replaceBranchThreadId?: string,
+  ): BranchThreadLinkClaimResult | null | Promise<BranchThreadLinkClaimResult | null>;
   /** Update plain-text message content in place. Returns null if not found. */
   updateContent(id: string, content: string, editedAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /** #1462: augment callback-persisted messages with metadata collected only on the stream path. */
@@ -382,6 +388,11 @@ const MAX_MESSAGES = 2000;
 
 /** Default limit for queries */
 const DEFAULT_LIMIT = 50;
+
+export interface BranchThreadLinkClaimResult {
+  claimed: boolean;
+  branchThreadId: string;
+}
 
 function watermarkFromBigInt(value: bigint): ThreadAppendWatermark {
   return value.toString(10) as ThreadAppendWatermark;
@@ -1006,6 +1017,24 @@ export class MessageStore {
     if (!msg) return null;
     msg.extra = extra;
     return msg;
+  }
+
+  claimBranchThreadLink(
+    id: string,
+    candidateBranchThreadId: string,
+    replaceBranchThreadId?: string,
+  ): BranchThreadLinkClaimResult | null {
+    const msg = this.messages.find((message) => message.id === id);
+    if (!msg) return null;
+    const currentBranchThreadId = msg.extra?.slockThread?.branchThreadId;
+    if (currentBranchThreadId && currentBranchThreadId !== replaceBranchThreadId) {
+      return { claimed: false, branchThreadId: currentBranchThreadId };
+    }
+    msg.extra = {
+      ...msg.extra,
+      slockThread: { branchThreadId: candidateBranchThreadId, replyCount: 0 },
+    };
+    return { claimed: true, branchThreadId: candidateBranchThreadId };
   }
 
   updateContent(id: string, content: string, editedAt: number): StoredMessage | null {

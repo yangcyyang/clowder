@@ -2223,6 +2223,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           }
         : {}),
       ...(m.visibility ? { visibility: m.visibility } : {}),
+      ...(m.mentions.length > 0 ? { mentions: [...m.mentions] } : {}),
       ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
       ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
       ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),

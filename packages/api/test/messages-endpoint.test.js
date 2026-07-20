@@ -62,6 +62,7 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[0].type, 'user');
     assert.equal(body.messages[0].catId, null);
     assert.equal(body.messages[0].content, 'hello');
+    assert.deepEqual(body.messages[0].mentions, ['opus']);
 
     // Assistant message
     assert.equal(body.messages[1].type, 'assistant');
