@@ -166,6 +166,9 @@ export function registerCallbackTaskRoutes(
       reply.status(403);
       return { error: 'Task belongs to a different thread' };
     }
+    // Cheap pre-check keeps 409-before-freshness ordering (a retry on an
+    // already-claimed task must not consume the invocation side-effect claim).
+    // The authoritative atomic check is claimIfUnowned below.
     if (existing.ownerCatId && existing.ownerCatId !== actor.catId) {
       reply.status(409);
       return { error: 'Task is already claimed by another cat', ownerCatId: existing.ownerCatId };
@@ -180,16 +183,19 @@ export function registerCallbackTaskRoutes(
     });
     if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
-    const updated = await taskStore.update(taskId, {
-      ownerCatId: actor.catId,
-      status: 'doing',
-      eventCatId: actor.catId,
+    // 票B B3: single atomic CAS — read-then-update allowed two racing cats to both win.
+    const claim = await taskStore.claimIfUnowned(taskId, actor.catId, {
       ...(why ? { why } : {}),
     });
-    if (!updated) {
-      reply.status(500);
-      return { error: 'Failed to claim task' };
+    if (claim.outcome === 'not_found') {
+      reply.status(404);
+      return { error: 'Task not found' };
     }
+    if (claim.outcome === 'already_claimed') {
+      reply.status(409);
+      return { error: 'Task is already claimed by another cat', ownerCatId: claim.task.ownerCatId };
+    }
+    const updated = claim.task;
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     return { status: 'ok', task: updated };

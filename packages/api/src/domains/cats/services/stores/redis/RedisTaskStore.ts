@@ -16,7 +16,7 @@
 import type { AutomationState, CatId, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
-import { createSubjectOwnershipConflict, type ITaskStore, mergeTaskEvents } from '../ports/TaskStore.js';
+import { createSubjectOwnershipConflict, type ClaimTaskResult, type ITaskStore, mergeTaskEvents } from '../ports/TaskStore.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -36,6 +36,27 @@ const MAX_AUTOMATION_STATE_PATCH_RETRIES = 5;
  * ARGV[2] = score (createdAt as string)
  * ARGV[3..] = hash field-value pairs (flattened)
  */
+/**
+ * Lua script: atomically claim a task if it is unowned (or already owned by
+ * the same cat). CAS condition is ONLY ownerCatId — events are pre-merged in
+ * TS (append 'claimed') and written together with the claim.
+ *
+ * KEYS[1] = tasks:detail:{id}
+ * ARGV[1] = catId (claimant)
+ * ARGV[2] = updatedAt (ms string)
+ * ARGV[3] = why ('' = keep existing)
+ * ARGV[4] = events JSON (pre-merged)
+ * returns: -1 not_found / 0 already_claimed / 1 claimed
+ */
+const CLAIM_IF_UNOWNED_LUA = `
+if redis.call('exists', KEYS[1]) == 0 then return -1 end
+local current = redis.call('hget', KEYS[1], 'ownerCatId')
+if current and current ~= '' and current ~= ARGV[1] then return 0 end
+redis.call('hset', KEYS[1], 'ownerCatId', ARGV[1], 'status', 'doing', 'updatedAt', ARGV[2], 'events', ARGV[4])
+if ARGV[3] ~= '' then redis.call('hset', KEYS[1], 'why', ARGV[3]) end
+return 1
+`;
+
 const ATOMIC_OWNED_WRITE_LUA = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
   return 0
@@ -320,6 +341,42 @@ export class RedisTaskStore implements ITaskStore {
     // Update TTL based on new status
     await this.applyTtl(updated);
     return updated;
+  }
+
+  /**
+   * 票B B3: atomic claim via Lua CAS on ownerCatId.
+   * Events are read pre-Lua and merged in TS (append 'claimed'); the CAS
+   * condition is only ownerCatId. TTL is re-applied and the task re-read
+   * after a successful claim.
+   */
+  async claimIfUnowned(taskId: string, catId: CatId, input?: { why?: string }): Promise<ClaimTaskResult> {
+    const detailKey = TaskKeys.detail(taskId);
+    const existing = await this.get(taskId);
+    if (!existing) return { outcome: 'not_found' };
+
+    const now = Date.now();
+    const updateInput: UpdateTaskInput = {
+      ownerCatId: catId,
+      status: 'doing',
+      eventCatId: catId,
+      ...(input?.why ? { why: input.why } : {}),
+    };
+    const events = mergeTaskEvents(existing, updateInput, now);
+
+    const result = Number(
+      await this.redis.eval(CLAIM_IF_UNOWNED_LUA, 1, detailKey, catId, String(now), input?.why ?? '', JSON.stringify(events)),
+    );
+    if (result === -1) return { outcome: 'not_found' };
+    if (result === 0) {
+      const current = await this.get(taskId);
+      if (!current) return { outcome: 'not_found' };
+      return { outcome: 'already_claimed', task: current };
+    }
+
+    const task = await this.get(taskId);
+    if (!task) return { outcome: 'not_found' };
+    await this.applyTtl(task);
+    return { outcome: 'claimed', task };
   }
 
   async linkTaskThreadIfAbsent(
