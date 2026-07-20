@@ -171,6 +171,19 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(updated.contextHealth, health);
   });
 
+  it('理智线 T3 (task #385): update() stores and rehydrates sanityState', async () => {
+    const record = await store.create(BASE_INPUT);
+    assert.equal(record.sanityState, undefined, 'fresh record should have no sanityState yet');
+
+    const updated = await store.update(record.id, { sanityState: 'yellow' });
+    assert.ok(updated);
+    assert.equal(updated.sanityState, 'yellow');
+
+    // Round-trip through a fresh read (not just the in-memory return value from update()).
+    const reread = await store.get(record.id);
+    assert.equal(reread.sanityState, 'yellow');
+  });
+
   it('update() persists continuityCapsule across hydrated lookup paths', async () => {
     const record = await store.create(BASE_INPUT);
     const capsule = {

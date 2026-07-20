@@ -1121,6 +1121,155 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.contextHealth.source, 'exact');
   });
 
+  // ── 理智线 T3 (task #385): sanity state machine ──────────────────────────
+
+  it('理智线 T3: persists sanityState=green and emits no event for a fresh low-usage session', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    // opus's sanityLine resolves to 200_000 (defaultModel 'claude-opus-4-6' matches the
+    // 'opus' keyword in resolveSanityLineDefault — see T2, task #384).
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-sanity-green', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            usage: { inputTokens: 60000, outputTokens: 1000, contextWindowSize: 1_000_000 },
+          },
+        };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const outputs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-sanity-green',
+        isLastCat: true,
+      }),
+    );
+
+    const active = sessionChainStore.getActive('opus', 'thread-sanity-green');
+    assert.equal(active.sanityState, 'green'); // 60K/200K = 30%
+    const sanityEvents = outputs.filter(
+      (o) => o.type === 'system_info' && JSON.parse(o.content).type === 'sanity_state_changed',
+    );
+    assert.equal(sanityEvents.length, 0, 'green baseline on first turn should not emit a transition event');
+  });
+
+  it('理智线 T3: emits a green→red transition event when a fresh session starts already over the red threshold', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const service = {
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-sanity-red', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'anthropic',
+            model: 'claude-opus-4-6',
+            // 192K / 200K sanityLine = 96% → red
+            usage: { inputTokens: 192000, outputTokens: 1000, contextWindowSize: 1_000_000 },
+          },
+        };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const outputs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-sanity-red',
+        isLastCat: true,
+      }),
+    );
+
+    const active = sessionChainStore.getActive('opus', 'thread-sanity-red');
+    assert.equal(active.sanityState, 'red');
+    const sanityEvent = outputs.find(
+      (o) => o.type === 'system_info' && JSON.parse(o.content).type === 'sanity_state_changed',
+    );
+    assert.ok(sanityEvent, 'should emit a sanity_state_changed event');
+    const payload = JSON.parse(sanityEvent.content);
+    assert.equal(payload.from, 'green');
+    assert.equal(payload.to, 'red');
+    assert.equal(payload.catId, 'opus');
+    assert.equal(payload.threadId, 'thread-sanity-red');
+    assert.ok(typeof payload.ratio === 'number');
+  });
+
+  it('理智线 T3: emits exactly one transition event across turns and none when staying in the same tier', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const threadId = 'thread-sanity-sequence';
+    const cliSessionId = 'cli-sanity-sequence';
+
+    async function turn(inputTokens) {
+      const service = {
+        async *invoke() {
+          yield { type: 'session_init', catId: 'opus', sessionId: cliSessionId, timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens, outputTokens: 500, contextWindowSize: 1_000_000 },
+            },
+          };
+        },
+      };
+      const deps = { ...makeDeps(), sessionChainStore };
+      return collect(
+        invokeSingleCat(deps, { catId: 'opus', service, prompt: 'test', userId: 'user1', threadId, isLastCat: true }),
+      );
+    }
+
+    const findSanityEvent = (outputs) =>
+      outputs
+        .filter((o) => o.type === 'system_info' && JSON.parse(o.content).type === 'sanity_state_changed')
+        .map((o) => JSON.parse(o.content));
+
+    // Turn 1: 100K/200K = 50% → green, no event (fresh session baseline).
+    const t1 = await turn(100000);
+    assert.deepEqual(findSanityEvent(t1), []);
+
+    // Turn 2: 150K/200K = 75% → yellow, green→yellow event.
+    const t2 = await turn(150000);
+    const t2Events = findSanityEvent(t2);
+    assert.equal(t2Events.length, 1);
+    assert.equal(t2Events[0].from, 'green');
+    assert.equal(t2Events[0].to, 'yellow');
+
+    // Turn 3: 160K/200K = 80% → still yellow, no event.
+    const t3 = await turn(160000);
+    assert.deepEqual(findSanityEvent(t3), []);
+
+    // Turn 4: 192K/200K = 96% → red, yellow→red event.
+    const t4 = await turn(192000);
+    const t4Events = findSanityEvent(t4);
+    assert.equal(t4Events.length, 1);
+    assert.equal(t4Events[0].from, 'yellow');
+    assert.equal(t4Events[0].to, 'red');
+
+    assert.equal(sessionChainStore.getActive('opus', threadId).sanityState, 'red');
+  });
+
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

@@ -24,6 +24,11 @@ export interface SessionRecord {
   status: SessionStatus;
   /** Latest context health snapshot after last invocation */
   contextHealth?: ContextHealth;
+  /**
+   * 理智线 T3（task #385）：绿黄红理智线档位，跟 contextHealth 是两个不同的度量
+   * （分母是 sanityLine 不是 windowTokens）。用于跨轮判断是否跨档发事件。
+   */
+  sanityState?: 'green' | 'yellow' | 'red';
   /** Latest token usage snapshot (persisted for frontend display after reload) */
   lastUsage?: SessionUsageSnapshot;
   messageCount: number;

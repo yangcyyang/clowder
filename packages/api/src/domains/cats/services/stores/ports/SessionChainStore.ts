@@ -22,6 +22,7 @@ export type SessionRecordPatch = Partial<
     | 'cliSessionId'
     | 'status'
     | 'contextHealth'
+    | 'sanityState'
     | 'lastUsage'
     | 'messageCount'
     | 'sealReason'
@@ -171,6 +172,7 @@ export class SessionChainStore implements ISessionChainStore {
       }
     }
     if (patch.contextHealth !== undefined) record.contextHealth = patch.contextHealth;
+    if (patch.sanityState !== undefined) record.sanityState = patch.sanityState;
     if (patch.lastUsage !== undefined) record.lastUsage = patch.lastUsage;
     if (patch.messageCount !== undefined) record.messageCount = patch.messageCount;
     if (patch.sealReason !== undefined) record.sealReason = patch.sealReason;

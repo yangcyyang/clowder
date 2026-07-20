@@ -13,7 +13,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type ContextHealth,
+  catRegistry,
+  getSanityLineFallback,
+  type MessageContent,
+  type ToolPolicy,
+} from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   resolveBuiltinClientForProvider,
@@ -52,8 +59,8 @@ import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger
 import { recordLlmCallSpan, recordToolUseSpan } from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import { filterAccountEnvVars } from '../../../../../utils/env-var-secret-guard.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { filterAccountEnvVars } from '../../../../../utils/env-var-secret-guard.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
@@ -128,6 +135,7 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
 }
 
 import type { SessionManager } from '../../session/SessionManager.js';
+import { computeSanityTransition, getSanityThresholdsFromEnv } from '../../session/SessionSanityMonitor.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
@@ -1797,8 +1805,38 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
                   if (activeRecord) {
                     const u = msg.metadata?.usage!;
+                    // 理智线 T3 (task #385): reuse the same usedTokens ContextHealth already
+                    // computed above; classify against sanityLine (a different, usually much
+                    // smaller, threshold than windowTokens — see SessionSanityMonitor.ts).
+                    // Only emit a system_info event on tier crossings, not every same-tier turn.
+                    const sanityLine =
+                      catRegistry.tryGet(catId as string)?.config.sanityLine ?? getSanityLineFallback();
+                    const sanityTransition = computeSanityTransition(
+                      activeRecord.sanityState,
+                      usedTokens,
+                      sanityLine,
+                      getSanityThresholdsFromEnv(),
+                    );
+                    if (sanityTransition.event) {
+                      outputs.push({
+                        type: 'system_info' as const,
+                        catId,
+                        content: JSON.stringify({
+                          type: 'sanity_state_changed',
+                          catId,
+                          threadId,
+                          sanityLine,
+                          usedTokens,
+                          ratio: sanityTransition.event.ratio,
+                          from: sanityTransition.event.from,
+                          to: sanityTransition.event.to,
+                        }),
+                        timestamp: Date.now(),
+                      });
+                    }
                     await deps.sessionChainStore.update(activeRecord.id, {
                       contextHealth: health,
+                      sanityState: sanityTransition.state,
                       lastUsage: {
                         ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
                         ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),

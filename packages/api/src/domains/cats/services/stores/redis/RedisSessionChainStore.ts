@@ -209,6 +209,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.contextHealth !== undefined) {
       pairs.push('contextHealth', JSON.stringify(patch.contextHealth));
     }
+    if (patch.sanityState !== undefined) {
+      pairs.push('sanityState', patch.sanityState);
+    }
     if (patch.lastUsage !== undefined) {
       pairs.push('lastUsage', JSON.stringify(patch.lastUsage));
     }
@@ -279,6 +282,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const continuityCapsule =
       data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
+    const sanityState = data.sanityState as SessionRecord['sanityState'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
     const consecutiveRestoreFailures = data.consecutiveRestoreFailures
@@ -294,6 +298,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       seq: parseInt(data.seq!, 10),
       status: (data.status as SessionStatus) ?? 'active',
       ...(contextHealth ? { contextHealth } : {}),
+      ...(sanityState ? { sanityState } : {}),
       ...(lastUsage ? { lastUsage } : {}),
       messageCount: parseInt(data.messageCount ?? '0', 10),
       ...(sealReason ? { sealReason } : {}),
