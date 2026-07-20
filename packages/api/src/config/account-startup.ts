@@ -6,16 +6,26 @@
  */
 import { hasLegacyProviderProfiles, readCatalogAccounts } from './catalog-accounts.js';
 import { assertCredentialsReadable } from './credentials.js';
+import { scanAccountsForLeakedEnvVars, type LeakedEnvVarFinding } from '../utils/env-var-secret-guard.js';
+import { createModuleLogger } from '../infrastructure/logger.js';
+
+const moduleLog = createModuleLogger('account-startup');
 
 export interface AccountStartupResult {
   accountCount: number;
+  /** 票B B1: masked findings from the one-time read-only envVars leak scan. */
+  leakedEnvVars: LeakedEnvVarFinding[];
+}
+
+interface WarnLogger {
+  warn: (obj: unknown, msg?: string) => void;
 }
 
 /**
  * Startup check — trigger migration and verify system health.
  * Throws on: migration conflict, corrupt accounts/credentials, LL-043 invariant.
  */
-export function accountStartupHook(projectRoot: string): AccountStartupResult {
+export function accountStartupHook(projectRoot: string, options?: { log?: WarnLogger }): AccountStartupResult {
   // readCatalogAccounts triggers ensureMigrated → may throw on account conflicts
   let accounts: Record<string, unknown>;
   try {
@@ -46,5 +56,19 @@ export function accountStartupHook(projectRoot: string): AccountStartupResult {
     );
   }
 
-  return { accountCount: Object.keys(accounts).length };
+  // 票B B1: one-time read-only leak scan — accounts written before the
+  // write-time rejection may carry secret-like envVars in accounts.json (0644).
+  // Warn-only, masked key names, NEVER values.
+  const log = options?.log ?? moduleLog;
+  const leakedEnvVars = scanAccountsForLeakedEnvVars(
+    accounts as Record<string, { envVars?: Readonly<Record<string, string>> }>,
+  );
+  for (const finding of leakedEnvVars) {
+    log.warn(
+      { accountId: finding.accountId, envKey: finding.maskedKey, detail: finding.detail },
+      '[security] account envVars contains a secret-like entry — move it to credentials.json (0600 keychain)',
+    );
+  }
+
+  return { accountCount: Object.keys(accounts).length, leakedEnvVars };
 }

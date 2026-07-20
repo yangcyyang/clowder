@@ -8,6 +8,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
+// 票B B3: PATCH/DELETE/scope=all now require an authenticated principal.
+const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
+
 function createMockSocketManager() {
   const events = [];
   return {
@@ -392,6 +395,7 @@ describe('Tasks Routes', () => {
     });
     await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${createRes.json().id}`,
       payload: { status: 'in_review' },
     });
@@ -399,6 +403,7 @@ describe('Tasks Routes', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/tasks?scope=all&kind=work&status=in_review',
+      headers: AUTH_HEADERS,
     });
 
     assert.equal(response.statusCode, 200);
@@ -457,6 +462,7 @@ describe('Tasks Routes', () => {
 
     await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: {
         status: 'in_review',
@@ -498,6 +504,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { status: 'doing' },
     });
@@ -530,6 +537,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: { 'x-cat-cafe-user': 'user-1' },
       url: `/api/tasks/${taskId}`,
       payload: { status: 'in_review' },
     });
@@ -559,11 +567,13 @@ describe('Tasks Routes', () => {
 
     await app.inject({
       method: 'PATCH',
+      headers: { 'x-cat-cafe-user': 'user-1' },
       url: `/api/tasks/${taskId}`,
       payload: { status: 'in_review' },
     });
     await app.inject({
       method: 'PATCH',
+      headers: { 'x-cat-cafe-user': 'user-1' },
       url: `/api/tasks/${taskId}`,
       payload: { why: 'updated reason' },
     });
@@ -583,6 +593,7 @@ describe('Tasks Routes', () => {
 
     const claimRes = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { ownerCatId: 'codex', status: 'doing', eventCatId: 'codex' },
     });
@@ -594,6 +605,7 @@ describe('Tasks Routes', () => {
 
     const doneRes = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { status: 'done', eventCatId: 'codex' },
     });
@@ -605,6 +617,7 @@ describe('Tasks Routes', () => {
 
     const unclaimRes = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { ownerCatId: null, eventCatId: 'codex' },
     });
@@ -623,11 +636,13 @@ describe('Tasks Routes', () => {
 
     await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { ownerCatId: 'codex', eventCatId: 'codex' },
     });
     await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { status: 'done', eventCatId: 'codex' },
     });
@@ -649,6 +664,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: {
         status: 'failed',
@@ -683,6 +699,7 @@ describe('Tasks Routes', () => {
     const taskId = createRes.json().id;
     await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { ownerCatId: 'codex', eventCatId: 'codex' },
     });
@@ -921,6 +938,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { status: 'in_review' },
     });
@@ -940,6 +958,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: {
         evidence: {
@@ -967,6 +986,7 @@ describe('Tasks Routes', () => {
     const app = await createApp();
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: '/api/tasks/nonexistent',
       payload: { status: 'done' },
     });
@@ -985,6 +1005,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'PATCH',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
       payload: { status: 'invalid-status' },
     });
@@ -1005,6 +1026,7 @@ describe('Tasks Routes', () => {
 
     const response = await app.inject({
       method: 'DELETE',
+      headers: AUTH_HEADERS,
       url: `/api/tasks/${taskId}`,
     });
 
@@ -1022,6 +1044,7 @@ describe('Tasks Routes', () => {
     const app = await createApp();
     const response = await app.inject({
       method: 'DELETE',
+      headers: AUTH_HEADERS,
       url: '/api/tasks/nonexistent',
     });
 

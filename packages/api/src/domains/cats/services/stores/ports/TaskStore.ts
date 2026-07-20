@@ -8,6 +8,7 @@
 
 import type {
   AutomationState,
+  CatId,
   CreateTaskInput,
   TaskEvent,
   TaskItem,
@@ -120,6 +121,12 @@ export function mergeTaskEvents(existing: TaskItem, input: UpdateTaskInput, now 
   return [...(existing.events ?? []), ...buildTaskUpdateEvents(existing, input, now), ...(input.events ?? [])];
 }
 
+/** 票B B3: result of an atomic claim attempt. */
+export type ClaimTaskResult =
+  | { outcome: 'not_found' }
+  | { outcome: 'already_claimed'; task: TaskItem }
+  | { outcome: 'claimed'; task: TaskItem };
+
 /**
  * Common interface for task stores (in-memory and Redis).
  * #320: Extended with kind/subject-based queries for unified PR tracking.
@@ -152,6 +159,13 @@ export interface ITaskStore {
     taskId: string,
     input: { taskThreadId: string; sourceMessageId?: string },
   ): { task: TaskItem | null; linked: boolean } | Promise<{ task: TaskItem | null; linked: boolean }>;
+
+  /**
+   * 票B B3: atomically claim an unowned task (CAS on ownerCatId).
+   * Same-cat re-claim is idempotent. On success appends the standard
+   * 'claimed' event and moves status to 'doing'.
+   */
+  claimIfUnowned(taskId: string, catId: CatId, input?: { why?: string }): ClaimTaskResult | Promise<ClaimTaskResult>;
 }
 
 /**
@@ -305,6 +319,22 @@ export class TaskStore implements ITaskStore {
     };
     this.tasks.set(taskId, updated);
     return { task: updated, linked: true };
+  }
+
+  claimIfUnowned(taskId: string, catId: CatId, input?: { why?: string }): ClaimTaskResult {
+    const existing = this.tasks.get(taskId);
+    if (!existing) return { outcome: 'not_found' };
+    if (existing.ownerCatId && existing.ownerCatId !== catId) {
+      return { outcome: 'already_claimed', task: existing };
+    }
+    const updated = this.update(taskId, {
+      ownerCatId: catId,
+      status: 'doing',
+      eventCatId: catId,
+      ...(input?.why ? { why: input.why } : {}),
+    });
+    if (!updated) return { outcome: 'not_found' };
+    return { outcome: 'claimed', task: updated };
   }
 
   update(taskId: string, input: UpdateTaskInput): TaskItem | null {

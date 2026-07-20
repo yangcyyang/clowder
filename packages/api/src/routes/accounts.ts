@@ -22,6 +22,7 @@ import { configEventBus, createChangeSetId } from '../config/config-event-bus.js
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { detectEnvVarSecret, ENV_VAR_SECRET_MESSAGE } from '../utils/env-var-secret-guard.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -130,6 +131,21 @@ const envVarsSchema = z
       if (!k.startsWith('CAT_CAFE_')) filtered[k] = v;
     }
     return Object.keys(filtered).length > 0 ? filtered : undefined;
+  })
+  .superRefine((vars, ctx) => {
+    if (!vars) return;
+    // 票B B1: reject secret-like entries — envVars live in accounts.json (0644),
+    // secrets belong in the credentials.json (0600) keychain.
+    for (const [k, v] of Object.entries(vars)) {
+      const reason = detectEnvVarSecret(k, v);
+      if (reason) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['envVars', k],
+          message: `envVars.${k} looks like a secret (${reason}) — ${ENV_VAR_SECRET_MESSAGE}`,
+        });
+      }
+    }
   });
 
 const authTypeEnum = z.enum(['oauth', 'api_key']);

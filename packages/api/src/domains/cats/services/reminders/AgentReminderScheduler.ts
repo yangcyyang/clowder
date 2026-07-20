@@ -48,27 +48,6 @@ export function startAgentReminderScheduler(deps: AgentReminderSchedulerDeps): (
           const thread = await deps.threadStore.get(reminder.threadId);
           const userId = thread?.createdBy ?? 'system';
           const content = `⏰ 提醒到期：${reminder.message}\n\n目标 Agent：@${reminder.catId}`;
-          const stored = await deps.messageStore.append({
-            userId: 'system',
-            catId: null,
-            threadId: reminder.threadId,
-            content,
-            mentions: [reminder.catId as CatId],
-            timestamp: Date.now(),
-            source: REMINDER_SOURCE,
-          });
-
-          deps.socketManager?.broadcastToRoom(`thread:${reminder.threadId}`, 'connector_message', {
-            threadId: reminder.threadId,
-            message: {
-              id: stored.id,
-              type: 'connector',
-              content: stored.content,
-              source: REMINDER_SOURCE,
-              timestamp: stored.timestamp,
-            },
-          });
-
           const enqueueResult = deps.invocationQueue.enqueue({
             threadId: reminder.threadId,
             userId,
@@ -80,10 +59,42 @@ export function startAgentReminderScheduler(deps: AgentReminderSchedulerDeps): (
             sourceCategory: 'scheduled',
             idempotencyKey: `reminder:${reminder.id}`,
           });
+          // 票B B2: only mark fired when the invocation was actually queued.
+          // On 'resetting' (the live false-fire path) nothing was enqueued —
+          // leave the reminder scheduled so the next tick retries it. The
+          // thread message append moved inside this branch: it is trivially
+          // safe (no ordering dependency) and prevents one duplicate
+          // "提醒到期" message per retry tick while the queue keeps resetting.
           if (enqueueResult.outcome === 'enqueued') {
+            const stored = await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              threadId: reminder.threadId,
+              content,
+              mentions: [reminder.catId as CatId],
+              timestamp: Date.now(),
+              source: REMINDER_SOURCE,
+            });
+
+            deps.socketManager?.broadcastToRoom(`thread:${reminder.threadId}`, 'connector_message', {
+              threadId: reminder.threadId,
+              message: {
+                id: stored.id,
+                type: 'connector',
+                content: stored.content,
+                source: REMINDER_SOURCE,
+                timestamp: stored.timestamp,
+              },
+            });
+
             await deps.queueProcessor.tryAutoExecute(reminder.threadId);
+            await deps.store.markFired(reminder.id);
+          } else {
+            deps.log.warn(
+              { reminderId: reminder.id, threadId: reminder.threadId, outcome: enqueueResult.outcome },
+              '[reminder] enqueue did not succeed; leaving reminder scheduled for next tick',
+            );
           }
-          await deps.store.markFired(reminder.id);
         } catch (err) {
           deps.log.warn({ err, reminderId: reminder.id }, '[reminder] failed to fire reminder');
         } finally {

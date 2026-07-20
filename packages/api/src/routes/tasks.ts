@@ -344,6 +344,23 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return userId;
   }
 
+  /**
+   * 票B B3: minimal caller-scope check for task mutation / cross-thread listing.
+   * Binding resolution order:
+   *   1. task.userId → must equal caller.
+   *   2. parent thread.createdBy → must equal caller.
+   *   3. no binding at all (legacy tasks) → accessible to any authenticated principal.
+   * DOCUMENTED BOUNDARY: unbound tasks (case 3) are NOT protected — they carry
+   * no ownership metadata to check against. New tasks created via callback
+   * flows always carry userId; only legacy/anonymous tasks hit case 3.
+   */
+  async function taskAccessibleToUser(task: TaskItem, userId: string): Promise<boolean> {
+    if (task.userId) return task.userId === userId;
+    const thread = await threadStore.get(task.threadId);
+    if (thread?.createdBy) return thread.createdBy === userId;
+    return true;
+  }
+
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
     const result = createSchema.safeParse(request.body);
@@ -380,8 +397,15 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       status?: string;
     };
     if (scope === 'all') {
+      // 票B B3: scope=all requires a principal and is filtered to tasks the
+      // caller can access (previously leaked every task to anyone).
+      const userId = requireUserId(request, reply);
+      if (!userId) return { error: 'Identity required' };
       const taskKind = kind === 'pr_tracking' ? 'pr_tracking' : 'work';
       let tasks = await taskStore.listByKind(taskKind);
+      tasks = (
+        await Promise.all(tasks.map(async (task) => ((await taskAccessibleToUser(task, userId)) ? task : null)))
+      ).filter((task): task is TaskItem => task !== null);
       if (status) tasks = tasks.filter((t) => t.status === status);
       return { tasks };
     }
@@ -581,6 +605,10 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
   // PATCH /api/tasks/:id
   app.patch('/api/tasks/:id', async (request, reply) => {
+    // 票B B3: identity + caller-scope required (previously unauthenticated).
+    const userId = requireUserId(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
     const { id } = request.params as { id: string };
     const result = updateSchema.safeParse(request.body);
     if (!result.success) {
@@ -589,6 +617,14 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
 
     const previous = await taskStore.get(id);
+    if (!previous) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    if (!(await taskAccessibleToUser(previous, userId))) {
+      reply.status(403);
+      return { error: 'Task belongs to another user' };
+    }
     const updated = await taskStore.update(id, toUpdateInput(result.data));
     if (!updated) {
       reply.status(404);
@@ -604,7 +640,20 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
 
   // DELETE /api/tasks/:id
   app.delete('/api/tasks/:id', async (request, reply) => {
+    // 票B B3: identity + caller-scope required (previously unauthenticated).
+    const userId = requireUserId(request, reply);
+    if (!userId) return { error: 'Identity required' };
+
     const { id } = request.params as { id: string };
+    const task = await taskStore.get(id);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    if (!(await taskAccessibleToUser(task, userId))) {
+      reply.status(403);
+      return { error: 'Task belongs to another user' };
+    }
     const deleted = await taskStore.delete(id);
     if (!deleted) {
       reply.status(404);

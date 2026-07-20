@@ -52,6 +52,7 @@ import { emitOtelLog } from '../../../../../infrastructure/telemetry/otel-logger
 import { recordLlmCallSpan, recordToolUseSpan } from '../../../../../infrastructure/telemetry/span-helpers.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
+import { filterAccountEnvVars } from '../../../../../utils/env-var-secret-guard.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
@@ -1147,12 +1148,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // in subprocess env so user vars override provider-injected values.
     let accountEnv: Record<string, string> | undefined;
     if (resolvedAccount?.envVars) {
-      const validEnvKey = /^[A-Z_][A-Za-z0-9_]*$/;
-      const filtered: Record<string, string> = {};
-      for (const [k, v] of Object.entries(resolvedAccount.envVars)) {
-        if (!validEnvKey.test(k) || k.startsWith('CAT_CAFE_')) continue;
-        filtered[k] = v;
-      }
+      // 票B B1: defense-in-depth — drop secret-like entries (accounts written
+      // before write-time rejection existed). Values are never logged.
+      const filtered = filterAccountEnvVars(resolvedAccount.envVars, (drop) => {
+        if (drop.reason === 'secret_like') {
+          log.warn(
+            { catId, invocationId, envKey: drop.maskedKey, detail: drop.detail },
+            '[security] dropping secret-like account envVars entry — store secrets in credentials, not envVars',
+          );
+        }
+      });
       if (Object.keys(filtered).length > 0) accountEnv = filtered;
     }
 
