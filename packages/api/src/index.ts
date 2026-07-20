@@ -1186,7 +1186,7 @@ async function main(): Promise<void> {
           service = new DareAgentService({ catId });
           break;
         case 'antigravity':
-          service = new AntigravityAgentService({
+          service = AntigravityAgentService.forProduction({
             catId,
             capabilityReceiptGate,
           });

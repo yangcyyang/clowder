@@ -115,6 +115,17 @@ export interface AntigravityAgentServiceOptions {
   modelCapacityRetryDelaysMs?: readonly number[];
 }
 
+/**
+ * A1 production wiring: the capability receipt gate is a REQUIRED dependency
+ * of the production service. Omitting it is a compile-time error (and a
+ * startup throw), never a silent pass. Test injection keeps using the plain
+ * constructor with a mock `bridge`.
+ */
+export interface AntigravityAgentServiceProductionOptions
+  extends Omit<AntigravityAgentServiceOptions, 'bridge' | 'capabilityReceiptGate'> {
+  capabilityReceiptGate: NonNullable<BridgeOptions['capabilityReceiptGate']>;
+}
+
 export class AntigravityAgentService implements AgentService {
   readonly catId: CatId;
   private readonly model: string;
@@ -124,6 +135,16 @@ export class AntigravityAgentService implements AgentService {
   private readonly streamErrorGraceWindowMs: number;
   private readonly modelCapacityRetryDelaysMs: number[];
 
+  static forProduction(options: AntigravityAgentServiceProductionOptions): AntigravityAgentService {
+    if (!options?.capabilityReceiptGate) {
+      throw new Error(
+        'AntigravityAgentService.forProduction requires a capability receipt gate. ' +
+          'Building the production service without one would silently disable A1 enforce mode.',
+      );
+    }
+    return new AntigravityAgentService(options);
+  }
+
   constructor(options?: AntigravityAgentServiceOptions) {
     this.catId = options?.catId
       ? typeof options.catId === 'string'
@@ -132,12 +153,15 @@ export class AntigravityAgentService implements AgentService {
       : createCatId('antigravity');
     this.model = options?.model ?? getCatModel(this.catId as string);
     const injectedBridge = options?.bridge;
+    // Gate-carrying construction goes through the strict production factory;
+    // gate-less bridges exist only for tests.
     this.bridge =
       injectedBridge ??
-      new AntigravityBridge(
-        options?.connection,
-        options?.capabilityReceiptGate ? { capabilityReceiptGate: options.capabilityReceiptGate } : undefined,
-      );
+      (options?.capabilityReceiptGate
+        ? AntigravityBridge.forProduction(options?.connection, {
+            capabilityReceiptGate: options.capabilityReceiptGate,
+          })
+        : new AntigravityBridge(options?.connection));
     this.pollTimeoutMs = options?.pollTimeoutMs ?? 60_000;
     this.autoApprove = options?.autoApprove ?? process.env['ANTIGRAVITY_AUTO_APPROVE'] !== 'false';
     this.streamErrorGraceWindowMs = options?.streamErrorGraceWindowMs ?? STREAM_ERROR_GRACE_WINDOW_MS;

@@ -148,6 +148,17 @@ export interface BridgeOptions {
   };
 }
 
+/**
+ * A1 production wiring: the capability receipt gate is a REQUIRED dependency.
+ * `AntigravityBridge.forProduction` refuses to build a bridge without one, so
+ * omitting the gate in the production composition root is a compile-time
+ * error (and a startup throw), never a silent pass. The plain constructor
+ * stays lenient for test injection.
+ */
+export interface ProductionBridgeOptions extends BridgeOptions {
+  capabilityReceiptGate: NonNullable<BridgeOptions['capabilityReceiptGate']>;
+}
+
 export interface NativeExecutionAuthorizationContext {
   invocationId: string;
   threadId: string;
@@ -176,6 +187,23 @@ export class AntigravityBridge {
   ) {
     this.sessionStorePath = options?.sessionStorePath ?? DEFAULT_SESSION_STORE;
     this.capabilityReceiptGate = options?.capabilityReceiptGate;
+  }
+
+  /**
+   * A1 production construction. The gate is required by-type; the runtime
+   * guard is belt-and-braces for JS callers that bypass the type system.
+   */
+  static forProduction(
+    connection: Partial<BridgeConnection> | undefined,
+    options: ProductionBridgeOptions,
+  ): AntigravityBridge {
+    if (!options?.capabilityReceiptGate) {
+      throw new Error(
+        'AntigravityBridge.forProduction requires a capability receipt gate. ' +
+          'Building the production bridge without one would silently disable A1 enforce mode.',
+      );
+    }
+    return new AntigravityBridge(connection, options);
   }
 
   attachExecutors(registry: ExecutorRegistry, audit: AuditSink): void {
