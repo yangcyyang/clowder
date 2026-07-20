@@ -630,4 +630,131 @@ describe('SessionBootstrap', () => {
       assert.ok(result.text.includes('cat_cafe_read_invocation_detail'));
     });
   });
+
+  // ── 理智线 T5 (task #387): red-zone forced-seal recitation on wake ────────
+
+  describe('T5: sanity_critical recitation + sanityHandoff rendering', () => {
+    function makeCapsule(overrides = {}) {
+      return {
+        v: 1,
+        threadId: 'thread-1',
+        catId: 'opus',
+        triggerState: 'red',
+        goal: '（消息推断）实现理智线 T5 红区强制换班',
+        goalIsInferred: true,
+        background: '（消息推断）理智线批的最后一票',
+        constraints: '禁用 rm -rf；不要动 canonical worktree',
+        completed: '已完成 requestSeal 幂等验证',
+        verified: '测试通过，回归全绿',
+        abandonedApproaches: '未明确',
+        openIssues: '未明确',
+        nextSteps: '接下来验证 SessionBootstrap 渲染',
+        mustReadFiles: 'packages/api/src/domains/cats/services/session/SessionBootstrap.ts',
+        generatedAt: Date.now(),
+        ...overrides,
+      };
+    }
+
+    it('does NOT inject recitation for a normal seal reason (e.g. threshold)', async () => {
+      const store = createMockSessionChainStore([
+        {
+          id: 'sess-0',
+          catId: 'opus',
+          threadId: 'thread-1',
+          status: 'sealed',
+          seq: 0,
+          sealReason: 'threshold',
+          sanityHandoff: makeCapsule(),
+        },
+      ]);
+      const reader = createMockTranscriptReader();
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'opus',
+        'thread-1',
+      );
+      assert.ok(result);
+      assert.ok(!result.text.includes('换班回述'), 'normal seal reasons must not trigger the recitation instruction');
+      assert.ok(!result.text.includes('Sanity-Critical Handoff'));
+    });
+
+    it('injects the recitation instruction + sanityHandoff fields when sealReason is sanity_critical', async () => {
+      const store = createMockSessionChainStore([
+        {
+          id: 'sess-0',
+          catId: 'opus',
+          threadId: 'thread-1',
+          status: 'sealed',
+          seq: 0,
+          sealReason: 'sanity_critical',
+          sanityHandoff: makeCapsule(),
+        },
+      ]);
+      const reader = createMockTranscriptReader();
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'opus',
+        'thread-1',
+      );
+      assert.ok(result);
+      assert.ok(result.text.includes('换班回述'), 'sanity_critical seal must trigger the recitation instruction');
+      assert.ok(result.text.includes('禁止跳过回述直接动手'));
+      assert.ok(result.text.includes('Sanity-Critical Handoff'));
+      for (const label of ['目标', '背景', '约束', '已完成', '已验证', '下一步']) {
+        assert.match(result.text, new RegExp(label));
+      }
+    });
+
+    it('CANARY: a short constraint embedded in the capsule survives verbatim into the new session bootstrap text', async () => {
+      const CANARY = '禁用 rm -rf（跨班保活验证标记）';
+      const store = createMockSessionChainStore([
+        {
+          id: 'sess-0',
+          catId: 'opus',
+          threadId: 'thread-1',
+          status: 'sealed',
+          seq: 0,
+          sealReason: 'sanity_critical',
+          sanityHandoff: makeCapsule({ constraints: CANARY }),
+        },
+      ]);
+      const reader = createMockTranscriptReader();
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'opus',
+        'thread-1',
+      );
+      assert.ok(result);
+      assert.ok(
+        result.text.includes(CANARY),
+        'a short constraint from the red-zone handoff capsule must survive verbatim across the shift boundary',
+      );
+    });
+
+    it('does not inject recitation when sealReason is sanity_critical but sanityHandoff is missing (defensive)', async () => {
+      const store = createMockSessionChainStore([
+        {
+          id: 'sess-0',
+          catId: 'opus',
+          threadId: 'thread-1',
+          status: 'sealed',
+          seq: 0,
+          sealReason: 'sanity_critical',
+          // sanityHandoff intentionally absent
+        },
+      ]);
+      const reader = createMockTranscriptReader();
+
+      const result = await buildSessionBootstrap(
+        { sessionChainStore: store, transcriptReader: reader },
+        'opus',
+        'thread-1',
+      );
+      assert.ok(result);
+      assert.ok(!result.text.includes('换班回述'));
+    });
+  });
 });

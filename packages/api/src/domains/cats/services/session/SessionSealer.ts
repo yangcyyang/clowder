@@ -27,7 +27,7 @@ import type { ExtractiveDigestV1, TranscriptWriter } from './TranscriptWriter.js
 const log = createModuleLogger('session-sealer');
 const FINALIZE_TIMEOUT_MS = 30_000;
 
-export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
+export type SealReason = 'threshold' | 'manual' | 'error' | 'sanity_critical' | (string & {});
 
 /**
  * F065 Phase C: Handoff digest configuration.

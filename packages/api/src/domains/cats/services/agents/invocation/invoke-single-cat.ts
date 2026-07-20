@@ -521,6 +521,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let didResetRestoreFailures = false;
   let openCodeRuntimeConfigPath: string | undefined;
   let assistantTextForMemory = '';
+  // 理智线 T5 (task #387): set true once the red-zone forced writeback below has
+  // run (success or failure), so the normal end-of-invocation writeback doesn't
+  // fire a second time for the same turn.
+  let forcedMemoryWritebackDone = false;
+  // 理智线 T5 (task #387): sessionId of the active record once sanityTransition
+  // crosses into 'red' this turn, consumed by the forced-seal check inside F33's
+  // block below (reset per turn — this function handles exactly one invocation).
+  let sanityRedTriggerSessionId: string | undefined;
 
   const captureAssistantTextForMemory = (message: AgentMessage): void => {
     // F193: the route owns the freshness verdict. Until it publishes, stdout is
@@ -1917,6 +1925,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                       },
                       updatedAt: Date.now(),
                     });
+
+                    // 理智线 T5 (task #387): remember the red trigger for the forced-seal
+                    // check below. The actual requestSeal() call happens inside F33's own
+                    // block (after skipAutoSealForApproxApiKey/skipAutoSealForApiKeyCompress
+                    // are computed) — sanityLine's red decision is derived from the SAME
+                    // usedTokens value as F33's fillRatio, so it inherits the same
+                    // noisy-telemetry risk on api_key/approx gateways (F062-fix) and must
+                    // respect the same skip guard, not a separate one.
+                    if (sanityTransition.event && sanityTransition.event.to === 'red') {
+                      sanityRedTriggerSessionId = activeRecord.id;
+                    }
                   }
                 } catch {
                   /* best-effort */
@@ -1953,157 +1972,236 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
                   if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
                     const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
-                    const action = shouldTakeAction(
-                      health.fillRatio,
-                      health.windowTokens,
-                      health.usedTokens,
-                      activeRecord?.compressionCount ?? 0,
-                      strategy,
-                    );
 
-                    switch (action.type) {
-                      case 'none':
-                        break;
-                      case 'warn':
-                        // Warn is already emitted via context_health; add a one-shot handoff draft marker.
-                        if (activeRecord && !_handoffDraftWindowSessions.has(activeRecord.id)) {
-                          _handoffDraftWindowSessions.add(activeRecord.id);
+                    // 理智线 T5 (task #387): forced red-zone seal. Deliberately placed
+                    // inside this same api_key/approx noise-guarded scope — sanityLine's
+                    // red decision derives from the same (possibly noisy) usedTokens as
+                    // F33's fillRatio, so it must respect the same F062-fix skip guard,
+                    // not a separate one. If this seal fires, skipping the shouldTakeAction/
+                    // switch below is an OPTIMIZATION (nothing left for F33 to do once the
+                    // session is no longer 'active') — NOT the safety guarantee. The actual
+                    // guarantee is requestSeal()'s own CAS idempotency: calling it again on
+                    // an already-sealing/sealed record is a verified no-op (see the dedicated
+                    // "N times on an already-sealed session" test).
+                    let forcedSealAccepted = false;
+                    if (activeRecord && sanityRedTriggerSessionId === activeRecord.id && deps.sessionSealer) {
+                      // Forced memory writeback: unlike the normal end-of-invocation
+                      // writeback (fire-and-forget, swallows errors via .catch()), this
+                      // MUST be awaited before sealing so the handoff's assistant-side
+                      // memory is durably persisted — and failure MUST be loud (not
+                      // swallowed), since a silent failure here means the next shift
+                      // loses this turn's memory. We still proceed to seal after logging
+                      // a failure — this must not hang the handoff indefinitely.
+                      if (!freshnessProtected && !forcedMemoryWritebackDone && assistantTextForMemory.trim()) {
+                        try {
+                          await autoUpdateAgentMemory({
+                            catId,
+                            invocationId,
+                            threadId,
+                            ...(params.currentUserMessageId
+                              ? { currentUserMessageId: params.currentUserMessageId }
+                              : {}),
+                            assistantText: assistantTextForMemory,
+                            completedAt: Date.now(),
+                          });
+                          forcedMemoryWritebackDone = true;
+                        } catch (err) {
+                          forcedMemoryWritebackDone = true;
+                          log.error(
+                            { catId, threadId, invocationId, sessionId: activeRecord.id, err },
+                            'SANITY_CRITICAL forced memory writeback FAILED — next shift may lose this turn’s memory',
+                          );
                           outputs.push({
                             type: 'system_info' as const,
                             catId,
                             content: JSON.stringify({
-                              type: 'handoff_draft_window',
+                              type: 'sanity_forced_writeback_failed',
                               catId,
-                              sessionId: activeRecord.id,
                               threadId,
-                              healthSnapshot: health,
-                              trust: inferResumeTrustForSessionHandoff({
-                                reason: 'warn_threshold',
-                                session: activeRecord,
-                                hasVerifyEvidence: true,
-                              }),
+                              sessionId: activeRecord.id,
+                              error: err instanceof Error ? err.message : String(err),
                             }),
                             timestamp: Date.now(),
                           });
                         }
-                        break;
-                      case 'seal':
-                      case 'seal_after_compress': {
-                        if (activeRecord) {
-                          let handoffWrite: Awaited<ReturnType<typeof writeContextHandoffForPromptProjects>>;
-                          try {
-                            handoffWrite = await writeContextHandoffForPromptProjects({
-                              threadId,
-                              catId: catId as string,
-                              fromSessionId: activeRecord.id,
-                              reason: action.reason,
-                              trust: inferResumeTrustForSessionHandoff({
-                                reason: action.reason,
-                                session: activeRecord,
-                                hasVerifyEvidence: true,
-                              }),
-                              health,
-                              source: 'runtime-threshold',
-                            });
-                          } catch (err) {
+                      }
+
+                      const forcedSeal = await deps.sessionSealer.requestSeal({
+                        sessionId: activeRecord.id,
+                        reason: 'sanity_critical',
+                      });
+                      outputs.push({
+                        type: 'system_info' as const,
+                        catId,
+                        content: JSON.stringify({
+                          type: 'sanity_forced_seal',
+                          catId,
+                          threadId,
+                          sessionId: activeRecord.id,
+                          accepted: forcedSeal.accepted,
+                        }),
+                        timestamp: Date.now(),
+                      });
+                      if (forcedSeal.accepted) {
+                        forcedSealAccepted = true;
+                        sessionManager.delete(userId, catId, threadId).catch(() => {});
+                        deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                      }
+                    }
+
+                    if (!forcedSealAccepted) {
+                      const action = shouldTakeAction(
+                        health.fillRatio,
+                        health.windowTokens,
+                        health.usedTokens,
+                        activeRecord?.compressionCount ?? 0,
+                        strategy,
+                      );
+
+                      switch (action.type) {
+                        case 'none':
+                          break;
+                        case 'warn':
+                          // Warn is already emitted via context_health; add a one-shot handoff draft marker.
+                          if (activeRecord && !_handoffDraftWindowSessions.has(activeRecord.id)) {
+                            _handoffDraftWindowSessions.add(activeRecord.id);
                             outputs.push({
                               type: 'system_info' as const,
                               catId,
                               content: JSON.stringify({
-                                type: 'session_handoff_write_failed',
+                                type: 'handoff_draft_window',
                                 catId,
                                 sessionId: activeRecord.id,
                                 threadId,
-                                reason: action.reason,
-                                error: err instanceof Error ? err.message : String(err),
+                                healthSnapshot: health,
+                                trust: inferResumeTrustForSessionHandoff({
+                                  reason: 'warn_threshold',
+                                  session: activeRecord,
+                                  hasVerifyEvidence: true,
+                                }),
                               }),
                               timestamp: Date.now(),
                             });
-                            break;
                           }
-                          const sealResult = await deps.sessionSealer.requestSeal({
-                            sessionId: activeRecord.id,
-                            reason: action.reason,
-                          });
-                          if (sealResult.accepted) {
-                            sessionManager.delete(userId, catId, threadId).catch(() => {});
-                            const sealTimestamp = Date.now();
-                            const continuityCapsule = params.continuityCapsule
-                              ? completeCapsuleForSeal(params.continuityCapsule, {
-                                  invocationId,
-                                  createdAt: sealTimestamp,
-                                  seal: {
-                                    sessionId: activeRecord.id,
-                                    sessionSeq: activeRecord.seq + 1,
-                                    reason: action.reason,
-                                    healthSnapshot: health,
-                                  },
-                                })
-                              : undefined;
-                            const sealInfoMessage = {
-                              type: 'system_info' as const,
-                              catId,
-                              content: JSON.stringify({
-                                type: 'session_seal_requested',
-                                catId,
-                                sessionId: activeRecord.id,
-                                sessionSeq: activeRecord.seq + 1,
-                                reason: action.reason,
-                                healthSnapshot: health,
-                                handoffWrite,
-                                ...(continuityCapsule
-                                  ? {
-                                      continuityCapsule,
-                                      continuityDiagnostics: {
-                                        source: 'route_state',
-                                        boundary: continuityCapsule.continuationReason,
-                                        generated: true,
-                                        persistedVia: 'session_seal_requested',
-                                        threadId,
-                                        catId,
-                                        invocationId,
-                                        sessionId: activeRecord.id,
-                                      },
-                                    }
-                                  : {}),
-                              }),
-                              timestamp: sealTimestamp,
-                            };
-                            outputs.push(sealInfoMessage);
-                            if (deps.transcriptWriter) {
-                              const sessInfo: TranscriptSessionInfo = {
-                                sessionId: activeRecord.id,
+                          break;
+                        case 'seal':
+                        case 'seal_after_compress': {
+                          if (activeRecord) {
+                            let handoffWrite: Awaited<ReturnType<typeof writeContextHandoffForPromptProjects>>;
+                            try {
+                              handoffWrite = await writeContextHandoffForPromptProjects({
                                 threadId,
-                                catId: activeRecord.catId,
-                                cliSessionId: activeRecord.cliSessionId,
-                                seq: activeRecord.seq,
-                              };
-                              deps.transcriptWriter.appendEvent(
-                                sessInfo,
-                                sealInfoMessage as unknown as Record<string, unknown>,
-                                invocationId,
-                              );
+                                catId: catId as string,
+                                fromSessionId: activeRecord.id,
+                                reason: action.reason,
+                                trust: inferResumeTrustForSessionHandoff({
+                                  reason: action.reason,
+                                  session: activeRecord,
+                                  hasVerifyEvidence: true,
+                                }),
+                                health,
+                                source: 'runtime-threshold',
+                              });
+                            } catch (err) {
+                              outputs.push({
+                                type: 'system_info' as const,
+                                catId,
+                                content: JSON.stringify({
+                                  type: 'session_handoff_write_failed',
+                                  catId,
+                                  sessionId: activeRecord.id,
+                                  threadId,
+                                  reason: action.reason,
+                                  error: err instanceof Error ? err.message : String(err),
+                                }),
+                                timestamp: Date.now(),
+                              });
+                              break;
                             }
-                            deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                            const sealResult = await deps.sessionSealer.requestSeal({
+                              sessionId: activeRecord.id,
+                              reason: action.reason,
+                            });
+                            if (sealResult.accepted) {
+                              sessionManager.delete(userId, catId, threadId).catch(() => {});
+                              const sealTimestamp = Date.now();
+                              const continuityCapsule = params.continuityCapsule
+                                ? completeCapsuleForSeal(params.continuityCapsule, {
+                                    invocationId,
+                                    createdAt: sealTimestamp,
+                                    seal: {
+                                      sessionId: activeRecord.id,
+                                      sessionSeq: activeRecord.seq + 1,
+                                      reason: action.reason,
+                                      healthSnapshot: health,
+                                    },
+                                  })
+                                : undefined;
+                              const sealInfoMessage = {
+                                type: 'system_info' as const,
+                                catId,
+                                content: JSON.stringify({
+                                  type: 'session_seal_requested',
+                                  catId,
+                                  sessionId: activeRecord.id,
+                                  sessionSeq: activeRecord.seq + 1,
+                                  reason: action.reason,
+                                  healthSnapshot: health,
+                                  handoffWrite,
+                                  ...(continuityCapsule
+                                    ? {
+                                        continuityCapsule,
+                                        continuityDiagnostics: {
+                                          source: 'route_state',
+                                          boundary: continuityCapsule.continuationReason,
+                                          generated: true,
+                                          persistedVia: 'session_seal_requested',
+                                          threadId,
+                                          catId,
+                                          invocationId,
+                                          sessionId: activeRecord.id,
+                                        },
+                                      }
+                                    : {}),
+                                }),
+                                timestamp: sealTimestamp,
+                              };
+                              outputs.push(sealInfoMessage);
+                              if (deps.transcriptWriter) {
+                                const sessInfo: TranscriptSessionInfo = {
+                                  sessionId: activeRecord.id,
+                                  threadId,
+                                  catId: activeRecord.catId,
+                                  cliSessionId: activeRecord.cliSessionId,
+                                  seq: activeRecord.seq,
+                                };
+                                deps.transcriptWriter.appendEvent(
+                                  sessInfo,
+                                  sealInfoMessage as unknown as Record<string, unknown>,
+                                  invocationId,
+                                );
+                              }
+                              deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                            }
                           }
+                          break;
                         }
-                        break;
-                      }
-                      case 'allow_compress':
-                        // Don't seal — let CLI compress. Log for observability.
-                        outputs.push({
-                          type: 'system_info' as const,
-                          catId,
-                          content: JSON.stringify({
-                            type: 'strategy_allow_compress',
+                        case 'allow_compress':
+                          // Don't seal — let CLI compress. Log for observability.
+                          outputs.push({
+                            type: 'system_info' as const,
                             catId,
-                            strategy: strategy.strategy,
-                            compressionCount: activeRecord?.compressionCount ?? 0,
-                            healthSnapshot: health,
-                          }),
-                          timestamp: Date.now(),
-                        });
-                        break;
+                            content: JSON.stringify({
+                              type: 'strategy_allow_compress',
+                              catId,
+                              strategy: strategy.strategy,
+                              compressionCount: activeRecord?.compressionCount ?? 0,
+                              healthSnapshot: health,
+                            }),
+                            timestamp: Date.now(),
+                          });
+                          break;
+                      }
                     }
                   }
                 } catch {
@@ -2622,7 +2720,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       threadDuration.record((Date.now() - threadCreatedAt) / 1000, { [AGENT_ID]: catId, [STATUS]: otelStatus });
     }
 
-    if (!freshnessProtected && !params.deferMemoryWriteback && otelStatus === 'ok' && assistantTextForMemory.trim()) {
+    if (
+      !freshnessProtected &&
+      !forcedMemoryWritebackDone &&
+      !params.deferMemoryWriteback &&
+      otelStatus === 'ok' &&
+      assistantTextForMemory.trim()
+    ) {
       autoUpdateAgentMemory({
         catId,
         invocationId,

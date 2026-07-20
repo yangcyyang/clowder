@@ -38,8 +38,8 @@ export interface SessionRecord {
   /** Latest token usage snapshot (persisted for frontend display after reload) */
   lastUsage?: SessionUsageSnapshot;
   messageCount: number;
-  /** Seal reason (Phase B) */
-  sealReason?: 'threshold' | 'manual' | 'error' | (string & {});
+  /** Seal reason (Phase B). 'sanity_critical' = 理智线 T5 (task #387) red-zone forced seal. */
+  sealReason?: 'threshold' | 'manual' | 'error' | 'sanity_critical' | (string & {});
   /** F33: Number of CLI compressions in this session (hybrid strategy) */
   compressionCount?: number;
   /** Structured collaboration control-flow state used across compact/seal/resume boundaries. */
@@ -159,8 +159,15 @@ export interface SessionStrategyConfig {
   safetyMargin?: number;
 }
 
-/** Seal reason for strategy-driven actions */
-export type SealReason = 'threshold' | 'budget_exhausted' | 'max_compressions' | 'manual' | 'error' | (string & {});
+/** Seal reason for strategy-driven actions. 'sanity_critical' = 理智线 T5 (task #387) red-zone forced seal. */
+export type SealReason =
+  | 'threshold'
+  | 'budget_exhausted'
+  | 'max_compressions'
+  | 'manual'
+  | 'error'
+  | 'sanity_critical'
+  | (string & {});
 
 /** Strategy action returned by shouldTakeAction() */
 export type StrategyAction =

@@ -1518,6 +1518,287 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
   });
 
+  // ── 理智线 T5 (task #387): forced red-zone handoff + recitation ───────────
+
+  describe('理智线 T5: forced red-zone seal + writeback', () => {
+    let savedHandoffEnv;
+    before(() => {
+      savedHandoffEnv = process.env.CAT_CAFE_SANITY_HANDOFF;
+      process.env.CAT_CAFE_SANITY_HANDOFF = '1';
+    });
+    after(() => {
+      if (savedHandoffEnv === undefined) delete process.env.CAT_CAFE_SANITY_HANDOFF;
+      else process.env.CAT_CAFE_SANITY_HANDOFF = savedHandoffEnv;
+    });
+
+    function redTurnService({ catId, cliSessionId, inputTokens, contextWindowSize }) {
+      return {
+        async *invoke() {
+          yield { type: 'session_init', catId, sessionId: cliSessionId, timestamp: Date.now() };
+          yield { type: 'text', catId, content: '正在推进任务', timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId,
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens, outputTokens: 500, contextWindowSize },
+            },
+          };
+        },
+      };
+    }
+
+    it('red transition forces a seal via requestSeal with reason sanity_critical', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const threadId = 'thread-t5-forced-seal';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T5 的红区强制换班',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      // Large windowTokens (1M) so only the sanityLine (200K for opus) trips, not F33's own
+      // windowTokens-ratio threshold — keeps this test isolated to the sanity_critical path.
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-t5-forced',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 1, 'exactly one sanity_forced_seal event expected');
+      assert.equal(sealEvents[0].accepted, true);
+
+      const chain = sessionChainStore.getChain(catId, threadId);
+      assert.equal(chain.length, 1);
+      // finalize() is fire-and-forget; with no transcriptWriter/threadStore configured it can
+      // resolve synchronously fast enough to already show 'sealed' by the time collect() drains —
+      // either status is valid proof requestSeal's active->sealing CAS transition fired.
+      assert.ok(['sealing', 'sealed'].includes(chain[0].status), `expected sealing or sealed, got ${chain[0].status}`);
+      assert.equal(chain[0].sealReason, 'sanity_critical');
+      assert.ok(chain[0].sanityHandoff, 'sanityHandoff must be persisted before the seal');
+      assert.equal(chain[0].sanityHandoff.triggerState, 'red');
+    });
+
+    it('same-turn double trigger (sanityLine red + windowTokens threshold) does not double-seal — requestSeal idempotency is the guarantee', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const realSealer = new SessionSealer(sessionChainStore);
+      const messageStore = new MessageStore();
+      const threadId = 'thread-t5-double-trigger';
+      const catId = 'opus';
+
+      const requestSealCalls = [];
+      const sealer = {
+        async requestSeal(opts) {
+          const result = await realSealer.requestSeal(opts);
+          requestSealCalls.push({ reason: opts.reason, accepted: result.accepted });
+          return result;
+        },
+        async finalize(opts) {
+          return realSealer.finalize(opts);
+        },
+        reconcileStuck: async () => 0,
+        reconcileAllStuck: async () => 0,
+      };
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T5 双触发场景',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer: sealer, messageStore };
+      // inputTokens=195000 with contextWindowSize=200000: sanityLine ratio 97.5% (>=95% red)
+      // AND windowTokens ratio 97.5% (>= opus's F33 90% action threshold) both trip together.
+      await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-t5-double',
+            inputTokens: 195000,
+            contextWindowSize: 200000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      // Actual (and better than merely-idempotent) behavior: F33's own seal branch re-fetches
+      // its own activeRecord via getActive(), which only returns status==='active' records.
+      // Since our sanity_critical seal already flipped status to 'sealing' earlier in the same
+      // synchronous pass, F33's `if (activeRecord)` guard is false and it never calls
+      // requestSeal a second time at all — not just "calls it and gets rejected". Idempotency
+      // in SessionSealer.requestSeal (CAS on status) is still the primary guarantee (verified
+      // directly in the dedicated 'N times on an already-sealed session' test above); this
+      // getActive()-narrowing is a confirmed secondary effect, not a separate guard we rely on.
+      assert.equal(requestSealCalls.length, 1, 'F33 threshold path must not attempt a redundant requestSeal call');
+      assert.equal(requestSealCalls[0].reason, 'sanity_critical');
+      assert.equal(requestSealCalls[0].accepted, true);
+
+      const chain = sessionChainStore.getChain(catId, threadId);
+      assert.equal(chain.length, 1, 'only one SessionRecord — no duplicate seal/session created');
+      assert.equal(chain[0].sealReason, 'sanity_critical', 'the first accepted seal reason wins');
+    });
+
+    it('requestSeal called N times on an already-sealed session stays a no-op (hard idempotency)', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const sessionChainStore = new SessionChainStore();
+      const sealer = new SessionSealer(sessionChainStore);
+      const record = await sessionChainStore.create({
+        threadId: 'thread-t5-jitter',
+        catId: 'opus',
+        userId: 'user1',
+        cliSessionId: 'cli-jitter',
+      });
+
+      const results = [];
+      for (let i = 0; i < 5; i++) {
+        results.push(await sealer.requestSeal({ sessionId: record.id, reason: 'sanity_critical' }));
+      }
+
+      assert.equal(results[0].accepted, true);
+      for (let i = 1; i < results.length; i++) {
+        assert.equal(results[i].accepted, false, `call #${i + 1} must not accept a second seal`);
+      }
+      const final = sessionChainStore.get(record.id);
+      assert.equal(final.status, 'sealing');
+      assert.equal(final.sealReason, 'sanity_critical');
+    });
+
+    it('forced memory writeback is awaited before sealing (success path does not double-write via the normal fire-and-forget path)', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const messageStore = new MessageStore();
+      const threadId = 'thread-t5-writeback-ok';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T5 强制回写',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-t5-writeback-ok',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const failures = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_writeback_failed');
+      assert.equal(failures.length, 0, 'writeback should succeed silently (no failure event) on the happy path');
+    });
+
+    it('forced memory writeback FAILURE is surfaced loudly (not swallowed) and sealing still proceeds', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const messageStore = new MessageStore();
+      const threadId = 'thread-t5-writeback-fail';
+      // Invalid catId (space) fails AgentMemoryStore's assertSafeCatId(), forcing a real,
+      // deterministic, side-effect-free throw inside autoUpdateAgentMemory — not a mock.
+      const catId = 'opus bad';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 T5 强制回写失败可见性',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-t5-writeback-fail',
+            inputTokens: 115000, // catId unknown to catRegistry -> sanityLine fallback 120K -> 115K is red (>=95%)
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const failures = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_writeback_failed');
+      assert.equal(failures.length, 1, 'writeback failure must be surfaced as a visible system_info event');
+      assert.match(failures[0].error, /Invalid catId/);
+
+      // Sealing must still proceed despite the writeback failure (no hang / no silent abort of the handoff).
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 1);
+      assert.equal(sealEvents[0].accepted, true, 'seal must still be accepted even though writeback failed');
+    });
+  });
+
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

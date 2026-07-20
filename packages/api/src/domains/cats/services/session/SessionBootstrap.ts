@@ -17,6 +17,7 @@ import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
+import { formatSanityHandoffMarkdown } from './HandoffCapsuleGenerator.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
 
@@ -114,6 +115,29 @@ export async function buildSessionBootstrap(
   // Build sections separately for section-aware token cap (AC-5, R4 P1-1)
   // Priority: identity (always keep) > durable project handoff > tools (always keep) > threadMemory > digest > task snapshot
   const identitySection = parts.join('\n');
+
+  // 理智线 T5 (task #387): red-zone forced seals carry a mandatory recitation
+  // instruction + the T4 sanityHandoff capsule. Gated strictly on
+  // sealReason === 'sanity_critical' — normal seals (threshold/manual/etc.)
+  // get plain continuity only, no recitation. Always-keep priority (folded
+  // into baseTokens like identity/tools below) since this recitation IS the
+  // safety mechanism T5 exists to deliver — it must not be silently dropped
+  // by the token-budget trim.
+  let sanityRecitationSection = '';
+  if (prevSession.sealReason === 'sanity_critical' && prevSession.sanityHandoff) {
+    // sanityHandoff fields are regex-extracted from chat message content (see
+    // HandoffCapsuleGenerator.ts) — same "arbitrary user-controlled text entering a
+    // system prompt" category as the generative digest above, so it gets the same
+    // sanitizeHandoffBody() defense against prompt-injection-via-content.
+    const sanitizedCapsule = sanitizeHandoffBody(formatSanityHandoffMarkdown(prevSession.sanityHandoff));
+    sanityRecitationSection = [
+      '',
+      '[理智线红区强制换班 — Sanity-Critical Handoff]',
+      '【换班回述】你是接班猫。先用不超过 5 行回述：①任务目标 ②当前状态 ③下一步，经确认或无疑义后再继续执行。禁止跳过回述直接动手。',
+      '',
+      sanitizedCapsule,
+    ].join('\n');
+  }
 
   let projectHandoffSection = '';
   try {
@@ -248,7 +272,7 @@ export async function buildSessionBootstrap(
 
   // Section-aware token cap (AC-5): identity + tools are always kept.
   // Drop order: task snapshot (lowest) → digest → threadMemory (highest variable priority).
-  const baseTokens = estimateTokens(identitySection + projectHandoffSection + toolsSection);
+  const baseTokens = estimateTokens(identitySection + sanityRecitationSection + projectHandoffSection + toolsSection);
   const remainingBudget = MAX_BOOTSTRAP_TOKENS - baseTokens;
 
   const tmTokens = hasThreadMemory ? estimateTokens(threadMemorySection) : 0;
@@ -283,6 +307,7 @@ export async function buildSessionBootstrap(
 
   const text =
     identitySection +
+    sanityRecitationSection +
     projectHandoffSection +
     threadMemorySection +
     recallSection +
