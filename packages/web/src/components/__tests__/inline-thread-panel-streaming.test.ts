@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   getInlineThreadPanelShellClassName,
   getInlineThreadReplyMessages,
-  getInlineThreadSourceMessageId,
   getInlineThreadSearchHits,
+  getInlineThreadSourceMessageId,
   getNextInlineThreadSearchIndex,
   getViewInChannelHref,
   InlineThreadTaskStatusCard,
@@ -113,6 +113,24 @@ describe('InlineThreadPanel thread target guard', () => {
 
   it('allows real branch threads to receive replies', () => {
     expect(isUnsafeInlineThreadTarget('thread-branch', { threadId: 'thread-main' })).toBe(false);
+  });
+
+  // Root cause (2026-07-21): POST /api/tasks/:id/thread's sourceMessage is a synthetic
+  // message that lives INSIDE the task's own thread by design (task-discussion-thread.ts
+  // toTaskThreadMessage() — it copies the source content into a message whose threadId
+  // is literally the task thread id). So for task threads, sourceMessage.threadId always
+  // equals the panel's threadId — that's correct by construction, not a failed branch
+  // creation. Reusing the branch-reply guard here false-positives on every single
+  // task-thread reply (cy hit this live: "Thread 未创建成功" when @-mentioning inside a
+  // task thread that had zero prior replies).
+  it('does not false-positive on task threads, where sourceMessage.threadId legitimately equals the task threadId', () => {
+    expect(isUnsafeInlineThreadTarget('task-thread-1', { threadId: 'task-thread-1' }, { isTaskThread: true })).toBe(
+      false,
+    );
+  });
+
+  it('still blocks a genuinely-failed non-task branch even when isTaskThread is omitted (default false)', () => {
+    expect(isUnsafeInlineThreadTarget('thread-main', { threadId: 'thread-main' }, { isTaskThread: false })).toBe(true);
   });
 });
 

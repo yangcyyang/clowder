@@ -160,10 +160,7 @@ export function getInlineThreadPanelShellClassName(): string {
   return 'thread-panel-motion fixed inset-0 z-[60] flex h-[100dvh] min-h-0 bg-[var(--console-overlay-medium)] lg:relative lg:inset-auto lg:z-auto lg:h-full lg:flex-shrink-0 lg:bg-transparent';
 }
 
-function findInlineThreadSourceCopyIndex(
-  messages: readonly ChatMessageData[],
-  sourceMessage: ChatMessageData,
-): number {
+function findInlineThreadSourceCopyIndex(messages: readonly ChatMessageData[], sourceMessage: ChatMessageData): number {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (
@@ -244,10 +241,26 @@ export function getNextInlineThreadSearchIndex(current: number, total: number, d
   return (current + direction + total) % total;
 }
 
+/**
+ * Guards the branch-reply-from-message flow (openInlineThreadFromMessage in
+ * ChatContainer.tsx): if branch creation silently failed, threadId falls back to the
+ * source message's own (parent/main) thread, and posting there would leak the reply
+ * into the main channel — so we block and surface an error instead.
+ *
+ * Task threads are a different model and must NOT be checked the same way: the
+ * "sourceMessage" ensureTaskDiscussionThread() returns is a synthetic copy that lives
+ * INSIDE the task's own thread by construction (see task-discussion-thread.ts
+ * toTaskThreadMessage() — its `threadId` is the task thread id itself). So
+ * sourceMessage.threadId === threadId is *expected* for every task thread, not a sign
+ * that thread creation failed — treating it as unsafe there false-positives on every
+ * single reply typed into a task thread (root cause of the "Thread 未创建成功" bug).
+ */
 export function isUnsafeInlineThreadTarget(
   threadId: string,
   sourceMessage: Pick<ChatMessageData, 'threadId'>,
+  options?: { isTaskThread?: boolean },
 ): boolean {
+  if (options?.isTaskThread) return false;
   return !!sourceMessage.threadId && sourceMessage.threadId === threadId;
 }
 
@@ -659,7 +672,7 @@ export function InlineThreadPanel({
     setSending(true);
     setSendError(null);
     try {
-      if (isUnsafeInlineThreadTarget(threadId, sourceMessage)) {
+      if (isUnsafeInlineThreadTarget(threadId, sourceMessage, { isTaskThread: Boolean(task) })) {
         throw new Error('Thread 未创建成功，已阻止把回复写入主频道');
       }
       if (isCommandInvocation(content, '/reset-context')) {
@@ -738,6 +751,7 @@ export function InlineThreadPanel({
     sourceThreadMessageId,
     sourceMessage,
     startReplyPolling,
+    task,
     threadId,
   ]);
 
