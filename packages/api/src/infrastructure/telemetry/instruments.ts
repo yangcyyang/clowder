@@ -125,6 +125,12 @@ export const capabilityReceiptGateDecisions = lazy(() =>
   }),
 );
 
+export const memoryPromotionGateDecisions = lazy(() =>
+  meter().createCounter('cat_cafe.memory_promotion.gate_total', {
+    description: 'Memory promotion gate decisions by bounded mode x action',
+  }),
+);
+
 export const invocationCompleted = lazy(() =>
   meter().createCounter('cat_cafe.invocation.completed', {
     description: 'Invocation completion count by cat and outcome',
