@@ -1,6 +1,6 @@
 import type { TrajectoryStep } from '../AntigravityBridge.js';
 import type { AntigravityToolExecutor, ExecutorContext, ExecutorResult } from './AntigravityToolExecutor.js';
-import { resolveToolName } from './ExecutorRegistry.js';
+import { resolveToolName, RUN_COMMAND_TOOL_NAME } from './ExecutorRegistry.js';
 
 export interface RunCommandInput {
   commandLine: string;
@@ -66,7 +66,7 @@ export function isReadOnlyRunCommand(commandLine: string): boolean {
 }
 
 export class RunCommandExecutor implements AntigravityToolExecutor<RunCommandInput, { exitCode: number }> {
-  readonly toolName = 'run_command';
+  readonly toolName = RUN_COMMAND_TOOL_NAME;
 
   constructor(private readonly deps: { rpc: RpcFn }) {}
 

@@ -36,7 +36,7 @@ import {
 } from './antigravity-image-publisher.js';
 import { summarizeStepShape, TRACE_ENABLED, traceLog } from './antigravity-trace.js';
 import { AuditLogger } from './executors/AuditLogger.js';
-import { ExecutorRegistry } from './executors/ExecutorRegistry.js';
+import { ExecutorRegistry, isRunCommandOrAmbiguousWaitingStep } from './executors/ExecutorRegistry.js';
 import { isReadOnlyRunCommand, RunCommandExecutor } from './executors/RunCommandExecutor.js';
 
 const log = createModuleLogger('antigravity-service');
@@ -313,12 +313,11 @@ export class AntigravityAgentService implements AgentService {
             if (nextBatch.done) return;
             const batch = nextBatch.value;
             if (batch.cursor.awaitingUserInput) {
+              // A1 F-1 fix: suppression uses the SAME discriminator as the
+              // executor (toolCall.name via isRunCommandOrAmbiguousWaitingStep),
+              // and ambiguous waiting steps fail toward suppression.
               const hasReceiptGatedWaitingStep =
-                capabilityReceiptScopeActive &&
-                batch.steps.some(
-                  (step) =>
-                    step.status === 'CORTEX_STEP_STATUS_WAITING' && step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND',
-                );
+                capabilityReceiptScopeActive && batch.steps.some((step) => isRunCommandOrAmbiguousWaitingStep(step));
               if (
                 !hasReceiptGatedWaitingStep &&
                 capabilityPendingStepKeys.size === 0 &&
@@ -823,7 +822,13 @@ export class AntigravityAgentService implements AgentService {
               terminalAbort = true;
               break;
             }
-            if (isStall && capabilityPendingStepKeys.size === 0 && this.autoApprove && !stallProbed) {
+            if (
+              isStall &&
+              !capabilityReceiptScopeActive &&
+              capabilityPendingStepKeys.size === 0 &&
+              this.autoApprove &&
+              !stallProbed
+            ) {
               stallProbed = true;
               try {
                 await this.bridge.resolveOutstandingSteps(cascadeId);
