@@ -196,11 +196,11 @@ describe('Antigravity waiting approval', () => {
     }
   });
 
-  test('service probes resolveOutstandingSteps on stall when autoApprove=true (no awaitingUserInput)', async () => {
+  test('service probes resolveOutstandingSteps on stall when autoApprove=true OUTSIDE capability receipt scope', async () => {
     const resolveOutstandingSteps = mock.fn(async () => {});
     const bridge = {
       ...createMockServiceBridge({ resolveOutstandingSteps }),
-      isCapabilityReceiptScope: mock.fn(() => true),
+      isCapabilityReceiptScope: mock.fn(() => false),
       pollForSteps: mock.fn(async function* () {
         // Simulate stall: RUNNING but no awaitingUserInput flag, bridge throws stall
         throw new Error('Antigravity stall: no activity for 60213ms (steps=5, status=CASCADE_RUN_STATUS_RUNNING)');
@@ -285,6 +285,137 @@ describe('Antigravity waiting approval', () => {
     );
     const text = messages.find((msg) => msg.type === 'text');
     assert.equal(text?.content, 'approved without waiting for stall');
+  });
+
+  test('A1: type-drifted run_command step still suppresses auto-approve inside receipt scope', async () => {
+    // F-1 fix: suppression must use the SAME discriminator as the executor
+    // (metadata.toolCall.name), not step.type. A step whose type string drifts
+    // but which the executor WOULD gate must still suppress LS auto-approve.
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const driftedWaitingStep = {
+      type: 'CORTEX_STEP_TYPE_RUN_COMMAND_DRIFTED', // type drift: no longer the canonical constant
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {
+        toolCall: {
+          id: 'toolu_type_drift',
+          name: 'run_command',
+          argumentsJson: JSON.stringify({ CommandLine: 'echo hi', Cwd: '/tmp' }),
+        },
+        sourceTrajectoryStepInfo: { trajectoryId: 'trajectory-1', stepIndex: 11 },
+      },
+    };
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+      nativeExecuteAndPush: mock.fn(async () => 'capability_pending'),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [driftedWaitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: true,
+          },
+        };
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'capability approved' },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('run command'));
+
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      0,
+      'type drift must NOT reopen the LS-side auto-approve bypass inside receipt scope',
+    );
+    assert.ok(
+      messages.some((msg) => msg.errorCode === 'waiting_capability_approval'),
+      'must wait for capability approval, not LS auto-approval',
+    );
+  });
+
+  test('A1: ambiguous waiting step (no toolCall name) fails toward suppression inside receipt scope', async () => {
+    // F-1 fix: when the tool name cannot be determined, suppress auto-approve
+    // (fail safe) rather than letting an unidentified waiting step through.
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const ambiguousWaitingStep = {
+      type: 'CORTEX_STEP_TYPE_UNSPECIFIED',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: {},
+    };
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+      nativeExecuteAndPush: mock.fn(async () => false),
+      pollForSteps: mock.fn(async function* () {
+        yield {
+          steps: [ambiguousWaitingStep],
+          cursor: {
+            baselineStepCount: 0,
+            lastDeliveredStepCount: 0,
+            terminalSeen: false,
+            lastActivityAt: Date.now(),
+            awaitingUserInput: true,
+          },
+        };
+        yield {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { response: 'resolved without auto-approve' },
+            },
+          ],
+          cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: true, lastActivityAt: Date.now() },
+        };
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('do something'));
+
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      0,
+      'ambiguous waiting step must suppress auto-approve inside receipt scope',
+    );
+  });
+
+  test('A1: stall probe is suppressed inside capability receipt scope', async () => {
+    // F-1 fix: the stall-probe auto-approve path must not approve steps while
+    // the invocation is inside receipt scope.
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      isCapabilityReceiptScope: mock.fn(() => true),
+      pollForSteps: mock.fn(async function* () {
+        throw new Error('Antigravity stall: no activity for 60213ms (steps=5, status=CASCADE_RUN_STATUS_RUNNING)');
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('open browser'));
+
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      0,
+      'stall probe must NOT auto-approve inside capability receipt scope',
+    );
+    const errors = messages.filter((msg) => msg.type === 'error');
+    assert.ok(errors.length >= 1, 'stall must surface as an error when the probe is suppressed');
+    assert.match(errors[0].error, /stall/i);
   });
 
   test('capability_pending never enters the legacy auto-approve path and retries the exact step', async () => {

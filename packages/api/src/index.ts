@@ -58,6 +58,7 @@ import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegi
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
   CapabilityReceiptExecutionGate,
+  assertCapabilityReceiptStartupInvariants,
   resolveCapabilityReceiptRolloutPolicy,
 } from './domains/cats/services/auth/CapabilityReceiptExecutionGate.js';
 import {
@@ -477,6 +478,8 @@ async function main(): Promise<void> {
     io: socketManager.getIO(),
   });
   const capabilityReceiptPolicy = resolveCapabilityReceiptRolloutPolicy(process.env);
+  // A1: enforce mode + legacy LS auto-approve is a misconfiguration — fail fast.
+  assertCapabilityReceiptStartupInvariants(capabilityReceiptPolicy, process.env);
   const capabilityReceiptStore = createCapabilityReceiptStore({
     mode: capabilityReceiptPolicy.mode,
     ...(redis ? { redis } : {}),
@@ -1186,7 +1189,7 @@ async function main(): Promise<void> {
           service = new DareAgentService({ catId });
           break;
         case 'antigravity':
-          service = new AntigravityAgentService({
+          service = AntigravityAgentService.forProduction({
             catId,
             capabilityReceiptGate,
           });
