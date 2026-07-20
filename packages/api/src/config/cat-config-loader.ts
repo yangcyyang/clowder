@@ -21,7 +21,13 @@ import type {
   Roster,
   ToolPolicy,
 } from '@cat-cafe/shared';
-import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
+import {
+  type ClientId,
+  catRegistry,
+  createCatId,
+  normalizeCliEffortForProvider,
+  resolveSanityLine,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
@@ -118,7 +124,10 @@ function modelVersionLabelFamily(label: string | undefined): string | undefined 
   return undefined;
 }
 
-export function normalizeVariantLabelForModel(label: string | undefined, model: string | undefined): string | undefined {
+export function normalizeVariantLabelForModel(
+  label: string | undefined,
+  model: string | undefined,
+): string | undefined {
   if (!label) return undefined;
   const derived = deriveModelVariantLabel(model);
   if (!derived) return label;
@@ -148,6 +157,7 @@ const catVariantSchema = z.object({
   defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
   mcpSupport: z.boolean(),
   toolPolicy: toolPolicySchema.optional(),
+  sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384): variant-level sanityLine override
   cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
   cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
@@ -242,6 +252,7 @@ const catBreedSchema = z.object({
   defaultVariantId: z.string().min(1),
   variants: z.array(catVariantSchema).min(1),
   toolPolicy: toolPolicySchema.optional(),
+  sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384): breed-level sanityLine default
   features: catFeaturesSchema,
   teamStrengths: z.string().optional(), // F-Ground-3: breed-level default
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
@@ -501,10 +512,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
       const variantLabel = normalizeVariantLabelForModel(variant.variantLabel, variant.defaultModel);
-      const capabilityContract =
-        variant.capabilityContract ??
-        breed.capabilityContract ??
-        {
+      const capabilityContract = variant.capabilityContract ??
+        breed.capabilityContract ?? {
           primaryRoles: uniqueNonEmpty([breed.displayName, variant.displayName, variantLabel]),
           canHandle: uniqueNonEmpty([
             ...splitCapabilityText(teamStrengths),
@@ -534,6 +543,9 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
         toolPolicy: variant.toolPolicy ?? breed.toolPolicy ?? defaultToolPolicyForCat(catId),
+        // 理智线 T2 (#384): variant 显式值 > breed 显式值 > 模型先验表 > 120K 兜底；
+        // 总是解析出一个数字（不像 toolPolicy 那样兜底函数可能因猫而异），故不做 spread guard。
+        sanityLine: resolveSanityLine(variant.sanityLine, breed.sanityLine, variant.defaultModel),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }

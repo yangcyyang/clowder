@@ -109,6 +109,12 @@ export interface CatVariant {
   readonly color?: CatColor;
   /** Per-cat context budget (optional, falls back to defaults) */
   readonly contextBudget?: ContextBudget;
+  /**
+   * 理智线 T2（task #384）：会话理智线死线（token 数）——超过即应换班，跟 contextBudget
+   * 的投递口尺寸是不同的边界。落回顺序：variant 显式值 > breed 显式值 >
+   * resolveSanityLineDefault(defaultModel) 模型先验表 > 120K 兜底（见 sanity-line-defaults.ts）。
+   */
+  readonly sanityLine?: number;
   /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
   readonly sessionChain?: boolean;
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */
@@ -185,6 +191,8 @@ export interface CatBreed {
   readonly variants: readonly CatVariant[];
   /** Breed-level default toolbox level; variant can override. */
   readonly toolPolicy?: ToolPolicy;
+  /** 理智线 T2（task #384）：breed-level sanityLine default; variant may override. */
+  readonly sanityLine?: number;
   /** Per-cat feature flags (optional, all features enabled by default) */
   readonly features?: CatFeatures;
   /** F-Ground-3: Human-readable strengths for teammate roster (breed default) */

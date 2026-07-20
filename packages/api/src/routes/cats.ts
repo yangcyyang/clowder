@@ -108,6 +108,7 @@ const baseCatSchema = z.object({
   assetCard: assetCardSchema.optional(),
   contextBudget: contextBudgetSchema.optional(),
   toolPolicy: toolPolicySchema.optional(),
+  sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384)
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -164,6 +165,7 @@ const updateCatSchema = z.object({
   assetCard: assetCardSchema.nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   toolPolicy: toolPolicySchema.nullable().optional(),
+  sanityLine: z.number().int().positive().nullable().optional(), // 理智线 T2 (#384)
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -503,6 +505,7 @@ async function toCatResponse(
     cli: cat.cli,
     toolPolicy: cat.toolPolicy,
     contextBudget: cat.contextBudget,
+    sanityLine: cat.sanityLine, // 理智线 T2 (#384)
     avatar: resolveResponseAvatar(projectRoot, cat.avatar),
     roleDescription: cat.roleDescription,
     personality: cat.personality,

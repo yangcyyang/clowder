@@ -720,6 +720,48 @@ describe('F32-b: toAllCatConfigs (multi-variant)', () => {
   });
 });
 
+describe('理智线 T2 (task #384): sanityLine resolution', () => {
+  it('falls back to model-default table when no explicit sanityLine is configured', () => {
+    const config = loadCatConfig(writeTempConfig(multiVariantConfig()));
+    const all = toAllCatConfigs(config);
+    // opus: defaultModel 'claude-opus-4-6' → opus keyword → 200K
+    assert.equal(all.opus.sanityLine, 200_000);
+    // opus-45: defaultModel 'claude-sonnet-4-5-20250929' → sonnet keyword → 200K
+    assert.equal(all['opus-45'].sanityLine, 200_000);
+    // gemini: defaultModel 'gemini-2.5-pro' matches nothing in the T2 table → 120K fallback
+    assert.equal(all.gemini.sanityLine, 120_000);
+  });
+
+  it('variant-level explicit sanityLine overrides the model-default table', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[0].variants[0].sanityLine = 77_000;
+    const config = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(config);
+    assert.equal(all.opus.sanityLine, 77_000);
+    // sibling variant without an override is unaffected
+    assert.equal(all['opus-45'].sanityLine, 200_000);
+  });
+
+  it('breed-level sanityLine is used when the variant has none', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[1].sanityLine = 555_000; // siamese/gemini breed, model default would otherwise be 120K
+    const config = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(config);
+    assert.equal(all.gemini.sanityLine, 555_000);
+  });
+
+  it('variant-level sanityLine takes priority over breed-level sanityLine', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[0].sanityLine = 111_000;
+    cfg.breeds[0].variants[0].sanityLine = 222_000;
+    const config = loadCatConfig(writeTempConfig(cfg));
+    const all = toAllCatConfigs(config);
+    assert.equal(all.opus.sanityLine, 222_000);
+    // opus-45 has no variant-level override → falls back to breed-level
+    assert.equal(all['opus-45'].sanityLine, 111_000);
+  });
+});
+
 describe('F32-b: buildCatIdToBreedIndex', () => {
   it('maps variant catIds to parent breed', () => {
     const config = loadCatConfig(writeTempConfig(multiVariantConfig()));

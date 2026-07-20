@@ -465,6 +465,8 @@ export type {
   RichMessageExtra,
 } from './rich.js';
 export { normalizeRichBlock } from './rich.js';
+// 理智线 T2 (task #384): sanityLine model-default resolution
+export { getSanityLineFallback, resolveSanityLine, resolveSanityLineDefault } from './sanity-line-defaults.js';
 // Session chain types (F24 Session Chain + Context Health)
 export type {
   ContextHealth,

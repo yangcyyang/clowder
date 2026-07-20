@@ -76,6 +76,12 @@ export interface CatConfig {
   readonly cli?: CliConfig;
   readonly commandArgs?: readonly string[];
   readonly contextBudget?: ContextBudget;
+  /**
+   * 理智线 T2（task #384）：会话理智线死线（token 数）。resolveSanityLine() 出的最终值总是
+   * 一个数字（variant 显式值 > breed 显式值 > 模型先验表 > 120K 兜底）；类型标 optional 只是
+   * 因为不是所有 CatConfig 构造路径都经过该解析（如测试里手搭的最小 config）。
+   */
+  readonly sanityLine?: number;
   readonly roleDescription: string;
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */

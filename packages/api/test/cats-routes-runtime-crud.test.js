@@ -388,6 +388,78 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(JSON.parse(createRes.body).error, /effort/i);
   });
 
+  it('POST /api/cats rejects a negative sanityLine (理智线 T2, task #384)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-negative-sanity',
+        name: '负数理智线猫',
+        displayName: '负数理智线猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-negative-sanity'],
+        roleDescription: '测试',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        cli: { command: 'codex', outputFormat: 'json' },
+        sanityLine: -1,
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+  });
+
+  it('POST /api/cats rejects a non-numeric sanityLine (理智线 T2, task #384)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-string-sanity',
+        name: '字符串理智线猫',
+        displayName: '字符串理智线猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-string-sanity'],
+        roleDescription: '测试',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        cli: { command: 'codex', outputFormat: 'json' },
+        sanityLine: 'not-a-number',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400);
+  });
+
   it('POST /api/cats accepts kimi client with first-class default CLI commands', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

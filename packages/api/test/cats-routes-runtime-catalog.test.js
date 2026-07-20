@@ -186,6 +186,8 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.ok(runtimeCat, 'runtime-cat should come from runtime catalog');
     assert.equal(runtimeCat.displayName, '运行时猫');
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
+    // 理智线 T2 (#384): unconfigured cat with an unmatched model (gpt-5.4) falls back to 120K
+    assert.equal(runtimeCat.sanityLine, 120_000, 'GET /api/cats response should carry the resolved sanityLine field');
   });
 
   it('GET /api/cats falls back when a local /avatars file is missing', async () => {
