@@ -143,6 +143,7 @@ import type { SessionManager } from '../../session/SessionManager.js';
 import { computeSanityTransition, getSanityThresholdsFromEnv } from '../../session/SessionSanityMonitor.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
+import type { ICooldownStore } from '../../stores/ports/CooldownStore.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
@@ -285,6 +286,41 @@ async function generateAndPersistSanityHandoff(
   }
 }
 
+/** 理智线 T6 (task #388): recognized-but-unresolved-resetAt default cooldown window. */
+const DEFAULT_USAGE_LIMIT_COOLDOWN_MS = 30 * 60_000;
+
+/**
+ * 理智线 T6 (task #388): 把一条 errorCode==='usage_limit' 的 AgentMessage 写成结构化冷却。
+ * **调用方硬约束**：只在 `msg.errorCode === 'usage_limit'` 时调用——不能对"任何未识别
+ * 的错误"都套这条兜底（专家-Claude scoping 澄清：Kimi/Gemini 没有 pattern 时它们的错误
+ * 压根不会被识别成 usage_limit，走通用错误处理，保持现状，不被误冷却）。
+ * `until` 优先取 `msg.metadata.diagnostics.resetAt`（结构化/精确解析值）；解析不出时才
+ * 落 30 分钟默认冷却（这也是这条"识别到但没解析出具体时间"分支唯一合法触发默认值的场景）。
+ */
+async function recordUsageLimitCooldown(
+  deps: { cooldownStore?: ICooldownStore },
+  input: { catId: CatId; msg: AgentMessage },
+): Promise<{ until: number; resetAtResolved: boolean } | null> {
+  if (!deps.cooldownStore) return null;
+  try {
+    const diagnostics = input.msg.metadata?.diagnostics as { resetAt?: unknown } | undefined;
+    const resetAt = typeof diagnostics?.resetAt === 'number' ? diagnostics.resetAt : undefined;
+    const until = resetAt ?? Date.now() + DEFAULT_USAGE_LIMIT_COOLDOWN_MS;
+    const source = catRegistry.tryGet(input.catId as string)?.config.clientId ?? 'unknown';
+    await deps.cooldownStore.set({
+      catId: input.catId,
+      until,
+      reason: 'usage_limit',
+      source,
+      originalError: input.msg.error ?? 'usage_limit',
+    });
+    return { until, resetAtResolved: resetAt !== undefined };
+  } catch {
+    /* best-effort — a failed cooldown write must not break the invocation */
+    return null;
+  }
+}
+
 /** @internal Exposed for testing */
 export function _resetCompressionDetection(): void {
   _prevContextFill.clear();
@@ -318,6 +354,9 @@ export interface InvocationDeps {
   readonly messageStore?: IMessageStore;
   /** F24 Phase B: Session sealer for auto-seal when context threshold reached */
   readonly sessionSealer?: ISessionSealer;
+  /** 理智线 T6 (task #388): per-cat quota-cooldown state. Optional so existing
+   *  test/deps construction sites keep compiling without it. */
+  readonly cooldownStore?: ICooldownStore;
   /** F24 Phase C: Transcript writer for event collection + flush on seal */
   readonly transcriptWriter?: TranscriptWriter;
   /** F24 Phase D: Transcript reader for reading sealed session data */
@@ -1518,6 +1557,27 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (msg.type === 'error') {
         hadStreamError = true;
         lastErrorMessage = msg.error;
+
+        // 理智线 T6 (task #388): errorCode==='usage_limit' is the ONLY trigger for
+        // a cooldown write — any other/unrecognized errorCode must NOT be swept
+        // into cooldown (would falsely cool down a cat on a normal error).
+        if (msg.errorCode === 'usage_limit') {
+          const cooldown = await recordUsageLimitCooldown(deps, { catId: catId as CatId, msg });
+          if (cooldown) {
+            outputs.push({
+              type: 'system_info' as const,
+              catId,
+              content: JSON.stringify({
+                type: 'cooldown_started',
+                catId,
+                threadId,
+                until: cooldown.until,
+                resetAtResolved: cooldown.resetAtResolved,
+              }),
+              timestamp: Date.now(),
+            });
+          }
+        }
       }
 
       if (msg.type === 'session_init' && msg.sessionId) {

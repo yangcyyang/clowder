@@ -31,16 +31,17 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from '../pro
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import {
-  buildClaudeStreamJsonUserMessage,
-  isClaudeRuntimeSteerEnabled,
-  registerClaudeRuntimeSteerChannel,
-} from './claude-runtime-steer.js';
-import {
   extractClaudeUsage,
   isDiagnosticOnlyEdeResult,
   isResultErrorEvent,
   transformClaudeEvent,
 } from './claude-ndjson-parser.js';
+import { detectClaudeQuotaSignal } from './claude-quota-detector.js';
+import {
+  buildClaudeStreamJsonUserMessage,
+  isClaudeRuntimeSteerEnabled,
+  registerClaudeRuntimeSteerChannel,
+} from './claude-runtime-steer.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -430,6 +431,15 @@ export class ClaudeAgentService implements AgentService {
 
       let eventCount = 0;
       let textEventCount = 0;
+      // 理智线 T6 (task #388): accumulate the full turn's text + track the latest
+      // rate_limit_event resetsAt seen, for quota-signal detection right before
+      // the 'done' yield (see detectClaudeQuotaSignal() call below).
+      let accumulatedText = '';
+      let concurrentRateLimitResetsAtMs: number | undefined;
+      const captureQuotaDetectorText = (msg: { type: string; content?: string; textMode?: string }): void => {
+        if (msg.type !== 'text' || !msg.content) return;
+        accumulatedText = msg.textMode === 'replace' ? msg.content : `${accumulatedText}${msg.content}`;
+      };
       for await (const event of events) {
         eventCount++;
         const evtType =
@@ -508,6 +518,13 @@ export class ClaudeAgentService implements AgentService {
 
         // F8: Capture usage from result/success events before transform drops them
         const rawEvt = event as Record<string, unknown>;
+        // 理智线 T6 (task #388): rate_limit_event carries a structured resetsAt —
+        // prefer it over parsing the wall-clock time out of the session-limit text
+        // notice (see detectClaudeQuotaSignal()). Keep the latest one seen.
+        if (rawEvt.type === 'rate_limit_event' && typeof rawEvt.resets_at === 'string') {
+          const parsedResetsAt = Date.parse(rawEvt.resets_at);
+          if (!Number.isNaN(parsedResetsAt)) concurrentRateLimitResetsAtMs = parsedResetsAt;
+        }
         if (rawEvt.type === 'result' && rawEvt.subtype === 'success') {
           metadata.usage = extractClaudeUsage(rawEvt);
           // F24-fix: Attach per-turn input from last message_start for context health
@@ -539,6 +556,7 @@ export class ClaudeAgentService implements AgentService {
         if (Array.isArray(result)) {
           for (const msg of result) {
             if (msg.type === 'text') textEventCount++;
+            captureQuotaDetectorText(msg);
             // Capture sessionId into metadata
             if (msg.type === 'session_init' && msg.sessionId) {
               metadata.sessionId = msg.sessionId;
@@ -559,6 +577,7 @@ export class ClaudeAgentService implements AgentService {
             sawResultError = true;
           }
           if (result.type === 'text') textEventCount++;
+          captureQuotaDetectorText(result);
           yield { ...result, metadata };
         }
       }
@@ -572,6 +591,47 @@ export class ClaudeAgentService implements AgentService {
           { catId: this.catId, totalEvents: eventCount },
           'Claude CLI produced 0 text events — will show as silent_completion',
         );
+      }
+      // 理智线 T6 (task #388): text-scan quota detection (tail-anchored, exact
+      // format — see claude-quota-detector.ts for the FP-avoidance rationale).
+      // Yielded as a distinct 'error' message (not attached to 'done' directly):
+      // route-serial.ts/route-parallel.ts only harvest errorCode from type==='error'
+      // messages into their own synthesized terminal 'done' (which is what
+      // QueueProcessor's terminalErrorCode actually reads) — matches the same
+      // propagation path Codex's usage_limit errorCode already uses.
+      const quotaSignal = detectClaudeQuotaSignal(
+        accumulatedText,
+        concurrentRateLimitResetsAtMs !== undefined ? { concurrentResetAtMs: concurrentRateLimitResetsAtMs } : {},
+      );
+      if (quotaSignal) {
+        log.info(
+          {
+            catId: this.catId,
+            invocationId: options?.invocationId,
+            resetSource: quotaSignal.resetSource,
+            hadConcurrentRateLimitEvent: concurrentRateLimitResetsAtMs !== undefined,
+            resetAt: quotaSignal.resetAt,
+          },
+          'Claude quota text-scan matched — telemetry for future TP/FP review (see #388 follow-up)',
+        );
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: quotaSignal.resetAt
+            ? `Claude 额度用尽，${new Date(quotaSignal.resetAt).toLocaleString('zh-CN')} 恢复`
+            : 'Claude 额度用尽，恢复时间未知',
+          errorCode: quotaSignal.errorCode,
+          metadata: {
+            ...metadata,
+            diagnostics: {
+              ...metadata.diagnostics,
+              resetAt: quotaSignal.resetAt,
+              resetSource: quotaSignal.resetSource,
+              matchedText: quotaSignal.matchedText,
+            },
+          },
+          timestamp: Date.now(),
+        };
       }
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {

@@ -109,6 +109,101 @@ test('yields session_init, text, and done on basic success', async () => {
   assert.equal(msgs[2].type, 'done');
 });
 
+// ── 理智线 T6 (task #388): quota text-scan detection ────────────────────────
+
+test('T6: text ending with the real quota-limit notice yields an additional error(usage_limit) message', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('Hello'));
+
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'sess-quota' },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'text',
+            text: "帮你更新了文档。You've hit your session limit · resets 3:30am (Asia/Shanghai)",
+          },
+        ],
+      },
+    },
+    { type: 'result', subtype: 'success', session_id: 'sess-quota' },
+  ]);
+
+  const msgs = await promise;
+  assert.ok(
+    msgs.some((m) => m.type === 'text' && m.content.includes('帮你更新了文档')),
+    'the original reply text must still be delivered normally',
+  );
+  const errMsg = msgs.find((m) => m.type === 'error');
+  assert.ok(errMsg, 'a tail-anchored quota notice must yield an additional error message');
+  assert.equal(errMsg.errorCode, 'usage_limit');
+  assert.equal(msgs[msgs.length - 1].type, 'done', 'done must still be the terminal message');
+});
+
+test('T6: rate_limit_event resetsAt (if present in the same turn) is preferred over text-parsed time', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('Hello'));
+
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'sess-quota-rle' },
+    { type: 'rate_limit_event', utilization: 1.0, resets_at: '2026-06-30T01:00:00.000Z' },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'text', text: "You've hit your session limit · resets 3:30am (Asia/Shanghai)" }],
+      },
+    },
+    { type: 'result', subtype: 'success', session_id: 'sess-quota-rle' },
+  ]);
+
+  const msgs = await promise;
+  const errMsg = msgs.find((m) => m.type === 'error');
+  assert.ok(errMsg);
+  assert.equal(errMsg.metadata?.diagnostics?.resetSource, 'rate_limit_event');
+  assert.equal(errMsg.metadata?.diagnostics?.resetAt, Date.parse('2026-06-30T01:00:00.000Z'));
+});
+
+test('T6 FP SENTINEL: a mid-reply quote of the quota phrase does NOT yield an error message', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('discuss the sample text'));
+
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'sess-fp' },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'text',
+            text:
+              "You've hit your session limit · resets 3:30am (Asia/Shanghai) — that's the sample phrase we're " +
+              'using as a test fixture. Anyway, back to your actual question: the root cause is X, verified by tests.',
+          },
+        ],
+      },
+    },
+    { type: 'result', subtype: 'success', session_id: 'sess-fp' },
+  ]);
+
+  const msgs = await promise;
+  assert.equal(
+    msgs.find((m) => m.type === 'error'),
+    undefined,
+    'a mid-reply citation/discussion of the phrase must not be misclassified as a real quota hit',
+  );
+});
+
 test('handles tool_use content blocks', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

@@ -20,6 +20,7 @@ import {
 } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
+import type { ICooldownStore } from '../../stores/ports/CooldownStore.js';
 import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
@@ -521,6 +522,9 @@ export interface QueueProcessorDeps {
     SessionContinuationCoordinator,
     'prepareInvocationContext' | 'commitInvocationOutcome'
   >;
+  /** 理智线 T6 (task #388): per-cat quota-cooldown state. Optional so existing deps
+   *  construction sites keep compiling without it. */
+  cooldownStore?: ICooldownStore;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -582,6 +586,10 @@ export class QueueProcessor {
   private userBatchTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private fastLaneRouter = new FastLaneRouter();
   private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
+  /** 理智线 T6 (task #388): dedup — only post the cooldown-queued notice once per entry,
+   *  not on every re-scan while the entry stays blocked. Bounded so it can't leak forever. */
+  private cooldownNotifiedEntryIds = new Set<string>();
+  private static readonly COOLDOWN_NOTIFIED_MAX = 5000;
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
   private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
 
@@ -1122,6 +1130,76 @@ export class QueueProcessor {
     }
   }
 
+  /**
+   * 理智线 T6 (task #388): layer-1 dispatch gate. An entry is dispatchable only if
+   * NONE of its targetCats are currently cooling down (not just targetCats[0]) —
+   * a serial/A2A chain or an un-split multi-mention entry with any cooling member
+   * stays queued as a whole (V0 scope: fine-grained per-target splitting for
+   * parallel multi-mention is a documented follow-up, not this ticket — see gate
+   * report). Returns the first cooling record found, or null if none are cooling.
+   */
+  private async isEntryCoolingDown(entry: QueueEntry): Promise<{ catId: string; until: number } | null> {
+    if (!this.deps.cooldownStore) return null;
+    const now = Date.now();
+    for (const catId of entry.targetCats) {
+      try {
+        const record = await this.deps.cooldownStore.get(catId as CatId);
+        if (record && record.until > now) return { catId, until: record.until };
+      } catch {
+        /* best-effort */
+      }
+    }
+    return null;
+  }
+
+  /** Post a cooldown-queued notice once per entry (not on every re-scan while blocked). */
+  private async notifyEntryCooldownQueued(entry: QueueEntry, cooling: { catId: string; until: number }): Promise<void> {
+    if (this.cooldownNotifiedEntryIds.has(entry.id)) return;
+    if (this.cooldownNotifiedEntryIds.size >= QueueProcessor.COOLDOWN_NOTIFIED_MAX) {
+      this.cooldownNotifiedEntryIds.clear();
+    }
+    this.cooldownNotifiedEntryIds.add(entry.id);
+    try {
+      const untilLabel = new Date(cooling.until).toLocaleString('zh-CN', { hour12: false });
+      const content = `⏳ @${cooling.catId} 配额冷却中，预计 ${untilLabel} 恢复。消息已排队，到点自动续跑。`;
+      const source = {
+        connector: 'cooldown-pending',
+        label: '配额冷却排队',
+        icon: 'info',
+        meta: {
+          presentation: 'system_notice',
+          noticeTone: 'info',
+          threadId: entry.threadId,
+          catId: cooling.catId,
+          until: cooling.until,
+          queueEntryId: entry.id,
+        },
+      } as const;
+      const stored = await this.deps.messageStore.append({
+        userId: 'system',
+        catId: null,
+        threadId: entry.threadId,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        source,
+        idempotencyKey: `cooldown-pending:${entry.id}`,
+      });
+      this.deps.socketManager.broadcastToRoom(`thread:${entry.threadId}`, 'connector_message', {
+        threadId: entry.threadId,
+        message: {
+          id: stored.id,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          timestamp: stored.timestamp,
+        },
+      });
+    } catch (err) {
+      this.deps.log.warn({ err, threadId: entry.threadId, entryId: entry.id }, '[T6] cooldown-pending notice failed');
+    }
+  }
+
   /** Check if a slot's queue is paused (canceled/failed AND has queued entries). */
   isPaused(threadId: string, catId?: string): boolean {
     if (catId) {
@@ -1537,7 +1615,9 @@ export class QueueProcessor {
     if (this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
       return { started: false, entry, blocked: true };
     }
-    return this.startAutoExecuteEntry(entry) ? { started: true, entry } : { started: false, entry, blocked: true };
+    return (await this.startAutoExecuteEntry(entry))
+      ? { started: true, entry }
+      : { started: false, entry, blocked: true };
   }
 
   /**
@@ -1700,14 +1780,19 @@ export class QueueProcessor {
       if (entry.a2aWaitedForQueuedUserMessages === true && this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
         continue;
       }
-      this.startAutoExecuteEntry(entry);
+      await this.startAutoExecuteEntry(entry);
       // Continue scanning — start all entries with free cat slots (parallel dispatch)
     }
     if (redirectedConflict) await this.tryAutoExecute(threadId);
   }
 
-  private startAutoExecuteEntry(entry: QueueEntry): boolean {
+  private async startAutoExecuteEntry(entry: QueueEntry): Promise<boolean> {
     const entryCat = entry.targetCats[0] ?? 'unknown';
+    const cooling = await this.isEntryCoolingDown(entry);
+    if (cooling) {
+      await this.notifyEntryCooldownQueued(entry, cooling);
+      return false;
+    }
     const sk = QueueProcessor.slotKey(entry.threadId, entryCat);
     if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(entry.threadId, entryCat)) return false;
     if (!this.deps.queue.markProcessingById(entry.threadId, entry.id)) return false;
@@ -1760,9 +1845,11 @@ export class QueueProcessor {
       const entryCat = entry.targetCats[0] ?? catId;
       const entrySk = QueueProcessor.slotKey(threadId, entryCat);
 
-      if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+      const cooling = await this.isEntryCoolingDown(entry);
+      if (cooling || this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
         this.deps.queue.rollbackProcessing(threadId, entry.id);
         busyCats.add(entryCat);
+        if (cooling) await this.notifyEntryCooldownQueued(entry, cooling);
         continue;
       }
 
@@ -1815,9 +1902,11 @@ export class QueueProcessor {
       entryCat = entry.targetCats[0] ?? 'unknown';
       sk = QueueProcessor.slotKey(threadId, entryCat);
 
-      if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+      const cooling = await this.isEntryCoolingDown(entry);
+      if (cooling || this.processingSlots.has(sk) || this.deps.invocationTracker.has(threadId, entryCat)) {
         this.deps.queue.rollbackProcessing(threadId, entry.id);
         busyCats.add(entryCat);
+        if (cooling) await this.notifyEntryCooldownQueued(entry, cooling);
         continue;
       }
       break;

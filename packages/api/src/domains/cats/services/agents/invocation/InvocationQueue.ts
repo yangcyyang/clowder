@@ -643,6 +643,25 @@ export class InvocationQueue {
     return users;
   }
 
+  /**
+   * 理智线 T6 (task #388): threadIds with at least one 'queued' entry whose targetCats
+   * includes catId — used by the cooldown-expiry sweep to know which threads to retry
+   * once a cat's cooldown ends (cooldown is per-cat, not per-thread, so a single cat's
+   * expiry can unblock entries across multiple threads).
+   */
+  listThreadsWithQueuedEntryForCat(catId: string): string[] {
+    const threadIds = new Set<string>();
+    for (const q of this.queues.values()) {
+      for (const entry of q) {
+        if (entry.status === 'queued' && entry.targetCats.includes(catId)) {
+          threadIds.add(entry.threadId);
+          break;
+        }
+      }
+    }
+    return [...threadIds];
+  }
+
   /** F122B: List all queued autoExecute entries for a thread (for scanning past busy slots). */
   listAutoExecute(threadId: string): QueueEntry[] {
     const now = Date.now();

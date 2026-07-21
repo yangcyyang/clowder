@@ -1799,6 +1799,184 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
   });
 
+  // ── 理智线 T6 (task #388): quota-cooldown scheduling ───────────────────────
+
+  describe('理智线 T6: quota-cooldown write gating', () => {
+    function errorService({ catId, errorCode, error, metadata }) {
+      return {
+        async *invoke() {
+          yield { type: 'session_init', catId, sessionId: `cli-${catId}`, timestamp: Date.now() };
+          yield {
+            type: 'error',
+            catId,
+            error,
+            ...(errorCode ? { errorCode } : {}),
+            ...(metadata ? { metadata } : {}),
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId, timestamp: Date.now() };
+        },
+      };
+    }
+
+    function findCooldownStarted(outputs) {
+      return outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'cooldown_started');
+    }
+
+    it('errorCode=usage_limit WITH resolved resetAt writes a cooldown using that exact resetAt', async () => {
+      const { CooldownStore } = await import('../dist/domains/cats/services/stores/ports/CooldownStore.js');
+      const cooldownStore = new CooldownStore();
+      const resetAt = Date.now() + 3 * 60 * 60_000;
+
+      const deps = { ...makeDeps(), cooldownStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({
+            catId: 'opus',
+            errorCode: 'usage_limit',
+            error: 'Claude 额度用尽',
+            metadata: { diagnostics: { resetAt, resetSource: 'text_parse' } },
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-resolved-reset',
+          isLastCat: true,
+        }),
+      );
+
+      const record = await cooldownStore.get('opus');
+      assert.ok(record, 'cooldown record must be written');
+      assert.equal(record.until, resetAt, 'until must equal the resolved resetAt, not the 30min default');
+      assert.equal(record.reason, 'usage_limit');
+
+      const events = findCooldownStarted(outputs);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].resetAtResolved, true);
+    });
+
+    it('errorCode=usage_limit WITHOUT a resolved resetAt falls back to the 30min default', async () => {
+      const { CooldownStore } = await import('../dist/domains/cats/services/stores/ports/CooldownStore.js');
+      const cooldownStore = new CooldownStore();
+      const before = Date.now();
+
+      const deps = { ...makeDeps(), cooldownStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({
+            catId: 'opus',
+            errorCode: 'usage_limit',
+            error: 'Claude 额度用尽，恢复时间未知',
+            metadata: { diagnostics: { resetSource: 'unresolved' } },
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-default-reset',
+          isLastCat: true,
+        }),
+      );
+
+      const record = await cooldownStore.get('opus');
+      assert.ok(record);
+      const expectedMin = before + 30 * 60_000 - 1000; // small slack for test execution time
+      const expectedMax = Date.now() + 30 * 60_000 + 1000;
+      assert.ok(
+        record.until >= expectedMin && record.until <= expectedMax,
+        `expected ~30min default, got until=${record.until} (now=${Date.now()})`,
+      );
+
+      const events = findCooldownStarted(outputs);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].resetAtResolved, false);
+    });
+
+    it('REGRESSION GUARD: an unrecognized/other errorCode must NOT write a cooldown', async () => {
+      const { CooldownStore } = await import('../dist/domains/cats/services/stores/ports/CooldownStore.js');
+      const cooldownStore = new CooldownStore();
+
+      const deps = { ...makeDeps(), cooldownStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({ catId: 'opus', errorCode: 'SOME_OTHER_ERROR', error: 'unrelated failure' }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-unrelated-error',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(await cooldownStore.get('opus'), null, 'an unrelated errorCode must not trigger a cooldown');
+      assert.equal(findCooldownStarted(outputs).length, 0);
+    });
+
+    it('REGRESSION GUARD: a plain error with NO errorCode at all must NOT write a cooldown', async () => {
+      const { CooldownStore } = await import('../dist/domains/cats/services/stores/ports/CooldownStore.js');
+      const cooldownStore = new CooldownStore();
+
+      const deps = { ...makeDeps(), cooldownStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({ catId: 'opus', error: 'CLI 异常退出 (code: 1)' }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-plain-error',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(await cooldownStore.get('opus'), null);
+      assert.equal(findCooldownStarted(outputs).length, 0);
+    });
+
+    it('re-detection during an active cooldown extends via max(existing, new), never shortens it', async () => {
+      const { CooldownStore } = await import('../dist/domains/cats/services/stores/ports/CooldownStore.js');
+      const cooldownStore = new CooldownStore();
+      const longResetAt = Date.now() + 6 * 60 * 60_000;
+      const shortResetAt = Date.now() + 1 * 60 * 60_000;
+
+      const deps = { ...makeDeps(), cooldownStore };
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({
+            catId: 'opus',
+            errorCode: 'usage_limit',
+            error: 'x',
+            metadata: { diagnostics: { resetAt: longResetAt } },
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-max-merge',
+          isLastCat: true,
+        }),
+      );
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'opus',
+          service: errorService({
+            catId: 'opus',
+            errorCode: 'usage_limit',
+            error: 'y',
+            metadata: { diagnostics: { resetAt: shortResetAt } },
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-t6-max-merge',
+          isLastCat: true,
+        }),
+      );
+
+      const record = await cooldownStore.get('opus');
+      assert.equal(record.until, longResetAt, 'a shorter re-detection must not shorten the existing cooldown');
+    });
+  });
+
   it('F24-fix: prefers lastTurnInputTokens over aggregated inputTokens for context health', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

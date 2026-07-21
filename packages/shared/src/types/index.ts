@@ -253,6 +253,9 @@ export {
   getConnectorDefinition,
   SCHEDULER_TRIGGER_PREFIX,
 } from './connector.js';
+// 理智线 T6（task #388）：配额冷却结构化状态
+export type { CooldownInput, CooldownRecord } from './cooldown.js';
+export { truncateCooldownOriginalError } from './cooldown.js';
 // Deliberate types (4-E 两轮制 - 类型预埋)
 export type {
   DeliberateEvent,

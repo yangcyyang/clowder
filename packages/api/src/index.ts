@@ -34,6 +34,7 @@ import { assertStorageReady } from './config/storage-guard.js';
 import { FreshnessEgressGate } from './domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import { FreshnessHoldExpiryScheduler } from './domains/cats/services/agents/freshness/FreshnessHoldExpiryScheduler.js';
 import { isCollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
+import { sweepExpiredCooldowns } from './domains/cats/services/agents/invocation/cooldown-sweep.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
@@ -57,8 +58,8 @@ import { AntigravityAgentService } from './domains/cats/services/agents/provider
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
-  CapabilityReceiptExecutionGate,
   assertCapabilityReceiptStartupInvariants,
+  CapabilityReceiptExecutionGate,
   resolveCapabilityReceiptRolloutPolicy,
 } from './domains/cats/services/auth/CapabilityReceiptExecutionGate.js';
 import {
@@ -91,6 +92,7 @@ import { createAuthorizationRuleStore } from './domains/cats/services/stores/fac
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCapabilityReceiptStore } from './domains/cats/services/stores/factories/CapabilityReceiptStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
+import { createCooldownStore } from './domains/cats/services/stores/factories/CooldownStoreFactory.js';
 import { createFreshnessHoldStore } from './domains/cats/services/stores/factories/FreshnessHoldStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
@@ -601,6 +603,8 @@ async function main(): Promise<void> {
   }
 
   const sessionChainStore = createSessionChainStore(redis);
+  // 理智线 T6 (task #388): per-cat quota-cooldown state, restart-safe via Redis when available.
+  const cooldownStore = createCooldownStore(redis);
   // F24: Transcript Writer/Reader for session chain
   // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
   const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
@@ -1371,6 +1375,7 @@ async function main(): Promise<void> {
     ...(sessionStore ? { sessionStore } : {}),
     ...(threadStore ? { threadStore } : {}),
     sessionChainStore,
+    cooldownStore,
     transcriptWriter,
     transcriptReader,
     sessionSealer,
@@ -1421,6 +1426,7 @@ async function main(): Promise<void> {
     log: app.log,
     catSupervisor,
     sessionContinuationCoordinator,
+    cooldownStore,
   });
   const restoredQueue = await invocationQueue.restorePersistedEntries();
   if (restoredQueue.restored > 0) {
@@ -2317,6 +2323,26 @@ async function main(): Promise<void> {
     }
   }, GLOBAL_REAPER_INTERVAL_MS);
   globalReaperTimer.unref();
+
+  // 理智线 T6 (task #388): quota-cooldown expiry sweep — startup pass + periodic scan.
+  // Independent of the F118 reaper above (5min is too coarse for cooldown wake-ups;
+  // see gate report for why it's not coupled to that timer). Redis-persisted cooldown
+  // state means a restart just resumes scanning — no lost wake-up.
+  const COOLDOWN_SWEEP_INTERVAL_MS = 45_000;
+  const cooldownSweepDeps = { cooldownStore, invocationQueue, queueProcessor, log: app.log };
+  try {
+    await sweepExpiredCooldowns(cooldownSweepDeps);
+  } catch (err) {
+    app.log.warn(`[api] T6 cooldown-sweep startup pass failed (best-effort): ${String(err)}`);
+  }
+  const cooldownSweepTimer = setInterval(async () => {
+    try {
+      await sweepExpiredCooldowns(cooldownSweepDeps);
+    } catch {
+      // best-effort periodic sweep
+    }
+  }, COOLDOWN_SWEEP_INTERVAL_MS);
+  cooldownSweepTimer.unref();
 
   // Log server startup to audit log (best-effort: don't crash if audit dir unwritable)
   const auditLog = getEventAuditLog();

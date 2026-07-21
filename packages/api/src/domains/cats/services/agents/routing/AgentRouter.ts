@@ -36,6 +36,7 @@ import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
 import type { TranscriptWriter } from '../../session/TranscriptWriter.js';
+import type { ICooldownStore } from '../../stores/ports/CooldownStore.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
@@ -163,6 +164,8 @@ export interface AgentRouterOptions {
   transcriptReader?: TranscriptReader;
   /** F24 Phase B: Session sealer for auto-seal */
   sessionSealer?: ISessionSealer;
+  /** 理智线 T6 (task #388): per-cat quota-cooldown state. */
+  cooldownStore?: ICooldownStore;
   /** #80: Streaming draft persistence store */
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
@@ -222,6 +225,7 @@ export class AgentRouter {
   private transcriptWriter: TranscriptWriter | undefined;
   private transcriptReader: TranscriptReader | undefined;
   private sessionSealer: ISessionSealer | undefined;
+  private cooldownStore: ICooldownStore | undefined;
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
@@ -283,6 +287,7 @@ export class AgentRouter {
     this.transcriptWriter = options.transcriptWriter;
     this.transcriptReader = options.transcriptReader;
     this.sessionSealer = options.sessionSealer;
+    this.cooldownStore = options.cooldownStore;
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
@@ -747,6 +752,7 @@ export class AgentRouter {
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),
+        ...(this.cooldownStore ? { cooldownStore: this.cooldownStore } : {}),
         ...(this.taskStore ? { taskStore: this.taskStore } : {}),
         ...(this.workflowSopStore ? { workflowSopStore: this.workflowSopStore } : {}),
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),

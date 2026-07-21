@@ -1452,4 +1452,35 @@ describe('InvocationQueue', () => {
     const d = queue.dequeue('t1', 'u1');
     assert.equal(d.callerTraceContext, undefined);
   });
+
+  // ── 理智线 T6 (task #388): listThreadsWithQueuedEntryForCat ──
+
+  it('listThreadsWithQueuedEntryForCat finds threads with a queued entry targeting that cat', () => {
+    queue.enqueue(entry({ threadId: 't1', userId: 'u1', targetCats: ['opus'] }));
+    queue.enqueue(entry({ threadId: 't2', userId: 'u2', targetCats: ['opus', 'codex'] }));
+    queue.enqueue(entry({ threadId: 't3', userId: 'u3', targetCats: ['gemini'] }));
+
+    assert.deepEqual(queue.listThreadsWithQueuedEntryForCat('opus').sort(), ['t1', 't2']);
+    assert.deepEqual(queue.listThreadsWithQueuedEntryForCat('codex'), ['t2']);
+    assert.deepEqual(queue.listThreadsWithQueuedEntryForCat('gemini'), ['t3']);
+    assert.deepEqual(queue.listThreadsWithQueuedEntryForCat('nonexistent'), []);
+  });
+
+  it('listThreadsWithQueuedEntryForCat excludes non-queued (processing) entries', () => {
+    queue.enqueue(entry({ threadId: 't1', userId: 'u1', targetCats: ['opus'] }));
+    queue.markProcessing('t1', 'u1');
+
+    assert.deepEqual(
+      queue.listThreadsWithQueuedEntryForCat('opus'),
+      [],
+      'a processing entry is not queued — must not be returned',
+    );
+  });
+
+  it('listThreadsWithQueuedEntryForCat dedupes multiple queued entries in the same thread', () => {
+    queue.enqueue(entry({ threadId: 't1', userId: 'u1', targetCats: ['opus'], content: 'A' }));
+    queue.enqueue(entry({ threadId: 't1', userId: 'u1', targetCats: ['opus'], content: 'B' }));
+
+    assert.deepEqual(queue.listThreadsWithQueuedEntryForCat('opus'), ['t1']);
+  });
 });
