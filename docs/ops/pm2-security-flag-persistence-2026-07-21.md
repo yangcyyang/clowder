@@ -44,11 +44,21 @@
 
 ## 待执行（不在本次范围）：真重启迁移
 
-**为什么需要人在场**：`pm2 restart --update-env` 会用 `ecosystem.config.cjs`
-里的 env **完全替换**当前进程的自定义 env——如果本文档遗漏了某个仍在被依赖
-的安全 flag（哪怕只是上面第 3 类里的某一个，只要代码里其实检查了它），重启
-瞬间就是真实的安全门失效或功能中断，不是"配置漂移"那个级别。必须有人能在
-重启后立刻验证、必要时立刻回滚。
+**为什么需要人在场**：apply 会用 `ecosystem.config.cjs` 里的 env **完全替换**
+当前进程的自定义 env——如果本文档遗漏了某个仍在被依赖的安全 flag（哪怕只是
+上面第 3 类里的某一个，只要代码里其实检查了它），重启瞬间就是真实的安全门
+失效或功能中断，不是"配置漂移"那个级别。必须有人能在重启后立刻验证、必要
+时立刻回滚。
+
+**⚠️ 关键纠正（专家-Claude gate 时指出）**：普通的 `pm2 restart clowder-api`
+（哪怕带 `--update-env`）**不会重新读取 `ecosystem.config.cjs` 的 env**——它
+只会重放 pm2 已保存/内存里的进程 env，`--update-env` 只是把*当前 shell* 的
+env 合并进去，不会去读 ecosystem 文件。真正让 `ecosystem.config.cjs` 里的新
+env 生效，必须用**显式指向 ecosystem 文件**的命令：`pm2 reload
+ecosystem.config.cjs --update-env`（或 `pm2 delete clowder-api && pm2 start
+ecosystem.config.cjs --only clowder-api`）。这也意味着：**merge 这份配置到
+canonical 本身是安全的**——任何后续的 crash-restart 或普通 `pm2 restart` 都
+不会意外 apply 它，只有下面这条 deliberate 命令才会。
 
 ### 执行清单（yangcyyang 在场时）
 
@@ -56,7 +66,10 @@
    （完整 173 行自定义 env，不只是本文档这 10 个），留作回滚参照。
 2. **确认 canonical HEAD** 已包含本次 commit（`cf209b99` 或其后续 merge
    commit），`ecosystem.config.cjs` 内容跟本文档表格一致。
-3. **执行**：`pm2 restart clowder-api --update-env`。
+3. **执行**（必须显式指向 ecosystem 文件，见上面的关键纠正）：
+   `pm2 reload ecosystem.config.cjs --update-env`（优先，reload 是滚动重启，
+   停机窗口更小）；如果 reload 对这个场景不生效，退回
+   `pm2 delete clowder-api && pm2 start ecosystem.config.cjs --only clowder-api`。
 4. **立即验证**（重启后 <1 分钟内）：
    - `pm2 env 1` 重新抓取，跟步骤1的基线逐行 diff。
    - 断言本文档表格 10 个 flag 全部存在且值正确（尤其
@@ -65,14 +78,15 @@
    - `curl /api/ready` 绿。
    - 跑一次 `runtime-doctor` 冒烟脚本（`#381` 产出）确认基础链路没退化。
 5. **若发现遗漏**：立刻用 F194 flip 时验证过的单 flag 追加流程（抓当前 env
-   → 过滤 pm2 内部 key → 补齐遗漏值 → 重新 `--update-env`）补回，不要等下一次
-   计划性重启。
+   → 过滤 pm2 内部 key → 补齐遗漏值 → `pm2 restart clowder-api --update-env`，
+   这一步不涉及 ecosystem 文件重读，是往*当前已生效*的进程 env 上追加/纠正，
+   跟步骤3的语义不同）补回，不要等下一次计划性重启。
 6. **回滚预案**：若重启后行为明显异常（比如能力回执被绕过的迹象），
-   立刻 `pm2 restart clowder-api`（不带 --update-env，回到刚才的进程状态是
-   不可能的——env 已经变了；真正回滚手段是从步骤1的快照文件手动重新
-   export 后再 `--update-env` 一次）。这也是为什么必须有人在场：自动化脚本
-   发现异常后的正确响应需要判断"是配置错了还是代码本身有问题"，不适合无人
-   值守执行。
+   进程当前 env 已经是 apply 后的状态，不可能"退回上一个内存状态"——真正的
+   回滚是从步骤1的快照文件手动重新 export 那批变量，再
+   `pm2 restart clowder-api --update-env` 一次，把进程 env 纠正回快照状态。
+   这也是为什么必须有人在场：自动化脚本发现异常后的正确响应需要判断"是
+   配置错了还是代码本身有问题"，不适合无人值守执行。
 
 ### 验收标准
 - [ ] 10 个安全 flag 重启后在 `pm2 env 1` 里全部存在，值跟本文档表格一致
