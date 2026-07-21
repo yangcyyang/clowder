@@ -14,6 +14,13 @@ export function formatTaskSourceContent(task: { title: string; why?: string }): 
   return [`📌 Task: ${task.title}`, task.why?.trim() ? `\n${task.why.trim()}` : ''].join('\n');
 }
 
+/**
+ * 理智线批相邻的 #404 whisper 钉：这份合成 sourceMessage 曾经不带 visibility/
+ * whisperTo/revealedAt，导致下游（任务卡渲染）无法判断真实来源消息是不是
+ * whisper——一条通过 whisper 发送、被 F194 自动收纳成任务的指令，其内容会
+ * 通过任务卡"看起来是公开的"泄露给无权 viewer。补齐这三个字段，让
+ * canViewerSeeThreadMessage() 之类的下游过滤器能正确判断。
+ */
 export function toTaskThreadMessage(message: StoredMessage) {
   return {
     id: message.id,
@@ -25,6 +32,9 @@ export function toTaskThreadMessage(message: StoredMessage) {
     timestamp: message.timestamp,
     ...(message.editedAt ? { editedAt: message.editedAt } : {}),
     ...(message.origin ? { origin: message.origin } : {}),
+    ...(message.visibility ? { visibility: message.visibility } : {}),
+    ...(message.whisperTo ? { whisperTo: message.whisperTo } : {}),
+    ...(message.revealedAt ? { revealedAt: message.revealedAt } : {}),
   };
 }
 

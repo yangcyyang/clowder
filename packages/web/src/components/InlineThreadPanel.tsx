@@ -30,6 +30,7 @@ import { ImagePreview } from './ImagePreview';
 import { MentionPicker } from './MentionPicker';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref } from './ThreadSidebar/thread-navigation';
+import { canViewerSeeThreadMessage, type ThreadViewer } from './ThreadSidebar/thread-perceptibility';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
 const THREAD_PANEL_DEFAULT_WIDTH = 520;
@@ -292,11 +293,102 @@ function getTaskOwnerLabel(task: TaskItem): string {
   return task.ownerCatId ?? '未分配';
 }
 
-export function InlineThreadTaskStatusCard({ task }: { task?: TaskItem }) {
+const DEFAULT_VIEWER: ThreadViewer = { type: 'user' };
+
+/** localStorage key for the task-card collapse memory (#404 §2). Exported for tests. */
+export function taskCardCollapsedStorageKey(threadId: string): string {
+  return `clowder:thread-taskcard-collapsed:${threadId}`;
+}
+
+function readTaskCardCollapsed(threadId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(taskCardCollapsedStorageKey(threadId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeTaskCardCollapsed(threadId: string, collapsed: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(taskCardCollapsedStorageKey(threadId), collapsed ? '1' : '0');
+  } catch {
+    /* storage unavailable — collapse state just won't persist */
+  }
+}
+
+/**
+ * #404 whisper 钉：任务卡字段（标题/负责人/交付证据/下一步）都是从 sourceMessage
+ * 派生的展示内容。sourceMessage 现在（见 task-discussion-thread.ts 的
+ * toTaskThreadMessage 修复）会正确带上 visibility/whisperTo，用
+ * canViewerSeeThreadMessage 判断——viewer.type==='user' 时（当前唯一的 web
+ * 展示场景）恒可见，这不是漏洞，是"owner 看见一切"的既有设计（同票D
+ * present-agents 的安全模型）；viewer.type==='cat' 时才真过滤，是防御性预留，
+ * 给未来非 owner 视角用。不可见时整卡降级为"私密任务"占位，不渲染任何字段。
+ */
+export function InlineThreadTaskStatusCard({
+  task,
+  sourceMessage,
+  threadId,
+  viewer = DEFAULT_VIEWER,
+}: {
+  task?: TaskItem;
+  sourceMessage?: Pick<ChatMessageData, 'visibility' | 'whisperTo' | 'revealedAt'>;
+  threadId?: string;
+  viewer?: ThreadViewer;
+}) {
+  const [collapsed, setCollapsed] = useState(() => (threadId ? readTaskCardCollapsed(threadId) : false));
+
+  useEffect(() => {
+    if (threadId) setCollapsed(readTaskCardCollapsed(threadId));
+  }, [threadId]);
+
   if (!task) return null;
+
+  const visible = !sourceMessage || canViewerSeeThreadMessage(sourceMessage as ChatMessageData, viewer);
+  if (!visible) {
+    return (
+      <section
+        className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
+        aria-label="任务 Thread 状态（私密）"
+      >
+        <div className="text-xs font-semibold text-[var(--cafe-text-muted)]">🔒 私密任务</div>
+        <p className="text-[11px] text-[var(--cafe-text-muted)]">你无权查看此任务的来源内容</p>
+      </section>
+    );
+  }
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      if (threadId) writeTaskCardCollapsed(threadId, next);
+      return next;
+    });
+  };
 
   const evidenceCount = countTaskEvidence(task.evidence);
   const statusTone = TASK_STATUS_TONE[task.status] ?? TASK_STATUS_TONE.todo;
+  const statusChip = (
+    <span className={`flex-shrink-0 border px-2 py-0.5 text-[11px] font-semibold ${statusTone}`}>
+      {TASK_STATUS_LABELS[task.status] ?? task.status}
+    </span>
+  );
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        className="flex w-full flex-shrink-0 items-center justify-between gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2 text-left"
+        aria-label="展开任务 Thread 状态"
+        aria-expanded={false}
+      >
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--cafe-text)]">任务 · {task.title}</span>
+        {statusChip}
+      </button>
+    );
+  }
 
   return (
     <section
@@ -313,9 +405,19 @@ export function InlineThreadTaskStatusCard({ task }: { task?: TaskItem }) {
             {task.title}
           </div>
         </div>
-        <span className={`flex-shrink-0 border px-2 py-0.5 text-[11px] font-semibold ${statusTone}`}>
-          {TASK_STATUS_LABELS[task.status] ?? task.status}
-        </span>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          {statusChip}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="slock-header-action slock-header-action--icon"
+            aria-label="折叠任务 Thread 状态"
+            aria-expanded={true}
+            title="折叠"
+          >
+            ⌃
+          </button>
+        </div>
       </div>
       {task.why.trim() && (
         <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{task.why}</p>
@@ -335,6 +437,51 @@ export function InlineThreadTaskStatusCard({ task }: { task?: TaskItem }) {
             {getTaskNextStep(task.status)}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * #404 §1: context region for NON-task threads — a small quoted-style card
+ * showing which message this thread branches from. Mutually exclusive with
+ * InlineThreadTaskStatusCard (a thread is either a task thread or not).
+ *
+ * #404 whisper 钉：跟任务卡同一条纪律——message 本身可能是 whisper，
+ * canViewerSeeThreadMessage 判断不可见时整卡降级为占位，不渲染内容/发送者。
+ */
+export function InlineThreadParentMessageCard({
+  message,
+  getCatById,
+  viewer = DEFAULT_VIEWER,
+}: {
+  message: ChatMessageData;
+  getCatById: (catId: string) => { displayName: string } | undefined;
+  viewer?: ThreadViewer;
+}) {
+  if (!canViewerSeeThreadMessage(message, viewer)) {
+    return (
+      <section
+        className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
+        aria-label="父消息（私密）"
+      >
+        <div className="text-xs font-semibold text-[var(--cafe-text-muted)]">🔒 私密消息</div>
+      </section>
+    );
+  }
+
+  const cat = message.catId ? getCatById(message.catId) : undefined;
+  const authorLabel = cat?.displayName ?? message.catId ?? '你';
+
+  return (
+    <section
+      className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
+      aria-label="父消息"
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">回复自</div>
+      <div className="min-w-0">
+        <div className="truncate text-xs font-semibold text-[var(--cafe-text)]">{authorLabel}</div>
+        <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{message.content}</p>
       </div>
     </section>
   );
@@ -1071,7 +1218,11 @@ export function InlineThreadPanel({
             </button>
           </div>
         )}
-        <InlineThreadTaskStatusCard task={task} />
+        {task ? (
+          <InlineThreadTaskStatusCard task={task} sourceMessage={sourceMessage} threadId={threadId} />
+        ) : (
+          <InlineThreadParentMessageCard message={sourceMessage} getCatById={getCatById} />
+        )}
         {runtimeCats.length > 0 && (
           <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
@@ -1167,7 +1318,14 @@ export function InlineThreadPanel({
             className="hidden"
             onChange={handleImageSelect}
           />
-          <div className="slock-composer-frame relative">
+          {/*
+            #404 §4 re-skin: visually matches ChatInput's composer frame (border/radius/bg/
+            focus-ring tokens + bottom toolbar row) by referencing the SAME CSS custom
+            properties and utility classes ChatInput.tsx uses, so the two stay in visual sync
+            without literally reusing ChatInput's send/mention/whisper logic (see #404 gate
+            discussion: full component reuse was rejected as high-risk, re-skin was approved).
+          */}
+          <div className="slock-composer-frame group relative flex min-h-[var(--slock-input-height-min)] flex-col rounded-[var(--slock-radius-lg)] border border-[var(--console-input-stroke)] bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 focus-within:ring-[var(--console-input-stroke)]">
             {showMentionPicker && (
               <MentionPicker
                 options={filteredCatOptions}
@@ -1193,44 +1351,43 @@ export function InlineThreadPanel({
               onPaste={handleImagePaste}
               placeholder="Message thread"
               rows={2}
-              className="h-[84px] w-full resize-none border-0 bg-transparent px-3 py-2 pr-12 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none placeholder:text-[var(--cafe-text-muted)]"
+              className="max-h-[260px] min-h-12 w-full flex-1 resize-none border-0 bg-transparent px-3 py-2.5 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-[var(--cafe-text)] outline-none placeholder:text-[var(--cafe-text-muted)]"
             />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={(!input.trim() && images.length === 0) || sending || isPreparingImages}
-              className="slock-send-button absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center disabled:cursor-not-allowed disabled:opacity-45"
-              aria-label={sending ? '发送中' : '发送 Thread 回复'}
-              title={sending ? '发送中...' : '发送'}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
-              </svg>
-            </button>
-          </div>
-          <div className="mt-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[var(--cafe-text-muted)]">
+            <div className="flex items-center justify-between gap-2 px-2 pb-2">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={sending || isPreparingImages || images.length >= MAX_THREAD_IMAGES}
+                  className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="上传图片"
+                  title="上传图片"
+                >
+                  ▧
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => imageInputRef.current?.click()}
-                disabled={sending || isPreparingImages || images.length >= MAX_THREAD_IMAGES}
-                className="slock-inline-control flex h-7 w-7 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="上传图片"
-                title="上传图片"
+                onClick={handleSend}
+                disabled={(!input.trim() && images.length === 0) || sending || isPreparingImages}
+                className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={sending ? '发送中' : '发送 Thread 回复'}
+                title={sending ? '发送中...' : '发送'}
               >
-                ▧
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
+                </svg>
               </button>
-              <span className="slock-inline-control flex h-7 w-7 items-center justify-center" aria-hidden="true">
-                ⌘
-              </span>
             </div>
+          </div>
+          <div className="mt-2 flex items-center justify-end">
             <span className="text-[11px] text-[var(--cafe-text-muted)]">Enter 发送 · Shift+Enter 换行</span>
           </div>
         </div>
