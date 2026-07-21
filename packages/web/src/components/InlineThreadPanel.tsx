@@ -1144,12 +1144,26 @@ export function InlineThreadPanel({
     ],
   );
 
+  // #404-interaction item 3: Escape closes the panel, but only when no sub-widget (search
+  // bar / slash-command picker / mention picker) is already consuming it — those handlers
+  // don't call stopPropagation (only preventDefault), so this bubbles up from the same
+  // keypress; checking their still-current (pre-update) open state here defers to them.
+  const handlePanelKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (event.key !== 'Escape') return;
+      if (searchOpen || showSlashCommands || showMentionPicker) return;
+      onClose();
+    },
+    [searchOpen, showSlashCommands, showMentionPicker, onClose],
+  );
+
   return (
     <div className={getInlineThreadPanelShellClassName()} data-open={isClosing ? 'false' : 'true'}>
       <div className="hidden lg:block">
         <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
       </div>
       <aside
+        onKeyDown={handlePanelKeyDown}
         className="slock-inline-thread-panel flex h-full min-h-0 w-full flex-shrink-0 flex-col border-l border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] lg:w-[var(--inline-thread-panel-width)]"
         style={{ '--inline-thread-panel-width': `${panelWidth}px` } as CSSProperties}
       >
