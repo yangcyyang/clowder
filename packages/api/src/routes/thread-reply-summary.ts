@@ -6,6 +6,18 @@ export interface ThreadReplyPreview {
   catId: string | null;
   content: string;
   timestamp: number;
+  /**
+   * whisper-hygiene consistency fix (twin of the InlineThreadReplyPreview live-socket fix):
+   * `isFoldVisibleReply` below already gates message selection through `canViewMessage`, so
+   * this backend function itself never leaks an invisible whisper to whatever `viewer` it's
+   * called with. But the *output* previously dropped these fields entirely, so a downstream
+   * frontend mirror filter (canViewerSeeThreadMessage) had nothing to check — carrying them
+   * through closes that consistency gap without changing today's behavior (the current call
+   * site passes {type:'user'}, which is the correct, already-authorized web-display viewer).
+   */
+  visibility?: 'public' | 'whisper';
+  whisperTo?: readonly string[];
+  revealedAt?: number | null;
 }
 
 export interface ThreadReplySummary {
@@ -63,6 +75,9 @@ export function deriveThreadReplySummary(
       catId: latest.catId,
       content: compactPreview(latest.content) || (latest.contentBlocks?.length ? '附件消息' : '回复'),
       timestamp: latest.timestamp,
+      ...(latest.visibility ? { visibility: latest.visibility } : {}),
+      ...(latest.whisperTo ? { whisperTo: latest.whisperTo } : {}),
+      ...(latest.revealedAt !== undefined ? { revealedAt: latest.revealedAt } : {}),
     },
   };
 }

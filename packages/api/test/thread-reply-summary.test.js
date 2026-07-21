@@ -95,7 +95,17 @@ describe('deriveThreadReplySummary', () => {
     });
     assert.deepEqual(deriveThreadReplySummary(source, branchMessages, { type: 'cat', catId: 'opus' }), {
       replyCount: 2,
-      latestReply: { id: 'whisper', catId: 'opus', content: '只给 opus 的秘密', timestamp: 120 },
+      latestReply: {
+        id: 'whisper',
+        catId: 'opus',
+        content: '只给 opus 的秘密',
+        timestamp: 120,
+        // whisper-hygiene: visibility fields now carried through (consistency fix,
+        // twin of the InlineThreadReplyPreview live-socket fix) so a downstream
+        // frontend mirror filter has fields to work with.
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      },
     });
   });
 
