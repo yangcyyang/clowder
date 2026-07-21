@@ -806,6 +806,9 @@ export function InlineThreadPanel({
               catId: latestReply.catId ?? null,
               content: latestReply.content.replace(/\s+/g, ' ').trim() || '回复',
               timestamp: latestReply.timestamp,
+              ...(latestReply.visibility ? { visibility: latestReply.visibility } : {}),
+              ...(latestReply.whisperTo ? { whisperTo: latestReply.whisperTo } : {}),
+              ...(latestReply.revealedAt !== undefined ? { revealedAt: latestReply.revealedAt } : {}),
             },
           }
         : {}),

@@ -8,8 +8,8 @@ import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
-import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { apiFetch } from '@/utils/api-client';
+import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
@@ -27,7 +27,10 @@ import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
 import { getThreadHref, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { canViewerSeeThreadMessage, type ThreadViewer } from './ThreadSidebar/thread-perceptibility';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
+
+const DEFAULT_VIEWER: ThreadViewer = { type: 'user' };
 
 const BREED_STYLES: Record<string, { font?: string }> = {
   ragdoll: {},
@@ -156,17 +159,11 @@ function MessageTaskBadge({
   seq,
   assigneeLabel,
   onOpen,
-  addressToken,
-  onReferenceAddress,
-  onCopyAddress,
 }: {
   task: TaskItem;
   seq: number;
   assigneeLabel?: string;
   onOpen?: (task: TaskItem) => void;
-  addressToken?: string;
-  onReferenceAddress?: () => void;
-  onCopyAddress?: () => void;
 }) {
   const metaLabels = getTaskMetaLabels(task);
   const chipLabel = assigneeLabel ? `任务 #${seq} @${assigneeLabel}` : `任务 #${seq}`;
@@ -186,109 +183,165 @@ function MessageTaskBadge({
 
   if (onOpen) {
     return (
-      <div className="mt-1.5 flex max-w-full items-stretch gap-1">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpen(task);
-          }}
-          className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-cyan-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-cyan-ring"
-          title={`打开任务 Thread：${task.title}`}
-          aria-label={`打开任务 Thread #${seq}${assigneeLabel ? `，负责人 ${assigneeLabel}` : ''}`}
-        >
-          {content}
-        </button>
-        <ThreadAddressActions token={addressToken} onReference={onReferenceAddress} onCopy={onCopyAddress} />
-      </div>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpen(task);
+        }}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-cyan-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-cyan-ring"
+        title={`打开任务 Thread：${task.title}`}
+        aria-label={`打开任务 Thread #${seq}${assigneeLabel ? `，负责人 ${assigneeLabel}` : ''}`}
+      >
+        {content}
+      </button>
     );
   }
 
   return (
-    <div className="mt-1.5">
-      <span
-        className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)]"
-        title={task.title}
-      >
-        {content}
-      </span>
-    </div>
+    <span
+      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2 py-1 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)]"
+      title={task.title}
+    >
+      {content}
+    </span>
   );
 }
 
+type ThreadReplyLatest = {
+  id: string;
+  catId: string | null;
+  content: string;
+  timestamp: number;
+  visibility?: 'public' | 'whisper';
+  whisperTo?: string[];
+  revealedAt?: number | null;
+};
+
+/**
+ * #404-adjacent whisper 钉：hover title 里的"最新回复摘要"是消息内容派生，必须过
+ * canViewerSeeThreadMessage 判断——viewer.type==='user'（当前唯一的 web 展示场景）恒可见
+ * 是既有设计（owner 看见一切），viewer.type==='cat' 时才真过滤，是防御性预留。不可见时
+ * title 整体省略（不渲染任何摘要片段），不只是隐藏作者名。
+ */
 function ThreadReplyBadge({
   count,
   newCount = 0,
   latestReply,
   latestAuthorLabel,
   onOpen,
-  addressToken,
-  onReferenceAddress,
-  onCopyAddress,
+  viewer = DEFAULT_VIEWER,
 }: {
   count: number;
   newCount?: number;
-  latestReply?: { content: string };
+  latestReply?: ThreadReplyLatest;
   latestAuthorLabel?: string;
   onOpen: () => void;
-  addressToken?: string;
-  onReferenceAddress?: () => void;
-  onCopyAddress?: () => void;
+  viewer?: ThreadViewer;
 }) {
   if (count <= 0) return null;
 
+  const summaryVisible = !latestReply || canViewerSeeThreadMessage(latestReply as unknown as ChatMessageType, viewer);
+  const title =
+    summaryVisible && latestReply && latestAuthorLabel ? `${latestAuthorLabel} · ${latestReply.content}` : undefined;
+
   return (
-    <div className="mt-2 flex w-full max-w-xl items-stretch gap-1">
-      <button
-        type="button"
-        aria-label={`打开 Thread，${count} 条回复${newCount > 0 ? `，${newCount} 条新回复` : ''}`}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onOpen();
-        }}
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2.5 py-1.5 text-left text-[11px] font-semibold text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
-      >
-        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2v-7Z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
+    <button
+      type="button"
+      aria-label={`打开 Thread，${count} 条回复${newCount > 0 ? `，${newCount} 条新回复` : ''}`}
+      title={title}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen();
+      }}
+      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2 py-1 text-[11px] font-semibold leading-none text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
+    >
+      <svg className="h-3.5 w-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2v-7Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      </svg>
+      <span className="shrink-0">
+        {count} {count === 1 ? 'reply' : 'replies'}
+      </span>
+      {newCount > 0 && (
+        <>
+          <span
+            data-thread-unread-dot="true"
+            aria-hidden="true"
+            className="h-2 w-2 flex-shrink-0 rounded-full bg-conn-emerald-text"
           />
-        </svg>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 leading-none">
-            <span>
-              {count} {count === 1 ? 'reply' : 'replies'}
-            </span>
-            {newCount > 0 && (
-              <>
-                <span
-                  data-thread-unread-dot="true"
-                  aria-hidden="true"
-                  className="h-2 w-2 flex-shrink-0 rounded-full bg-conn-emerald-text"
-                />
-                <span className="text-conn-emerald-text">· {newCount} new</span>
-              </>
-            )}
-          </span>
-          {latestReply && latestAuthorLabel && (
-            <span
-              data-thread-reply-summary="true"
-              className="mt-1 block truncate font-normal leading-snug text-[var(--cafe-text-muted)]"
-              title={`${latestAuthorLabel} · ${latestReply.content}`}
-            >
-              {latestAuthorLabel} · {latestReply.content}
-            </span>
-          )}
-        </span>
-        <span aria-hidden="true" className="flex-shrink-0 text-[var(--cafe-text-muted)]">
-          ›
-        </span>
-      </button>
-      <ThreadAddressActions token={addressToken} onReference={onReferenceAddress} onCopy={onCopyAddress} />
+          <span className="shrink-0 text-conn-emerald-text">· {newCount} new</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+/**
+ * #404 系跟进（chip 票）：任务徽章 + 回复入口现在并排一行（Raft `[状态 #号] [💬 N reply]`
+ * 样式），共享一份 ThreadAddressActions（此前两个徽章各自条件渲染一份、靠互斥的
+ * addressToken 传参凑单份显示——现在收成一处，不再靠隐式互斥）。
+ */
+function MessageBadgeRow({
+  task,
+  threadReplyInfo,
+  onOpenThread,
+  onOpenTaskThread,
+  messageId,
+  getCatById,
+  threadAddressToken,
+  onReferenceThreadAddress,
+  onCopyThreadAddress,
+  viewer,
+}: {
+  task?: { task: TaskItem; seq: number; assigneeLabel?: string };
+  threadReplyInfo?: {
+    replyCount: number;
+    newCount?: number;
+    latestReply?: ThreadReplyLatest;
+  };
+  onOpenThread?: (messageId: string) => void;
+  onOpenTaskThread?: (task: TaskItem) => void;
+  messageId: string;
+  getCatById: (id: string) => CatData | undefined;
+  threadAddressToken?: string;
+  onReferenceThreadAddress?: () => void;
+  onCopyThreadAddress?: () => void;
+  viewer?: ThreadViewer;
+}) {
+  const hasReply = !!(threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread);
+  if (!task && !hasReply) return null;
+
+  return (
+    <div className="mt-1.5 flex max-w-full flex-wrap items-center gap-1.5">
+      {task && (
+        <MessageTaskBadge
+          task={task.task}
+          seq={task.seq}
+          assigneeLabel={task.assigneeLabel}
+          onOpen={onOpenTaskThread}
+        />
+      )}
+      {hasReply && threadReplyInfo && (
+        <ThreadReplyBadge
+          count={threadReplyInfo.replyCount}
+          newCount={threadReplyInfo.newCount}
+          latestReply={threadReplyInfo.latestReply}
+          latestAuthorLabel={
+            threadReplyInfo.latestReply?.catId
+              ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
+              : '你'
+          }
+          onOpen={() => onOpenThread!(messageId)}
+          viewer={viewer}
+        />
+      )}
+      <ThreadAddressActions
+        token={threadAddressToken}
+        onReference={onReferenceThreadAddress}
+        onCopy={onCopyThreadAddress}
+      />
     </div>
   );
 }
@@ -323,7 +376,7 @@ interface ChatMessageProps {
     branchThreadId: string;
     replyCount: number;
     newCount?: number;
-    latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+    latestReply?: ThreadReplyLatest;
   };
   onOpenThread?: (messageId: string) => void;
   onOpenTaskThread?: (task: TaskItem) => void;
@@ -340,6 +393,7 @@ interface ChatMessageProps {
   disableContentCollapse?: boolean;
   showRuntimeMetadata?: boolean;
   searchHighlight?: string;
+  viewer?: ThreadViewer;
 }
 
 export function ChatMessage({
@@ -360,6 +414,7 @@ export function ChatMessage({
   onCancelEdit,
   onRetrySend,
   disableContentCollapse = false,
+  viewer = DEFAULT_VIEWER,
   showRuntimeMetadata = false,
   searchHighlight,
 }: ChatMessageProps) {
@@ -648,17 +703,6 @@ export function ChatMessage({
               <CollapsibleMarkdown content={message.content} searchHighlight={searchHighlight} />
             )}
           </div>
-          {taskEntry && (
-            <MessageTaskBadge
-              task={taskEntry.task}
-              seq={taskEntry.seq}
-              assigneeLabel={taskAssigneeLabel}
-              onOpen={onOpenTaskThread}
-              addressToken={(threadReplyInfo?.replyCount ?? 0) <= 0 ? threadAddressToken : undefined}
-              onReferenceAddress={onReferenceThreadAddress}
-              onCopyAddress={onCopyThreadAddress}
-            />
-          )}
           {message.sendStatus === 'failed' && (
             <div className="mt-2 flex w-fit items-center gap-2 border-2 border-conn-red-text bg-conn-red-bg px-2.5 py-1.5 text-xs font-semibold text-conn-red-text shadow-[var(--slock-shadow-chip)]">
               <span>发送失败：{message.sendError || '服务未收到'}</span>
@@ -674,22 +718,20 @@ export function ChatMessage({
             </div>
           )}
           <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
-          {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
-            <ThreadReplyBadge
-              count={threadReplyInfo.replyCount}
-              newCount={threadReplyInfo.newCount}
-              latestReply={threadReplyInfo.latestReply}
-              latestAuthorLabel={
-                threadReplyInfo.latestReply?.catId
-                  ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
-                  : '你'
-              }
-              onOpen={() => onOpenThread(message.id)}
-              addressToken={threadAddressToken}
-              onReferenceAddress={onReferenceThreadAddress}
-              onCopyAddress={onCopyThreadAddress}
-            />
-          )}
+          <MessageBadgeRow
+            task={
+              taskEntry ? { task: taskEntry.task, seq: taskEntry.seq, assigneeLabel: taskAssigneeLabel } : undefined
+            }
+            threadReplyInfo={threadReplyInfo}
+            onOpenThread={onOpenThread}
+            onOpenTaskThread={onOpenTaskThread}
+            messageId={message.id}
+            getCatById={getCatById}
+            threadAddressToken={threadAddressToken}
+            onReferenceThreadAddress={onReferenceThreadAddress}
+            onCopyThreadAddress={onCopyThreadAddress}
+            viewer={viewer}
+          />
         </div>
       </div>
     );
@@ -832,34 +874,19 @@ export function ChatMessage({
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />
           )}
         </div>
-        {taskEntry && (
-          <MessageTaskBadge
-            task={taskEntry.task}
-            seq={taskEntry.seq}
-            assigneeLabel={taskAssigneeLabel}
-            onOpen={onOpenTaskThread}
-            addressToken={(threadReplyInfo?.replyCount ?? 0) <= 0 ? threadAddressToken : undefined}
-            onReferenceAddress={onReferenceThreadAddress}
-            onCopyAddress={onCopyThreadAddress}
-          />
-        )}
         <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
-        {threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread && (
-          <ThreadReplyBadge
-            count={threadReplyInfo.replyCount}
-            newCount={threadReplyInfo.newCount}
-            latestReply={threadReplyInfo.latestReply}
-            latestAuthorLabel={
-              threadReplyInfo.latestReply?.catId
-                ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
-                : '你'
-            }
-            onOpen={() => onOpenThread(message.id)}
-            addressToken={threadAddressToken}
-            onReferenceAddress={onReferenceThreadAddress}
-            onCopyAddress={onCopyThreadAddress}
-          />
-        )}
+        <MessageBadgeRow
+          task={taskEntry ? { task: taskEntry.task, seq: taskEntry.seq, assigneeLabel: taskAssigneeLabel } : undefined}
+          threadReplyInfo={threadReplyInfo}
+          onOpenThread={onOpenThread}
+          onOpenTaskThread={onOpenTaskThread}
+          messageId={message.id}
+          getCatById={getCatById}
+          threadAddressToken={threadAddressToken}
+          onReferenceThreadAddress={onReferenceThreadAddress}
+          onCopyThreadAddress={onCopyThreadAddress}
+          viewer={viewer}
+        />
       </div>
     </div>
   );

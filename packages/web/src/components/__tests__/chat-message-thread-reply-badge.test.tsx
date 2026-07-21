@@ -100,7 +100,7 @@ describe('ChatMessage thread reply badge', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders a slock-like clickable reply entry that opens the thread panel', () => {
+  it('renders a Raft-compact clickable reply chip (single line, summary in hover title) that opens the thread panel', () => {
     const onOpenThread = vi.fn();
 
     act(() => {
@@ -130,11 +130,16 @@ describe('ChatMessage thread reply badge', () => {
 
     expect(replyButton).toBeTruthy();
     expect(replyButton?.textContent).toContain('5 new');
-    expect(replyButton?.textContent).toContain('opus');
-    expect(replyButton?.textContent).toContain('已完成验收矩阵与窄屏回归');
+    // Compact chip: no inline author/content summary line — it's on hover (title) only.
+    expect(replyButton?.textContent).not.toContain('已完成验收矩阵与窄屏回归');
+    expect(replyButton?.querySelector('[data-thread-reply-summary="true"]')).toBeNull();
+    expect(replyButton?.title).toContain('opus');
+    expect(replyButton?.title).toContain('已完成验收矩阵与窄屏回归');
     expect(replyButton?.getAttribute('aria-label')).toContain('打开 Thread');
     expect(replyButton?.querySelector('[data-thread-unread-dot="true"]')).toBeTruthy();
-    expect(replyButton?.className).toContain('min-h-11');
+    // Compact single-line pill, not the old tall/wide reply-preview box.
+    expect(replyButton?.className).not.toContain('min-h-11');
+    expect(replyButton?.className).not.toContain('flex-1');
 
     act(() => {
       replyButton?.click();
@@ -143,7 +148,7 @@ describe('ChatMessage thread reply badge', () => {
     expect(onOpenThread).toHaveBeenCalledWith('m-thread-parent');
   });
 
-  it('keeps the latest summary compact and hides the unread dot when read', () => {
+  it('keeps the latest summary in the hover title and hides the unread dot when read', () => {
     act(() => {
       root.render(
         <ChatMessage
@@ -167,10 +172,176 @@ describe('ChatMessage thread reply badge', () => {
 
     const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('1 reply'),
-    );
-    expect(replyButton?.textContent).toContain('你 · 这是用户发出的最后一条回复');
+    ) as HTMLButtonElement | undefined;
+    expect(replyButton?.textContent).not.toContain('你 · 这是用户发出的最后一条回复');
+    expect(replyButton?.title).toContain('你 · 这是用户发出的最后一条回复');
     expect(replyButton?.querySelector('[data-thread-unread-dot="true"]')).toBeNull();
-    expect(replyButton?.querySelector('[data-thread-reply-summary="true"]')?.className).toContain('truncate');
+  });
+
+  it('renders the task chip and reply chip side by side in one compact row (Raft-style), sharing one set of address actions', async () => {
+    useTaskStore.setState({ tasks: [makeTask()] });
+    const token = '#大厅:0001784400000000-000001-ab12cd34';
+    apiFetchMock.mockResolvedValue({ ok: true });
+
+    await act(async () => {
+      root.render(
+        <ChatMessage
+          message={makeUserMessage()}
+          getCatById={() => undefined}
+          threadReplyInfo={{
+            branchThreadId: 'thread-branch',
+            replyCount: 3,
+            latestReply: { id: 'reply-latest', catId: null, content: '并排验收', timestamp: Date.now() },
+          }}
+          onOpenThread={vi.fn()}
+          onOpenTaskThread={vi.fn()}
+          threadAddressToken={token}
+          onReferenceThreadAddress={vi.fn()}
+          onCopyThreadAddress={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const taskButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('任务 #1'),
+    ) as HTMLButtonElement | undefined;
+    const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('3 replies'),
+    ) as HTMLButtonElement | undefined;
+
+    expect(taskButton).toBeTruthy();
+    expect(replyButton).toBeTruthy();
+    // Side by side: same flex-row parent.
+    expect(taskButton?.parentElement).toBe(replyButton?.parentElement);
+    expect(taskButton?.parentElement?.className).toContain('flex');
+
+    // Exactly one shared set of address actions in the row, not one per badge.
+    expect(container.querySelectorAll('[data-thread-address-actions]').length).toBe(1);
+    expect(container.querySelector('button[aria-label="引用 Thread 地址"]')).toBeTruthy();
+  });
+
+  describe('whisper sentinel: reply-chip hover-title summary', () => {
+    it('cat viewer NOT a whisper recipient → hover title omits author/content of a whisper latest reply', () => {
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={makeUserMessage()}
+            getCatById={() => undefined}
+            threadReplyInfo={{
+              branchThreadId: 'thread-branch',
+              replyCount: 1,
+              latestReply: {
+                id: 'reply-latest',
+                catId: 'opus',
+                content: '悄悄改一下密钥轮换脚本',
+                timestamp: Date.now(),
+                visibility: 'whisper',
+                whisperTo: ['grok'],
+              },
+            }}
+            onOpenThread={vi.fn()}
+            viewer={{ type: 'cat', catId: 'codex' }}
+          />,
+        );
+      });
+
+      const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('1 reply'),
+      ) as HTMLButtonElement | undefined;
+      expect(replyButton?.title ?? '').not.toContain('悄悄改一下密钥轮换脚本');
+      expect(replyButton?.textContent).not.toContain('悄悄改一下密钥轮换脚本');
+    });
+
+    it('whisperTo missing/malformed on a whisper reply → fail closed, still hidden from a cat viewer', () => {
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={makeUserMessage()}
+            getCatById={() => undefined}
+            threadReplyInfo={{
+              branchThreadId: 'thread-branch',
+              replyCount: 1,
+              latestReply: {
+                id: 'reply-latest',
+                catId: 'opus',
+                content: '悄悄改一下密钥轮换脚本',
+                timestamp: Date.now(),
+                visibility: 'whisper',
+                whisperTo: undefined,
+              },
+            }}
+            onOpenThread={vi.fn()}
+            viewer={{ type: 'cat', catId: 'codex' }}
+          />,
+        );
+      });
+
+      const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('1 reply'),
+      ) as HTMLButtonElement | undefined;
+      expect(replyButton?.title ?? '').not.toContain('悄悄改一下密钥轮换脚本');
+    });
+
+    it('cat viewer IS the whisper recipient → hover title shows the summary', () => {
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={makeUserMessage()}
+            getCatById={() => undefined}
+            threadReplyInfo={{
+              branchThreadId: 'thread-branch',
+              replyCount: 1,
+              latestReply: {
+                id: 'reply-latest',
+                catId: 'opus',
+                content: '悄悄改一下密钥轮换脚本',
+                timestamp: Date.now(),
+                visibility: 'whisper',
+                whisperTo: ['grok'],
+              },
+            }}
+            onOpenThread={vi.fn()}
+            viewer={{ type: 'cat', catId: 'grok' }}
+          />,
+        );
+      });
+
+      const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('1 reply'),
+      ) as HTMLButtonElement | undefined;
+      expect(replyButton?.title).toContain('悄悄改一下密钥轮换脚本');
+    });
+
+    it('web owner viewer (type=user, default/only current live case) always sees the summary — by design, not a leak', () => {
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={makeUserMessage()}
+            getCatById={() => undefined}
+            threadReplyInfo={{
+              branchThreadId: 'thread-branch',
+              replyCount: 1,
+              latestReply: {
+                id: 'reply-latest',
+                catId: 'opus',
+                content: '悄悄改一下密钥轮换脚本',
+                timestamp: Date.now(),
+                visibility: 'whisper',
+                whisperTo: ['grok'],
+              },
+            }}
+            onOpenThread={vi.fn()}
+          />,
+        );
+      });
+
+      const replyButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('1 reply'),
+      ) as HTMLButtonElement | undefined;
+      expect(replyButton?.title).toContain('悄悄改一下密钥轮换脚本');
+    });
   });
 
   it('keeps authorized open, reference and copy as sibling controls with full-id address payload', async () => {
@@ -227,9 +398,7 @@ describe('ChatMessage thread reply badge', () => {
 
     expect(container.querySelector('[data-thread-address-actions]')).toBeNull();
     expect(apiFetchMock).toHaveBeenCalled();
-    expect(
-      apiFetchMock.mock.calls.some(([url]) => String(url).includes('/api/thread-address/resolve?')),
-    ).toBe(true);
+    expect(apiFetchMock.mock.calls.some(([url]) => String(url).includes('/api/thread-address/resolve?'))).toBe(true);
   });
 
   it('renders a slock-like task dispatch chip with assignee and opens the task thread', () => {

@@ -3,6 +3,15 @@ export type InlineThreadReplyPreview = {
   catId: string | null;
   content: string;
   timestamp: number;
+  /**
+   * Whisper metadata, carried through from the underlying reply message so
+   * downstream summary rendering (e.g. the entry-chip hover title) can be
+   * gated by canViewerSeeThreadMessage instead of always showing the raw
+   * content of a possibly-whisper reply.
+   */
+  visibility?: 'public' | 'whisper';
+  whisperTo?: string[];
+  revealedAt?: number | null;
 };
 export type InlineThreadReplyEntry = {
   branchThreadId: string;
