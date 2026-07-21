@@ -375,66 +375,75 @@ export function InlineThreadTaskStatusCard({
     </span>
   );
 
-  if (collapsed) {
-    return (
+  // #404-interaction: one persistent header + a grid-rows-animated detail section, instead
+  // of two unrelated JSX trees swapped instantly — collapse/expand is a smooth height
+  // transition (the standard grid-template-rows 0fr/1fr "animate to auto" technique) rather
+  // than a layout jump.
+  return (
+    <section
+      className="flex flex-shrink-0 flex-col border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)]"
+      aria-label="任务 Thread 状态"
+    >
       <button
         type="button"
         onClick={toggleCollapsed}
-        className="flex w-full flex-shrink-0 items-center justify-between gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2 text-left"
-        aria-label="展开任务 Thread 状态"
-        aria-expanded={false}
+        className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left"
+        aria-label={collapsed ? '展开任务 Thread 状态' : '折叠任务 Thread 状态'}
+        aria-expanded={!collapsed}
       >
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--cafe-text)]">任务 · {task.title}</span>
-        {statusChip}
-      </button>
-    );
-  }
-
-  return (
-    <section
-      className="flex flex-shrink-0 flex-col gap-2 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
-      aria-label="任务 Thread 状态"
-    >
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-[var(--cafe-text-muted)]">任务目标</div>
-          <div
-            className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--cafe-text)]"
-            title={task.title}
-          >
-            {task.title}
-          </div>
+        <div className="min-w-0 flex-1">
+          {collapsed ? (
+            <span className="block truncate text-xs font-medium text-[var(--cafe-text)]">任务 · {task.title}</span>
+          ) : (
+            <>
+              <div className="text-[11px] font-semibold text-[var(--cafe-text-muted)]">任务目标</div>
+              <div
+                className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--cafe-text)]"
+                title={task.title}
+              >
+                {task.title}
+              </div>
+            </>
+          )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {statusChip}
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="slock-header-action slock-header-action--icon"
-            aria-label="折叠任务 Thread 状态"
-            aria-expanded={true}
-            title="折叠"
+          <span
+            aria-hidden="true"
+            className={`inline-block transition-transform duration-200 ease-out ${collapsed ? '' : 'rotate-180'}`}
           >
-            ⌃
-          </button>
+            ⌄
+          </span>
         </div>
-      </div>
-      {task.why.trim() && (
-        <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{task.why}</p>
-      )}
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div className="min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">负责人</div>
-          <div className="mt-0.5 truncate font-medium text-[var(--cafe-text)]">{getTaskOwnerLabel(task)}</div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">交付证据</div>
-          <div className="mt-0.5 font-medium text-[var(--cafe-text)]">交付证据 {evidenceCount}/5</div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">下一步</div>
-          <div className="mt-0.5 truncate font-medium text-[var(--cafe-text)]" title={getTaskNextStep(task.status)}>
-            {getTaskNextStep(task.status)}
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: collapsed ? '0fr' : '1fr' }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex flex-col gap-2 px-4 pb-3">
+            {task.why.trim() && (
+              <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{task.why}</p>
+            )}
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">负责人</div>
+                <div className="mt-0.5 truncate font-medium text-[var(--cafe-text)]">{getTaskOwnerLabel(task)}</div>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">交付证据</div>
+                <div className="mt-0.5 font-medium text-[var(--cafe-text)]">交付证据 {evidenceCount}/5</div>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-[var(--cafe-text-muted)]">下一步</div>
+                <div
+                  className="mt-0.5 truncate font-medium text-[var(--cafe-text)]"
+                  title={getTaskNextStep(task.status)}
+                >
+                  {getTaskNextStep(task.status)}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
