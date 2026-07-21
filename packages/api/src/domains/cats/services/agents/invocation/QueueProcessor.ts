@@ -2112,7 +2112,10 @@ export class QueueProcessor {
             let preview: Awaited<ReturnType<typeof hydrateReplyPreview>> | null = null;
             if (result.replyTo) {
               try {
-                preview = await hydrateReplyPreview(messageStore, result.replyTo);
+                // whisper-hygiene: this preview feeds a websocket broadcast to the web
+                // client, never a cat's context — {type:'user'} is the correct (not a
+                // shortcut) viewer, matching the established "web=owner=authorized" model.
+                preview = await hydrateReplyPreview(messageStore, result.replyTo, { type: 'user' });
               } catch {
                 /* best-effort: preview failure must not drop the delivered message */
               }

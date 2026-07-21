@@ -559,8 +559,12 @@ export async function* routeSerial(
       // hop keeps the normal bounded history window.
       const deliveryOnlyEnabled = worklist.length === 1 && isDeliveryOnlyEnabled(threadId);
       const streamReplyTo = a2aTriggerMessageId ?? options.replyToMessageId;
+      // whisper-hygiene: this preview can end up embedded verbatim in `catId`'s own
+      // invocation context (a2aTriggerContent below) — the receiving cat is the real
+      // viewer here, not the web owner. A whisper not addressed to `catId` must not
+      // hydrate at all, or its content would leak straight into that cat's prompt.
       const streamReplyPreview = streamReplyTo
-        ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
+        ? await hydrateReplyPreview(deps.messageStore, streamReplyTo, { type: 'cat', catId: catId as CatId })
         : undefined;
       const a2aTriggerMessage = a2aTriggerMessageId ? await deps.messageStore.getById(a2aTriggerMessageId) : null;
       const a2aTriggerContent =

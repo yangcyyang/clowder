@@ -2248,7 +2248,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const { hydrateReplyPreview } = await import('../domains/cats/services/stores/ports/MessageStore.js');
       await Promise.all(
         replyItems.map(async (item) => {
-          const preview = await hydrateReplyPreview(opts.messageStore, item.replyTo as string);
+          // whisper-hygiene: this is a GET /api/messages REST response for the web client,
+          // never a cat's context — {type:'user'} is correct (web=owner=authorized).
+          const preview = await hydrateReplyPreview(opts.messageStore, item.replyTo as string, { type: 'user' });
           if (preview) {
             item.replyPreview = preview;
           }

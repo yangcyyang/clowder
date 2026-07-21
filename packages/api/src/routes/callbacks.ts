@@ -632,7 +632,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (!isFirst) return { status: 'duplicate', clientMessageId, messageId: storedMsg.id };
     }
 
-    const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
+    // whisper-hygiene: this preview feeds a websocket broadcast to the web client, never a
+    // cat's context — {type:'user'} is correct (web=owner=authorized), not a shortcut.
+    const replyPreview = validatedReplyTo
+      ? await hydrateReplyPreview(messageStore, validatedReplyTo, { type: 'user' })
+      : undefined;
 
     socketManager.broadcastAgentMessage(
       {
@@ -767,7 +771,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
       });
 
-      const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
+      // whisper-hygiene: this preview feeds a websocket broadcast to the web client, never a
+      // cat's context — {type:'user'} is correct (web=owner=authorized), not a shortcut.
+      const replyPreview = validatedReplyTo
+        ? await hydrateReplyPreview(messageStore, validatedReplyTo, { type: 'user' })
+        : undefined;
 
       const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
         canEnqueueA2A: hasA2AMentions,
@@ -1212,7 +1220,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // F121: Hydrate reply preview for broadcast
-    const replyPreview = validatedReplyTo ? await hydrateReplyPreview(messageStore, validatedReplyTo) : undefined;
+    // whisper-hygiene: this preview feeds a websocket broadcast to the web client, never a
+    // cat's context — {type:'user'} is correct (web=owner=authorized), not a shortcut.
+    const replyPreview = validatedReplyTo
+      ? await hydrateReplyPreview(messageStore, validatedReplyTo, { type: 'user' })
+      : undefined;
 
     // F27: Enqueue @mentioned cats into parent worklist (unified A2A path)
     const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
@@ -1536,7 +1548,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     });
     const richBlocks = reviewedRichBlocks;
     if (deliveryDecision.shouldBroadcastNow) {
-      const replyPreview = storedMsg.replyTo ? await hydrateReplyPreview(messageStore, storedMsg.replyTo) : undefined;
+      // whisper-hygiene: broadcast to the web client, never a cat's context — {type:'user'}.
+      const replyPreview = storedMsg.replyTo
+        ? await hydrateReplyPreview(messageStore, storedMsg.replyTo, { type: 'user' })
+        : undefined;
       socketManager.broadcastAgentMessage(
         {
           type: 'text',

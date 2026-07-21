@@ -49,6 +49,15 @@ export interface ReplyPreview {
   content: string;
   deleted?: true;
   kind?: ReplyPreviewKind;
+  /**
+   * Carried through from the source message so any downstream mirror filter has fields to
+   * work with. Not the primary defense — hydrateReplyPreview() itself gates on the caller's
+   * viewer before returning a preview at all; this is defense-in-depth consistency with the
+   * rest of the message→display-object family (see whisper-hygiene-audit).
+   */
+  visibility?: 'public' | 'whisper';
+  whisperTo?: readonly string[];
+  revealedAt?: number | null;
 }
 
 /** Source metadata attached to connector-transport messages. */

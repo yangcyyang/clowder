@@ -15,7 +15,7 @@ import type {
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
 import type { MessageMetadata } from '../../types.js';
-import { isSystemUserMessage } from '../visibility.js';
+import { canViewMessage, isSystemUserMessage, type Viewer } from '../visibility.js';
 // Single source of truth: ThreadStore.ts owns DEFAULT_THREAD_ID
 import { DEFAULT_THREAD_ID } from './ThreadStore.js';
 export { DEFAULT_THREAD_ID };
@@ -1102,10 +1102,23 @@ const PREVIEW_MAX_LENGTH = 80;
  * F121: Hydrate a reply preview from message store.
  * Returns null if the referenced message doesn't exist.
  * Returns { deleted: true } if the parent was soft/hard-deleted.
+ *
+ * whisper-hygiene: `viewer` is the actual recipient of this preview (the web owner for
+ * broadcast/REST call sites, or the specific receiving cat for any server-side
+ * agent-context/prompt-construction call site — see whisper-hygiene-audit memory). This is
+ * the real security boundary, not decoration: if the source message is an un-revealed
+ * whisper not addressed to `viewer`, this returns null exactly like "message not found" —
+ * callers already handle that gracefully, so a denied whisper produces the same "no preview
+ * available" behavior as any other unavailable-preview case, never partial/redacted content.
  */
-export async function hydrateReplyPreview(store: IMessageStore, replyToId: string): Promise<ReplyPreview | null> {
+export async function hydrateReplyPreview(
+  store: IMessageStore,
+  replyToId: string,
+  viewer: Viewer,
+): Promise<ReplyPreview | null> {
   const parent = await store.getById(replyToId);
   if (!parent || !isDelivered(parent)) return null;
+  if (!canViewMessage(parent, viewer)) return null;
 
   if (parent.deletedAt || parent._tombstone) {
     return { senderCatId: parent.catId, content: '', deleted: true };
@@ -1118,5 +1131,8 @@ export async function hydrateReplyPreview(store: IMessageStore, replyToId: strin
     senderCatId: parent.catId,
     content: truncated,
     ...(parent.extra?.scheduler?.hiddenTrigger ? { kind: 'scheduler_trigger' as const } : {}),
+    ...(parent.visibility ? { visibility: parent.visibility } : {}),
+    ...(parent.whisperTo ? { whisperTo: parent.whisperTo } : {}),
+    ...(parent.revealedAt !== undefined ? { revealedAt: parent.revealedAt } : {}),
   };
 }
