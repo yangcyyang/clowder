@@ -387,7 +387,7 @@ export function InlineThreadTaskStatusCard({
       <button
         type="button"
         onClick={toggleCollapsed}
-        className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left"
+        className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--cafe-accent)]"
         aria-label={collapsed ? '展开任务 Thread 状态' : '折叠任务 Thread 状态'}
         aria-expanded={!collapsed}
       >
@@ -1459,7 +1459,7 @@ export function InlineThreadPanel({
                 type="button"
                 onClick={handleSend}
                 disabled={(!input.trim() && images.length === 0) || sending || isPreparingImages}
-                className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--cafe-accent)] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={sending ? '发送中' : '发送 Thread 回复'}
                 title={sending ? '发送中...' : '发送'}
               >
