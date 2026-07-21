@@ -736,6 +736,53 @@ export function InlineThreadPanel({
   );
   useVisibleThreadReadAck(threadId, countableReplyMessages.length + 1);
 
+  // #404-interaction item 2: follow the bottom when the reader is already there, otherwise
+  // surface a content-free "N new" jump button instead of yanking their scroll position.
+  // Content-free by design (no reply preview text) so this never needs a whisper check.
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const wasNearBottomRef = useRef(true);
+  const previousVisibleReplyCountRef = useRef(visibleReplyMessages.length);
+  const [pendingNewReplyCount, setPendingNewReplyCount] = useState(0);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const handleScrollContainerScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    wasNearBottomRef.current = nearBottom;
+    if (nearBottom) setPendingNewReplyCount(0);
+  }, []);
+
+  useEffect(() => {
+    const previousCount = previousVisibleReplyCountRef.current;
+    const currentCount = visibleReplyMessages.length;
+    previousVisibleReplyCountRef.current = currentCount;
+    if (currentCount <= previousCount) return;
+    if (wasNearBottomRef.current) {
+      scrollToBottom(previousCount === 0 ? 'auto' : 'smooth');
+    } else {
+      setPendingNewReplyCount((prev) => prev + (currentCount - previousCount));
+    }
+  }, [visibleReplyMessages.length, scrollToBottom]);
+
+  const jumpToLatestReply = useCallback(() => {
+    scrollToBottom('smooth');
+    setPendingNewReplyCount(0);
+  }, [scrollToBottom]);
+
+  // The panel instance is reused across thread switches (no key={threadId} at the call
+  // site), so per-thread scroll-follow state must reset explicitly, not just on unmount.
+  useEffect(() => {
+    wasNearBottomRef.current = true;
+    previousVisibleReplyCountRef.current = 0;
+    setPendingNewReplyCount(0);
+  }, [threadId]);
+
   const searchableMessages = useMemo(
     () => [sourceMessage, ...visibleReplyMessages],
     [sourceMessage, visibleReplyMessages],
@@ -1262,57 +1309,73 @@ export function InlineThreadPanel({
             ))}
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" onWheel={stopScrollPropagation}>
-          <div className="mb-4">
-            <div
-              className={`px-1 py-1 transition-colors ${
-                activeSearchHit?.id === sourceMessage.id
-                  ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)]'
-                  : ''
-              }`}
-              data-inline-thread-message-id={sourceMessage.id}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScrollContainerScroll}
+            className="absolute inset-0 overflow-y-auto overscroll-contain px-5 py-4"
+            onWheel={stopScrollPropagation}
+          >
+            <div className="mb-4">
+              <div
+                className={`px-1 py-1 transition-colors ${
+                  activeSearchHit?.id === sourceMessage.id
+                    ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)]'
+                    : ''
+                }`}
+                data-inline-thread-message-id={sourceMessage.id}
+              >
+                <ChatMessage
+                  message={sourceMessage}
+                  getCatById={getCatById}
+                  showRuntimeMetadata
+                  searchHighlight={searchHits.some((hit) => hit.id === sourceMessage.id) ? searchQuery : undefined}
+                />
+              </div>
+            </div>
+            <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
+              <div>Beginning of replies</div>
+              <div className="mt-1">
+                {visibleReplyMessages.length} {visibleReplyMessages.length === 1 ? 'reply' : 'replies'}
+              </div>
+            </div>
+            {loading ? (
+              <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
+            ) : visibleReplyMessages.length === 0 ? (
+              <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
+            ) : (
+              visibleReplyMessages.map((msg) => {
+                const isHit = searchHits.some((hit) => hit.id === msg.id);
+                const isActiveHit = activeSearchHit?.id === msg.id;
+                return (
+                  <div
+                    key={msg.id}
+                    data-inline-thread-message-id={msg.id}
+                    className={`transition-colors ${
+                      isActiveHit
+                        ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-1 py-1'
+                        : ''
+                    }`}
+                  >
+                    <ChatMessage
+                      message={msg}
+                      getCatById={getCatById}
+                      showRuntimeMetadata
+                      searchHighlight={isHit ? searchQuery : undefined}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {pendingNewReplyCount > 0 && (
+            <button
+              type="button"
+              onClick={jumpToLatestReply}
+              className="slock-tool-button absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-3 py-1.5 text-[11px] font-semibold text-[var(--cafe-text)] shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-[var(--console-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
             >
-              <ChatMessage
-                message={sourceMessage}
-                getCatById={getCatById}
-                showRuntimeMetadata
-                searchHighlight={searchHits.some((hit) => hit.id === sourceMessage.id) ? searchQuery : undefined}
-              />
-            </div>
-          </div>
-          <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
-            <div>Beginning of replies</div>
-            <div className="mt-1">
-              {visibleReplyMessages.length} {visibleReplyMessages.length === 1 ? 'reply' : 'replies'}
-            </div>
-          </div>
-          {loading ? (
-            <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">加载中...</div>
-          ) : visibleReplyMessages.length === 0 ? (
-            <div className="py-6 text-center text-sm text-[var(--cafe-text-muted)]">暂无回复</div>
-          ) : (
-            visibleReplyMessages.map((msg) => {
-              const isHit = searchHits.some((hit) => hit.id === msg.id);
-              const isActiveHit = activeSearchHit?.id === msg.id;
-              return (
-                <div
-                  key={msg.id}
-                  data-inline-thread-message-id={msg.id}
-                  className={`transition-colors ${
-                    isActiveHit
-                      ? 'border-2 border-[var(--slock-border-color)] bg-[var(--console-active-bg)] px-1 py-1'
-                      : ''
-                  }`}
-                >
-                  <ChatMessage
-                    message={msg}
-                    getCatById={getCatById}
-                    showRuntimeMetadata
-                    searchHighlight={isHit ? searchQuery : undefined}
-                  />
-                </div>
-              );
-            })
+              ↓ {pendingNewReplyCount} 条新消息
+            </button>
           )}
         </div>
 
