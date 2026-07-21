@@ -41,6 +41,18 @@ export function getSanityThresholdsFromEnv(env: NodeJS.ProcessEnv = process.env)
   };
 }
 
+/**
+ * 安全阀（2026-07-21，理智线全开批）：分类+`sanity_state_changed` 事件一直没有独立开关
+ * （只挂 F24 sessionChain，默认 on）——红区强制封存本身在生产已经在跑，若未校准的阈值封得
+ * 过勤，之前没有单独关掉"封存"这一步的手段（只能连 sessionChain 一起关，会连累其他不相关
+ * 功能）。这个 flag 只挡 invoke-single-cat.ts 里实际调用 `sessionSealer.requestSeal` 那一步，
+ * 不挡分类/事件（那部分是纯观测，无破坏性）。**默认 on**——封存已经在生产发生，缺省值本身
+ * 不应该构成一次未确认的行为改变。
+ */
+export function isSanitySealEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CAT_CAFE_SANITY_SEAL_ENABLED !== '0' && env.CAT_CAFE_SANITY_SEAL_ENABLED !== 'false';
+}
+
 export function classifySanityState(
   usedTokens: number,
   sanityLine: number,

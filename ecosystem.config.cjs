@@ -61,6 +61,17 @@ const apiSecurityEnv = {
   CLOWDER_AUTO_TASK_THREAD_THREADS: 'thread_mrqr35sjajks9qlg,thread_mrrmu5i66vxj55ia',
   CLOWDER_THREAD_ADDRESS_ROUTING: 'false',
   CLOWDER_THREAD_ADDRESS_THREADS: 'thread_mrqr35sjajks9qlg',
+  // 理智线全开批 (2026-07-21): the red-zone forced-seal itself has been running live in
+  // production all along (gated only by F24's pre-existing sessionChain toggle, not a
+  // dedicated flag) — CAT_CAFE_SANITY_SEAL_ENABLED is a NEW safety-valve flag added so it can
+  // be turned off independently if the un-canary-calibrated thresholds seal too aggressively.
+  // Kept 'true' here to match current (already-live) production behavior — this is not a new
+  // behavior change, it's giving us a lever we didn't have before.
+  CAT_CAFE_SANITY_SEAL_ENABLED: 'true',
+  // Completes the seal→handoff loop: without this, a sanity_critical forced seal happens with
+  // no handoff capsule for the next session (confirmed via live pm2 logs, cat-9eoshf3q 06:44
+  // 2026-07-21 incident) — this IS the actual behavior change ("全开").
+  CAT_CAFE_SANITY_HANDOFF: 'true',
 };
 
 module.exports = {

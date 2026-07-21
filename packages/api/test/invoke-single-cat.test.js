@@ -1799,6 +1799,245 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
   });
 
+  // ── 理智线全开批 (2026-07-21): CAT_CAFE_SANITY_SEAL_ENABLED kill-switch ────
+
+  describe('理智线 sanity-seal kill-switch (CAT_CAFE_SANITY_SEAL_ENABLED)', () => {
+    let savedSealEnv;
+    let savedHandoffEnv;
+    before(() => {
+      savedSealEnv = process.env.CAT_CAFE_SANITY_SEAL_ENABLED;
+      savedHandoffEnv = process.env.CAT_CAFE_SANITY_HANDOFF;
+    });
+    afterEach(() => {
+      if (savedSealEnv === undefined) delete process.env.CAT_CAFE_SANITY_SEAL_ENABLED;
+      else process.env.CAT_CAFE_SANITY_SEAL_ENABLED = savedSealEnv;
+      if (savedHandoffEnv === undefined) delete process.env.CAT_CAFE_SANITY_HANDOFF;
+      else process.env.CAT_CAFE_SANITY_HANDOFF = savedHandoffEnv;
+    });
+
+    function redTurnService({ catId, cliSessionId, inputTokens, contextWindowSize }) {
+      return {
+        async *invoke() {
+          yield { type: 'session_init', catId, sessionId: cliSessionId, timestamp: Date.now() };
+          yield { type: 'text', catId, content: '正在推进任务', timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId,
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens, outputTokens: 500, contextWindowSize },
+            },
+          };
+        },
+      };
+    }
+
+    it('kill-switch off ("0"): red transition does NOT force a seal', async () => {
+      process.env.CAT_CAFE_SANITY_SEAL_ENABLED = '0';
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const threadId = 'thread-killswitch-off';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 kill-switch off 场景',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-killswitch-off',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 0, 'kill-switch off must suppress the forced seal entirely');
+
+      const chain = sessionChainStore.getChain(catId, threadId);
+      assert.equal(chain.length, 1);
+      assert.equal(
+        chain[0].status,
+        'active',
+        'session must remain active — F33 windowTokens ratio is nowhere near its own threshold here',
+      );
+    });
+
+    it('kill-switch off ("false"): classification/sanity_state_changed events still fire normally — only the seal step is blocked', async () => {
+      process.env.CAT_CAFE_SANITY_SEAL_ENABLED = 'false';
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const threadId = 'thread-killswitch-off-observability';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 kill-switch off 但分类仍观测的场景',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-killswitch-off-observability',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const stateEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_state_changed');
+      assert.equal(stateEvents.length, 1, 'classification must still run and emit its tier-crossing event');
+      assert.equal(stateEvents[0].to, 'red');
+
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 0, 'seal step alone must be suppressed');
+    });
+
+    it('default (env unset): behaves as on — red transition still forces a seal (regression guard)', async () => {
+      delete process.env.CAT_CAFE_SANITY_SEAL_ENABLED;
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const threadId = 'thread-killswitch-default-on';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线 kill-switch 默认值场景',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-killswitch-default-on',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 1, 'unset env must default to on — existing production behavior unchanged');
+      assert.equal(sealEvents[0].accepted, true);
+    });
+
+    it('positive path — full 全开 target state: kill-switch on + handoff on → seal fires AND produces a real sanityHandoff', async () => {
+      process.env.CAT_CAFE_SANITY_SEAL_ENABLED = '1';
+      process.env.CAT_CAFE_SANITY_HANDOFF = '1';
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const threadId = 'thread-killswitch-full-loop';
+      const catId = 'opus';
+
+      await messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: '帮我实现理智线全开目标态：封存+交接包一起闭环',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore };
+      const outputs = await collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({
+            catId,
+            cliSessionId: 'cli-killswitch-full-loop',
+            inputTokens: 195000,
+            contextWindowSize: 1_000_000,
+          }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      const sealEvents = outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+      assert.equal(sealEvents.length, 1, 'seal must fire');
+      assert.equal(sealEvents[0].accepted, true);
+
+      const chain = sessionChainStore.getChain(catId, threadId);
+      assert.equal(chain.length, 1);
+      assert.equal(chain[0].sealReason, 'sanity_critical');
+      assert.ok(
+        chain[0].sanityHandoff,
+        'the seal→handoff loop must actually close: a real sanityHandoff must be persisted, not just the seal alone',
+      );
+      assert.equal(chain[0].sanityHandoff.triggerState, 'red');
+    });
+  });
+
   // ── 理智线 T6 (task #388): quota-cooldown scheduling ───────────────────────
 
   describe('理智线 T6: quota-cooldown write gating', () => {

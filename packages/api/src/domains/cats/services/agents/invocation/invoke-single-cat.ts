@@ -140,7 +140,11 @@ import {
   isSanityHandoffEnabled,
 } from '../../session/HandoffCapsuleGenerator.js';
 import type { SessionManager } from '../../session/SessionManager.js';
-import { computeSanityTransition, getSanityThresholdsFromEnv } from '../../session/SessionSanityMonitor.js';
+import {
+  computeSanityTransition,
+  getSanityThresholdsFromEnv,
+  isSanitySealEnabled,
+} from '../../session/SessionSanityMonitor.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ICooldownStore } from '../../stores/ports/CooldownStore.js';
@@ -2044,7 +2048,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     // an already-sealing/sealed record is a verified no-op (see the dedicated
                     // "N times on an already-sealed session" test).
                     let forcedSealAccepted = false;
-                    if (activeRecord && sanityRedTriggerSessionId === activeRecord.id && deps.sessionSealer) {
+                    if (
+                      activeRecord &&
+                      sanityRedTriggerSessionId === activeRecord.id &&
+                      deps.sessionSealer &&
+                      isSanitySealEnabled()
+                    ) {
                       // Forced memory writeback: unlike the normal end-of-invocation
                       // writeback (fire-and-forget, swallows errors via .catch()), this
                       // MUST be awaited before sealing so the handoff's assistant-side
