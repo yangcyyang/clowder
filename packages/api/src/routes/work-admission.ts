@@ -44,6 +44,24 @@ const LINE_LEADING_MENTION_RE = /^\s*@[^\s，,：:]+\s+/u;
 const DIRECT_ACTION_RE =
   /(?:^|[，,。；;！!\s])(?:开工|按这个做|安排|执行|你来推进|来做|去做|去查|修复|修一下|弄(?:一下|一个)|上线吧|部署|重启|清理|翻译|整理|写|查|检查|排查|导出|抓取|压缩|备份|review|跑一遍|默认打开|给.+配)|^(?:帮我|请)(?:把|做|改|修|建|部署|重启|清理|写|查|导出|翻译)|^把.+(?:清理|翻译|整理|打开|压缩|改|修|建|部署|重启|写|查|跑|导出|抓取)/i;
 
+// F194 FP tightening: long pasted documents/excerpts (e.g. reference material, meeting notes)
+// often contain an incidental action-shaped verb (e.g. "改") without being an instruction. A
+// numbered-paragraph structure with no leading @mention is a strong signal of "pasted document,
+// not a command" — bail out to reply_only before DIRECT_ACTION_RE gets a chance to match.
+const LONG_STRUCTURED_DOCUMENT_LENGTH_THRESHOLD = 500;
+const LEADING_MENTION_ANYWHERE_RE = /^\s*@/u;
+// Matches a numbered-paragraph marker ("1. ", "12." ...) either at the true start of the
+// message or right after sentence-level punctuation/whitespace — the latter also covers
+// paragraphs whose original newlines were collapsed into spaces before reaching this classifier.
+const NUMBERED_PARAGRAPH_MARKER_RE = /(?:^|[\s。！!])[1-9]\d?\.\s*(?=\S)/gu;
+
+function isLongStructuredDocument(content: string): boolean {
+  if (content.length <= LONG_STRUCTURED_DOCUMENT_LENGTH_THRESHOLD) return false;
+  if (LEADING_MENTION_ANYWHERE_RE.test(content)) return false;
+  const markers = content.match(NUMBERED_PARAGRAPH_MARKER_RE);
+  return (markers?.length ?? 0) >= 2;
+}
+
 function normalizeTaskTitle(content: string): string {
   const normalized = content
     .replace(/^\s*(?:@[^\s，,：:]+\s+)+/u, '')
@@ -99,6 +117,10 @@ export function classifyWorkAdmission(input: WorkAdmissionInput): WorkAdmissionD
       ...(ownerCatId ? { ownerCatId } : {}),
       reason: 'approval_with_pending_plan',
     };
+  }
+
+  if (isLongStructuredDocument(content)) {
+    return { kind: 'reply_only', reason: 'long_structured_document' };
   }
 
   if (!DIRECT_ACTION_RE.test(actionContent)) return { kind: 'reply_only', reason: 'no_explicit_action' };
