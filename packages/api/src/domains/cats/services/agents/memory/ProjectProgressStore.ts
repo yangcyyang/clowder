@@ -80,6 +80,64 @@ async function readProjectFile(
   };
 }
 
+// Handoff-index entries (see formatContextHandoffIndexEntry) are appended to the file tail in
+// chronological order, so the newest entry is always last. Generic head-truncation (above) is
+// correct for freeform docs like brief/progress/decisions.md, but wrong here: it silently kept
+// the OLDEST entries and dropped the most recent handoffs (P0, 2026-07-23 optimization report
+// §3). This entry-aware truncation keeps whole entries only (never cuts one in half) and
+// prefers the most recent ones, falling back to plain head-truncation if the file doesn't look
+// like an entry log (e.g. a freshly-initialized header with no entries yet).
+const HANDOFF_ENTRY_DELIMITER = '\n---\n\n## ';
+
+async function readProjectHandoffIndexFile(
+  projectId: string,
+  path: string,
+  maxChars: number,
+  overflowLabel: string,
+): Promise<ProjectProgressRecord> {
+  if (!existsSync(path)) {
+    return { id: projectId, path, content: '', exists: false, truncated: false };
+  }
+  const raw = await readFile(path, 'utf-8');
+  if (raw.length <= maxChars) {
+    return { id: projectId, path, content: raw, exists: true, truncated: false };
+  }
+
+  const parts = raw.split(HANDOFF_ENTRY_DELIMITER);
+  if (parts.length < 2) {
+    // No parseable entries (e.g. header-only file) — fall back to the generic behavior.
+    return {
+      id: projectId,
+      path,
+      content: `${raw.slice(0, maxChars)}\n\n[${overflowLabel}内容过长，已截断]`,
+      exists: true,
+      truncated: true,
+    };
+  }
+
+  const header = parts[0] ?? '';
+  const entries = parts.slice(1); // each is missing its leading "## ", re-added below
+  const overflowNote = `\n\n[${overflowLabel}内容过长，仅保留最近条目]`;
+  const budget = Math.max(0, maxChars - header.length - overflowNote.length);
+
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entryText = `${HANDOFF_ENTRY_DELIMITER}## ${entries[i]}`;
+    if (used + entryText.length > budget && kept.length > 0) break;
+    kept.unshift(entryText);
+    used += entryText.length;
+  }
+
+  return {
+    id: projectId,
+    path,
+    content: `${header}${kept.join('')}${overflowNote}`,
+    exists: true,
+    truncated: true,
+  };
+}
+
 export async function readProjectBrief(
   projectId: string,
   projectRoot = findMonorepoRoot(),
@@ -109,7 +167,7 @@ export async function readProjectHandoffIndex(
   projectRoot = findMonorepoRoot(),
 ): Promise<ProjectProgressRecord> {
   const path = getProjectHandoffIndexPath(projectId, projectRoot);
-  return readProjectFile(projectId, path, PROJECT_HANDOFF_INDEX_MAX_CHARS, '交接索引');
+  return readProjectHandoffIndexFile(projectId, path, PROJECT_HANDOFF_INDEX_MAX_CHARS, '交接索引');
 }
 
 export async function readProjectHandoffIndexesForBootstrap(
@@ -119,7 +177,12 @@ export async function readProjectHandoffIndexesForBootstrap(
   if (projectIds.length === 0) return null;
   const records = await Promise.all(
     projectIds.map((id) =>
-      readProjectFile(id, getProjectHandoffIndexPath(id, projectRoot), PROJECT_BOOTSTRAP_HANDOFF_INDEX_MAX_CHARS, '交接索引'),
+      readProjectHandoffIndexFile(
+        id,
+        getProjectHandoffIndexPath(id, projectRoot),
+        PROJECT_BOOTSTRAP_HANDOFF_INDEX_MAX_CHARS,
+        '交接索引',
+      ),
     ),
   );
   const blocks = records
