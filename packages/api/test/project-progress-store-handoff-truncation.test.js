@@ -86,6 +86,10 @@ describe('P0-1: handoff-index truncation keeps the most recent entries', () => {
       const markers = [...record.content.matchAll(/ENTRY_MARKER_(\d+)/g)].map((m) => Number(m[1]));
       assert.ok(markers.length >= 2, 'should keep more than one entry given the fixture size');
 
+      // Regression: HANDOFF_ENTRY_DELIMITER already ends in "## " — reconstructing entries must
+      // not re-add it (caught in review: doubled into "## ## " heading markup on every kept entry).
+      assert.ok(!record.content.includes('## ## '), 'reconstructed entries must not double the "## " heading marker');
+
       for (const n of new Set(markers)) {
         const entryHeading = new RegExp(
           `## 2026-07-${String(n + 1).padStart(2, '0')}T10:00:00\\.000Z · context-handoff`,
@@ -103,6 +107,49 @@ describe('P0-1: handoff-index truncation keeps the most recent entries', () => {
 
       // Highest-numbered marker present must be the very last one written (39).
       assert.equal(Math.max(...markers), 39, 'the newest entry must be the last one kept');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('budget is a hard upper bound — even when the single newest entry alone exceeds it, content is capped, not injected whole', async () => {
+    // Caught in review: an entry's `refs` field is an unbounded array, so a single entry can
+    // itself blow the budget (repro found 10583 chars vs a 6000-char budget = 76% over).
+    const { writeContextHandoffForPromptProjects, readProjectHandoffIndex, PROJECT_HANDOFF_INDEX_MAX_CHARS } =
+      await importStore();
+    const root = await mkdtemp(resolve(tmpdir(), 'cat-cafe-handoff-truncation-single-oversized-'));
+    try {
+      await mkdir(resolve(root, '.cat-cafe', 'projects', 'demo'), { recursive: true });
+
+      const hugeRefs = Array.from({ length: 200 }, (_, i) => `ref-${i}-${'x'.repeat(40)}`);
+      await writeContextHandoffForPromptProjects(
+        {
+          timestamp: '2026-08-01T10:00:00.000Z',
+          threadId: 'thread-oversized',
+          catId: 'codex',
+          fromSessionId: 'session-oversized',
+          reason: 'threshold',
+          trust: 'trusted',
+          what: 'ENTRY_MARKER_OVERSIZED: a single entry with an unbounded refs list',
+          refs: hugeRefs,
+        },
+        ['demo'],
+        root,
+      );
+
+      const raw = await readFile(resolve(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'), 'utf-8');
+      assert.ok(
+        raw.length > PROJECT_HANDOFF_INDEX_MAX_CHARS,
+        'fixture entry alone must exceed the max-chars budget to exercise the hard-cap path',
+      );
+
+      const record = await readProjectHandoffIndex('demo', root);
+      assert.ok(
+        record.content.length <= PROJECT_HANDOFF_INDEX_MAX_CHARS,
+        `content length (${record.content.length}) must not exceed the max-chars budget (${PROJECT_HANDOFF_INDEX_MAX_CHARS}) even for a single oversized entry`,
+      );
+      assert.ok(record.content.includes('ENTRY_MARKER_OVERSIZED'), 'the truncated entry heading must still be present');
+      assert.ok(record.content.includes('已截尾'), 'the per-entry truncation must be marked, not silent');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

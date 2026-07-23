@@ -116,14 +116,28 @@ async function readProjectHandoffIndexFile(
   }
 
   const header = parts[0] ?? '';
-  const entries = parts.slice(1); // each is missing its leading "## ", re-added below
+  const entries = parts.slice(1); // each is missing its leading delimiter (incl. "## "), re-added via HANDOFF_ENTRY_DELIMITER below
   const overflowNote = `\n\n[${overflowLabel}内容过长，仅保留最近条目]`;
   const budget = Math.max(0, maxChars - header.length - overflowNote.length);
 
   const kept: string[] = [];
   let used = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
-    const entryText = `${HANDOFF_ENTRY_DELIMITER}## ${entries[i]}`;
+    // HANDOFF_ENTRY_DELIMITER already ends in "## " — do not re-add it here (that duplicated
+    // "## ## " into every kept entry's heading; caught in review, not by the original tests).
+    const entryText = `${HANDOFF_ENTRY_DELIMITER}${entries[i]}`;
+    if (kept.length === 0 && entryText.length > budget) {
+      // budget is a hard upper bound (caught in review: a single newest entry with an unbounded
+      // refs list can itself blow the budget, e.g. 10583 vs a 6000-char budget — "part of the
+      // newest" still beats "all of the oldest" or "nothing", but it must not defeat the budget).
+      // Truncate this one entry's tail to fit, rather than injecting it whole.
+      const entryOverflowNote = `\n\n[${overflowLabel}单条内容过长，已截尾]`;
+      const truncatedEntryBudget = Math.max(0, budget - entryOverflowNote.length);
+      const truncatedEntry = `${entryText.slice(0, truncatedEntryBudget)}${entryOverflowNote}`;
+      kept.unshift(truncatedEntry);
+      used = truncatedEntry.length;
+      break;
+    }
     if (used + entryText.length > budget && kept.length > 0) break;
     kept.unshift(entryText);
     used += entryText.length;
