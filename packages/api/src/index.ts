@@ -83,6 +83,7 @@ import {
 import { initPushNotificationService } from './domains/cats/services/push/PushNotificationService.js';
 import { startAgentReminderScheduler } from './domains/cats/services/reminders/AgentReminderScheduler.js';
 import { AgentReminderStore } from './domains/cats/services/reminders/AgentReminderStore.js';
+import { SanitySealCooldownStore } from './domains/cats/services/session/SanitySealCooldownStore.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';
@@ -605,6 +606,9 @@ async function main(): Promise<void> {
   const sessionChainStore = createSessionChainStore(redis);
   // 理智线 T6 (task #388): per-cat quota-cooldown state, restart-safe via Redis when available.
   const cooldownStore = createCooldownStore(redis);
+  // B1 (2026-07-23): (catId, threadId) post-forced-seal cooldown — pure in-memory debounce,
+  // not restart-safe by design (see SanitySealCooldownStore.ts doc comment).
+  const sanitySealCooldownStore = new SanitySealCooldownStore();
   // F24: Transcript Writer/Reader for session chain
   // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
   const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
@@ -1376,6 +1380,7 @@ async function main(): Promise<void> {
     ...(threadStore ? { threadStore } : {}),
     sessionChainStore,
     cooldownStore,
+    sanitySealCooldownStore,
     transcriptWriter,
     transcriptReader,
     sessionSealer,

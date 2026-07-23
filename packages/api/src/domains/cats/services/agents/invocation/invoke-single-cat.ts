@@ -139,6 +139,7 @@ import {
   generateSanityHandoffCapsule,
   isSanityHandoffEnabled,
 } from '../../session/HandoffCapsuleGenerator.js';
+import { getSanitySealCooldownMsFromEnv, SanitySealCooldownStore } from '../../session/SanitySealCooldownStore.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import {
   computeSanityTransition,
@@ -361,6 +362,10 @@ export interface InvocationDeps {
   /** 理智线 T6 (task #388): per-cat quota-cooldown state. Optional so existing
    *  test/deps construction sites keep compiling without it. */
   readonly cooldownStore?: ICooldownStore;
+  /** B1 (2026-07-23): (catId, threadId) post-forced-seal cooldown to stop the
+   *  seal→new-session→turn-1-red→seal loop. Optional so existing test/deps
+   *  construction sites keep compiling without it. */
+  readonly sanitySealCooldownStore?: SanitySealCooldownStore;
   /** F24 Phase C: Transcript writer for event collection + flush on seal */
   readonly transcriptWriter?: TranscriptWriter;
   /** F24 Phase D: Transcript reader for reading sealed session data */
@@ -2054,67 +2059,87 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                       deps.sessionSealer &&
                       isSanitySealEnabled()
                     ) {
-                      // Forced memory writeback: unlike the normal end-of-invocation
-                      // writeback (fire-and-forget, swallows errors via .catch()), this
-                      // MUST be awaited before sealing so the handoff's assistant-side
-                      // memory is durably persisted — and failure MUST be loud (not
-                      // swallowed), since a silent failure here means the next shift
-                      // loses this turn's memory. We still proceed to seal after logging
-                      // a failure — this must not hang the handoff indefinitely.
-                      if (!freshnessProtected && !forcedMemoryWritebackDone && assistantTextForMemory.trim()) {
-                        try {
-                          await autoUpdateAgentMemory({
-                            catId,
-                            invocationId,
-                            threadId,
-                            ...(params.currentUserMessageId
-                              ? { currentUserMessageId: params.currentUserMessageId }
-                              : {}),
-                            assistantText: assistantTextForMemory,
-                            completedAt: Date.now(),
-                          });
-                          forcedMemoryWritebackDone = true;
-                        } catch (err) {
-                          forcedMemoryWritebackDone = true;
-                          log.error(
-                            { catId, threadId, invocationId, sessionId: activeRecord.id, err },
-                            'SANITY_CRITICAL forced memory writeback FAILED — next shift may lose this turn’s memory',
-                          );
-                          outputs.push({
-                            type: 'system_info' as const,
-                            catId,
-                            content: JSON.stringify({
-                              type: 'sanity_forced_writeback_failed',
-                              catId,
-                              threadId,
-                              sessionId: activeRecord.id,
-                              error: err instanceof Error ? err.message : String(err),
-                            }),
-                            timestamp: Date.now(),
-                          });
-                        }
-                      }
-
-                      const forcedSeal = await deps.sessionSealer.requestSeal({
-                        sessionId: activeRecord.id,
-                        reason: 'sanity_critical',
-                      });
-                      outputs.push({
-                        type: 'system_info' as const,
-                        catId,
-                        content: JSON.stringify({
-                          type: 'sanity_forced_seal',
+                      // B1 (2026-07-23): the (catId, threadId) combo was force-sealed recently —
+                      // skip this seal to break the seal→new-session→turn-1-red→seal loop, and
+                      // degrade to F33's own shouldTakeAction below (same path as kill-switch off).
+                      const cooldownCheck = deps.sanitySealCooldownStore?.check(catId, threadId);
+                      if (cooldownCheck?.cooling) {
+                        outputs.push({
+                          type: 'system_info' as const,
                           catId,
-                          threadId,
+                          content: JSON.stringify({
+                            type: 'sanity_seal_cooldown_skipped',
+                            catId,
+                            threadId,
+                            sessionId: activeRecord.id,
+                            remainingMs: cooldownCheck.remainingMs,
+                          }),
+                          timestamp: Date.now(),
+                        });
+                      } else {
+                        // Forced memory writeback: unlike the normal end-of-invocation
+                        // writeback (fire-and-forget, swallows errors via .catch()), this
+                        // MUST be awaited before sealing so the handoff's assistant-side
+                        // memory is durably persisted — and failure MUST be loud (not
+                        // swallowed), since a silent failure here means the next shift
+                        // loses this turn's memory. We still proceed to seal after logging
+                        // a failure — this must not hang the handoff indefinitely.
+                        if (!freshnessProtected && !forcedMemoryWritebackDone && assistantTextForMemory.trim()) {
+                          try {
+                            await autoUpdateAgentMemory({
+                              catId,
+                              invocationId,
+                              threadId,
+                              ...(params.currentUserMessageId
+                                ? { currentUserMessageId: params.currentUserMessageId }
+                                : {}),
+                              assistantText: assistantTextForMemory,
+                              completedAt: Date.now(),
+                            });
+                            forcedMemoryWritebackDone = true;
+                          } catch (err) {
+                            forcedMemoryWritebackDone = true;
+                            log.error(
+                              { catId, threadId, invocationId, sessionId: activeRecord.id, err },
+                              'SANITY_CRITICAL forced memory writeback FAILED — next shift may lose this turn’s memory',
+                            );
+                            outputs.push({
+                              type: 'system_info' as const,
+                              catId,
+                              content: JSON.stringify({
+                                type: 'sanity_forced_writeback_failed',
+                                catId,
+                                threadId,
+                                sessionId: activeRecord.id,
+                                error: err instanceof Error ? err.message : String(err),
+                              }),
+                              timestamp: Date.now(),
+                            });
+                          }
+                        }
+
+                        const forcedSeal = await deps.sessionSealer.requestSeal({
                           sessionId: activeRecord.id,
-                          accepted: forcedSeal.accepted,
-                        }),
-                        timestamp: Date.now(),
-                      });
-                      if (forcedSeal.accepted) {
-                        forcedSealAccepted = true;
-                        sessionManager.delete(userId, catId, threadId).catch(() => {});
-                        deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                          reason: 'sanity_critical',
+                        });
+                        outputs.push({
+                          type: 'system_info' as const,
+                          catId,
+                          content: JSON.stringify({
+                            type: 'sanity_forced_seal',
+                            catId,
+                            threadId,
+                            sessionId: activeRecord.id,
+                            accepted: forcedSeal.accepted,
+                          }),
+                          timestamp: Date.now(),
+                        });
+                        if (forcedSeal.accepted) {
+                          forcedSealAccepted = true;
+                          sessionManager.delete(userId, catId, threadId).catch(() => {});
+                          deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                          deps.sanitySealCooldownStore?.recordSeal(catId, threadId, getSanitySealCooldownMsFromEnv());
+                        }
                       }
                     }
 

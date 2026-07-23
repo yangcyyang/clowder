@@ -32,6 +32,7 @@ import {
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
+import type { SanitySealCooldownStore } from '../../session/SanitySealCooldownStore.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
@@ -166,6 +167,8 @@ export interface AgentRouterOptions {
   sessionSealer?: ISessionSealer;
   /** 理智线 T6 (task #388): per-cat quota-cooldown state. */
   cooldownStore?: ICooldownStore;
+  /** B1 (2026-07-23): (catId, threadId) post-forced-seal cooldown. */
+  sanitySealCooldownStore?: SanitySealCooldownStore;
   /** #80: Streaming draft persistence store */
   draftStore?: IDraftStore;
   /** F065: Task store for bootstrap task snapshot injection */
@@ -226,6 +229,7 @@ export class AgentRouter {
   private transcriptReader: TranscriptReader | undefined;
   private sessionSealer: ISessionSealer | undefined;
   private cooldownStore: ICooldownStore | undefined;
+  private sanitySealCooldownStore: SanitySealCooldownStore | undefined;
   private draftStore: IDraftStore | undefined;
   private taskProgressStore: TaskProgressStore | undefined;
   private taskStore: ITaskStore | undefined;
@@ -288,6 +292,7 @@ export class AgentRouter {
     this.transcriptReader = options.transcriptReader;
     this.sessionSealer = options.sessionSealer;
     this.cooldownStore = options.cooldownStore;
+    this.sanitySealCooldownStore = options.sanitySealCooldownStore;
     this.draftStore = options.draftStore;
     this.taskProgressStore = options.taskProgressStore;
     this.taskStore = options.taskStore;
@@ -753,6 +758,7 @@ export class AgentRouter {
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),
         ...(this.sessionSealer ? { sessionSealer: this.sessionSealer } : {}),
         ...(this.cooldownStore ? { cooldownStore: this.cooldownStore } : {}),
+        ...(this.sanitySealCooldownStore ? { sanitySealCooldownStore: this.sanitySealCooldownStore } : {}),
         ...(this.taskStore ? { taskStore: this.taskStore } : {}),
         ...(this.workflowSopStore ? { workflowSopStore: this.workflowSopStore } : {}),
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),

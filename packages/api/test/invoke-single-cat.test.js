@@ -2038,6 +2038,209 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
   });
 
+  // ── B1 (2026-07-23, task #405/#406): 理智线红区空转 cooldown ─────────────────
+
+  describe('B1: sanity-seal cooldown (SanitySealCooldownStore)', () => {
+    function redTurnService({ catId, cliSessionId, inputTokens, contextWindowSize }) {
+      return {
+        async *invoke() {
+          yield { type: 'session_init', catId, sessionId: cliSessionId, timestamp: Date.now() };
+          yield { type: 'text', catId, content: '正在推进任务', timestamp: Date.now() };
+          yield {
+            type: 'done',
+            catId,
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              usage: { inputTokens, outputTokens: 500, contextWindowSize },
+            },
+          };
+        },
+      };
+    }
+
+    async function invokeRedTurn(deps, { catId, threadId, cliSessionId }) {
+      await deps.messageStore.append({
+        userId: 'user1',
+        catId: null,
+        content: `帮我实现理智线 B1 冷却场景 ${cliSessionId}`,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+      return collect(
+        invokeSingleCat(deps, {
+          catId,
+          service: redTurnService({ catId, cliSessionId, inputTokens: 195000, contextWindowSize: 1_000_000 }),
+          prompt: 'test',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+    }
+
+    function sealEventsOf(outputs) {
+      return outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_forced_seal');
+    }
+
+    function cooldownSkippedEventsOf(outputs) {
+      return outputs
+        .filter((m) => m.type === 'system_info')
+        .map((m) => JSON.parse(m.content))
+        .filter((c) => c.type === 'sanity_seal_cooldown_skipped');
+    }
+
+    it('no cooldown record yet: red transition triggers a forced seal normally (regression)', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { SanitySealCooldownStore } = await import(
+        '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+      );
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const sanitySealCooldownStore = new SanitySealCooldownStore();
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+      const outputs = await invokeRedTurn(deps, {
+        catId: 'opus',
+        threadId: 'thread-b1-no-cooldown-yet',
+        cliSessionId: 'cli-b1-first',
+      });
+
+      assert.equal(sealEventsOf(outputs).length, 1);
+      assert.equal(sealEventsOf(outputs)[0].accepted, true);
+      assert.equal(cooldownSkippedEventsOf(outputs).length, 0);
+    });
+
+    it('within the cooldown window: a second red transition for the SAME catId+threadId is skipped, with an observable event', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { SanitySealCooldownStore } = await import(
+        '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+      );
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const sanitySealCooldownStore = new SanitySealCooldownStore();
+      const catId = 'opus';
+      const threadId = 'thread-b1-cooldown-active';
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+      // First red turn: seals normally, starts the cooldown window.
+      const firstOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-seal-1' });
+      assert.equal(sealEventsOf(firstOutputs).length, 1);
+      assert.equal(sealEventsOf(firstOutputs)[0].accepted, true);
+
+      // Second red turn on the brand-new session (same catId+threadId, cooldown still active).
+      const secondOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-seal-2' });
+      assert.equal(sealEventsOf(secondOutputs).length, 0, 'second forced seal must be suppressed by the cooldown');
+      const skipped = cooldownSkippedEventsOf(secondOutputs);
+      assert.equal(skipped.length, 1, 'the suppression must be observable (activity/live-verification signal)');
+      assert.equal(skipped[0].catId, catId);
+      assert.equal(skipped[0].threadId, threadId);
+      assert.ok(skipped[0].remainingMs > 0);
+
+      const chain = sessionChainStore.getChain(catId, threadId);
+      assert.equal(chain.length, 2, 'a second session record still gets created — only the forced seal is skipped');
+      assert.equal(chain[1].status, 'active', 'second session must NOT be sealed while cooling down');
+    });
+
+    it('cooldown is scoped to catId+threadId — a different threadId for the same cat seals normally', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { SanitySealCooldownStore } = await import(
+        '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+      );
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const sanitySealCooldownStore = new SanitySealCooldownStore();
+      const catId = 'opus';
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+      await invokeRedTurn(deps, { catId, threadId: 'thread-b1-thread-a', cliSessionId: 'cli-b1-thread-a' });
+      const otherThreadOutputs = await invokeRedTurn(deps, {
+        catId,
+        threadId: 'thread-b1-thread-b',
+        cliSessionId: 'cli-b1-thread-b',
+      });
+
+      assert.equal(
+        sealEventsOf(otherThreadOutputs).length,
+        1,
+        'a different thread for the same cat must not be caught by the other thread’s cooldown',
+      );
+      assert.equal(cooldownSkippedEventsOf(otherThreadOutputs).length, 0);
+    });
+
+    it('cooldown is scoped to catId+threadId — a different cat on the SAME thread seals normally', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { SanitySealCooldownStore } = await import(
+        '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+      );
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const sanitySealCooldownStore = new SanitySealCooldownStore();
+      const threadId = 'thread-b1-shared-thread';
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+      await invokeRedTurn(deps, { catId: 'opus', threadId, cliSessionId: 'cli-b1-cat-opus' });
+      const otherCatOutputs = await invokeRedTurn(deps, { catId: 'codex', threadId, cliSessionId: 'cli-b1-cat-codex' });
+
+      assert.equal(
+        sealEventsOf(otherCatOutputs).length,
+        1,
+        'a different cat on the same thread must not be caught by the other cat’s cooldown',
+      );
+      assert.equal(cooldownSkippedEventsOf(otherCatOutputs).length, 0);
+    });
+
+    it('CAT_CAFE_SANITY_SEAL_COOLDOWN_MS=0 explicitly disables the cooldown (rollback lever)', async () => {
+      const savedEnv = process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS;
+      process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS = '0';
+      try {
+        const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+        const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+        const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+        const { SanitySealCooldownStore } = await import(
+          '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+        );
+        const sessionChainStore = new SessionChainStore();
+        const messageStore = new MessageStore();
+        const sessionSealer = new SessionSealer(sessionChainStore);
+        const sanitySealCooldownStore = new SanitySealCooldownStore();
+        const catId = 'opus';
+        const threadId = 'thread-b1-cooldown-disabled';
+        const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+        await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-disabled-1' });
+        const secondOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-disabled-2' });
+
+        assert.equal(
+          sealEventsOf(secondOutputs).length,
+          1,
+          'cooldown=0 must behave like today (pre-B1): every red transition seals',
+        );
+        assert.equal(cooldownSkippedEventsOf(secondOutputs).length, 0);
+      } finally {
+        if (savedEnv === undefined) delete process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS;
+        else process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS = savedEnv;
+      }
+    });
+  });
+
   // ── 理智线 T6 (task #388): quota-cooldown scheduling ───────────────────────
 
   describe('理智线 T6: quota-cooldown write gating', () => {
