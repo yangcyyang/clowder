@@ -14,7 +14,9 @@ const MAX_SENTENCE_LEN = 100;
 
 const DECISION_PATTERNS = [/决定|确定|选择|采用|使用|拍板|定了|实现了|完成了|修复了|同意/];
 // Intentionally NO bare "阈值" — it matched config prose and polluted openQuestions.
-const QUESTION_PATTERNS = [/需要|待定|TODO|还没|未来|后续|是否|待确认|待实验|\?|？/];
+// Note: do not add bare `？`/`?` here — they are sentence splitters, so post-split
+// fragments never contain them (dead code if included).
+const QUESTION_PATTERNS = [/需要|待定|TODO|还没|未来|后续|是否|待确认|待实验/];
 const ARTIFACT_PATTERN = /\b(ADR-\d+|F\d{2,3})\b/g;
 
 /** Split on CN/EN sentence ends + CN commas；filter empty / punctuation-leading debris. */
