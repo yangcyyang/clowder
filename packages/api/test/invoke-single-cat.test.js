@@ -2207,6 +2207,106 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(cooldownSkippedEventsOf(otherCatOutputs).length, 0);
     });
 
+    it('once the cooldown window elapses, a still-red active session is eligible to be re-sealed (found in review: event-only eligibility never re-arms)', async (t) => {
+      // Root cause this guards against: gating seal-eligibility on `sanityTransition.event`
+      // (a fresh tier CROSSING) instead of `sanityTransition.state` (this turn's classification)
+      // means that once a session's persisted sanityState is already 'red', a still-red turn
+      // produces event:null (red→red, no crossing) — so after the cooldown naturally expires,
+      // nothing re-triggers a seal attempt at all. A session stuck red would go from "at most
+      // one forced seal per cooldown window" to "permanently exempt". Timeline: seal #1 -> new
+      // session, still red -> skipped by cooldown -> clock advances past the cooldown TTL ->
+      // the SAME active (never-sealed) session, still red -> must be sealed this time.
+      t.mock.timers.enable({ apis: ['Date'] });
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { SanitySealCooldownStore, DEFAULT_SANITY_SEAL_COOLDOWN_MS } = await import(
+        '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+      );
+      const sessionChainStore = new SessionChainStore();
+      const messageStore = new MessageStore();
+      const sessionSealer = new SessionSealer(sessionChainStore);
+      const sanitySealCooldownStore = new SanitySealCooldownStore();
+      const catId = 'opus';
+      const threadId = 'thread-b1-ttl-then-reseal';
+      const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+      // Turn 1: fresh session, red on the first turn -> forced seal fires, cooldown starts.
+      const firstOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-ttl-1' });
+      assert.equal(sealEventsOf(firstOutputs).length, 1, 'first turn must seal');
+
+      // Turn 2: new active session, still red on its own first turn -> would normally re-seal,
+      // but the cooldown from turn 1 is still active -> skipped.
+      const secondOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-ttl-2' });
+      assert.equal(
+        sealEventsOf(secondOutputs).length,
+        0,
+        'second turn must be suppressed by the still-active cooldown',
+      );
+      assert.equal(cooldownSkippedEventsOf(secondOutputs).length, 1);
+
+      const activeAfterSkip = sessionChainStore.getActive(catId, threadId);
+      assert.ok(activeAfterSkip, 'the second (skipped) session must remain active, not sealed');
+      assert.equal(
+        activeAfterSkip.sanityState,
+        'red',
+        'the active session must be persisted as red even without a fresh transition event',
+      );
+
+      // Advance the clock past the cooldown TTL. No new invocation happened in between — this is
+      // the exact "red→red, event:null" case the fix must still catch via `state`, not `event`.
+      t.mock.timers.tick(DEFAULT_SANITY_SEAL_COOLDOWN_MS + 1);
+
+      // Turn 3 MUST reuse turn 2's cliSessionId, not a new one: session_init with a *different*
+      // cliSessionId while a record is still active is treated as "CLI session replaced" (a
+      // wholly separate reseal path with reason 'cli_session_replaced', see invoke-single-cat.ts
+      // ~1608) and would create a brand-new session record — masking exactly the bug this test
+      // guards against. Reusing the same cliSessionId keeps turn 3 on the SAME active session.
+      const thirdOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-ttl-2' });
+      assert.equal(
+        sealEventsOf(thirdOutputs).length,
+        1,
+        'once the cooldown TTL has elapsed, the still-red session must be eligible to seal again',
+      );
+      assert.equal(sealEventsOf(thirdOutputs)[0].accepted, true);
+      assert.equal(cooldownSkippedEventsOf(thirdOutputs).length, 0);
+    });
+
+    it('CAT_CAFE_SANITY_SEAL_COOLDOWN_MS as an empty/whitespace-only string falls back to the default (does not silently disable the cooldown)', async () => {
+      // `Number('')` and `Number('   ')` are both `0` in JS — an unset/blank env value must not
+      // be misread as the explicit "0 = off" rollback lever (found in review).
+      const savedEnv = process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS;
+      process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS = '   ';
+      try {
+        const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+        const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+        const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+        const { SanitySealCooldownStore } = await import(
+          '../dist/domains/cats/services/session/SanitySealCooldownStore.js'
+        );
+        const sessionChainStore = new SessionChainStore();
+        const messageStore = new MessageStore();
+        const sessionSealer = new SessionSealer(sessionChainStore);
+        const sanitySealCooldownStore = new SanitySealCooldownStore();
+        const catId = 'opus';
+        const threadId = 'thread-b1-cooldown-blank-env';
+        const deps = { ...makeDeps(), sessionChainStore, sessionSealer, messageStore, sanitySealCooldownStore };
+
+        await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-blank-env-1' });
+        const secondOutputs = await invokeRedTurn(deps, { catId, threadId, cliSessionId: 'cli-b1-blank-env-2' });
+
+        assert.equal(
+          sealEventsOf(secondOutputs).length,
+          0,
+          'a blank env value must behave like the default (cooldown active), not like "0 = disabled"',
+        );
+        assert.equal(cooldownSkippedEventsOf(secondOutputs).length, 1);
+      } finally {
+        if (savedEnv === undefined) delete process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS;
+        else process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS = savedEnv;
+      }
+    });
+
     it('CAT_CAFE_SANITY_SEAL_COOLDOWN_MS=0 explicitly disables the cooldown (rollback lever)', async () => {
       const savedEnv = process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS;
       process.env.CAT_CAFE_SANITY_SEAL_COOLDOWN_MS = '0';

@@ -2002,7 +2002,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     // usedTokens value as F33's fillRatio, so it inherits the same
                     // noisy-telemetry risk on api_key/approx gateways (F062-fix) and must
                     // respect the same skip guard, not a separate one.
-                    if (sanityTransition.event && sanityTransition.event.to === 'red') {
+                    //
+                    // B1 (2026-07-23, found by independent review): this MUST key off
+                    // `sanityTransition.state === 'red'` (this turn's classification), not
+                    // `sanityTransition.event` (only fires on a fresh tier CROSSING). Once a
+                    // session's persisted sanityState is already 'red', a still-red turn
+                    // produces event:null (red→red, no crossing) — gating on the event alone
+                    // means eligibility to even ATTEMPT a seal never re-arms after the first
+                    // turn, so once the B1 cooldown window naturally expires there is nothing
+                    // left to re-trigger a seal attempt: a session stuck red would go from
+                    // "at most one forced seal per cooldown window" to "permanently exempt".
+                    // The handoff-capsule generation above stays event-gated on purpose (must
+                    // not regenerate every red turn) — only this eligibility signal changes.
+                    if (sanityTransition.state === 'red') {
                       sanityRedTriggerSessionId = activeRecord.id;
                     }
                   }

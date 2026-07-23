@@ -23,8 +23,12 @@
 export const DEFAULT_SANITY_SEAL_COOLDOWN_MS = 20 * 60 * 1000; // 20 minutes
 
 function parseCooldownMsEnv(value: string | undefined): number {
-  if (value === undefined) return DEFAULT_SANITY_SEAL_COOLDOWN_MS;
-  const parsed = Number(value);
+  // `Number('')` and `Number('   ')` both evaluate to `0` in JS — an unset/blank env value must
+  // fall back to the default, not silently disable the cooldown (found in review). Only an
+  // explicit, normalized "0" means "off".
+  const trimmed = value?.trim();
+  if (!trimmed) return DEFAULT_SANITY_SEAL_COOLDOWN_MS;
+  const parsed = Number(trimmed);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_SANITY_SEAL_COOLDOWN_MS;
 }
 
@@ -34,7 +38,11 @@ export function getSanitySealCooldownMsFromEnv(env: NodeJS.ProcessEnv = process.
 }
 
 function cooldownKey(catId: string, threadId: string): string {
-  return `${catId}:${threadId}`;
+  // A source-level escape (not a raw byte) — keeps the file plain text/git-diffable while still
+  // giving an unambiguous separator at runtime, regardless of what characters catId/threadId
+  // might ever contain (unlike a printable separator such as ':', which would assume neither ID
+  // ever contains one — a NUL byte cannot legitimately appear in either).
+  return `${catId}\u0000${threadId}`;
 }
 
 export interface SanitySealCooldownCheck {
