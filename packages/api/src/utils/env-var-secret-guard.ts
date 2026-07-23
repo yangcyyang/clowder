@@ -10,6 +10,9 @@
  * Name matching is suffix-based (last `_` segment), NOT substring, so benign
  * numeric config like TOKEN_EXPIRY=3600 or MAX_TOKENS=8192 passes while
  * OPENAI_API_KEY / GITHUB_TOKEN / DB_PASSWORD are flagged.
+ *
+ * B4 (2026-07-23): free-text redaction for task titles reuses the same
+ * SECRET_VALUE_BODIES — do not invent parallel secret regex in other modules.
  */
 
 /** Sensitive final segments (compared case-insensitively). */
@@ -27,17 +30,23 @@ const SECRET_NAME_SUFFIXES = new Set([
 /** Chinese secret markers — defense for pre-schema accounts with non-POSIX keys. */
 const SECRET_NAME_CN = /凭证|密码|密钥/;
 
-const SECRET_VALUE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
-  { pattern: /^sk-[A-Za-z0-9]/, label: 'OpenAI/Anthropic-style API key (sk-…)' },
-  { pattern: /^ghp_[A-Za-z0-9]/, label: 'GitHub personal access token (ghp_…)' },
-  { pattern: /^gho_[A-Za-z0-9]/, label: 'GitHub OAuth token (gho_…)' },
-  { pattern: /^github_pat_/, label: 'GitHub fine-grained PAT (github_pat_…)' },
-  { pattern: /^Bearer\s+\S/, label: 'Bearer token' },
-  { pattern: /^AKIA[0-9A-Z]{16}/, label: 'AWS access key id (AKIA…)' },
-  { pattern: /^xox[baprs]-/, label: 'Slack token (xox…)' },
-  { pattern: /^-----BEGIN/, label: 'PEM private material (-----BEGIN …)' },
-  { pattern: /hooks\.slack\.com\/services\//, label: 'Slack webhook URL with secret path' },
-  { pattern: /discord(?:app)?\.com\/api\/webhooks\//, label: 'Discord webhook URL with secret path' },
+/**
+ * Shared secret *value* bodies — same set for env-var detection (^ anchored)
+ * and free-text redaction (global). Extend this list only; no parallel regex.
+ */
+const SECRET_VALUE_BODIES: ReadonlyArray<{ body: RegExp; label: string }> = [
+  { body: /sk-[A-Za-z0-9]+/, label: 'OpenAI/Anthropic-style API key (sk-…)' },
+  { body: /ghp_[A-Za-z0-9]+/, label: 'GitHub personal access token (ghp_…)' },
+  { body: /gho_[A-Za-z0-9]+/, label: 'GitHub OAuth token (gho_…)' },
+  { body: /github_pat_[A-Za-z0-9_]+/, label: 'GitHub fine-grained PAT (github_pat_…)' },
+  { body: /Bearer\s+\S+/, label: 'Bearer token' },
+  { body: /AKIA[0-9A-Z]{16}/, label: 'AWS access key id (AKIA…)' },
+  { body: /xox[baprs]-[A-Za-z0-9-]+/, label: 'Slack token (xox…)' },
+  { body: /-----BEGIN[A-Z ]*PRIVATE KEY-----/, label: 'PEM private material (-----BEGIN …)' },
+  { body: /hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/, label: 'Slack webhook URL with secret path' },
+  { body: /discord(?:app)?\.com\/api\/webhooks\/[A-Za-z0-9/_-]+/, label: 'Discord webhook URL with secret path' },
+  // Observed in production task title leak (2026-06-28): tp-c545… mid-sentence
+  { body: /tp-[A-Za-z0-9]{12,}/, label: 'tp-… style API token' },
 ];
 
 export const ENV_VAR_SECRET_MESSAGE = 'store secrets in credentials, not envVars';
@@ -45,6 +54,9 @@ export const ENV_VAR_SECRET_MESSAGE = 'store secrets in credentials, not envVars
 /**
  * Returns a human-readable reason when the key/value pair looks like a secret,
  * or null when it looks like benign configuration.
+ *
+ * Value checks use unanchored bodies so webhook URLs still match mid-string
+ * (legacy behavior); free-text redaction reuses the same bodies with /g.
  */
 export function detectEnvVarSecret(key: string, value: string): string | null {
   const trimmedKey = key.trim();
@@ -57,8 +69,10 @@ export function detectEnvVarSecret(key: string, value: string): string | null {
     return `key name ends with secret suffix "${last}"`;
   }
   const trimmedValue = value.trim();
-  for (const { pattern, label } of SECRET_VALUE_PATTERNS) {
-    if (pattern.test(trimmedValue)) {
+  for (const { body, label } of SECRET_VALUE_BODIES) {
+    // Reset lastIndex in case a sticky/global copy was used elsewhere.
+    body.lastIndex = 0;
+    if (body.test(trimmedValue)) {
       return `value looks like ${label}`;
     }
   }
@@ -69,6 +83,29 @@ export function detectEnvVarSecret(key: string, value: string): string | null {
 export function maskEnvKey(key: string): string {
   if (key.length <= 4) return '***';
   return `${key.slice(0, 2)}***${key.slice(-2)}`;
+}
+
+/**
+ * Free-text redaction for surfaces that copy user message fragments (task
+ * titles, system notices). Reuses SECRET_VALUE_BODIES — no parallel regex.
+ */
+export function redactSecretsInText(text: string, replacement = '[REDACTED]'): string {
+  if (!text) return text;
+  let out = text;
+  for (const { body } of SECRET_VALUE_BODIES) {
+    const global = new RegExp(body.source, 'g');
+    out = out.replace(global, replacement);
+  }
+  return out;
+}
+
+/** True when free text contains a secret-shaped value (same bodies as env guard). */
+export function textContainsSecretValue(text: string): boolean {
+  if (!text) return false;
+  for (const { body } of SECRET_VALUE_BODIES) {
+    if (body.test(text)) return true;
+  }
+  return false;
 }
 
 export interface EnvVarDrop {

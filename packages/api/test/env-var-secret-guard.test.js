@@ -209,3 +209,24 @@ describe('B1 env-var-secret-guard', () => {
     }
   });
 });
+
+
+describe('B4 free-text secret redaction (task titles)', () => {
+  it('redacts mid-title sk-/tp- tokens without inventing parallel regex', async () => {
+    const { redactSecretsInText, textContainsSecretValue } = await import('../dist/utils/env-var-secret-guard.js');
+    const raw =
+      '帮我部署，key=tp-c545abcdef0123456789 以及 sk-proj-abc123def456 别泄露';
+    assert.equal(textContainsSecretValue(raw), true);
+    const redacted = redactSecretsInText(raw);
+    assert.ok(!redacted.includes('tp-c545'), 'tp- token redacted');
+    assert.ok(!redacted.includes('sk-proj'), 'sk- token redacted');
+    assert.ok(redacted.includes('[REDACTED]'));
+    assert.ok(redacted.includes('帮我部署'));
+  });
+
+  it('leaves benign task titles untouched', async () => {
+    const { redactSecretsInText } = await import('../dist/utils/env-var-secret-guard.js');
+    const title = '把大厅噪音清理一下并重启 api';
+    assert.equal(redactSecretsInText(title), title);
+  });
+});

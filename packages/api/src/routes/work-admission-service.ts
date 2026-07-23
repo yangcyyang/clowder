@@ -4,6 +4,7 @@ import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
+import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
 import type { WorkAdmissionDecision } from './work-admission.js';
 
 export interface ExecutionRouteV1 {
@@ -53,7 +54,8 @@ function taskTitleForSource(sourceMessage: StoredMessage, classifiedTitle: strin
   // unrevealed whisper body therefore cannot be reused as the task title even
   // though the source copy itself is protected by canViewMessage().
   if (sourceMessage.visibility === 'whisper' && !sourceMessage.revealedAt) return '私密工作指令';
-  return classifiedTitle;
+  // Defense-in-depth: classified path already redacts; re-apply for resume_pending_plan titles.
+  return redactSecretsInText(classifiedTitle);
 }
 
 export async function admitWorkMessage(input: {

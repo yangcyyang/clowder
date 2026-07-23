@@ -2,6 +2,9 @@
  * extractDecisionSignals — F148 VG-3
  * Pure function: extracts decision/question/artifact signals from transcript text + ThreadSummary.
  * Zero LLM cost — regex patterns reuse AutoSummarizer's proven set.
+ *
+ * B5 (2026-07-23): sentence split includes Chinese commas; drop punctuation-leading
+ * fragments; remove wide "阈值" match that polluted openQuestions.
  */
 
 const MAX_DECISIONS = 8;
@@ -10,8 +13,13 @@ const MAX_ARTIFACTS = 8;
 const MAX_SENTENCE_LEN = 100;
 
 const DECISION_PATTERNS = [/决定|确定|选择|采用|使用|拍板|定了|实现了|完成了|修复了|同意/];
-const QUESTION_PATTERNS = [/需要|待定|TODO|还没|未来|后续|是否|待确认|待实验|阈值/];
+// Intentionally NO bare "阈值" — it matched config prose and polluted openQuestions.
+const QUESTION_PATTERNS = [/需要|待定|TODO|还没|未来|后续|是否|待确认|待实验|\?|？/];
 const ARTIFACT_PATTERN = /\b(ADR-\d+|F\d{2,3})\b/g;
+
+/** Split on CN/EN sentence ends + CN commas；filter empty / punctuation-leading debris. */
+const SENTENCE_SPLIT_RE = /[。！？!?\n，、,;；]+/;
+const LEADING_PUNCT_RE = /^[\s"'“”‘’（）()[\]【】「」『』…·\-—_]+/;
 
 export interface DecisionSignals {
   decisions: string[];
@@ -42,12 +50,19 @@ function dedup(items: string[]): string[] {
   return result;
 }
 
+function splitSentences(text: string): string[] {
+  return text
+    .split(SENTENCE_SPLIT_RE)
+    .map((s) => s.replace(LEADING_PUNCT_RE, '').trim())
+    .filter((s) => s.length > 5 && !/^[\p{P}\p{S}]+$/u.test(s));
+}
+
 function extractFromText(text: string, patterns: RegExp[], max: number): string[] {
   if (!text) return [];
-  const sentences = text.split(/[。！？\n]/).filter((s) => s.trim().length > 5);
+  const sentences = splitSentences(text);
   const matches: string[] = [];
   for (const s of sentences) {
-    const trimmed = s.trim().slice(0, MAX_SENTENCE_LEN);
+    const trimmed = s.slice(0, MAX_SENTENCE_LEN);
     if (patterns.some((p) => p.test(trimmed)) && matches.length < max) {
       matches.push(trimmed);
     }
@@ -63,7 +78,7 @@ export function extractDecisionSignals(input: DecisionSignalsInput): DecisionSig
   // 2. Artifact references from transcript
   const artifactMatches = new Set<string>();
   for (const match of input.transcriptText.matchAll(ARTIFACT_PATTERN)) {
-    artifactMatches.add(match[1]);
+    artifactMatches.add(match[1]!);
   }
 
   // 3. Combine with ThreadSummary (summary first — higher quality)

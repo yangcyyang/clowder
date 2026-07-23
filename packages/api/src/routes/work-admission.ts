@@ -1,4 +1,5 @@
 import type { CatId } from '@cat-cafe/shared';
+import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
 
 export interface PendingPlanContext {
   messageId: string;
@@ -63,7 +64,10 @@ function isLongStructuredDocument(content: string): boolean {
 }
 
 function normalizeTaskTitle(content: string): string {
-  const normalized = content
+  // B4: redact secret-shaped values before truncating so a mid-title API key
+  // cannot survive as the first 80 chars of the task title (2026-06-28 leak).
+  const redacted = redactSecretsInText(content);
+  const normalized = redacted
     .replace(/^\s*(?:@[^\s，,：:]+\s+)+/u, '')
     .replace(/^\s*(?:请|帮我|你来)\s*/u, '')
     .replace(/\s+/g, ' ')

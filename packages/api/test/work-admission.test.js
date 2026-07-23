@@ -109,3 +109,14 @@ describe('F194 strict work admission classifier', () => {
     assert.equal(classifyWorkAdmission({ content: '把大厅噪音清理一下', targetCatIds: [] }).kind, 'create_from_message');
   });
 });
+
+
+test('B4: task title redacts embedded API keys before 80-char truncate', () => {
+  const content =
+    '帮我部署生产环境 key=tp-c545abcdef0123456789sk-proj-shouldnotleakXXXX 继续说明很多很多字来触发截断';
+  const decision = classifyWorkAdmission({ content });
+  assert.equal(decision.kind, 'create_from_message');
+  assert.ok(!decision.taskTitle.includes('tp-c545'), decision.taskTitle);
+  assert.ok(!decision.taskTitle.includes('sk-proj'), decision.taskTitle);
+  assert.ok(decision.taskTitle.includes('[REDACTED]') || decision.taskTitle.includes('部署'), decision.taskTitle);
+});

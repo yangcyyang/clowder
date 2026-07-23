@@ -15,11 +15,31 @@ describe('F148 VG-3: extractDecisionSignals', () => {
 
   test('extracts open questions from transcript text via regex', () => {
     const signals = extractDecisionSignals({
-      transcriptText: 'burst gap阈值需要实验确定。后续是否要加prompt cache？',
+      // B5: no bare "阈值" match; rely on 是否/？ and CN comma split
+      transcriptText: 'burst gap 参数需要实验确定，后续是否要加prompt cache？还有待确认的回滚方案。',
       summaryConclusions: [],
       summaryOpenQuestions: [],
     });
     assert.ok(signals.openQuestions.length >= 1, `expected >=1 questions, got ${signals.openQuestions.length}`);
+  });
+
+  test('B5: does not treat bare 阈值 prose as open question', () => {
+    const signals = extractDecisionSignals({
+      transcriptText: '把 burst gap 阈值调到 0.7。配置已写入 env。',
+      summaryConclusions: [],
+      summaryOpenQuestions: [],
+    });
+    assert.equal(signals.openQuestions.length, 0, 'bare 阈值 must not pollute openQuestions');
+  });
+
+  test('B5: splits on Chinese commas and drops punctuation-leading debris', () => {
+    const signals = extractDecisionSignals({
+      transcriptText: '我们决定用方案B，、、选择 redis 6398。',
+      summaryConclusions: [],
+      summaryOpenQuestions: [],
+    });
+    assert.ok(signals.decisions.some((d) => d.includes('方案B')));
+    assert.ok(signals.decisions.every((d) => !/^[,，、]/.test(d)), 'no punct-leading fragments');
   });
 
   test('extracts from ThreadSummary conclusions and openQuestions', () => {
