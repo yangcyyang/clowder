@@ -23,6 +23,7 @@ export type ParsedMultipart =
       visibility?: string;
       whisperTo?: string[];
       deliveryMode?: 'immediate' | 'queue' | 'force';
+      asTask?: boolean;
     }
   | { error: string };
 
@@ -120,6 +121,7 @@ export async function parseMultipart(
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
     ...(parseResult.data.deliveryMode ? { deliveryMode: parseResult.data.deliveryMode } : {}),
+    ...(parseResult.data.asTask !== undefined ? { asTask: parseResult.data.asTask } : {}),
     contentBlocks: blocks,
   };
 }

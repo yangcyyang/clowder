@@ -71,7 +71,7 @@ import {
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { isThreadFirstRoutingEnabled, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import type { AgentMessage } from '../domains/cats/services/types.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
@@ -121,9 +121,10 @@ import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
+import { ensureMessageAnchoredThread } from './task-discussion-thread.js';
 import { isThreadAddressRoutingEnabled, resolveThreadAddress } from './thread-address.js';
 import { deriveThreadReplySummary, type ThreadReplySummary } from './thread-reply-summary.js';
-import { classifyWorkAdmission } from './work-admission.js';
+import { classifyWorkAdmission, forceCreateFromMessage } from './work-admission.js';
 import { admitWorkMessage, type ExecutionRouteV1, isAutoTaskThreadRoutingEnabled } from './work-admission-service.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
@@ -405,6 +406,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // F39: Delivery mode
     let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
 
+    // F194 §3 step 3: "As Task" explicit declaration (Raft's per-message checkbox).
+    let asTask = false;
+
     if (request.isMultipart()) {
       // Parse multipart: text fields + image files
       const parsed = await parseMultipart(request, uploadDir);
@@ -425,6 +429,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (parsed.deliveryMode) {
         deliveryMode = parsed.deliveryMode;
       }
+      if (parsed.asTask) {
+        asTask = true;
+      }
     } else {
       // JSON mode (backwards compatible)
       const parseResult = sendMessageSchema.safeParse(request.body);
@@ -434,6 +441,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
       ({ content, userId: legacyUserId, threadId, replyTo, idempotencyKey } = parseResult.data);
       deliveryMode = parseResult.data.deliveryMode;
+      asTask = parseResult.data.asTask === true;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -748,17 +756,112 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       );
     }
 
+    // F194 §3 step 2 (thread-first routing): in a thread that opted into
+    // routingPolicy.mode='thread-first', every @mention message — including
+    // plain questions classifyWorkAdmission would never admit — routes its
+    // reply to the message's own anchored branch thread. The main thread
+    // keeps only the source message; thread_reply_count_updated (batch 1)
+    // is what makes the reply count visible there.
+    //
+    // Item 2 "judge retirement": classifyWorkAdmission (or the forced "As
+    // Task" declaration) no longer decides *where the reply goes* here — it
+    // only decides "create a task card as a bonus?". A false negative now
+    // costs one missing card, never a misrouted reply.
+    if (!executionRoute && hasMentions && !validatedReplyTo && opts.threadStore) {
+      const routingThread = resolvedThreadId === 'default' ? null : await opts.threadStore.get(resolvedThreadId);
+      if (isThreadFirstRoutingEnabled(routingThread)) {
+        rootUserMessage = await opts.messageStore.append({
+          userId,
+          catId: null,
+          content,
+          mentions: targetCats,
+          timestamp: Date.now(),
+          threadId: resolvedThreadId,
+          idempotencyKey: resolvedIdempotencyKey,
+          ...(contentBlocks ? { contentBlocks } : {}),
+          ...(whisperVisibility && whisperRecipients
+            ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+            : {}),
+        });
+        void deliverWebUserMessageToConnector(resolvedThreadId, content, rootUserMessage.id, opts, log, {
+          visibility: whisperVisibility,
+        });
+
+        const anchor = await ensureMessageAnchoredThread(
+          rootUserMessage,
+          { threadStore: opts.threadStore, messageStore: opts.messageStore },
+          { userId },
+        );
+        executionThreadId = anchor.threadId;
+        executionMessageId = anchor.anchorMessage.id;
+        executionRoute = {
+          version: 1,
+          sourceThreadId: resolvedThreadId,
+          rootMessageId: rootUserMessage.id,
+          replyTargetThreadId: anchor.threadId,
+          executionMessageId: anchor.anchorMessage.id,
+          mode: 'message_anchor',
+        };
+        if (anchor.created) {
+          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'thread_branched', {
+            sourceThreadId: resolvedThreadId,
+            newThreadId: anchor.threadId,
+            fromMessageId: rootUserMessage.id,
+          });
+        }
+
+        // Decorative task-card judgment only — never gates routing above.
+        if (opts.taskStore) {
+          const cardDecision = asTask
+            ? forceCreateFromMessage({ content, targetCatIds: targetCats })
+            : classifyWorkAdmission({ content, targetCatIds: targetCats });
+          if (cardDecision.kind !== 'reply_only') {
+            try {
+              const admitted = await admitWorkMessage({
+                decision: cardDecision,
+                sourceMessage: rootUserMessage,
+                userId,
+                deps: {
+                  taskStore: opts.taskStore,
+                  threadStore: opts.threadStore,
+                  messageStore: opts.messageStore,
+                  socketManager: opts.socketManager,
+                },
+              });
+              // Routing is already settled above — ensureTaskDiscussionThread
+              // reuses the same anchor branch (task-discussion-thread.ts),
+              // so only the task bookkeeping fields are worth carrying forward.
+              executionRoute = {
+                ...executionRoute,
+                ...(admitted.route.taskId ? { taskId: admitted.route.taskId } : {}),
+                ...(admitted.route.ownerCatId ? { ownerCatId: admitted.route.ownerCatId } : {}),
+              };
+            } catch (err) {
+              log.error(
+                { err, threadId: resolvedThreadId, messageId: rootUserMessage.id },
+                '[F194 thread-first] task card creation failed (non-fatal — reply routing unaffected)',
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // F194 §3 step 3: "As Task" forces admission regardless of the
+    // classifier's verdict — one of Raft's three explicit-declaration
+    // entrances (docs/research/clowder-raft-thread-task-design.md §5.3).
+    // Non-thread-first channels otherwise keep the existing canary-gated
+    // classifier behavior byte-for-byte.
     const autoTaskDecision =
-      !executionRoute &&
-      isAutoTaskThreadRoutingEnabled(resolvedThreadId) &&
-      opts.taskStore &&
-      opts.threadStore &&
-      opts.invocationRecordStore &&
-      !validatedReplyTo
-        ? classifyWorkAdmission({
-            content,
-            targetCatIds: hasMentions ? targetCats : [],
-          })
+      !executionRoute && opts.taskStore && opts.threadStore && opts.invocationRecordStore && !validatedReplyTo
+        ? asTask
+          ? forceCreateFromMessage({ content, targetCatIds: hasMentions ? targetCats : [] })
+          : isAutoTaskThreadRoutingEnabled(resolvedThreadId)
+            ? classifyWorkAdmission({
+                content,
+                targetCatIds: hasMentions ? targetCats : [],
+              })
+            : { kind: 'reply_only' as const, reason: 'rollout_or_dependencies_unavailable' }
         : { kind: 'reply_only' as const, reason: 'rollout_or_dependencies_unavailable' };
 
     if (autoTaskDecision.kind !== 'reply_only' && opts.taskStore && opts.threadStore) {
@@ -2049,6 +2152,58 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       rootMessageId: resolution.rootMessageId,
       threadId: resolution.replyTargetThreadId,
     };
+  });
+
+  // POST /api/messages/:id/convert-to-task — Raft 三显式入口之一（右键"转为任务"，
+  // 批次2 集成：契约与前端 MessageActions.handleConvertToTask 对齐 {userId,title?,why?}
+  // → {task, created}）。仅顶层消息可转：消息所在 thread 带 relation（即本身是分支）时拒绝。
+  app.post('/api/messages/:id/convert-to-task', async (request, reply) => {
+    const { id: messageId } = request.params as { id: string };
+    const body = (request.body ?? {}) as { userId?: string; title?: string; why?: string };
+    if (!body.userId || typeof body.userId !== 'string') {
+      reply.status(400);
+      return { error: 'userId is required' };
+    }
+    if (!opts.taskStore || !opts.threadStore) {
+      reply.status(503);
+      return { error: 'Task system unavailable' };
+    }
+    const sourceMessage = await opts.messageStore.getById(messageId);
+    if (!sourceMessage) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    const thread = await opts.threadStore.get(sourceMessage.threadId);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+    if (thread.relation) {
+      reply.status(409);
+      return { error: 'Only top-level messages can be converted to a task', code: 'NOT_TOP_LEVEL' };
+    }
+    const decision = forceCreateFromMessage({
+      content: body.title?.trim() || sourceMessage.content,
+      targetCatIds: sourceMessage.mentions ? [...sourceMessage.mentions] : [],
+    });
+    try {
+      const admitted = await admitWorkMessage({
+        decision,
+        sourceMessage,
+        userId: body.userId,
+        deps: {
+          taskStore: opts.taskStore,
+          threadStore: opts.threadStore,
+          messageStore: opts.messageStore,
+          socketManager: opts.socketManager,
+        },
+      });
+      return { task: admitted.task, created: admitted.created };
+    } catch (err) {
+      log.error({ err, messageId }, '[convert-to-task] admission failed');
+      reply.status(500);
+      return { error: 'Failed to convert message to task' };
+    }
   });
 
   // GET /api/messages/search - 全文搜索消息内容

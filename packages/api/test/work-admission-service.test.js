@@ -240,4 +240,88 @@ describe('F194 work admission service', () => {
       assert.equal(notices.length, 1, 'concurrent duplicate admission must not double-post the notice');
     });
   });
+
+  // ── F194 item 4 (batch 2-A): the owned-task counterpart — batch 1 only
+  // covered the unowned case, leaving an owned auto-admitted task with zero
+  // main-thread trace of its own creation (design doc §2 root cause 4). ──
+  describe('owned task creation notice (F194 item 4)', () => {
+    test('create_from_message WITH an owner cat posts a brief "已创建任务" one-liner to the main thread', async () => {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const events = [];
+      const socketManager = { broadcastToRoom: (...args) => events.push(args) };
+      const parent = await threadStore.create('alice', '大厅');
+      const sourceMessage = await messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content: '@opus 修复登录超时',
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        threadId: parent.id,
+      });
+
+      await admitWorkMessage({
+        decision: {
+          kind: 'create_from_message',
+          taskTitle: '修复登录超时',
+          ownerCatId: 'opus',
+          reason: 'line_leading_mention_action',
+        },
+        sourceMessage,
+        userId: 'alice',
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      });
+
+      const parentMessages = await messageStore.getByThread(parent.id, 20);
+      const notice = parentMessages.find((m) => m.extra?.systemKind === 'task_created');
+      assert.ok(notice, 'an owned auto-admitted task must also leave a main-thread breadcrumb');
+      assert.equal(notice.userId, 'system');
+      assert.equal(notice.catId, null);
+      assert.match(notice.content, /已创建任务/);
+      assert.match(notice.content, /#1/);
+      assert.match(notice.content, /opus/);
+
+      const connectorEvents = events.filter(([, name]) => name === 'connector_message');
+      assert.equal(connectorEvents.length, 1);
+      const [room, , payload] = connectorEvents[0];
+      assert.equal(room, `thread:${parent.id}`);
+      assert.equal(payload.message.content, notice.content);
+    });
+
+    test('concurrent admission WITH an owner posts exactly one owned-creation notice', async () => {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const events = [];
+      const socketManager = { broadcastToRoom: (...args) => events.push(args) };
+      const parent = await threadStore.create('alice', '大厅');
+      const sourceMessage = await messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content: '@opus 修复登录超时',
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        threadId: parent.id,
+      });
+
+      const input = {
+        decision: {
+          kind: 'create_from_message',
+          taskTitle: '修复登录超时',
+          ownerCatId: 'opus',
+          reason: 'line_leading_mention_action',
+        },
+        sourceMessage,
+        userId: 'alice',
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      };
+
+      await Promise.all([admitWorkMessage(input), admitWorkMessage(input)]);
+
+      const parentMessages = await messageStore.getByThread(parent.id, 20);
+      const notices = parentMessages.filter((m) => m.extra?.systemKind === 'task_created');
+      assert.equal(notices.length, 1, 'concurrent duplicate admission must not double-post the owned notice either');
+    });
+  });
 });

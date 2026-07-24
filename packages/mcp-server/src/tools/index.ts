@@ -14,6 +14,7 @@ export {
 } from './callback-memory-tools.js';
 export {
   ackMentionsInputSchema,
+  agentKeyCatIdSchema,
   callbackTools,
   checkInboxInputSchema,
   checkPermissionStatusInputSchema,
@@ -140,3 +141,20 @@ export {
   readSkillInputSchema,
   skillTools,
 } from './skill-tools.js';
+export {
+  handleReplyInThread,
+  handleSearchMessages,
+  handleTaskClaim,
+  handleTaskCreate,
+  handleTaskList,
+  handleTaskUnclaim,
+  handleTaskUpdate,
+  replyInThreadInputSchema,
+  searchMessagesInputSchema,
+  taskClaimInputSchema,
+  taskCreateInputSchema,
+  taskLifecycleTools,
+  taskListInputSchema,
+  taskUnclaimInputSchema,
+  taskUpdateInputSchema,
+} from './task-lifecycle-tools.js';

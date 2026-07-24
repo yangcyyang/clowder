@@ -94,6 +94,13 @@ export const PROMPT_SECTION_REGISTRY: readonly PromptSectionMeta[] = [
     description: '项目事实源四件套 + shouldInjectProjectContext 条件产物 → D1 下放 meta',
   },
   {
+    id: 'user-profile',
+    cacheClass: 'volatile',
+    slot: 'meta',
+    description:
+      '批次 2-D 共享铲屎官画像 (.cat-cafe/memory/USER.md，偏好/硬约束/账号级事实)，全猫可见，仅 v2 meta 槽注入',
+  },
+  {
     id: 'agent-status-bar',
     cacheClass: 'volatile',
     slot: 'meta',

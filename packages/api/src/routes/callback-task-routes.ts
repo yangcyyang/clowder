@@ -10,17 +10,21 @@ import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshn
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { isSubjectOwnershipConflictError, type ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { isLegalTaskStatusTransition } from '../domains/cats/services/tasks/task-status-transitions.js';
 import {
   resolveTaskSurfaceBinding,
   taskIsAccessibleFromExecutionSurface,
 } from '../domains/cats/services/tasks/task-surface-resolver.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
+import { requireCallbackAuth, requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
-import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
+import { appendTaskLifecycleNotice, TASK_STATUS_LABEL_ZH, taskLifecycleLabel } from './task-event-notices.js';
+import { deriveCallbackActor, resolvePrincipalThread, resolveScopedThreadId } from './callback-scope-helpers.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
+import { admitWorkMessage } from './work-admission-service.js';
 
 const updateTaskSchema = z.object({
   taskId: z.string().min(1),
@@ -359,5 +363,472 @@ export function registerCallbackTaskRoutes(
     tasks.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id));
 
     return { tasks };
+  });
+
+  // ============================================================================
+  // 批次 2-C: task-* dual-auth endpoints (Raft CLI parity, docs/research/
+  // clowder-raft-thread-task-design.md §5.1/§5B.5). These mirror the routes
+  // above but use requireCallbackPrincipal so agent-key (non-Claude, e.g.
+  // Antigravity) callers work too — the legacy create-task/claim-task/
+  // update-task/list-tasks routes above stay invocation-only and untouched.
+  // ============================================================================
+
+  const taskClaimSchema = z
+    .object({
+      taskId: z.string().min(1).optional(),
+      messageId: z.string().min(1).optional(),
+      why: z.string().max(1000).optional(),
+    })
+    .refine((data) => Boolean(data.taskId) !== Boolean(data.messageId), {
+      message: 'Exactly one of taskId or messageId is required',
+    });
+
+  const taskCreateSchema = z.object({
+    title: z.string().min(1).max(200),
+    why: z.string().max(1000).optional().default(''),
+    ownerCatId: z.string().min(1).optional(),
+    subjectKey: z.string().min(1).max(300).optional(),
+    parentTaskId: z.string().min(1).optional(),
+    threadId: z.string().min(1).optional(),
+  });
+
+  const taskUpdateSchema = z
+    .object({
+      taskId: z.string().min(1),
+      status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
+      failureClass: z
+        .enum(['agent_error', 'build_failed', 'test_failed', 'timeout', 'budget_exhausted', 'infra_error', 'manual_fail'])
+        .optional(),
+      failureReason: z.string().max(2000).optional(),
+      why: z.string().max(1000).optional(),
+    })
+    .refine((data) => data.status || data.failureClass || data.failureReason || data.why, {
+      message: 'At least one of status/failureClass/failureReason/why must be provided',
+    });
+
+  const taskUnclaimSchema = z.object({
+    taskId: z.string().min(1),
+    why: z.string().max(1000).optional(),
+  });
+
+  const taskListQuerySchema = z.object({
+    threadId: z.string().min(1).optional(),
+    status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
+    kind: z.enum(['work', 'pr_tracking']).optional(),
+  });
+
+  const resolveMessageThreadQuerySchema = z.object({
+    messageId: z.string().min(1),
+  });
+
+  /** Trimmed, secret-redacted, length-capped title derived from a raw message body. */
+  function titleFromMessageContent(content: string): string {
+    const redacted = redactSecretsInText(content).replace(/\s+/g, ' ').trim();
+    if (!redacted) return '待认领任务';
+    return redacted.length > 80 ? `${redacted.slice(0, 79)}…` : redacted;
+  }
+
+  // POST /api/callbacks/task-claim — claim by taskId, or convert-and-claim by messageId.
+  app.post('/api/callbacks/task-claim', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = taskClaimSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    const catId = createCatId(principal.catId);
+
+    if (parsed.data.taskId) {
+      const taskId = parsed.data.taskId;
+      const existing = await taskStore.get(taskId);
+      if (!existing) {
+        reply.status(404);
+        return { error: 'Task not found' };
+      }
+      const threadResult = await resolvePrincipalThread(principal, existing.threadId, { threadStore });
+      if (!threadResult.ok) {
+        reply.status(threadResult.statusCode);
+        return { error: threadResult.error };
+      }
+      if (existing.ownerCatId && existing.ownerCatId !== catId) {
+        reply.status(409);
+        return { error: 'Task is already claimed by another cat', ownerCatId: existing.ownerCatId };
+      }
+      const claim = await taskStore.claimIfUnowned(taskId, catId, parsed.data.why ? { why: parsed.data.why } : {});
+      if (claim.outcome === 'not_found') {
+        reply.status(404);
+        return { error: 'Task not found' };
+      }
+      if (claim.outcome === 'already_claimed') {
+        reply.status(409);
+        return { error: 'Task is already claimed by another cat', ownerCatId: claim.task.ownerCatId };
+      }
+      socketManager.broadcastToRoom(`thread:${claim.task.threadId}`, 'task_updated', claim.task);
+      return { status: 'ok', task: claim.task };
+    }
+
+    // message-id form: convert the message into a task (if needed) and claim it.
+    // Mirrors `raft task claim --message-id X` (design doc §5.1). ensureMessageAnchoredThread
+    // (2-A) is not ready yet, so this reuses admitWorkMessage/ensureTaskDiscussionThread
+    // directly — no new task business logic invented here.
+    if (!messageStore || !threadStore) {
+      reply.status(501);
+      return { error: 'Message/thread store unavailable — cannot claim by messageId' };
+    }
+    const messageId = parsed.data.messageId as string;
+    const sourceMessage = await messageStore.getById(messageId);
+    if (!sourceMessage) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    const threadResult = await resolvePrincipalThread(principal, sourceMessage.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+
+    const subjectKey = `work-intake:${sourceMessage.threadId}:${sourceMessage.id}`;
+    const existingTask = await taskStore.getBySubject(subjectKey);
+    if (existingTask) {
+      if (existingTask.ownerCatId && existingTask.ownerCatId !== catId) {
+        reply.status(409);
+        return {
+          error: 'Task for this message is already claimed by another cat',
+          ownerCatId: existingTask.ownerCatId,
+          taskId: existingTask.id,
+        };
+      }
+      const claim = await taskStore.claimIfUnowned(
+        existingTask.id,
+        catId,
+        parsed.data.why ? { why: parsed.data.why } : {},
+      );
+      if (claim.outcome === 'not_found') {
+        reply.status(404);
+        return { error: 'Task not found' };
+      }
+      if (claim.outcome === 'already_claimed') {
+        reply.status(409);
+        return { error: 'Task is already claimed by another cat', ownerCatId: claim.task.ownerCatId };
+      }
+      const discussion = await ensureTaskDiscussionThread(
+        claim.task,
+        { taskStore, threadStore, messageStore, socketManager },
+        { userId: principal.userId, broadcastUpdate: false },
+      );
+      socketManager.broadcastToRoom(`thread:${discussion.task.threadId}`, 'task_updated', discussion.task);
+      return { status: 'ok', task: discussion.task, created: false };
+    }
+
+    try {
+      const admitted = await admitWorkMessage({
+        decision: {
+          kind: 'create_from_message',
+          taskTitle: titleFromMessageContent(sourceMessage.content),
+          ownerCatId: catId,
+          reason: 'explicit_action',
+        },
+        sourceMessage,
+        userId: principal.userId,
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      });
+      reply.status(201);
+      return { status: 'ok', task: admitted.task, created: admitted.created };
+    } catch (err) {
+      if (isSubjectOwnershipConflictError(err)) {
+        reply.status(409);
+        return { error: 'Message belongs to another user' };
+      }
+      throw err;
+    }
+  });
+
+  // POST /api/callbacks/task-create — subjectKey dedup: if a task already exists for the
+  // subject, return it (status:'existing_task') instead of creating a duplicate — the
+  // caller should task-claim it instead (design doc §5.2 rule 3: "已有消息就 claim，别新建").
+  app.post('/api/callbacks/task-create', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = taskCreateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const threadResult = await resolvePrincipalThread(principal, parsed.data.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+    const threadId = threadResult.threadId;
+
+    let resolvedOwnerCatId: CatId | null = null;
+    if (parsed.data.ownerCatId) {
+      const resolved = resolveCatTarget(parsed.data.ownerCatId);
+      if ('error' in resolved) {
+        reply.status(400);
+        return resolved.error;
+      }
+      resolvedOwnerCatId = createCatId(resolved.ok);
+    }
+
+    if (parsed.data.parentTaskId) {
+      const parent = await taskStore.get(parsed.data.parentTaskId);
+      if (!parent) {
+        reply.status(400);
+        return { error: 'parentTaskId does not exist' };
+      }
+    }
+
+    if (parsed.data.subjectKey) {
+      const existing = await taskStore.getBySubject(parsed.data.subjectKey);
+      if (existing) {
+        return {
+          status: 'existing_task',
+          code: 'TASK_ALREADY_EXISTS',
+          task: existing,
+          hint: `A task already exists for this subject (taskId=${existing.id}) — use task_claim instead of creating a duplicate.`,
+        };
+      }
+    }
+
+    const createInput = {
+      threadId,
+      title: parsed.data.title,
+      why: parsed.data.why ?? '',
+      createdBy: createCatId(principal.catId),
+      kind: 'work' as const,
+      subjectKey: parsed.data.subjectKey ?? null,
+      userId: principal.userId,
+      ...(resolvedOwnerCatId ? { ownerCatId: resolvedOwnerCatId, status: 'doing' as const } : {}),
+      ...(parsed.data.parentTaskId ? { parentTaskId: parsed.data.parentTaskId } : {}),
+    };
+
+    let created;
+    try {
+      created = parsed.data.subjectKey ? await taskStore.upsertBySubject(createInput) : await taskStore.create(createInput);
+    } catch (err) {
+      if (isSubjectOwnershipConflictError(err)) {
+        reply.status(409);
+        return { error: 'Subject is already owned by another user' };
+      }
+      throw err;
+    }
+
+    const task =
+      threadStore && messageStore
+        ? (
+            await ensureTaskDiscussionThread(
+              created,
+              { taskStore, threadStore, messageStore, socketManager },
+              { userId: principal.userId, broadcastUpdate: false },
+            )
+          ).task
+        : created;
+
+    socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
+    reply.status(201);
+    return { status: 'ok', task };
+  });
+
+  // POST /api/callbacks/task-update — status transitions validated (design doc §5.2 rule 6).
+  app.post('/api/callbacks/task-update', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = taskUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    const { taskId, status, failureClass, failureReason, why } = parsed.data;
+
+    const existing = await taskStore.get(taskId);
+    if (!existing) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    const threadResult = await resolvePrincipalThread(principal, existing.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+    if (existing.ownerCatId && existing.ownerCatId !== principal.catId) {
+      reply.status(403);
+      return { error: 'Task is owned by another cat' };
+    }
+
+    if (status && status !== existing.status) {
+      const legality = isLegalTaskStatusTransition(existing.status, status);
+      if (!legality.ok) {
+        reply.status(409);
+        return { error: legality.reason, code: 'ILLEGAL_STATUS_TRANSITION', from: existing.status, to: status };
+      }
+    }
+
+    const updateData: Record<string, unknown> = { eventCatId: principal.catId };
+    if (status) updateData.status = status;
+    if (failureClass) updateData.failureClass = failureClass;
+    if (failureReason) updateData.failureReason = failureReason;
+    if (why) updateData.why = why;
+
+    const updated = await taskStore.update(taskId, updateData);
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to update task' };
+    }
+
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    emitTaskAttention(existing.status, updated);
+    // 批次2 集成：状态流转在主 thread 发系统通知（appendTaskLifecycleNotice 自带
+    // 同任务同状态 5 分钟去重；messageStore 未注入时静默跳过——通知是尽力而为）。
+    if (messageStore && status && status !== existing.status) {
+      const label = await taskLifecycleLabel(taskStore, updated).catch(() => `#${updated.id}`);
+      void appendTaskLifecycleNotice({
+        task: updated,
+        content: `任务 ${label} 状态变更：${TASK_STATUS_LABEL_ZH[existing.status]} → ${TASK_STATUS_LABEL_ZH[status]}（${principal.catId}）`,
+        systemKind: 'task_status_changed',
+        eventType: 'task_status_changed',
+        tone: status === 'done' ? 'success' : 'info',
+        dedupeKey: status,
+        deps: { messageStore, socketManager },
+      }).catch(() => {});
+    }
+    return { status: 'ok', task: updated };
+  });
+
+  // POST /api/callbacks/task-unclaim
+  app.post('/api/callbacks/task-unclaim', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = taskUnclaimSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    const { taskId, why } = parsed.data;
+
+    const existing = await taskStore.get(taskId);
+    if (!existing) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    const threadResult = await resolvePrincipalThread(principal, existing.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+    if (!existing.ownerCatId) {
+      reply.status(409);
+      return { error: 'Task has no owner to unclaim' };
+    }
+    if (existing.ownerCatId !== principal.catId) {
+      reply.status(403);
+      return { error: 'Task is claimed by another cat', ownerCatId: existing.ownerCatId };
+    }
+    if (existing.status === 'done') {
+      reply.status(409);
+      return { error: 'Cannot unclaim a completed task' };
+    }
+
+    const updated = await taskStore.update(taskId, {
+      ownerCatId: null,
+      status: 'todo',
+      eventCatId: principal.catId,
+      ...(why ? { why } : {}),
+    });
+    if (!updated) {
+      reply.status(500);
+      return { error: 'Failed to unclaim task' };
+    }
+
+    socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    return { status: 'ok', task: updated };
+  });
+
+  // GET /api/callbacks/task-list?threadId=&status=&kind=
+  app.get('/api/callbacks/task-list', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = taskListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request query', details: parsed.error.issues };
+    }
+    const { threadId: requestedThreadId, status, kind } = parsed.data;
+
+    let scopedThreadIds: string[];
+    if (requestedThreadId) {
+      const threadResult = await resolvePrincipalThread(principal, requestedThreadId, { threadStore });
+      if (!threadResult.ok) {
+        reply.status(threadResult.statusCode);
+        return { error: threadResult.error };
+      }
+      scopedThreadIds = [threadResult.threadId];
+    } else if (threadStore) {
+      const userThreads = await threadStore.list(principal.userId);
+      scopedThreadIds = userThreads.map((item) => item.id);
+    } else {
+      reply.status(400);
+      return { error: 'threadId is required (no thread store configured for cross-thread listing)' };
+    }
+
+    const perThreadTasks = await Promise.all(scopedThreadIds.map((id) => taskStore.listByThread(id)));
+    let tasks = [...new Map(perThreadTasks.flat().map((task) => [task.id, task])).values()];
+    if (status) tasks = tasks.filter((item) => item.status === status);
+    if (kind) tasks = tasks.filter((item) => item.kind === kind);
+    tasks.sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+
+    return { tasks };
+  });
+
+  // GET /api/callbacks/resolve-message-thread?messageId= — reverse lookup: which task
+  // (and its taskThreadId) is anchored to this message. Backs cat_cafe_reply_in_thread.
+  // Only the "task.taskThreadId already exists" scenario is supported (design doc §5.1:
+  // ensureMessageAnchoredThread is 2-A's not-yet-landed work) — anything else is a clear
+  // 404 telling the caller to use post_message/cross_post_message instead.
+  app.get('/api/callbacks/resolve-message-thread', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = resolveMessageThreadQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request query', details: parsed.error.issues };
+    }
+    if (!messageStore) {
+      reply.status(501);
+      return { error: 'Message store unavailable' };
+    }
+
+    const message = await messageStore.getById(parsed.data.messageId);
+    if (!message) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    const threadResult = await resolvePrincipalThread(principal, message.threadId, { threadStore });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+
+    const candidates = await taskStore.listByThread(message.threadId);
+    const task = candidates.find((item) => item.sourceMessageId === message.id && item.taskThreadId);
+    if (!task?.taskThreadId) {
+      reply.status(404);
+      return {
+        error:
+          'No thread is anchored to this message. Only messages already converted into a task with an existing ' +
+          'discussion thread can be replied-in-thread. Use task_claim with messageId to convert it first, or use ' +
+          'post_message/cross_post_message to reply in the current thread.',
+        code: 'NO_ANCHORED_THREAD',
+      };
+    }
+    return { threadId: task.taskThreadId, taskId: task.id };
   });
 }

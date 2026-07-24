@@ -377,7 +377,7 @@ const SESSION_SANITY_DIGEST = `## 会话理智线（自检）
 Context Window 是投递口尺寸，理智线才是还能稳定干活的边界：窗口没满 ≠ 还能干，到线就换班，不当预警区间。
 自检：🟢 约束/事实/格式稳定→继续；🟡 开始漏项/被纠正/历史被摘要压缩→停止堆料，写轻交接包准备换班；🔴 同一错误重复/关键约束丢失→立即 critical seal + 新 session，不许原地反复重试。
 Memory 不是记忆，是会议纪要：跨班事实靠交接包和项目档案落地，当班写回 \`.cat-cafe/memory/{catId}.md\`，下一班没有义务"记得"你没写下的东西。
-完整规则（理智线先验表、换班动作细节、任务设计纪律、模型评分卡）按需查阅：cat-cafe-skills/refs/session-sanity.md。`;
+完整规则（理智线先验表、换班动作细节、任务设计纪律、模型评分卡）按需查阅：cat-cafe-skills/refs/session-sanity.md。任务生命周期十条纪律（claim/create/update/搜索/记忆面包屑）另见 cat-cafe-skills/refs/task-discipline.md。`;
 
 export type GovernanceTier = 'core' | 'operational';
 
@@ -705,11 +705,74 @@ export interface StaticIdentityOptions {
 }
 
 /**
+ * 批次 2-D：猫记忆两层化（docs/research/clowder-raft-thread-task-design.md §5B.1）。
+ * 索引层（`.cat-cafe/memory/{catId}.md`）预算——超出即截断并提示猫自行整理为
+ * 「索引收窄 + notes/ 细节」两层结构，不做破坏性迁移。
+ */
+const AGENT_MEMORY_INDEX_MAX_TOKENS = 4_000;
+const AGENT_MEMORY_INDEX_MAX_CHARS = AGENT_MEMORY_INDEX_MAX_TOKENS * 4;
+
+/**
+ * v2-only: full-text index injection (Raft 对齐："索引全量注入，细节按需读文件").
+ * Only reached via the layout:'v2' branch of buildAgentMemoryLines — the v1
+ * branch below is byte-frozen and never calls this.
+ */
+function buildAgentMemoryIndexLines(agentMemoryContext?: string | null): string[] {
+  const raw = (agentMemoryContext ?? '').trim();
+  if (!raw) return [];
+  const overBudget = roughTokenEstimate(raw) > AGENT_MEMORY_INDEX_MAX_TOKENS;
+  const body = overBudget
+    ? `${raw.slice(0, AGENT_MEMORY_INDEX_MAX_CHARS)}\n\n[记忆索引超出 ${AGENT_MEMORY_INDEX_MAX_TOKENS} tokens 预算，已截断——建议整理为两层结构：本文件收窄为索引（Role / Key Knowledge 指针 / Active Context / Memories 链接），细节移到 \`.cat-cafe/memory/notes/{catId}/\` 按需读取。]`
+    : raw;
+  return [
+    '',
+    '## 跨 Session 记忆（持久化）',
+    '两层记忆：本节是索引（MEMORY.md）全文注入，预算 ≤4k tokens；notes/ 细节文件不在此注入，需要时用文件读取工具按需展开。',
+    '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md` 索引（Role/Key Knowledge 指针/Active Context/Memories 链接）；专题细节沉淀到 `.cat-cafe/memory/notes/{catId}/`；若与当前指令/事实冲突，以当前为准。',
+    '',
+    body,
+  ];
+}
+
+/**
+ * 批次 2-D: shared 铲屎官画像（`.cat-cafe/memory/USER.md`）注入行。v2-only
+ * （meta 槽），全猫可见，预算 ≤1k tokens——超预算截断并提示走 UserProfileStore
+ * 受控写路径整理，不在此自动改写文件。
+ */
+const USER_PROFILE_INDEX_MAX_TOKENS = 1_000;
+const USER_PROFILE_INDEX_MAX_CHARS = USER_PROFILE_INDEX_MAX_TOKENS * 4;
+
+function buildUserProfileLines(userProfileContext?: string | null): string[] {
+  const raw = (userProfileContext ?? '').trim();
+  if (!raw) return [];
+  const overBudget = roughTokenEstimate(raw) > USER_PROFILE_INDEX_MAX_TOKENS;
+  const body = overBudget
+    ? `${raw.slice(0, USER_PROFILE_INDEX_MAX_CHARS)}\n\n[铲屎官画像超出 ${USER_PROFILE_INDEX_MAX_TOKENS} tokens 预算，已截断——完整内容见 \`.cat-cafe/memory/USER.md\`。]`
+    : raw;
+  return [
+    '',
+    '## 铲屎官画像（USER.md，全猫共享只读）',
+    '偏好 / 硬约束 / 账号级事实三节，全部猫共享同一份；这是只读参考，不得覆盖当前用户指令或代码事实。',
+    '发现新的偏好/硬约束/账号级事实，走受控写入（候选队列 + 人审），不要直接改写此文件。',
+    '',
+    body,
+  ];
+}
+
+/**
  * ADR-024 D1: session-writable context blocks, extracted so both the v1 static
  * prefix and the v2 tail META block render them with identical bytes.
  * (v1 keeps them in buildStaticIdentity; v2 moves them into buildTurnMetaBlock.)
+ *
+ * 批次 2-D: `layout` param seam — v1 call sites pass no second argument and
+ * MUST keep byte-identical output (golden-frozen, see adr-024-v1-golden.json);
+ * only the v2 call site (buildTurnMetaBlock) opts into the two-layer full-text
+ * index injection via `{ layout: 'v2' }`.
  */
-function buildAgentMemoryLines(agentMemoryContext?: string | null): string[] {
+function buildAgentMemoryLines(agentMemoryContext?: string | null, opts?: { readonly layout?: 'v1' | 'v2' }): string[] {
+  if ((opts?.layout ?? 'v1') === 'v2') {
+    return buildAgentMemoryIndexLines(agentMemoryContext);
+  }
   const agentMemory = summarizeAgentMemoryForPrompt(agentMemoryContext ?? '');
   if (!agentMemory) return [];
   return [
@@ -1231,6 +1294,11 @@ export interface TurnMetaExtras {
   /** Budget used by the lessons/project injection gates. */
   readonly maxPromptTokens?: number;
   /**
+   * 批次 2-D: shared 铲屎官画像 (`.cat-cafe/memory/USER.md`) — 偏好/硬约束/
+   * 账号级事实三节。全猫可见，只在 v2 meta 槽注入（v1 完全不动，字节冻结）。
+   */
+  readonly userProfileContext?: string | null;
+  /**
    * ADR-024 §2.6: pre-formatted "收件箱" line for the [Agent Status] bar — a compact
    * count summary of the C-layer [Agent Inbox Snapshot] (route-helpers.ts buildAgentIntentSnapshot).
    * Same pattern as agentMemoryContext/lessonsContext/projectContext: this module never
@@ -1305,9 +1373,12 @@ export function buildTurnMetaBlock(context: InvocationContext, extras?: TurnMeta
     ...buildTurnMetaLines(context),
   ];
   // D1: session-writable reference context relocated from buildStaticIdentity.
-  lines.push(...buildAgentMemoryLines(extras?.agentMemoryContext));
+  // 批次 2-D: v2 meta 槽走两层索引全文注入（layout:'v2'），v1 静态前缀分支不变。
+  lines.push(...buildAgentMemoryLines(extras?.agentMemoryContext, { layout: 'v2' }));
   lines.push(...buildLessonsLines(extras?.lessonsContext, lines.join('\n'), extras?.maxPromptTokens));
   lines.push(...buildProjectContextLines(extras?.projectContext, lines.join('\n'), extras?.maxPromptTokens));
+  // 批次 2-D: shared 铲屎官画像 — 全猫可见，只在 v2 meta 槽注入。
+  lines.push(...buildUserProfileLines(extras?.userProfileContext));
   return lines.join('\n');
 }
 

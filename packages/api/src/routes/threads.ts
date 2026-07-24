@@ -183,6 +183,8 @@ const threadRoutingPolicySchema = z
       })
       .partial()
       .optional(),
+    /** F194 §3 step 2: thread-first opt-in. Default (absent) = current main-flow behavior. */
+    mode: z.literal('thread-first').optional(),
   })
   .strict();
 

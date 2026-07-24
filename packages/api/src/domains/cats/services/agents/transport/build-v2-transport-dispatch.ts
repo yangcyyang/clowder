@@ -50,6 +50,12 @@ export interface V2TransportDispatchInput {
   readonly agentMemoryContext?: string | null;
   readonly lessonsContext?: string | null;
   readonly projectContext?: string | null;
+  /**
+   * 批次 2-D: shared 铲屎官画像 (`.cat-cafe/memory/USER.md`), read via
+   * UserProfileStore.readUserProfileForPrompt. Optional/additive — callers that
+   * don't pass it see no change (buildUserProfileLines no-ops on empty input).
+   */
+  readonly userProfileContext?: string | null;
   readonly maxPromptTokens?: number;
   /**
    * ADR-024 §2.6: pre-formatted "收件箱" summary for the [Agent Status] bar — see
@@ -92,6 +98,7 @@ export function buildV2TransportDispatch(input: V2TransportDispatchInput): V2Tra
     agentMemoryContext: input.agentMemoryContext,
     lessonsContext: input.lessonsContext,
     projectContext: input.projectContext,
+    userProfileContext: input.userProfileContext,
     inboxSnapshotSummary: input.inboxSnapshotSummary,
     ...(input.maxPromptTokens !== undefined ? { maxPromptTokens: input.maxPromptTokens } : {}),
   });

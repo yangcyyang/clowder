@@ -39,6 +39,7 @@
 
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { STATUS } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { memoryPromotionGateDecisions } from '../../../../../infrastructure/telemetry/instruments.js';
@@ -92,6 +93,12 @@ export interface MemoryPromotionEvaluation {
   readonly reviewer?: 'user';
   /** Trace of matched rules, for shadow-mode observability and review. */
   readonly rules: readonly string[];
+  /**
+   * 批次 2-D: warn-only three-principles lint (selectivity / abstraction /
+   * structuring — see lintMemoryWriteCandidate below). Never affects `action`;
+   * purely surfaced for shadow-mode observability and human review.
+   */
+  readonly lintWarnings: readonly string[];
 }
 
 export interface MemoryPromotionInput {
@@ -103,6 +110,133 @@ export interface MemoryPromotionInput {
   readonly userMessageText?: string | undefined;
   /** Contents already sitting in the candidate queue (dedup baseline). */
   readonly queuedContents?: readonly string[];
+  /**
+   * 批次 2-D: optional four-category frontmatter (see parseMemoryFrontmatter).
+   * Absent = backward-compatible (no classification-driven behavior change,
+   * only affects lintWarnings' "unclassified" hint).
+   */
+  readonly frontmatter?: MemoryFrontmatter | null;
+}
+
+// ---------------------------------------------------------------------------
+// 批次 2-D 任务三: four-category frontmatter convention
+// ---------------------------------------------------------------------------
+
+/**
+ * memory/candidates 与 notes 文件的 frontmatter 分类（对齐 Raft 实证，
+ * docs/research/clowder-raft-thread-task-design.md §5B.1 "四分类 user/feedback/
+ * project/reference"）：
+ *   - user:      铲屎官本人的偏好/事实/指令——高可信来源。
+ *   - feedback:  被纠正/被指出的行为偏好或错误——**必须带 why**（为什么要这样
+ *                改），否则以后重读时不知道这条规则的动机，容易被误删或误套用。
+ *   - project:   项目级事实（进度/决策/约定）——跨 session 但只对该项目有意义。
+ *   - reference: 参考资料/踩坑记录——非强约束，供按需查阅。
+ *
+ * 分类是可选字段——**无分类 = 按现状处理**（向后兼容：evaluateMemoryPromotion
+ * 的 7 步判定逻辑不因缺分类而改变，只在 lintWarnings 里提示补分类）。
+ */
+export type MemoryFrontmatterType = 'user' | 'feedback' | 'project' | 'reference';
+
+export interface MemoryFrontmatter {
+  readonly type?: MemoryFrontmatterType;
+  /** Required (by convention, warn-only) when type === 'feedback'. */
+  readonly why?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface ParsedMemoryDocument {
+  readonly frontmatter: MemoryFrontmatter | null;
+  readonly body: string;
+}
+
+const MEMORY_FRONTMATTER_TYPES: ReadonlySet<string> = new Set(['user', 'feedback', 'project', 'reference']);
+
+/**
+ * Parse optional YAML frontmatter (`---\n...\n---\n`) from a memory/candidate/
+ * notes document — same delimiter convention as
+ * domains/signals/services/article-document.ts (parseFrontmatter). Missing or
+ * malformed frontmatter is backward-compatible: returns `frontmatter: null`
+ * and the original text as `body`; never throws.
+ */
+export function parseMemoryFrontmatter(raw: string): ParsedMemoryDocument {
+  if (!raw.startsWith('---\n')) return { frontmatter: null, body: raw };
+  const marker = '\n---\n';
+  const endIndex = raw.indexOf(marker, 4);
+  if (endIndex === -1) return { frontmatter: null, body: raw };
+  try {
+    const parsed = parseYaml(raw.slice(4, endIndex)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { frontmatter: null, body: raw };
+    }
+    const record = parsed as Record<string, unknown>;
+    const typeRaw = typeof record.type === 'string' ? record.type.trim() : undefined;
+    const type = typeRaw && MEMORY_FRONTMATTER_TYPES.has(typeRaw) ? (typeRaw as MemoryFrontmatterType) : undefined;
+    const why = typeof record.why === 'string' ? record.why.trim() : undefined;
+    return {
+      // Explicit `type`/`why` assignment (not conditional spread): an invalid raw
+      // `type` value (e.g. "banana") must be overwritten to undefined, not left
+      // over from `...record` — only the validated closed-set value survives.
+      frontmatter: { ...record, type, why },
+      body: raw.slice(endIndex + marker.length),
+    };
+  } catch {
+    return { frontmatter: null, body: raw };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 批次 2-D 任务三: writing principles (lint-style validator, warn-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * 写入三原则（对齐 Raft §5B.1 红线 + Clowder 现状）：
+ *
+ *  1. 选择性红线（selectivity）：仓库/文档已记录的事实不重复存；只对本次对话
+ *     有意义的临时状态不存（硬版本是 evaluateMemoryPromotion 的 session-temp
+ *     规则——这里是同一条原则的软提醒，覆盖硬规则之外的边缘案例）。
+ *  2. 抽象化（abstraction）：写入的是蒸馏后的结论/偏好/决策，不是原始对话记录
+ *     或大段粘贴——细节应该进 notes/，索引/记忆文件只留指针和结论。
+ *  3. 结构化（structuring）：按四分类 frontmatter（user/feedback/project/
+ *     reference）落位，feedback 必须带 why；不是自由散文堆砌。
+ *
+ * `lintMemoryWriteCandidate` 是这三原则的自动化校验——**先 warn 不拦**：命中
+ * 只追加到 evaluation.lintWarnings，不改变 promote/candidate/hold/skip 的判定
+ * 结果。判定权在人（review 候选队列时能看到 warning）。
+ */
+export interface MemoryLintInput {
+  readonly candidateText: string;
+  readonly frontmatter?: MemoryFrontmatter | null;
+}
+
+const RAW_DUMP_SUSPECT_RE = /```|^>{2,}|\n{3,}/m;
+const RAW_DUMP_MIN_CHARS = 400;
+
+export function lintMemoryWriteCandidate(input: MemoryLintInput): readonly string[] {
+  const warnings: string[] = [];
+  const text = input.candidateText.trim();
+  const type = input.frontmatter?.type;
+
+  // Principle 3 (structuring): classification presence + feedback-must-have-why.
+  if (!type) {
+    warnings.push(
+      'unclassified: 建议补充 frontmatter type: user|feedback|project|reference（无分类仍按现状处理，不阻断）',
+    );
+  } else if (type === 'feedback' && !input.frontmatter?.why?.trim()) {
+    warnings.push('feedback-missing-why: type=feedback 必须带 why（为什么要改这条），否则以后重读不知道动机');
+  }
+
+  // Principle 1 (selectivity red-line): soft echo of the session-temp hard rule.
+  if (SESSION_TEMP_RE.test(text)) {
+    warnings.push('selectivity: 内容像"仅本次会话有意义"，按红线不应持久化');
+  }
+
+  // Principle 2 (abstraction): long + code-fence/blockquote/blank-line-heavy
+  // text looks like a raw transcript dump rather than a distilled conclusion.
+  if (text.length > RAW_DUMP_MIN_CHARS && RAW_DUMP_SUSPECT_RE.test(text)) {
+    warnings.push('abstraction: 内容偏长且像原始记录/大段粘贴，建议先抽象为结论，细节移到 notes/');
+  }
+
+  return warnings;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,8 +458,11 @@ export function evaluateMemoryPromotion(input: MemoryPromotionInput): MemoryProm
   const hedged = HEDGING_RE.test(candidate) && !SOURCE_MARK_RE.test(candidate) && !userStated;
   const sourceGrade: MemorySourceGrade = userStated ? 'user-stated' : hedged ? 'model-guess' : 'observed-behavior';
   const confidence: MemoryConfidence = userStated ? 'high' : hedged ? 'low' : 'medium';
+  // 批次 2-D 任务三: warn-only lint, computed once and carried by every return
+  // path below via `...base` — never changes the action/skipReason decisions.
+  const lintWarnings = lintMemoryWriteCandidate({ candidateText: candidate, frontmatter: input.frontmatter });
 
-  const base = { sourceGrade, contentClass, confidence };
+  const base = { sourceGrade, contentClass, confidence, lintWarnings };
 
   // 1. Session temp vars are never durable.
   if (contentClass === 'session-temp') {

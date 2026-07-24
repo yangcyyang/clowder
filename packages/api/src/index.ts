@@ -1456,11 +1456,12 @@ async function main(): Promise<void> {
   const restoredQueue = await invocationQueue.restorePersistedEntries();
   if (restoredQueue.restored > 0) {
     app.log.info(restoredQueue, '[InvocationQueue] restored durable pending mentions');
-    for (const threadId of restoredQueue.threadIds) {
-      void queueProcessor.tryAutoExecute(threadId).catch((err) => {
-        app.log.error({ err, threadId }, '[InvocationQueue] restored pending mention auto-execute failed');
-      });
-    }
+    // [thread-task-design] §2 / batch-1 leftover: restored entries include plain
+    // user-sourced work (F194), not just autoExecute:true A2A entries — resumeRestoredEntries
+    // dequeues both instead of leaving user messages stuck until a manual "process next".
+    void queueProcessor.resumeRestoredEntries(restoredQueue.threadIds).catch((err) => {
+      app.log.error({ err, restoredQueue }, '[InvocationQueue] restored queue auto-resume failed');
+    });
   }
   app.addHook('onClose', async () => {
     queueProcessor.dispose();

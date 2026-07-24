@@ -28,6 +28,16 @@ export const sendMessageSchema = z
     whisperTo: z.array(catIdSchema()).optional(),
     /** F39: Delivery mode. undefined = smart default (queue when active, immediate otherwise). */
     deliveryMode: z.enum(['immediate', 'queue', 'force']).optional(),
+    /**
+     * F194 §3 step 2 (Raft "As Task" explicit entry point): when true, skip
+     * classifyWorkAdmission's heuristics entirely and force-create a task from
+     * this message via admitWorkMessage. Accepts a real boolean (JSON body) or
+     * the string form multipart/form-data sends.
+     */
+    asTask: z
+      .union([z.boolean(), z.literal('true'), z.literal('false')])
+      .transform((value) => value === true || value === 'true')
+      .optional(),
   })
   .refine((data) => data.visibility !== 'whisper' || (data.whisperTo && data.whisperTo.length > 0), {
     message: 'whisperTo must be non-empty when visibility is whisper',

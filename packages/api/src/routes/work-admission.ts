@@ -11,7 +11,8 @@ export type WorkAdmissionDecision =
       kind: 'create_from_message';
       taskTitle: string;
       ownerCatId?: CatId;
-      reason: 'explicit_action' | 'line_leading_mention_action';
+      /** as_task_explicit: F194 §3 step 3 — user checked "As Task", bypassing classifyWorkAdmission entirely. */
+      reason: 'explicit_action' | 'line_leading_mention_action' | 'as_task_explicit';
     }
   | {
       kind: 'resume_pending_plan';
@@ -135,5 +136,30 @@ export function classifyWorkAdmission(input: WorkAdmissionInput): WorkAdmissionD
     taskTitle: normalizeTaskTitle(content),
     ...(ownerCatId ? { ownerCatId } : {}),
     reason: hasLineLeadingMention ? 'line_leading_mention_action' : 'explicit_action',
+  };
+}
+
+/**
+ * F194 §3 step 3: the "As Task" explicit-declaration entry point (Raft's
+ * per-message checkbox — one of the three explicit-declaration entrances,
+ * see docs/research/clowder-raft-thread-task-design.md §5.3). Unlike
+ * classifyWorkAdmission, this never returns `reply_only` — the user already
+ * declared intent, so no heuristic gets a veto. Reuses the same title
+ * truncation/redaction (normalizeTaskTitle) and single-@mention owner
+ * resolution (uniqueOwner) as the classifier path, so downstream admission
+ * (admitWorkMessage) behaves identically either way.
+ */
+export function forceCreateFromMessage(input: WorkAdmissionInput): Extract<
+  WorkAdmissionDecision,
+  { kind: 'create_from_message' }
+> {
+  const content = input.content.trim();
+  const targetCatIds = [...new Set(input.targetCatIds ?? [])];
+  const ownerCatId = uniqueOwner(targetCatIds);
+  return {
+    kind: 'create_from_message',
+    taskTitle: normalizeTaskTitle(content),
+    ...(ownerCatId ? { ownerCatId } : {}),
+    reason: 'as_task_explicit',
   };
 }

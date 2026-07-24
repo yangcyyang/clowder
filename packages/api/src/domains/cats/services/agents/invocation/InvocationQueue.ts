@@ -399,7 +399,11 @@ export class InvocationQueue {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q || q.length === 0) return null;
     const removed = q.shift()!;
-    if (removed.pendingMentionId) void this.persistence?.delete(removed.id);
+    // [restart-resume] F194 persists plain user entries too (not only pendingMentionId
+    // A2A entries) — the durable-journal delete must not be gated on that field, or a
+    // completed user entry never leaves Redis and gets restored+re-run on every restart
+    // within its (up to 7-day) TTL. Deleting an id that was never journaled is a no-op.
+    void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -418,7 +422,8 @@ export class InvocationQueue {
     this.originalContents.delete(entryId);
 
     const removed = q.splice(idx, 1)[0] ?? null;
-    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    // [restart-resume] see dequeue() — delete must not be gated on pendingMentionId.
+    if (removed) void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -434,7 +439,8 @@ export class InvocationQueue {
     const entry = q[idx];
     if (!entry) return null;
     const snapshot = { ...entry };
-    if (entry.pendingMentionId) await this.persistence?.delete(entry.id);
+    // [restart-resume] see dequeue() — delete must not be gated on pendingMentionId.
+    await this.persistence?.delete(entry.id);
     const currentIdx = q.findIndex((candidate) => candidate.id === entryId);
     if (currentIdx === -1) return snapshot;
     this.originalContents.delete(entryId);
@@ -462,7 +468,8 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
-      if (e.pendingMentionId) void this.persistence?.delete(e.id);
+      // [restart-resume] see dequeue() — delete must not be gated on pendingMentionId.
+      void this.persistence?.delete(e.id);
     }
     this.queues.delete(key);
     return q;
@@ -571,7 +578,8 @@ export class InvocationQueue {
     this.originalContents.delete(entryId);
 
     const removed = q.splice(idx, 1)[0] ?? null;
-    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    // [restart-resume] see dequeue() — delete must not be gated on pendingMentionId.
+    if (removed) void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -626,7 +634,8 @@ export class InvocationQueue {
         this.originalContents.delete(entryId);
 
         const removed = q.splice(idx, 1)[0] ?? null;
-        if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+        // [restart-resume] see dequeue() — delete must not be gated on pendingMentionId.
+        if (removed) void this.persistence?.delete(removed.id);
         return removed;
       }
     }

@@ -46,9 +46,27 @@ export interface ThreadRoutingRule {
   expiresAt?: number;
 }
 
+/**
+ * F194 §3 step 2 (thread-first): additive routing mode alongside `scopes`.
+ * 'thread-first' = every @mention message in this thread routes its reply to
+ * the message's anchored branch thread (see ensureMessageAnchoredThread in
+ * task-discussion-thread.ts) instead of the main thread. Undefined/absent
+ * preserves the current main-flow behavior — this is an opt-in per thread.
+ */
+export type ThreadRoutingMode = 'thread-first';
+
 export interface ThreadRoutingPolicyV1 {
   v: 1;
   scopes?: Partial<Record<ThreadRoutingScope, ThreadRoutingRule>>;
+  /** F194 §3 step 2: thread-scoped routing mode. See ThreadRoutingMode. */
+  mode?: ThreadRoutingMode;
+}
+
+/** F194 §3 step 2: true when this thread has opted into thread-first routing. */
+export function isThreadFirstRoutingEnabled(
+  thread: Pick<Thread, 'routingPolicy'> | null | undefined,
+): boolean {
+  return thread?.routingPolicy?.v === 1 && thread.routingPolicy.mode === 'thread-first';
 }
 
 /** F065 Phase B + F148 VG-3: Rolling thread-level memory across sealed sessions. */
@@ -102,8 +120,12 @@ export interface ThreadMentionRoutingFeedback {
  */
 export interface ThreadRelationV1 {
   readonly v: 1;
-  /** task_thread: F194 auto-admitted task discussion thread (task-discussion-thread.ts). */
-  readonly kind: 'inline_reply' | 'edit_branch' | 'task_thread';
+  /**
+   * task_thread: F194 auto-admitted task discussion thread (task-discussion-thread.ts).
+   * message_thread: F194 §3 step 2 thread-first message-anchored branch — created by
+   * ensureMessageAnchoredThread for a plain @mention reply, independent of any task.
+   */
+  readonly kind: 'inline_reply' | 'edit_branch' | 'task_thread' | 'message_thread';
   readonly parentThreadId: string;
   readonly rootMessageId: string;
 }
@@ -696,10 +718,14 @@ export class ThreadStore implements IThreadStore {
     const thread = this.get(threadId);
     if (!thread) return;
 
-    // Normalize: null or empty scopes clears policy.
+    // Normalize: null, or a policy with neither scopes nor a mode, clears it.
+    // F194 §3 step 2: `mode` (e.g. 'thread-first') is meaningful on its own —
+    // this used to require non-empty `scopes`, which silently dropped a
+    // mode-only policy before `mode` existed as a field.
     const scopes = policy?.scopes;
     const hasScopes = scopes && Object.keys(scopes).length > 0;
-    if (!policy || policy.v !== 1 || !hasScopes) {
+    const hasMode = Boolean(policy?.mode);
+    if (!policy || policy.v !== 1 || (!hasScopes && !hasMode)) {
       delete thread.routingPolicy;
       return;
     }

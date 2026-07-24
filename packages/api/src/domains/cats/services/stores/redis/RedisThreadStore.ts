@@ -153,7 +153,10 @@ function parseThreadRelationJson(raw: string): ThreadRelationV1 | null {
       'v' in parsed &&
       parsed.v === 1 &&
       'kind' in parsed &&
-      (parsed.kind === 'inline_reply' || parsed.kind === 'edit_branch' || parsed.kind === 'task_thread') &&
+      (parsed.kind === 'inline_reply' ||
+        parsed.kind === 'edit_branch' ||
+        parsed.kind === 'task_thread' ||
+        parsed.kind === 'message_thread') &&
       'parentThreadId' in parsed &&
       typeof parsed.parentThreadId === 'string' &&
       parsed.parentThreadId.length > 0 &&
@@ -483,8 +486,11 @@ export class RedisThreadStore implements IThreadStore {
     const key = ThreadKeys.detail(threadId);
     const scopes = policy?.scopes;
     const hasScopes = scopes && Object.keys(scopes).length > 0;
+    // F194 §3 step 2: `mode` (e.g. 'thread-first') is meaningful without any
+    // `scopes` — mirrors the in-memory ThreadStore fix (same stale gate).
+    const hasMode = Boolean(policy?.mode);
 
-    if (!policy || policy.v !== 1 || !hasScopes) {
+    if (!policy || policy.v !== 1 || (!hasScopes && !hasMode)) {
       await this.deleteDetailFields(key, 'routingPolicy');
       return;
     }

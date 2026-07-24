@@ -24,6 +24,7 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { resolveContextCacheLayoutForCat } from '../../../../../config/context-cache-layout.js';
+import { readUserProfileForPrompt } from '../memory/UserProfileStore.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
 import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
@@ -380,6 +381,7 @@ export async function* routeParallel(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
+      const userProfileContext = await readUserProfileForPrompt();
       const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
       const contextLayerPlan = resolveContextLayerPlan({
         message,
@@ -627,6 +629,7 @@ export async function* routeParallel(
             agentMemoryContext,
             lessonsContext,
             projectContext,
+            userProfileContext,
             maxPromptTokens: effectiveContextBudget.maxPromptTokens,
             // ADR-024 D4/§2.6 last-mile wiring (W2-C left these documented for post-freeze):
             metaTransportText: inc.metaTransportText,
@@ -717,6 +720,7 @@ export async function* routeParallel(
             agentMemoryContext,
             lessonsContext,
             projectContext,
+            userProfileContext,
             maxPromptTokens: effectiveContextBudget.maxPromptTokens,
           });
         }

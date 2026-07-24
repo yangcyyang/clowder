@@ -236,6 +236,90 @@ describe('InvocationQueue', () => {
     assert.equal(after.size('t1', 'u1'), 0);
   });
 
+  // ── [restart-resume] durable-journal deletion must not gate on pendingMentionId ──
+  // Root cause: F194 persists plain user entries too (messages.ts calls persistEntry()
+  // on every user-sourced enqueue), but every removal path (dequeue/remove/removeProcessed*
+  // /clear) only called persistence.delete() when entry.pendingMentionId was set — a field
+  // that only ever exists on A2A pending-mention entries. A completed *user* entry therefore
+  // never left the Redis journal and would resurrect (and, once auto-resume dispatches it,
+  // re-execute) on every restart until its 7-day TTL. These entries have no pendingMentionId.
+
+  it('removeProcessedAcrossUsers deletes the durable journal row for a plain user entry', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()];
+      },
+    };
+    const q = new InvocationQueue(persistence);
+    const result = q.enqueue(entry({ content: '用户消息', targetCats: ['opus'] }));
+    await q.persistEntry(result.entry);
+    assert.equal(rows.size, 1, 'journal must contain the entry after persistEntry');
+
+    q.markProcessing('t1', 'u1');
+    const removed = q.removeProcessedAcrossUsers('t1', result.entry.id);
+    assert.ok(removed, 'entry should be removed from the in-memory queue');
+    // persistence.delete is fire-and-forget (void) — flush the microtask queue.
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(rows.size, 0, 'journal row must be deleted even without pendingMentionId');
+  });
+
+  it('removePersisted deletes the durable journal row for a plain user entry', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()];
+      },
+    };
+    const q = new InvocationQueue(persistence);
+    const result = q.enqueue(entry({ content: '用户消息', targetCats: ['opus'] }));
+    await q.persistEntry(result.entry);
+    assert.equal(rows.size, 1);
+
+    await q.removePersisted('t1', 'u1', result.entry.id);
+    assert.equal(rows.size, 0, 'removePersisted must delete the journal row regardless of pendingMentionId');
+  });
+
+  it('remove() and clear() also delete the durable journal row for a plain user entry', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()];
+      },
+    };
+    const q1 = new InvocationQueue(persistence);
+    const r1 = q1.enqueue(entry({ content: 'a', targetCats: ['opus'] }));
+    await q1.persistEntry(r1.entry);
+    q1.remove('t1', 'u1', r1.entry.id);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(rows.size, 0, 'remove() must delete the journal row');
+
+    const r2 = q1.enqueue(entry({ content: 'b', targetCats: ['codex'] }));
+    await q1.persistEntry(r2.entry);
+    assert.equal(rows.size, 1);
+    q1.clear('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(rows.size, 0, 'clear() must delete journal rows for every entry it drops');
+  });
+
   it('drops expired pending mentions during restore', async () => {
     const expired = {
       ...entry({ source: 'agent', autoExecute: true }),

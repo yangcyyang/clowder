@@ -223,7 +223,7 @@ export async function callbackGet(
   }
 }
 
-const agentKeyCatIdSchema = z
+export const agentKeyCatIdSchema = z
   .string()
   .min(1)
   .optional()

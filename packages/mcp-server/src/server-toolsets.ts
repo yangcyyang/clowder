@@ -14,6 +14,7 @@ import {
   signalStudyTools,
   signalsTools,
   skillTools,
+  taskLifecycleTools,
 } from './tools/index.js';
 
 type ToolDef = {
@@ -66,6 +67,17 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_get_thread_context',
   'cat_cafe_fetch_thread_history',
   'cat_cafe_list_threads',
+  // 批次 2-C: task-* dual-auth surface (docs/research/clowder-raft-thread-task-design.md
+  // §5.1/§5B.5) — backed by /api/callbacks/task-* + message-search + resolve-message-thread,
+  // all of which support agent-key auth (unlike the legacy cat_cafe_*_task tools above,
+  // which stay invocation-only).
+  'cat_cafe_task_claim',
+  'cat_cafe_task_create',
+  'cat_cafe_task_update',
+  'cat_cafe_task_unclaim',
+  'cat_cafe_task_list',
+  'cat_cafe_reply_in_thread',
+  'cat_cafe_search_messages',
 ]);
 
 const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
@@ -82,6 +94,7 @@ function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
 
 const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
+  ...taskLifecycleTools,
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,

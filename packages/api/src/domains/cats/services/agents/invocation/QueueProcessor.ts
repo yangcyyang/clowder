@@ -1593,6 +1593,76 @@ export class QueueProcessor {
     return result;
   }
 
+  /**
+   * [thread-task-design] §2 root cause / batch-1 leftover: restorePersistedEntries()
+   * puts F194-persisted queue entries back with status:'queued', but tryAutoExecute()
+   * only ever scans autoExecute:true (A2A) entries — plain user-sourced entries were
+   * durably journaled on enqueue (messages.ts) yet never got a dequeue kick on restart,
+   * so they sat inert until a human happened to hit "process next" in the UI.
+   *
+   * Called once after InvocationQueue.restorePersistedEntries() resolves. Reuses the
+   * existing dequeue machinery (tryAutoExecute for A2A, processNext for everything
+   * else) instead of inventing a new scheduler.
+   *
+   * Double-guard against duplicate execution (mirrors StartupReconciler's requeue
+   * judgment for crashed "running" invocations): a restored entry whose target cat
+   * already posted a reply after the entry's source message is evicted instead of
+   * re-run — this protects against a durable-journal row that outlived the request it
+   * represents (e.g. an older Redis row from before a persistence-delete fix).
+   */
+  async resumeRestoredEntries(threadIds: readonly string[]): Promise<void> {
+    for (const threadId of threadIds) {
+      await this.tryAutoExecute(threadId);
+
+      for (const userId of this.deps.queue.listUsersForThread(threadId)) {
+        const pending = this.deps.queue
+          .list(threadId, userId)
+          .filter((entry) => entry.status === 'queued' && !entry.autoExecute);
+        if (pending.length === 0) continue;
+
+        for (const entry of pending) {
+          if (await this.restoredEntryAlreadyAnswered(entry)) {
+            await this.deps.queue.removePersisted(threadId, userId, entry.id);
+          }
+        }
+
+        const stillPending = this.deps.queue
+          .list(threadId, userId)
+          .some((entry) => entry.status === 'queued' && !entry.autoExecute);
+        if (stillPending) {
+          await this.processNext(threadId, userId).catch((err) => {
+            this.deps.log.error(
+              { err, threadId, userId },
+              '[QueueProcessor] resumeRestoredEntries processNext failed',
+            );
+          });
+        }
+      }
+    }
+  }
+
+  /** Mirrors StartupReconciler.hasTargetReplyAfterUserMessage — see resumeRestoredEntries. */
+  private async restoredEntryAlreadyAnswered(entry: QueueEntry): Promise<boolean> {
+    const { messageStore } = this.deps;
+    if (!entry.messageId || entry.targetCats.length === 0) return false;
+    try {
+      const recent = await messageStore.getByThread(entry.threadId, 200);
+      const sourceIndex = recent.findIndex((msg) => msg.id === entry.messageId);
+      if (sourceIndex < 0) return false;
+      const targetCats = new Set(entry.targetCats);
+      return recent.slice(sourceIndex + 1).some((msg) => {
+        if (!msg.catId || !targetCats.has(msg.catId)) return false;
+        return Boolean(msg.content?.trim());
+      });
+    } catch (err) {
+      this.deps.log.warn(
+        { err, entryId: entry.id, threadId: entry.threadId },
+        '[QueueProcessor] resumeRestoredEntries reply-check failed',
+      );
+      return false;
+    }
+  }
+
   /** Targeted manual dispatch for a deferred A2A entry; never consumes unrelated queue work. */
   async processDeferredA2AEntry(
     threadId: string,
