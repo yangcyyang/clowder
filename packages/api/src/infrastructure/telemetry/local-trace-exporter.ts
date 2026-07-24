@@ -41,7 +41,7 @@ function spanToDTO(span: ReadableSpan): TraceSpanDTO {
       ...(span.status.message ? { message: span.status.message } : {}),
     },
     attributes: { ...span.attributes },
-    events: span.events.map((e) => ({
+    events: span.events.map((e: (typeof span.events)[number]) => ({
       name: e.name,
       timeMs: hrTimeToMs(e.time),
       ...(e.attributes && Object.keys(e.attributes).length > 0 ? { attributes: { ...e.attributes } } : {}),
