@@ -26,6 +26,10 @@ interface GrokAgentServiceOptions {
   grokHome?: string;
 }
 
+// ADR-024 D2/W2-E: Grok CLI has no system prompt flag; single blob prepend.
+// Prefer the seam's system slot (present every turn, independent of session-resume
+// gating) over the legacy `systemPrompt` derived string. `prompt` is already
+// ordered history → meta → userMsg by the caller when the seam ran.
 function buildPrompt(prompt: string, systemPrompt?: string): string {
   return systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${prompt}` : prompt;
 }
@@ -199,7 +203,7 @@ export class GrokAgentService implements AgentService {
 
     const args = [
       '-p',
-      buildPrompt(prompt, options?.systemPrompt),
+      buildPrompt(prompt, options?.transportPayload?.system ?? options?.systemPrompt),
       '--output-format',
       'streaming-json',
       '--model',

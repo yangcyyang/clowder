@@ -233,7 +233,11 @@ export class CatAgentService implements AgentService {
     const url = `${(credentials.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/v1/messages`;
     const body: Record<string, unknown> = { model, max_tokens: DEFAULT_MAX_TOKENS, messages, stream: true };
     if (tools.length > 0) body.tools = tools;
-    if (options?.systemPrompt) body.system = options.systemPrompt;
+    // ADR-024 D2/W2-E: dedicated system channel (Anthropic Messages API `system`
+    // field). Prefer the seam's system slot (present every turn, independent of
+    // session-resume gating) over the legacy `systemPrompt` derived string.
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    if (systemSlot) body.system = systemSlot;
 
     log.info(`[${this.catId}] API call: model=${model}, turns=${messages.length}, stream=true`);
     const resp = await fetch(url, {

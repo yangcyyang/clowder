@@ -7,6 +7,7 @@
  */
 
 import { catRegistry } from '@cat-cafe/shared';
+import { getContextCacheLayout } from '../../../../config/context-cache-layout.js';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
@@ -19,6 +20,17 @@ export interface ContextAssemblerOptions {
   maxTotalTokens?: number;
   /** @deprecated Use maxTotalTokens instead. Kept for backward compat during migration. */
   maxTotalChars?: number;
+  /**
+   * ADR-024 open question #3 (prefix-preserving eviction), v2-only, minimal version:
+   * block size for message-count eviction. `slice(-maxMessages)` moves the retained
+   * window's front edge by one message every single turn, which breaks the KV-cache
+   * history prefix every turn (byte-different from position 0 the instant the oldest
+   * kept message changes). v2 instead evicts a whole block at once and holds the front
+   * edge steady in between turns — moving the prefix break from "every turn" down to
+   * "every block boundary". Default 10; only takes effect when CONTEXT_CACHE_LAYOUT=v2 —
+   * v1 always uses the legacy exact `slice(-maxMessages)` window (byte-identical).
+   */
+  evictionBlockSize?: number;
 }
 
 export interface AssembledContext {
@@ -28,11 +40,19 @@ export interface AssembledContext {
   messageCount: number;
   /** Estimated token count of contextText (F8: for budget tracking) */
   estimatedTokens: number;
+  /**
+   * ADR-024 OQ-3 (v2 only): non-null when a block of older messages was evicted this
+   * call. Metadata only — deliberately NOT rendered as an inline summary inside
+   * contextText (ADR: "摘要不原位替换"). A caller that wants to surface a summary of
+   * the evicted block must append it to the tail META slot, never rewrite history.
+   */
+  evictedBlock?: { count: number; fromId: string; toId: string };
 }
 
 const DEFAULT_MAX_MESSAGES = 20;
 const DEFAULT_MAX_CONTENT_LENGTH = 1500;
 const DEFAULT_MAX_TOTAL_TOKENS = 2000;
+const DEFAULT_EVICTION_BLOCK_SIZE = 10;
 
 /**
  * Get display name for a message sender.
@@ -121,8 +141,24 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
     return { contextText: '', messageCount: 0, estimatedTokens: 0 };
   }
 
-  // Take the most recent N messages (messages are already chronological from store)
-  const recent = deliveredMessages.length > maxMessages ? deliveredMessages.slice(-maxMessages) : deliveredMessages;
+  // Take the most recent N messages (messages are already chronological from store).
+  // ADR-024 OQ-3 (v2 only): evict in whole blocks instead of shifting by one message
+  // every turn, so the retained front edge — and therefore the KV-cache prefix — only
+  // moves at block boundaries. v1 keeps the legacy exact slice(-maxMessages) (unchanged).
+  const isV2CacheLayout = getContextCacheLayout() === 'v2';
+  let evictedBlock: AssembledContext['evictedBlock'];
+  const recent = (() => {
+    if (deliveredMessages.length <= maxMessages) return deliveredMessages;
+    if (!isV2CacheLayout) return deliveredMessages.slice(-maxMessages);
+    const blockSize = Math.max(1, options?.evictionBlockSize ?? DEFAULT_EVICTION_BLOCK_SIZE);
+    const mustEvict = deliveredMessages.length - maxMessages;
+    const evictedCount = Math.min(deliveredMessages.length, Math.ceil(mustEvict / blockSize) * blockSize);
+    if (evictedCount > 0) {
+      const dropped = deliveredMessages.slice(0, evictedCount);
+      evictedBlock = { count: dropped.length, fromId: dropped[0]!.id, toId: dropped[dropped.length - 1]!.id };
+    }
+    return deliveredMessages.slice(evictedCount);
+  })();
 
   // Format all messages, then apply token budget from most-recent backward
   const formatted = recent.map((m) => formatMessage(m, { truncate: maxContentLength }));
@@ -147,5 +183,10 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   const header = `[对话历史 - 最近 ${included.length} 条]`;
   const contextText = `${header}\n${included.join('\n')}\n[/对话历史]`;
 
-  return { contextText, messageCount: included.length, estimatedTokens: totalTokens };
+  return {
+    contextText,
+    messageCount: included.length,
+    estimatedTokens: totalTokens,
+    ...(evictedBlock ? { evictedBlock } : {}),
+  };
 }

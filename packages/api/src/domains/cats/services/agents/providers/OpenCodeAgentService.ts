@@ -110,7 +110,13 @@ export class OpenCodeAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
-    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options?.cliConfigArgs);
+    // ADR-024 D2/W2-E: opencode CLI has no system prompt flag; OpenCode never had
+    // system-prompt support before W2-E, so this is new capability, strictly
+    // gated on the seam having run (v1 / no-transportPayload callers are
+    // byte-identical to pre-W2-E: `options?.systemPrompt` was never forwarded to
+    // this adapter through the main invocation path before this wave).
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options?.cliConfigArgs, systemSlot);
     const cwd = options?.workingDirectory;
     const childEnv = this.buildEnv(options?.callbackEnv);
     // F171: Account env vars applied LAST — user overrides provider-injected values
@@ -284,9 +290,18 @@ export class OpenCodeAgentService implements AgentService {
     }
   }
 
-  private buildArgs(prompt: string, sessionId?: string, model?: string, cliConfigArgs?: readonly string[]): string[] {
+  private buildArgs(
+    prompt: string,
+    sessionId?: string,
+    model?: string,
+    cliConfigArgs?: readonly string[],
+    systemSlot?: string,
+  ): string[] {
     const args = ['run'];
-    const guardedPrompt = `${prompt}${OPENCODE_FINAL_TEXT_GUARDRAIL}`;
+    // ADR-024 D2/W2-E: single blob, no system channel — system → history → meta →
+    // userMsg (the guardrail suffix stays last, after userMsg, as before).
+    const effectivePrompt = systemSlot ? `${systemSlot}\n\n${prompt}` : prompt;
+    const guardedPrompt = `${effectivePrompt}${OPENCODE_FINAL_TEXT_GUARDRAIL}`;
 
     // Session resume
     if (sessionId) {

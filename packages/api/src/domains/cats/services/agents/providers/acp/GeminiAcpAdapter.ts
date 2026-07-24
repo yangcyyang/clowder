@@ -185,8 +185,12 @@ export class GeminiAcpAdapter implements AgentService {
         return;
       }
 
-      // Prepend system prompt (Gemini CLI/ACP has no system prompt flag)
-      const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+      // Prepend system prompt (Gemini CLI/ACP has no system prompt flag).
+      // ADR-024 D2/W2-E: prefer the seam's system slot (present every turn,
+      // independent of session-resume gating) over the legacy `systemPrompt`
+      // derived string; `prompt` is already ordered history → meta → userMsg.
+      const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+      const effectivePrompt = systemSlot ? `${systemSlot}\n\n${prompt}` : prompt;
 
       // Window 4: onAbort listener covers the duration of promptStream
       promptStreamStartedAt = Date.now();

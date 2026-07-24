@@ -11,6 +11,12 @@ export interface CatDailyUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  /** ADR-024 W1-A: subset of inputTokens written to cache (Claude only; other providers 0). */
+  cacheCreationTokens: number;
+  /** ADR-024 W1-A: cacheReadTokens / inputTokens, 0 when inputTokens is 0.
+   *  This is the cache-hit-rate signal the ADR verification plan tracks
+   *  (long session target: <20% at v1 baseline → >70% after v2 layout). */
+  cacheReadRatio: number;
   costUsd: number;
   /** Number of times this cat participated (one multi-cat invocation = 1 per cat) */
   participations: number;
@@ -21,6 +27,10 @@ export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  /** ADR-024 W1-A: subset of inputTokens written to cache (Claude only; other providers 0). */
+  cacheCreationTokens: number;
+  /** ADR-024 W1-A: cacheReadTokens / inputTokens, 0 when inputTokens is 0. */
+  cacheReadRatio: number;
   costUsd: number;
   /** True invocation count (one multi-cat invocation = 1) */
   invocations: number;
@@ -46,19 +56,51 @@ export interface AggregateOptions {
 }
 
 function emptyCatUsage(): CatDailyUsage {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, participations: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadRatio: 0,
+    costUsd: 0,
+    participations: 0,
+  };
 }
 
 function emptyTotals(): UsageTotals {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, invocations: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadRatio: 0,
+    costUsd: 0,
+    invocations: 0,
+  };
+}
+
+/** ADR-024 W1-A: cache-hit-rate signal. 0 when there's no input to divide by
+ *  (avoids NaN/Infinity leaking into the API response). Rounded to 4 decimals
+ *  (basis-point precision) — matches the granularity costUsd rounding uses. */
+function computeCacheReadRatio(cacheReadTokens: number, inputTokens: number): number {
+  if (inputTokens <= 0) return 0;
+  return Math.round((cacheReadTokens / inputTokens) * 10_000) / 10_000;
 }
 
 function roundCostCat(usage: CatDailyUsage): CatDailyUsage {
-  return { ...usage, costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000 };
+  return {
+    ...usage,
+    cacheReadRatio: computeCacheReadRatio(usage.cacheReadTokens, usage.inputTokens),
+    costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000,
+  };
 }
 
 function roundCostTotals(usage: UsageTotals): UsageTotals {
-  return { ...usage, costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000 };
+  return {
+    ...usage,
+    cacheReadRatio: computeCacheReadRatio(usage.cacheReadTokens, usage.inputTokens),
+    costUsd: Math.round(usage.costUsd * 1_000_000) / 1_000_000,
+  };
 }
 
 function toDateString(epochMs: number): string {
@@ -123,6 +165,9 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
       existing.inputTokens += resolvedInputTokens;
       existing.outputTokens += resolveOutputTokens(usage, resolvedInputTokens);
       existing.cacheReadTokens += usage.cacheReadTokens ?? 0;
+      // Non-Claude providers have no cache-creation equivalent — usage.cacheCreationTokens
+      // stays undefined for them, ?? 0 keeps the field present without fabricating a value.
+      existing.cacheCreationTokens += usage.cacheCreationTokens ?? 0;
       existing.costUsd += usage.costUsd ?? 0;
       existing.participations += 1;
       dayBucket.set(catId, existing);
@@ -150,12 +195,14 @@ export function aggregateUsageByDay(records: InvocationRecord[], options: Aggreg
       dayTotal.inputTokens += usage.inputTokens;
       dayTotal.outputTokens += usage.outputTokens;
       dayTotal.cacheReadTokens += usage.cacheReadTokens;
+      dayTotal.cacheCreationTokens += usage.cacheCreationTokens;
       dayTotal.costUsd += usage.costUsd;
     }
 
     grandTotal.inputTokens += dayTotal.inputTokens;
     grandTotal.outputTokens += dayTotal.outputTokens;
     grandTotal.cacheReadTokens += dayTotal.cacheReadTokens;
+    grandTotal.cacheCreationTokens += dayTotal.cacheCreationTokens;
     grandTotal.costUsd += dayTotal.costUsd;
     grandTotal.invocations += dayTotal.invocations;
 

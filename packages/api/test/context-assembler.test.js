@@ -531,3 +531,80 @@ describe('assembleContext — F8 token-based truncation', () => {
     assert.ok(result.includes('GitHub Review 通知'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-024 open question #3: prefix-preserving eviction (v2 only, minimal version).
+// v1 (default) must keep the exact legacy slice(-maxMessages) behavior — the window
+// front edge shifts by one message every single call. v2 evicts whole blocks so the
+// front edge only moves at block boundaries (fewer, larger KV-cache prefix breaks).
+// ---------------------------------------------------------------------------
+describe('ADR-024 OQ-3: block-aligned eviction (v2 only)', () => {
+  const ORIGINAL_LAYOUT = process.env.CONTEXT_CACHE_LAYOUT;
+  after(() => {
+    if (ORIGINAL_LAYOUT === undefined) delete process.env.CONTEXT_CACHE_LAYOUT;
+    else process.env.CONTEXT_CACHE_LAYOUT = ORIGINAL_LAYOUT;
+  });
+
+  // Delimited markers (MSG_<i>_END) so substring checks can't false-positive on prefix
+  // collisions (e.g. "body-1" is a substring of "body-10"/"body-11").
+  function makeMsgs(count) {
+    return Array.from({ length: count }, (_, i) =>
+      mockMsg({ id: `msg-${i}`, content: `MSG_${i}_END`, timestamp: i * 1000 }),
+    );
+  }
+  const marker = (i) => `MSG_${i}_END`;
+
+  test('v1 (default): front edge shifts by one message every call — legacy sliding window', async () => {
+    delete process.env.CONTEXT_CACHE_LAYOUT;
+    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const r11 = assembleContext(makeMsgs(11), { maxMessages: 10 });
+    const r12 = assembleContext(makeMsgs(12), { maxMessages: 10 });
+    // 11 msgs, keep last 10 → drops msg-0, front = msg-1
+    assert.ok(r11.contextText.includes(marker(1)));
+    assert.ok(!r11.contextText.includes(marker(0)));
+    assert.equal(r11.evictedBlock, undefined, 'v1 never reports evictedBlock');
+    // 12 msgs, keep last 10 → drops msg-0 AND msg-1, front = msg-2 (moved again, one turn later)
+    assert.ok(!r12.contextText.includes(marker(1)), 'v1 front edge moved again — no block stability');
+    assert.ok(r12.contextText.includes(marker(2)));
+    assert.equal(r12.evictedBlock, undefined);
+  });
+
+  test('v2: front edge holds steady across a whole block, only moves at the block boundary', async () => {
+    process.env.CONTEXT_CACHE_LAYOUT = 'v2';
+    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const opts = { maxMessages: 10, evictionBlockSize: 5 };
+
+    // total=10: no eviction needed yet.
+    const r10 = assembleContext(makeMsgs(10), opts);
+    assert.equal(r10.evictedBlock, undefined);
+    assert.ok(r10.contextText.includes(marker(0)));
+
+    // total=11..15: mustEvict=1..5 all round up to one block (5) — front edge fixed at msg-5.
+    for (const total of [11, 12, 13, 14, 15]) {
+      const r = assembleContext(makeMsgs(total), opts);
+      assert.ok(r.contextText.includes(marker(5)), `total=${total}: msg-5 should stay in the retained window`);
+      assert.ok(!r.contextText.includes(marker(4)), `total=${total}: msg-4 should stay evicted`);
+      assert.deepEqual(
+        r.evictedBlock,
+        { count: 5, fromId: 'msg-0', toId: 'msg-4' },
+        `total=${total}: same evicted block as total=11 (front edge did not move)`,
+      );
+    }
+
+    // total=16: mustEvict=6 rounds up to a second block (10) — front edge jumps to msg-10.
+    const r16 = assembleContext(makeMsgs(16), opts);
+    assert.ok(!r16.contextText.includes(marker(5)), 'block boundary crossed: msg-5 now evicted too');
+    assert.ok(r16.contextText.includes(marker(10)));
+    assert.deepEqual(r16.evictedBlock, { count: 10, fromId: 'msg-0', toId: 'msg-9' });
+  });
+
+  test('v2: evictedBlock metadata is never rendered inline inside contextText (摘要不原位替换)', async () => {
+    process.env.CONTEXT_CACHE_LAYOUT = 'v2';
+    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const r = assembleContext(makeMsgs(11), { maxMessages: 10, evictionBlockSize: 5 });
+    assert.ok(r.evictedBlock, 'eviction happened');
+    // The history text itself must stay a pure append-only window of retained messages —
+    // no inline "[N messages evicted]"-style placeholder written in place of the dropped block.
+    assert.ok(!/evicted|已丢弃|已驱逐/.test(r.contextText), 'no inline eviction placeholder inside history text');
+  });
+});

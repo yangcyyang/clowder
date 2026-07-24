@@ -116,8 +116,14 @@ export class DareAgentService implements AgentService {
     }
 
     const endpoint = this.resolveEndpoint(options?.callbackEnv);
+    // ADR-024 D2/W2-E: DARE CLI has no system prompt flag; DARE never had
+    // system-prompt support before W2-E, so this is new capability, strictly
+    // gated on the seam having run (v1 / no-transportPayload callers are
+    // byte-identical to pre-W2-E — `--task` carried only `prompt` before).
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    const effectivePrompt = systemSlot ? `${systemSlot}\n\n${prompt}` : prompt;
     const args = this.buildArgs(
-      prompt,
+      effectivePrompt,
       options?.workingDirectory,
       options?.sessionId,
       endpoint,

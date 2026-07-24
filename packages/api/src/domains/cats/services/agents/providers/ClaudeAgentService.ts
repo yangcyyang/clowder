@@ -235,9 +235,14 @@ export class ClaudeAgentService implements AgentService {
       args.splice(6, 0, '--model', effectiveModel);
     }
 
-    // Inject static identity via --append-system-prompt (separate from -p content)
-    if (options?.systemPrompt) {
-      args.push('--append-system-prompt', options.systemPrompt);
+    // ADR-024 D2 mapping (v2 transport seam): the `system` slot → --append-system-prompt;
+    // the `-p` body is the seam's history → meta → userMsg ordering (meta 不得在 userMsg
+    // 之后), delivered via `prompt` (already ordered by the caller, missionPrefix preserved).
+    // In v1 / non-seam calls options.transportPayload is absent and options.systemPrompt is
+    // only set on the F-BLOAT self-heal retry, so behavior is unchanged there.
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    if (systemSlot) {
+      args.push('--append-system-prompt', systemSlot);
     }
 
     if (options?.sessionId) {

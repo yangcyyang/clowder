@@ -188,8 +188,12 @@ export class GeminiAgentService implements AgentService {
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE ?? this.model;
     const metadata: MessageMetadata = { provider: 'google', model: effectiveModel };
 
-    // Gemini CLI has no system prompt flag; prepend identity to prompt text
-    let effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+    // Gemini CLI has no system prompt flag; prepend identity to prompt text.
+    // ADR-024 D2/W2-E: prefer the seam's system slot (present every turn,
+    // independent of session-resume gating) over the legacy `systemPrompt`
+    // derived string; `prompt` is already ordered history → meta → userMsg.
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    let effectivePrompt = systemSlot ? `${systemSlot}\n\n${prompt}` : prompt;
 
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);

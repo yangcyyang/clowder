@@ -320,7 +320,11 @@ export class PiAgentService implements AgentService {
     const args = ['--print', '--mode', 'json', '--no-context-files'];
     if (options?.sessionId) args.push('--session', options.sessionId);
     if (model) args.push('--model', model);
-    if (options?.systemPrompt?.trim()) args.push('--append-system-prompt', options.systemPrompt.trim());
+    // ADR-024 D2/W2-E: Pi has a dedicated system channel (Claude-style). Prefer the
+    // seam's system slot (present every turn, independent of session-resume
+    // gating); `prompt` is already ordered history → meta → userMsg by the caller.
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    if (systemSlot?.trim()) args.push('--append-system-prompt', systemSlot.trim());
     return [...appendUserCliArgs(args, options?.cliConfigArgs), prompt];
   }
 }

@@ -45,6 +45,7 @@ import {
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
+import { getContextCacheLayout } from '../../../../../config/context-cache-layout.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
 import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
@@ -56,6 +57,11 @@ import {
   getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { supportsTransportSeam } from '../transport/assemble-transport-payload.js';
+import {
+  buildV2TransportDispatch,
+  type V2TransportDispatch,
+} from '../transport/build-v2-transport-dispatch.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
@@ -129,6 +135,7 @@ import {
   persistA2ARoutingBlockedNotice,
   persistSilentCompletionNotice,
   publishFreshnessDraft,
+  formatInboxSnapshotSummary,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -696,6 +703,13 @@ export async function* routeSerial(
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
+      // ADR-024: v2 four-slot dispatch (flag-gated). transportPayload is wired to the
+      // explicit W2-E allowlist (TRANSPORT_SEAM_CLIENT_IDS) — clientIds outside it keep
+      // the v1 prepend path. v1 leaves everything below untouched.
+      const cacheLayout = getContextCacheLayout();
+      const supportsSeam = supportsTransportSeam(catConfig?.clientId);
+      const v2StaticIdentityOptions = { mcpAvailable, packBlocks, toolPolicy: resolvedToolPolicy.toolPolicy };
+      let v2Dispatch: V2TransportDispatch | undefined;
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -873,6 +887,26 @@ export async function* routeSerial(
         });
         if (explicitMessage) parts.push(explicitMessage);
         prompt = parts.join('\n\n---\n\n');
+
+        if (cacheLayout === 'v2') {
+          v2Dispatch = buildV2TransportDispatch({
+            catId,
+            context: contextUsageWarning ? { ...invocationContextInput, contextUsageWarning } : invocationContextInput,
+            staticIdentityOptions: v2StaticIdentityOptions,
+            catModePrompt,
+            sessionBootstrap: bootstrapContext,
+            mcpInstructions,
+            historyText: inc.contextText,
+            userMsg: explicitMessage ?? '',
+            agentMemoryContext,
+            lessonsContext,
+            projectContext,
+            maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+            // ADR-024 D4/§2.6 last-mile wiring (W2-C left these documented for post-freeze):
+            metaTransportText: inc.metaTransportText,
+            inboxSnapshotSummary: formatInboxSnapshotSummary(inc.intentSnapshot),
+          });
+        }
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits
         let catContextHistory = loadStandardContext ? contextHistory : undefined; // fallback to legacy pre-assembled
@@ -933,12 +967,31 @@ export async function* routeSerial(
           invocationContext = buildInvocationContext({ ...invocationContextInput, contextUsageWarning });
         }
 
+        // Capture the current user message before it is folded into the assembled prompt (v2 userMsg slot).
+        const legacyUserMsg = prompt;
         if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrapContext) {
           const parts = [invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions].filter(Boolean);
           if (catContextHistory) parts.push(catContextHistory);
           prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
         } else if (catContextHistory) {
           prompt = `${catContextHistory}\n\n---\n\n${prompt}`;
+        }
+
+        if (cacheLayout === 'v2') {
+          v2Dispatch = buildV2TransportDispatch({
+            catId,
+            context: contextUsageWarning ? { ...invocationContextInput, contextUsageWarning } : invocationContextInput,
+            staticIdentityOptions: v2StaticIdentityOptions,
+            catModePrompt: catModePromptLegacy,
+            sessionBootstrap: bootstrapContext,
+            mcpInstructions,
+            historyText: catContextHistory,
+            userMsg: legacyUserMsg,
+            agentMemoryContext,
+            lessonsContext,
+            projectContext,
+            maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+          });
         }
       }
       const runtimeContextBudget = buildRuntimeContextBudgetSnapshot({
@@ -1056,7 +1109,10 @@ export async function* routeSerial(
         for await (const msg of invokeSingleCat(deps.invocationDeps, {
           catId,
           service: getService(deps.services, catId),
-          prompt,
+          // ADR-024 v2: use the four-slot body/system when the seam ran; transportPayload
+          // is wired to the W2-E allowlist (TRANSPORT_SEAM_CLIENT_IDS) — clientIds outside
+          // it keep the v1 prepend path (see `supportsSeam` above).
+          prompt: v2Dispatch ? v2Dispatch.promptBody : prompt,
           userId,
           threadId,
           ...(freshnessBaselineByCat.get(catId) ? { freshnessBaseline: freshnessBaselineByCat.get(catId)! } : {}),
@@ -1064,7 +1120,12 @@ export async function* routeSerial(
           ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
           ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
           ...(signal ? { signal } : {}),
-          ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+          ...(v2Dispatch
+            ? { systemPrompt: v2Dispatch.systemPrompt }
+            : staticIdentity
+              ? { systemPrompt: staticIdentity }
+              : {}),
+          ...(v2Dispatch && supportsSeam ? { transportPayload: v2Dispatch.transportPayload } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
           ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
           continuityCapsule,

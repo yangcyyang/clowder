@@ -23,6 +23,7 @@ import {
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
+import { getContextCacheLayout } from '../../../../../config/context-cache-layout.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
 import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
@@ -34,6 +35,11 @@ import {
   getGovernanceTierForToolPolicy,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { supportsTransportSeam } from '../transport/assemble-transport-payload.js';
+import {
+  buildV2TransportDispatch,
+  type V2TransportDispatch,
+} from '../transport/build-v2-transport-dispatch.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredMessage, StoredToolEvent, ThreadAppendWatermark } from '../../stores/ports/MessageStore.js';
@@ -87,6 +93,7 @@ import {
   parseCompactBoundarySystemInfo,
   persistSilentCompletionNotice,
   publishFreshnessDraft,
+  formatInboxSnapshotSummary,
   readHistoryForGovernanceObservation,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
@@ -442,6 +449,13 @@ export async function* routeParallel(
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
+      // ADR-024: v2 four-slot dispatch (flag-gated). transportPayload is wired to the
+      // explicit W2-E allowlist (TRANSPORT_SEAM_CLIENT_IDS) — clientIds outside it keep
+      // the v1 prepend path.
+      const cacheLayout = getContextCacheLayout();
+      const supportsSeam = supportsTransportSeam(catConfig?.clientId);
+      const v2StaticIdentityOptions = { mcpAvailable, packBlocks, toolPolicy: resolvedToolPolicy.toolPolicy };
+      let v2Dispatch: V2TransportDispatch | undefined;
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -596,8 +610,29 @@ export async function* routeParallel(
         // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
         // Defensive guard: if the current message ID is already present anywhere in
         // the assembled context text, do not append the raw message again.
-        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
+        const parIncludeExplicitMsg = shouldAppendExplicitCurrentMessage(inc, currentUserMessageId);
+        if (parIncludeExplicitMsg) parts.push(message);
         prompt = parts.join('\n\n---\n\n');
+
+        if (cacheLayout === 'v2') {
+          v2Dispatch = buildV2TransportDispatch({
+            catId,
+            context: contextUsageWarning ? { ...invocationContextInput, contextUsageWarning } : invocationContextInput,
+            staticIdentityOptions: v2StaticIdentityOptions,
+            catModePrompt: parCatModePrompt,
+            sessionBootstrap: bootstrapCtx,
+            mcpInstructions,
+            historyText: inc.contextText,
+            userMsg: parIncludeExplicitMsg ? message : '',
+            agentMemoryContext,
+            lessonsContext,
+            projectContext,
+            maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+            // ADR-024 D4/§2.6 last-mile wiring (W2-C left these documented for post-freeze):
+            metaTransportText: inc.metaTransportText,
+            inboxSnapshotSummary: formatInboxSnapshotSummary(inc.intentSnapshot),
+          });
+        }
       } else {
         // Per-cat context budget (Phase 4.0)
         let catContextHistory = loadStandardContext ? contextHistory : undefined;
@@ -667,6 +702,23 @@ export async function* routeParallel(
         } else {
           prompt = message;
         }
+
+        if (cacheLayout === 'v2') {
+          v2Dispatch = buildV2TransportDispatch({
+            catId,
+            context: contextUsageWarning ? { ...invocationContextInput, contextUsageWarning } : invocationContextInput,
+            staticIdentityOptions: v2StaticIdentityOptions,
+            catModePrompt: parCatModePromptLegacy,
+            sessionBootstrap: bootstrapCtx,
+            mcpInstructions,
+            historyText: catContextHistory,
+            userMsg: message,
+            agentMemoryContext,
+            lessonsContext,
+            projectContext,
+            maxPromptTokens: effectiveContextBudget.maxPromptTokens,
+          });
+        }
       }
       const runtimeContextBudget = buildRuntimeContextBudgetSnapshot({
         threadId,
@@ -715,7 +767,9 @@ export async function* routeParallel(
       return invokeSingleCat(deps.invocationDeps, {
         catId,
         service: getService(deps.services, catId),
-        prompt,
+        // ADR-024 v2: four-slot body/system when the seam ran; transportPayload is wired
+        // to the W2-E allowlist (TRANSPORT_SEAM_CLIENT_IDS, see `supportsSeam` above).
+        prompt: v2Dispatch ? v2Dispatch.promptBody : prompt,
         userId,
         threadId,
         ...(freshnessBaselineByCat.get(catId) ? { freshnessBaseline: freshnessBaselineByCat.get(catId)! } : {}),
@@ -723,7 +777,12 @@ export async function* routeParallel(
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(signal ? { signal } : {}),
-        ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+        ...(v2Dispatch
+          ? { systemPrompt: v2Dispatch.systemPrompt }
+          : staticIdentity
+            ? { systemPrompt: staticIdentity }
+            : {}),
+        ...(v2Dispatch && supportsSeam ? { transportPayload: v2Dispatch.transportPayload } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
         ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
         continuityCapsule,

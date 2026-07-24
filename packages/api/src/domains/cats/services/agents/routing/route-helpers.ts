@@ -13,6 +13,7 @@ import type {
   ToolPolicy,
 } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { getContextCacheLayout } from '../../../../../config/context-cache-layout.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
@@ -1473,6 +1474,16 @@ export interface IncrementalContextResult {
   };
   /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
   navigationHeader?: string;
+  /**
+   * ADR-024 D4 (v2 only): per-turn volatile B-layer transport content relocated out of
+   * `contextText` into the tail META slot — navigationHeader, [Agent Inbox Snapshot],
+   * evidence (recallEvidence hybrid search), and coverageMap (contaminated by evidence's
+   * retrievalHints, see report). Empty string in v1 and on all non-smart-window paths —
+   * v1 keeps this content inline in `contextText` (byte-identical, unchanged).
+   * Caller wiring: route-serial/route-parallel feed this into the v2 transport dispatch
+   * meta channel (buildV2TransportDispatch) once those files are unfrozen — see W2-C report.
+   */
+  metaTransportText?: string;
   /** Phase 3B: summary_segments shadow formatter diagnostics. */
   historySummary?: HistorySummaryObservation;
   /** Phase 3D/B3: true when summary governance fell back because a guard failed. */
@@ -1649,6 +1660,20 @@ export function formatAgentStageGate(gate: AgentStageGate | undefined): string {
     `instruction: ${gate.instruction}`,
     '[/Agent Stage Gate]',
   ].join('\n');
+}
+
+/**
+ * ADR-024 §2.6: compact "收件箱" count summary for the [Agent Status] bar
+ * (SystemPromptBuilder.ts buildAgentStatusBarLines / TurnMetaExtras.inboxSnapshotSummary).
+ * Deliberately NOT a data source of its own — just a one-line reformat of the same
+ * AgentIntentSnapshot that formatAgentIntentSnapshot already renders in full below the
+ * status bar. Caller (route-serial/route-parallel, once unfrozen) threads the result
+ * into buildV2TransportDispatch's inboxSnapshotSummary input.
+ */
+export function formatInboxSnapshotSummary(snapshot: AgentIntentSnapshot | undefined): string {
+  if (!snapshot) return '无';
+  const pendingNote = snapshot.requiresUserConfirmation ? '待确认' : snapshot.requiresTask ? '待认领' : '已读';
+  return `${snapshot.messageCount} 条 (${snapshot.intentType}/${pendingNote})`;
 }
 
 export function formatAgentIntentSnapshot(snapshot: AgentIntentSnapshot | undefined): string {
@@ -2989,6 +3014,14 @@ async function assembleSmartWindowContext(
   const budget = options?.contextBudget ?? getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
 
+  // ADR-024 D4: navigationHeader + [Agent Inbox Snapshot] are mandated to the meta slot
+  // under v2 (ADR "navigationHeader / [Agent Inbox Snapshot] → meta"). v1 keeps them
+  // inline in contextText, byte-identical to pre-D4 behavior.
+  const isV2CacheLayout = getContextCacheLayout() === 'v2';
+  const navIntentHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+  const historyNavIntentHeader = isV2CacheLayout ? '' : navIntentHeader;
+  const metaNavIntentHeader = isV2CacheLayout ? navIntentHeader : '';
+
   // 1. Burst detection
   const { burst, omitted } = detectRecentBurst(relevant, hcConfig);
 
@@ -3152,7 +3185,7 @@ async function assembleSmartWindowContext(
   if (effectiveTokenBudget <= 0) {
     const intentionalNoContext = budget.maxContextTokens <= 0;
     return {
-      contextText: [navigationHeader, intentSnapshotText].filter(Boolean).join('\n'),
+      contextText: historyNavIntentHeader,
       boundaryId,
       includedHistoryCount: 0,
       includesCurrentUserMessage: false,
@@ -3161,6 +3194,7 @@ async function assembleSmartWindowContext(
       historyGovernanceDegraded,
       historyGovernanceQualityIssues,
       intentSnapshot,
+      metaTransportText: metaNavIntentHeader,
     };
   }
 
@@ -3235,7 +3269,7 @@ async function assembleSmartWindowContext(
 
     // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
     if (totalTokens() > effectiveTokenBudget) {
-      const minimalContext = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+      const minimalContext = historyNavIntentHeader;
       return {
         contextText: estimateTokens(minimalContext) <= effectiveTokenBudget ? minimalContext : '',
         boundaryId,
@@ -3246,6 +3280,7 @@ async function assembleSmartWindowContext(
         historyGovernanceDegraded,
         historyGovernanceQualityIssues,
         intentSnapshot,
+        metaTransportText: metaNavIntentHeader,
       };
     }
 
@@ -3253,21 +3288,35 @@ async function assembleSmartWindowContext(
   }
 
   // 8. Assemble context packet
+  // ADR-024 D4: evidence (recallEvidence — live per-turn hybrid search, never byte-stable)
+  // and coverageMap (JSON-embeds retrievalHints derived straight from evidenceLines, so its
+  // determinism is contaminated by the same non-determinism) move to the meta slot under v2.
+  // threadMemory/tombstone/anchors stay in history: each is a pure function of the current
+  // omitted/burst message set (no timestamps-at-format-time, no randomness — verified in the
+  // W2-C report), so they satisfy the "same state → same bytes" append-only bar. burst is the
+  // real conversation history and always stays in place.
   const sections: string[] = [];
-  if (finalCoverageMapText) sections.push(finalCoverageMapText);
+  const metaTransportParts: string[] = metaNavIntentHeader ? [metaNavIntentHeader] : [];
+  if (finalCoverageMapText) {
+    if (isV2CacheLayout) metaTransportParts.push(finalCoverageMapText);
+    else sections.push(finalCoverageMapText);
+  }
   if (finalThreadMemoryText) sections.push(finalThreadMemoryText);
   if (finalTombstoneText) sections.push(finalTombstoneText);
   if (finalAnchorLines.length > 0) sections.push(...finalAnchorLines);
   if (finalEvidenceLines.length > 0) {
-    sections.push(`[Related evidence]\n${finalEvidenceLines.join('\n')}\n[/Related evidence]`);
+    const evidenceBlock = `[Related evidence]\n${finalEvidenceLines.join('\n')}\n[/Related evidence]`;
+    if (isV2CacheLayout) metaTransportParts.push(evidenceBlock);
+    else sections.push(evidenceBlock);
   }
   sections.push(...finalBurstLines);
+  const metaTransportText = metaTransportParts.join('\n\n');
 
   const includesCurrentUserMessage = Boolean(
     currentUserMessageId && finalBurstMsgs.some((m) => m.id === currentUserMessageId),
   );
 
-  const contextHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+  const contextHeader = historyNavIntentHeader;
   const historyRecallSmokeText = includedHistorySummary?.mode === 'summary-active' ? formatHistoryRecallSmoke() : '';
   const historySummarySection = finalThreadHistorySummaryText
     ? [finalThreadHistorySummaryText, historyRecallSmokeText, '[Recent Messages]'].filter(Boolean).join('\n')
@@ -3285,7 +3334,7 @@ async function assembleSmartWindowContext(
 
   // Final hard cap: envelope overhead may push total over budget
   if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
-    const minimalContext = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
+    const minimalContext = historyNavIntentHeader;
     return {
       contextText: estimateTokens(minimalContext) <= effectiveTokenBudget ? minimalContext : '',
       boundaryId,
@@ -3296,6 +3345,7 @@ async function assembleSmartWindowContext(
       historyGovernanceDegraded,
       historyGovernanceQualityIssues,
       intentSnapshot,
+      metaTransportText: metaNavIntentHeader,
     };
   }
 
@@ -3323,5 +3373,6 @@ async function assembleSmartWindowContext(
     },
     navigationHeader,
     intentSnapshot,
+    metaTransportText,
   };
 }

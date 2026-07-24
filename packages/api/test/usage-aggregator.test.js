@@ -57,6 +57,8 @@ describe('aggregateUsageByDay', () => {
       inputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadRatio: 0,
       costUsd: 0,
       invocations: 0,
     });
@@ -79,6 +81,8 @@ describe('aggregateUsageByDay', () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheReadTokens: 200,
+      cacheCreationTokens: 0,
+      cacheReadRatio: 0.2,
       costUsd: 0.05,
       participations: 1,
     });
@@ -86,6 +90,8 @@ describe('aggregateUsageByDay', () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheReadTokens: 200,
+      cacheCreationTokens: 0,
+      cacheReadRatio: 0.2,
       costUsd: 0.05,
       invocations: 1,
     });
@@ -93,6 +99,8 @@ describe('aggregateUsageByDay', () => {
       inputTokens: 1000,
       outputTokens: 500,
       cacheReadTokens: 200,
+      cacheCreationTokens: 0,
+      cacheReadRatio: 0.2,
       costUsd: 0.05,
       invocations: 1,
     });
@@ -284,7 +292,86 @@ describe('aggregateUsageByDay', () => {
     assert.equal(result.daily[0].cats.opus.inputTokens, 1000);
     assert.equal(result.daily[0].cats.opus.outputTokens, 0);
     assert.equal(result.daily[0].cats.opus.cacheReadTokens, 0);
+    assert.equal(result.daily[0].cats.opus.cacheCreationTokens, 0);
+    assert.equal(result.daily[0].cats.opus.cacheReadRatio, 0);
     assert.equal(result.daily[0].cats.opus.costUsd, 0);
+  });
+
+  // ADR-024 W1-A: cache telemetry (cache_read_input_tokens / cache_creation_input_tokens)
+  test('ADR-024: cacheCreationTokens accumulates independently of cacheReadTokens', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      makeRecord('inv-1', anchor - 4 * 3600_000, {
+        opus: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 100, cacheCreationTokens: 50, costUsd: 0.01 },
+      }),
+      makeRecord('inv-2', anchor + 2 * 3600_000, {
+        opus: { inputTokens: 2000, outputTokens: 300, cacheReadTokens: 400, cacheCreationTokens: 0, costUsd: 0.02 },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    const opus = result.daily[0].cats.opus;
+    assert.equal(opus.cacheReadTokens, 500);
+    assert.equal(opus.cacheCreationTokens, 50);
+    assert.equal(opus.inputTokens, 3000);
+    // ratio = cacheReadTokens / inputTokens = 500/3000 = 0.1667 (rounded to 4dp)
+    assert.equal(opus.cacheReadRatio, 0.1667);
+  });
+
+  test('ADR-024: non-Claude providers without cache-creation equivalent default to 0, not fabricated', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      makeRecord('inv-1', anchor, {
+        // Kimi-style usage: no cacheReadTokens/cacheCreationTokens field at all.
+        kimi: { inputTokens: 500, outputTokens: 100 },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    assert.equal(result.daily[0].cats.kimi.cacheReadTokens, 0);
+    assert.equal(result.daily[0].cats.kimi.cacheCreationTokens, 0);
+    assert.equal(result.daily[0].cats.kimi.cacheReadRatio, 0);
+  });
+
+  test('ADR-024: cacheReadRatio is 0 (not NaN/Infinity) when inputTokens is 0', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      makeRecord('inv-1', anchor, {
+        opus: { cacheReadTokens: 50 }, // no inputTokens at all → resolveInputTokens() falls back to 0
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    assert.equal(result.daily[0].cats.opus.inputTokens, 0);
+    assert.equal(result.daily[0].cats.opus.cacheReadRatio, 0);
+    assert.ok(Number.isFinite(result.daily[0].cats.opus.cacheReadRatio));
+  });
+
+  test('ADR-024: grandTotal cacheReadRatio reflects cross-day cache-read totals over cross-day input totals', async () => {
+    const { aggregateUsageByDay } = await import('../dist/domains/cats/services/usage-aggregator.js');
+    const anchor = todayNoon();
+    const records = [
+      makeRecord('inv-day1', anchor - ONE_DAY, {
+        opus: { inputTokens: 1000, cacheReadTokens: 800 },
+      }),
+      makeRecord('inv-day2', anchor, {
+        opus: { inputTokens: 1000, cacheReadTokens: 200 },
+      }),
+    ];
+
+    const result = aggregateUsageByDay(records, { days: 7 });
+
+    // grandTotal: 1000 read / 2000 input = 0.5, independent of the two days'
+    // individual ratios (0.8 and 0.2) — must not average the per-day ratios.
+    assert.equal(result.grandTotal.inputTokens, 2000);
+    assert.equal(result.grandTotal.cacheReadTokens, 1000);
+    assert.equal(result.grandTotal.cacheReadRatio, 0.5);
   });
 
   test('falls back to lastTurnInputTokens/contextUsedTokens for providers without normalized input tokens', async () => {

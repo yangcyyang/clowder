@@ -417,6 +417,18 @@ export interface InvocationParams {
   readonly isLastCat: boolean;
   /** Static identity prompt — prepended to prompt on new sessions (gated by F-BLOAT logic) */
   readonly systemPrompt?: string;
+  /**
+   * ADR-024 D2: structured four-slot payload (CONTEXT_CACHE_LAYOUT=v2, gated by the route
+   * layer's `TRANSPORT_SEAM_CLIENT_IDS` allowlist — Claude-only in W1-B, extended to the
+   * rest of the W2-E-verified providers). When present the caller has already ordered
+   * `prompt` as history→meta→userMsg, so this layer does NOT prepend systemPrompt into the
+   * `-p` body/blob — it hands `systemPrompt`/`transportPayload` to the adapter (its own
+   * system channel for Claude/Pi/CatAgent, or a single-blob prepend for the rest) and
+   * forwards this payload for direct slot mapping. Gating on `transportPayload` (not just
+   * `systemPrompt`) is what flips `useTransportSeam` below and skips the resume-gated
+   * prepend — the fix for non-Claude resumed sessions losing system content each turn.
+   */
+  readonly transportPayload?: import('../../types.js').AgentServiceOptions['transportPayload'];
   /** F108 fix: InvocationRecordStore's parent invocation ID for worklist key alignment */
   readonly parentInvocationId?: string;
   /** F121: The A2A trigger message ID for auto-replyTo */
@@ -1434,8 +1446,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F070-P2: missionPrefix (dispatch context) is prepended for external projects
     const promptWithMission = missionPrefix ? `${missionPrefix}\n\n${prompt}` : prompt;
 
+    // ADR-024 D2 (v2 transport seam): when the caller supplies a structured
+    // transportPayload, the system slot is delivered via the adapter's system
+    // channel (options.systemPrompt → --append-system-prompt), NOT prepended into
+    // the `-p` body — otherwise system would be injected twice. Gated by payload
+    // presence, so v1 and non-seam adapters keep the existing prepend behavior.
+    const useTransportSeam = !!params.transportPayload;
     const effectivePrompt =
-      injectSystemPrompt && params.systemPrompt
+      !useTransportSeam && injectSystemPrompt && params.systemPrompt
         ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
         : `${promptWithMission}`;
     const promptSourceBreakdown = estimatePromptSourceBreakdown({
@@ -1555,6 +1573,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         stallAutoKill: true,
       },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
+      // ADR-024 D2: v2 transport seam — hand the system slot to the adapter's system
+      // channel and forward the structured payload for direct slot mapping.
+      ...(params.transportPayload
+        ? {
+            transportPayload: params.transportPayload,
+            ...(params.systemPrompt ? { systemPrompt: params.systemPrompt } : {}),
+          }
+        : {}),
       parentSpan: invocationSpan,
     };
 

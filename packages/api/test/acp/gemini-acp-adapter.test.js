@@ -269,6 +269,33 @@ describe('GeminiAcpAdapter', () => {
     assert.ok(promptText.includes('user question'), 'Prompt should contain user question');
   });
 
+  // ADR-024 W2-E: transportPayload.system wins over a stale `systemPrompt`, and
+  // the four slots stay ordered system → history → meta → userMsg (ACP has no
+  // system-prompt field on session/prompt — single blob prepend, same as gemini-cli).
+  it('W2-E: transportPayload.system wins over stale systemPrompt; system → history → meta → userMsg', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+    const adapter = new GeminiAcpAdapter({ catId: 'gemini', pool, poolKey: TEST_POOL_KEY, projectRoot: '/tmp' });
+    const promptBody = ['HIST_MARKER', 'META_MARKER', 'USER_MARKER'].join('\n\n---\n\n');
+
+    for await (const _ of adapter.invoke(promptBody, {
+      systemPrompt: 'STALE_SHOULD_NOT_APPEAR',
+      transportPayload: { system: 'SYS_MARKER', history: 'HIST_MARKER', meta: 'META_MARKER', userMsg: 'USER_MARKER' },
+    })) {
+    }
+
+    const promptReq = captured.find((m) => m.method === 'session/prompt');
+    assert.ok(promptReq, 'Should have sent session/prompt');
+    const promptText = promptReq.params.prompt[0].text;
+    assert.ok(!promptText.includes('STALE_SHOULD_NOT_APPEAR'), 'stale systemPrompt must not appear');
+    const iSys = promptText.indexOf('SYS_MARKER');
+    const iHist = promptText.indexOf('HIST_MARKER');
+    const iMeta = promptText.indexOf('META_MARKER');
+    const iUser = promptText.indexOf('USER_MARKER');
+    assert.ok(iSys >= 0 && iHist >= 0 && iMeta >= 0 && iUser >= 0);
+    assert.ok(iSys < iHist && iHist < iMeta && iMeta < iUser, 'system → history → meta → userMsg');
+  });
+
   it('P1-2: classifies mcp_pollution errors', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
 

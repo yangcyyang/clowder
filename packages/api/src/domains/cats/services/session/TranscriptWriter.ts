@@ -19,6 +19,7 @@ import {
   extractContinuityCapsuleFromSystemInfo,
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+import { stripMetaBlockSegments } from '../context/meta-persistence-guard.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -362,7 +363,11 @@ function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim
 }
 
 function normalizeVisibleText(text: string, opts?: { trim?: boolean }): string | null {
-  const sanitized = stripLeakedToolCallPayload(text.replace(/[\x00-\x08\x0b-\x1f]/g, ''));
+  // ADR-024 D3: strip META-tagged segments at the point visible text is
+  // derived for `ExtractiveDigestV1.recentMessages` — this is the ingestion
+  // point into the persisted digest.extractive.json (the "compression"
+  // output for this module), so meta must never survive past here.
+  const sanitized = stripMetaBlockSegments(stripLeakedToolCallPayload(text.replace(/[\x00-\x08\x0b-\x1f]/g, '')));
   if (sanitized.trim().length === 0) return null;
   return opts?.trim === false ? sanitized : sanitized.trim();
 }

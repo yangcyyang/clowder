@@ -207,8 +207,16 @@ export class AntigravityAgentService implements AgentService {
       const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
       const promptBody = appendLocalImagePathHints(prompt, imagePaths);
 
-      const effectivePrompt = options?.systemPrompt
-        ? `${options.systemPrompt}${workspaceHint}${callbackFallback}\n\n---\n\n${promptBody}`
+      // ADR-024 D2/W2-E: Antigravity has no stable system-injection channel (LS
+      // cascade prompt only) — explicit degradation per ADR, whole-blob prepend.
+      // Order stays system → (adapter-local workspace/callback hints) →
+      // history → meta → userMsg. Prefer the seam's system slot (present every
+      // turn, independent of session-resume gating) over the legacy
+      // `systemPrompt` derived string; `prompt`/`promptBody` is already ordered
+      // history → meta → userMsg by the caller when the seam ran.
+      const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+      const effectivePrompt = systemSlot
+        ? `${systemSlot}${workspaceHint}${callbackFallback}\n\n---\n\n${promptBody}`
         : workspaceHint || callbackFallback
           ? `${`${workspaceHint}${callbackFallback}`.trimStart()}\n\n---\n\n${promptBody}`
           : promptBody;

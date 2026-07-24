@@ -38,6 +38,13 @@ export class A2AAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const taskId = randomUUID();
 
+    // ADR-024 D2/W2-E: A2A JSON-RPC has no separate system field on `tasks/send`;
+    // A2A never had system-prompt support before W2-E, so this is new capability,
+    // strictly gated on the seam having run (v1 / no-transportPayload callers are
+    // byte-identical to pre-W2-E — the text part carried only `prompt` before).
+    const systemSlot = options?.transportPayload?.system ?? options?.systemPrompt;
+    const effectivePrompt = systemSlot ? `${systemSlot}\n\n${prompt}` : prompt;
+
     const body = {
       jsonrpc: '2.0' as const,
       id: taskId,
@@ -46,7 +53,7 @@ export class A2AAgentService implements AgentService {
         id: taskId,
         message: {
           role: 'user' as const,
-          parts: [{ type: 'text' as const, text: prompt }],
+          parts: [{ type: 'text' as const, text: effectivePrompt }],
         },
       },
     };

@@ -695,6 +695,69 @@ export interface StaticIdentityOptions {
   projectContext?: string | null;
   /** Runtime max prompt budget used to decide low-priority LESSONS injection. */
   maxPromptTokens?: number;
+  /**
+   * ADR-024 context-cache layout.
+   * 'v1' (default): memory/lessons/project stay inline in the static prefix (current behavior).
+   * 'v2': those session-writable blocks are OMITTED here and relocated to the tail
+   *   META block (buildTurnMetaBlock) so the frozen system prefix stays cacheable (D1).
+   */
+  cacheLayout?: import('../../../../config/context-cache-layout.js').ContextCacheLayout;
+}
+
+/**
+ * ADR-024 D1: session-writable context blocks, extracted so both the v1 static
+ * prefix and the v2 tail META block render them with identical bytes.
+ * (v1 keeps them in buildStaticIdentity; v2 moves them into buildTurnMetaBlock.)
+ */
+function buildAgentMemoryLines(agentMemoryContext?: string | null): string[] {
+  const agentMemory = summarizeAgentMemoryForPrompt(agentMemoryContext ?? '');
+  if (!agentMemory) return [];
+  return [
+    '',
+    '## 跨 Session 记忆（持久化）',
+    '只注入 ≤200 字摘要，用于恢复当前状态、已关闭决策、行为偏好、环境 gotcha；需要全文时按需读取 memory 文件。',
+    '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md`；若与当前指令/事实冲突，以当前为准。',
+    '',
+    agentMemory,
+  ];
+}
+
+function buildLessonsLines(
+  lessonsContextRaw: string | null | undefined,
+  currentPrompt: string,
+  maxPromptTokens?: number,
+): string[] {
+  const lessonsContext = lessonsContextRaw?.trim();
+  if (!lessonsContext || !shouldInjectLessonsContext(currentPrompt, lessonsContext, maxPromptTokens)) return [];
+  return [
+    '',
+    '## 公共踩坑记录（LESSONS.md，低优先级）',
+    '这些是团队已验证的避坑经验，只用于提醒；不得覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
+    '',
+    '```markdown',
+    lessonsContext,
+    '```',
+  ];
+}
+
+function buildProjectContextLines(
+  projectContextRaw: string | null | undefined,
+  currentPrompt: string,
+  maxPromptTokens?: number,
+): string[] {
+  const projectContext = projectContextRaw?.trim();
+  if (!projectContext || !shouldInjectProjectContext(currentPrompt, projectContext, maxPromptTokens)) return [];
+  return [
+    '',
+    '## 项目事实源四件套（只读参考）',
+    '项目事实源来自 `.cat-cafe/projects/{project}/brief.md`、`progress.md`、`decisions.md` 和 `handoff-index.md`，用于快速恢复目标、进度、已拍板决策和接手入口。',
+    '只作参考，不覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实；接手时先读 handoff-index，不默认展开所有 handoff 或 handoff-log。',
+    '参与跨 session 项目时，完成阶段性工作后按需更新 progress.md；若提示 needs_brief，先补 brief.md 再推进长期任务。',
+    '',
+    '```markdown',
+    projectContext,
+    '```',
+  ];
 }
 
 /**
@@ -817,44 +880,13 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // sanity-line values (T2/T3) belong in buildInvocationContext, not here (KV-cache prefix stability).
   lines.push('', SESSION_SANITY_DIGEST);
 
-  const agentMemory = summarizeAgentMemoryForPrompt(options?.agentMemoryContext ?? '');
-  if (agentMemory) {
-    lines.push(
-      '',
-      '## 跨 Session 记忆（持久化）',
-      '只注入 ≤200 字摘要，用于恢复当前状态、已关闭决策、行为偏好、环境 gotcha；需要全文时按需读取 memory 文件。',
-      '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md`；若与当前指令/事实冲突，以当前为准。',
-      '',
-      agentMemory,
-    );
-  }
-
-  const lessonsContext = options?.lessonsContext?.trim();
-  if (lessonsContext && shouldInjectLessonsContext(lines.join('\n'), lessonsContext, options?.maxPromptTokens)) {
-    lines.push(
-      '',
-      '## 公共踩坑记录（LESSONS.md，低优先级）',
-      '这些是团队已验证的避坑经验，只用于提醒；不得覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实。',
-      '',
-      '```markdown',
-      lessonsContext,
-      '```',
-    );
-  }
-
-  const projectContext = options?.projectContext?.trim();
-  if (projectContext && shouldInjectProjectContext(lines.join('\n'), projectContext, options?.maxPromptTokens)) {
-    lines.push(
-      '',
-      '## 项目事实源四件套（只读参考）',
-      '项目事实源来自 `.cat-cafe/projects/{project}/brief.md`、`progress.md`、`decisions.md` 和 `handoff-index.md`，用于快速恢复目标、进度、已拍板决策和接手入口。',
-      '只作参考，不覆盖当前用户指令、Pack 指令、输出协议、共享家规或代码事实；接手时先读 handoff-index，不默认展开所有 handoff 或 handoff-log。',
-      '参与跨 session 项目时，完成阶段性工作后按需更新 progress.md；若提示 needs_brief，先补 brief.md 再推进长期任务。',
-      '',
-      '```markdown',
-      projectContext,
-      '```',
-    );
+  // ADR-024 D1: in v2 these session-writable blocks move to the tail META block
+  // (buildTurnMetaBlock) so the frozen system prefix stays byte-stable for KV-cache.
+  // v1 (default) keeps them inline here — byte-for-byte identical to prior behavior.
+  if ((options?.cacheLayout ?? 'v1') === 'v1') {
+    lines.push(...buildAgentMemoryLines(options?.agentMemoryContext));
+    lines.push(...buildLessonsLines(options?.lessonsContext, lines.join('\n'), options?.maxPromptTokens));
+    lines.push(...buildProjectContextLines(options?.projectContext, lines.join('\n'), options?.maxPromptTokens));
   }
 
   // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
@@ -876,13 +908,32 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 }
 
 /**
- * Build dynamic invocation context — changes per call.
- * Includes: teammates, mode, chain position, prompt tags.
- * (MCP tools and 铲屎官 reference moved to buildStaticIdentity for session-level injection.)
+ * ADR-024 D1: the F042 Identity line — the one `static`-class fragment of the old
+ * invocationContext. In v2 it is pinned into the system slot (D1 明文例外, F042
+ * anti-collapse); in v1 it stays at the head of buildInvocationContext.
  */
-export function buildInvocationContext(context: InvocationContext): string {
+export function buildInvocationIdentityLine(context: InvocationContext): string {
   const config = getConfig(context.catId as string);
   if (!config) return '';
+  const runtimeModel = (() => {
+    try {
+      return getCatModel(context.catId as string);
+    } catch {
+      return config.defaultModel;
+    }
+  })();
+  // F042: Identity constant — pinned per invocation to survive compression.
+  return `Identity: ${config.displayName}${config.nickname ? `/${config.nickname}` : ''} (@${context.catId}, model=${runtimeModel})`;
+}
+
+/**
+ * ADR-024 D1: the volatile per-turn body of the old invocationContext (everything
+ * EXCEPT the F042 Identity line). Returned as lines so buildInvocationContext (v1)
+ * and buildTurnMetaBlock (v2 meta slot) render byte-identical content.
+ */
+function buildTurnMetaLines(context: InvocationContext): string[] {
+  const config = getConfig(context.catId as string);
+  if (!config) return [];
 
   const lines: string[] = [];
   const runtimeModel = (() => {
@@ -892,11 +943,6 @@ export function buildInvocationContext(context: InvocationContext): string {
       return config.defaultModel;
     }
   })();
-
-  // F042: Identity constant — pinned per invocation to survive compression.
-  lines.push(
-    `Identity: ${config.displayName}${config.nickname ? `/${config.nickname}` : ''} (@${context.catId}, model=${runtimeModel})`,
-  );
 
   // F042 + F167: A2A direct-message reply target + identity anti-spoofing.
   // When handoff comes from a same-breed variant (same displayName, different catId),
@@ -1152,6 +1198,116 @@ export function buildInvocationContext(context: InvocationContext): string {
     );
   }
 
+  return lines;
+}
+
+/**
+ * Build dynamic invocation context — changes per call.
+ * Includes: teammates, mode, chain position, prompt tags.
+ * (MCP tools and 铲屎官 reference moved to buildStaticIdentity for session-level injection.)
+ *
+ * v1 shape preserved byte-for-byte: identity line followed by the volatile body.
+ */
+export function buildInvocationContext(context: InvocationContext): string {
+  const config = getConfig(context.catId as string);
+  if (!config) return '';
+  return [buildInvocationIdentityLine(context), ...buildTurnMetaLines(context)].join('\n');
+}
+
+/**
+ * ADR-024 D1/D3: header marking the tail META block. Kept recognizable so the
+ * persistence-exclusion invariant (W2-D) can strip META from transcript/seal/
+ * summary ingestion, and so a cat does not mistake META for the user message.
+ */
+export const META_BLOCK_HEADER = '[META] 本轮动态上下文（每轮重算，不写入历史/记忆，勿当作用户消息回复）';
+
+export interface TurnMetaExtras {
+  /** Cross-session memory summary, relocated from static identity (D1). */
+  readonly agentMemoryContext?: string | null;
+  /** LESSONS.md low-priority context, relocated from static identity (D1). */
+  readonly lessonsContext?: string | null;
+  /** Project fact-source four-piece, relocated from static identity (D1). */
+  readonly projectContext?: string | null;
+  /** Budget used by the lessons/project injection gates. */
+  readonly maxPromptTokens?: number;
+  /**
+   * ADR-024 §2.6: pre-formatted "收件箱" line for the [Agent Status] bar — a compact
+   * count summary of the C-layer [Agent Inbox Snapshot] (route-helpers.ts buildAgentIntentSnapshot).
+   * Same pattern as agentMemoryContext/lessonsContext/projectContext: this module never
+   * reaches across into route-helpers.ts itself (would be circular — route-helpers.ts already
+   * imports FROM this file); the caller formats the summary (see route-helpers.ts
+   * formatInboxSnapshotSummary) and threads it through here. Renders "无" when omitted.
+   */
+  readonly inboxSnapshotSummary?: string | null;
+}
+
+/**
+ * ADR-024 §2.6 (铲屎官拍板新增): unified status bar, rendered first inside the tail
+ * META block (right after META_BLOCK_HEADER). Purely a reformat of data
+ * buildTurnMetaLines / InvocationContext already carry — no new data sources, no new
+ * plumbing beyond the existing TurnMetaExtras channel already used for D1's relocated
+ * memory/lessons/project blocks. The original turnMetaLines content (full Task Gate
+ * text, full contextUsageWarning text, A2A source, ping-pong warning, teammates, …)
+ * still renders in full immediately afterward — this bar is a summary, not a replacement.
+ */
+function buildAgentStatusBarLines(context: InvocationContext, extras?: TurnMetaExtras): string[] {
+  const now = new Date();
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const timeStr = `${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const voiceLabel = context.voiceMode ? 'voice-on' : 'voice-off';
+
+  const lines: string[] = ['[Agent Status]', `时间: ${timeStr} · 模式: ${context.mode}/${voiceLabel}`];
+
+  // contextUsageWarning 水位数字：有则显示，无则整行省略（ADR §2.6 明文）。
+  if (context.contextUsageWarning) {
+    const percent = Math.round(context.contextUsageWarning.ratio * 100);
+    lines.push(`上下文: ${percent}%（黄线 70%）`);
+  }
+
+  // 任务门：复用 buildRuntimeTaskGateLines 的同一判定条件（threadId 或 currentUserMessageId 存在才有 Task Gate）。
+  const hasTaskGate = Boolean(context.threadId || context.currentUserMessageId);
+  if (hasTaskGate) {
+    const surface = `thread=${context.threadId ?? '$CAT_CAFE_THREAD_ID'}${
+      context.currentUserMessageId ? ` msg=${context.currentUserMessageId}` : ''
+    }`;
+    const taskPart = context.currentTask
+      ? ` taskId=${context.currentTask.id} owner=${context.currentTask.ownerCatId ?? 'unassigned'} status=${context.currentTask.status}`
+      : '';
+    lines.push(`任务门: ${surface}${taskPart}`);
+  } else {
+    lines.push('任务门: 无');
+  }
+
+  lines.push(`收件箱: ${extras?.inboxSnapshotSummary?.trim() || '无'}`);
+
+  // 预算行（tokens 用量 / cache-read 占比）：待 W1-A 遥测聚合（cache_read_input_tokens 等）接入后，
+  // 在此插入一行，例如 `预算: ${used}/${max} tokens · cache-read ${cacheReadPct}%`。当前无数据来源，先不渲染。
+
+  return lines;
+}
+
+/**
+ * ADR-024 D1: the v2 tail META block. Contains the volatile per-turn body PLUS the
+ * session-writable memory/lessons/project blocks moved out of the static prefix.
+ * Every turn this is recomputed and placed AFTER history, right before the user
+ * message — the F042 Identity line is deliberately NOT here (it lives in system).
+ *
+ * ADR-024 §2.6: the [Agent Status] bar renders first (right after META_BLOCK_HEADER),
+ * then the rest of turnMetaLines (A2A source / full warning text / etc.) unchanged.
+ */
+export function buildTurnMetaBlock(context: InvocationContext, extras?: TurnMetaExtras): string {
+  const config = getConfig(context.catId as string);
+  if (!config) return '';
+  const lines: string[] = [
+    META_BLOCK_HEADER,
+    ...buildAgentStatusBarLines(context, extras),
+    '',
+    ...buildTurnMetaLines(context),
+  ];
+  // D1: session-writable reference context relocated from buildStaticIdentity.
+  lines.push(...buildAgentMemoryLines(extras?.agentMemoryContext));
+  lines.push(...buildLessonsLines(extras?.lessonsContext, lines.join('\n'), extras?.maxPromptTokens));
+  lines.push(...buildProjectContextLines(extras?.projectContext, lines.join('\n'), extras?.maxPromptTokens));
   return lines.join('\n');
 }
 

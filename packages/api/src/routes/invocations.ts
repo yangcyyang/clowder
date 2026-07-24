@@ -58,6 +58,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       status: record.status,
       phase: record.phase,
       ...(record.error ? { error: record.error } : {}),
+      // ADR-024 W1-A: expose per-cat token usage (including cacheReadTokens /
+      // cacheCreationTokens when the provider reports them) so cache-hit
+      // telemetry is queryable per invocation, not just in the daily rollup.
+      ...(record.usageByCat ? { usageByCat: record.usageByCat } : {}),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };

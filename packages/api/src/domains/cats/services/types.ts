@@ -289,6 +289,13 @@ export interface AgentServiceOptions {
   auditContext?: AuditContext;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
+  /**
+   * ADR-024 D2: structured four-slot transport payload. Present only under
+   * CONTEXT_CACHE_LAYOUT=v2 for adapters wired to the seam (Claude in W1-B).
+   * When present, the adapter maps slots directly (system → --append-system-prompt,
+   * `-p` = history → meta → userMsg) instead of receiving a pre-joined prompt.
+   */
+  transportPayload?: import('./agents/transport/assemble-transport-payload.js').TransportPayload;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
   spawnCliOverride?: SpawnCliOverride;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */

@@ -13,6 +13,7 @@
  */
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import { dropMetaTaggedEntries } from '../context/meta-persistence-guard.js';
 import type { ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
 import type { DecisionSignals } from './extractDecisionSignals.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
@@ -104,6 +105,17 @@ export function buildThreadMemory(
   signals?: DecisionSignals,
   recentArtifacts?: ThreadMemoryV1['recentArtifacts'],
 ): ThreadMemoryV1 {
+  // ADR-024 D3: strip META-tagged entries from the input snapshot before any
+  // of it is merged into persisted ThreadMemory. This is the final ingestion
+  // point of the compression pipeline — defense-in-depth even though
+  // upstream callers (SessionSealer.extractSignals) already filter their own
+  // transcript snapshot before producing `signals`.
+  const safeSignals: DecisionSignals | undefined = signals && {
+    decisions: dropMetaTaggedEntries(signals.decisions),
+    openQuestions: dropMetaTaggedEntries(signals.openQuestions),
+    artifacts: dropMetaTaggedEntries(signals.artifacts),
+  };
+
   // R1 P1-1: session number comes from digest.seq (1-based display), not merge count
   const sessionNumber = newDigest.seq + 1;
   const mergeCount = (existing?.sessionsIncorporated ?? 0) + 1;
@@ -135,14 +147,14 @@ export function buildThreadMemory(
     updatedAt: Date.now(),
   };
 
-  if (signals) {
+  if (safeSignals) {
     const existDecisions = existing?.decisions ?? [];
     const existQuestions = existing?.openQuestions ?? [];
     const existArtifacts = existing?.artifacts ?? [];
 
-    const mergedDecisions = dedupStrings([...signals.decisions, ...existDecisions]);
-    const mergedQuestions = dedupStrings([...signals.openQuestions, ...existQuestions]);
-    const mergedArtifacts = dedupStrings([...signals.artifacts, ...existArtifacts]);
+    const mergedDecisions = dedupStrings([...safeSignals.decisions, ...existDecisions]);
+    const mergedQuestions = dedupStrings([...safeSignals.openQuestions, ...existQuestions]);
+    const mergedArtifacts = dedupStrings([...safeSignals.artifacts, ...existArtifacts]);
 
     if (mergedDecisions.length > 0) result.decisions = mergedDecisions.slice(0, MAX_DECISIONS);
     if (mergedQuestions.length > 0) result.openQuestions = mergedQuestions.slice(0, MAX_OPEN_QUESTIONS);

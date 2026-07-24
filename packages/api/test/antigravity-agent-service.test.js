@@ -67,6 +67,31 @@ describe('AntigravityAgentService (Bridge)', () => {
     assert.equal(messages[1].metadata.modelVerified, false);
   });
 
+  // ADR-024 W2-E: transportPayload.system wins over a stale `systemPrompt`, and
+  // the four slots stay ordered system → history → meta → userMsg (Antigravity
+  // has no stable injection channel — LS cascade prompt only — so this is the
+  // documented degradation: whole-blob prepend, order preserved).
+  test('W2-E: transportPayload.system wins over stale systemPrompt; system → history → meta → userMsg', async () => {
+    const bridge = createMockBridge();
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    const promptBody = ['HIST_MARKER', 'META_MARKER', 'USER_MARKER'].join('\n\n---\n\n');
+    await collect(
+      service.invoke(promptBody, {
+        systemPrompt: 'STALE_SHOULD_NOT_APPEAR',
+        transportPayload: { system: 'SYS_MARKER', history: 'HIST_MARKER', meta: 'META_MARKER', userMsg: 'USER_MARKER' },
+      }),
+    );
+
+    const sentPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
+    assert.ok(!sentPrompt.includes('STALE_SHOULD_NOT_APPEAR'), 'stale systemPrompt must not appear');
+    const iSys = sentPrompt.indexOf('SYS_MARKER');
+    const iHist = sentPrompt.indexOf('HIST_MARKER');
+    const iMeta = sentPrompt.indexOf('META_MARKER');
+    const iUser = sentPrompt.indexOf('USER_MARKER');
+    assert.ok(iSys >= 0 && iHist >= 0 && iMeta >= 0 && iUser >= 0);
+    assert.ok(iSys < iHist && iHist < iMeta && iMeta < iUser, 'system → history → meta → userMsg');
+  });
+
   test('prepends systemPrompt to prompt', async () => {
     const bridge = createMockBridge();
     const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });

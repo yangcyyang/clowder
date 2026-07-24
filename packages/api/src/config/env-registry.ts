@@ -597,6 +597,16 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
+    name: 'CONTEXT_CACHE_LAYOUT',
+    defaultValue: 'v1',
+    description:
+      'ADR-024 KV-cache 友好上下文布局开关：v1（默认，与现状字节级一致，零风险）/ v2（四槽布局 [STATIC SYSTEM]→[HISTORY]→[META]→[CURRENT MSG]，把 session 内会写的记忆/lessons/项目/每轮 meta 下放队尾 meta 块以保住历史前缀缓存）。金丝雀灰度用；异常一键回 v1。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+    exampleRecommended: true,
+  },
+  {
     name: 'CAT_CAFE_MESSAGE_BATCHING_THREADS',
     defaultValue: '(未设置)',
     description: '消息批量投递灰度线程白名单，逗号分隔；空值表示关闭。',

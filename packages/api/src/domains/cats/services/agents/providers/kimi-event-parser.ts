@@ -6,6 +6,7 @@
  */
 
 import type { TokenUsage } from '../../types.js';
+import type { TransportPayload } from '../transport/assemble-transport-payload.js';
 import { appendLocalImagePathHints } from './image-cli-bridge.js';
 
 export interface KimiPrintMessage {
@@ -99,12 +100,39 @@ export function readSessionIdFromMessage(message: KimiPrintMessage): string | un
   return undefined;
 }
 
-export function buildKimiPrompt(prompt: string, systemPrompt?: string, imagePaths: readonly string[] = []): string {
+/**
+ * ADR-024 D2/W2-E: Kimi has no separate system channel — kimi-code takes a single
+ * `--prompt` blob. When the v2 transport seam ran (`transportPayload` present),
+ * the system slot comes DIRECTLY off the payload (not the derived `systemPrompt`
+ * string) so it is included on every single call, independent of session-resume
+ * gating. That's the fix for the "known controversy #2" in the W2-E brief: once
+ * Identity (F042) moved into the system slot, non-Claude resumed sessions stopped
+ * reinjecting it every turn — Kimi's single blob always re-sends system, so
+ * reading it here (rather than relying on invoke-single-cat's resume-gated
+ * prepend) closes that gap.
+ *
+ * `prompt` (and thus `basePrompt`) is already ordered history → meta → userMsg by
+ * the caller (seam-rendered) when transportPayload is present — this function
+ * does NOT re-derive that ordering from the payload's other fields, so it stays
+ * pure "four slots → CLI contract" mapping with no adapter-owned meta logic (D2),
+ * and any caller-side augmentation ahead of userMsg (e.g. F070-P2 missionPrefix)
+ * is preserved rather than silently dropped.
+ *
+ * Without transportPayload (v1 / non-seam callers, e.g. direct `systemPrompt`
+ * passers), behavior is byte-identical to the pre-W2-E implementation.
+ */
+export function buildKimiPrompt(
+  prompt: string,
+  systemPrompt?: string,
+  imagePaths: readonly string[] = [],
+  transportPayload?: TransportPayload,
+): string {
   const basePrompt = appendLocalImagePathHints(prompt, imagePaths);
-  if (!systemPrompt?.trim()) return basePrompt;
+  const effectiveSystem = transportPayload ? transportPayload.system : systemPrompt;
+  if (!effectiveSystem?.trim()) return basePrompt;
   return [
     '<system_instructions>',
-    systemPrompt.trim(),
+    effectiveSystem.trim(),
     '</system_instructions>',
     '',
     '<user_request>',

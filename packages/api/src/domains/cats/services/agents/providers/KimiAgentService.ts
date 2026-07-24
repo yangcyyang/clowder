@@ -1,7 +1,5 @@
-/** Kimi Agent Service — kimi-cli subprocess via print mode + stream-json. */
+/** Kimi Agent Service — kimi-code subprocess via prompt mode + stream-json. */
 
-import { rmSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -10,17 +8,14 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
-import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractImagePaths } from './image-paths.js';
 import {
   buildApiKeyEnv,
-  buildProjectMcpArgs,
   readKimiContextUsedTokens,
   readKimiModelConfigInfo,
   readKimiSessionId,
   resolveKimiModelAlias,
-  writeMcpConfigFile,
 } from './kimi-config.js';
 import {
   buildKimiPrompt,
@@ -38,21 +33,17 @@ interface KimiAgentServiceOptions {
   catId?: CatId;
   spawnFn?: SpawnFn;
   model?: string;
-  mcpServerPath?: string;
 }
 
 export class KimiAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
-  private readonly mcpServerPath: string | undefined;
 
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
     this.spawnFn = options?.spawnFn;
     this.model = options?.model ?? getCatModel(this.catId as string);
-    this.mcpServerPath =
-      options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -61,12 +52,9 @@ export class KimiAgentService implements AgentService {
     const metadata: MessageMetadata = { provider: 'kimi', model: effectiveModel };
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
-    const effectivePrompt = buildKimiPrompt(prompt, options?.systemPrompt, imagePaths);
+    const effectivePrompt = buildKimiPrompt(prompt, options?.systemPrompt, imagePaths, options?.transportPayload);
     const workingDirectory = options?.workingDirectory ?? process.cwd();
     const apiKeyEnv = buildApiKeyEnv(effectiveModel, options?.callbackEnv);
-    const tempMcpConfig = this.mcpServerPath
-      ? writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
-      : null;
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
     const supportsThinking =
       modelConfig.capabilities.includes('thinking') ||
@@ -75,7 +63,9 @@ export class KimiAgentService implements AgentService {
       modelConfig.capabilities.includes('image_in') ||
       apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
 
-    const args = ['--print', '--output-format', 'stream-json'];
+    // kimi-code 0.28+ uses prompt mode directly. Older adapter flags such as
+    // --print/--work-dir/--thinking/--mcp-config-file now fail fast with code 1.
+    const args = ['--output-format', 'stream-json'];
     if (options?.sessionId) {
       args.push('--session', options.sessionId);
       metadata.sessionId = options.sessionId;
@@ -87,15 +77,6 @@ export class KimiAgentService implements AgentService {
         timestamp: Date.now(),
       };
     }
-    args.push('--work-dir', workingDirectory);
-    if (supportsThinking || modelConfig.defaultThinking) {
-      args.push('--thinking');
-    }
-    if (tempMcpConfig) {
-      args.push('--mcp-config-file', tempMcpConfig);
-    } else {
-      args.push(...buildProjectMcpArgs(workingDirectory));
-    }
     for (const dir of imageAccessDirs) {
       args.push('--add-dir', dir);
     }
@@ -105,9 +86,21 @@ export class KimiAgentService implements AgentService {
     args.push('--prompt', effectivePrompt);
 
     // User-defined CLI args from the member editor (#567).
-    const userParts: string[] = [];
+    const rawUserParts: string[] = [];
     for (const arg of options?.cliConfigArgs ?? []) {
-      userParts.push(...arg.trim().split(/\s+/));
+      rawUserParts.push(...arg.trim().split(/\s+/));
+    }
+    const removedBooleanFlags = new Set(['--print', '--thinking']);
+    const removedValueFlags = new Set(['--work-dir', '--mcp-config-file']);
+    const userParts: string[] = [];
+    for (let index = 0; index < rawUserParts.length; index += 1) {
+      const part = rawUserParts[index];
+      if (removedBooleanFlags.has(part)) continue;
+      if (removedValueFlags.has(part)) {
+        if (index + 1 < rawUserParts.length && !rawUserParts[index + 1].startsWith('-')) index += 1;
+        continue;
+      }
+      userParts.push(part);
     }
     if (userParts.length > 0) {
       const accumulativeFlags = new Set(['--add-dir']);
@@ -385,14 +378,6 @@ export class KimiAgentService implements AgentService {
         timestamp: Date.now(),
       };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
-    } finally {
-      if (tempMcpConfig) {
-        try {
-          rmSync(dirname(tempMcpConfig), { recursive: true, force: true });
-        } catch {
-          // best-effort cleanup
-        }
-      }
     }
   }
 }

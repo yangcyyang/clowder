@@ -8,6 +8,7 @@
 
 import type { ThreadSummary } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { stripMetaBlockSegments } from '../context/meta-persistence-guard.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
 
@@ -41,7 +42,11 @@ export class AutoSummarizer {
     if (this.inFlight.has(threadId)) return null;
     this.inFlight.add(threadId);
     try {
-      const messages = await this.messageStore.getByThread(threadId, 200);
+      // ADR-024 D3: strip any META-tagged segment from the input snapshot
+      // BEFORE it is inspected/used for extraction — meta is a per-turn
+      // throwaway artifact and must never influence or leak into a summary.
+      const rawMessages = await this.messageStore.getByThread(threadId, 200);
+      const messages = rawMessages.map((m) => ({ ...m, content: stripMetaBlockSegments(m.content) }));
       if (messages.length < MESSAGE_THRESHOLD) return null;
 
       const summaries = await this.summaryStore.listByThread(threadId);

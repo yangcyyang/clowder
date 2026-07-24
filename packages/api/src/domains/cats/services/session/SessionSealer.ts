@@ -13,6 +13,7 @@
 import type { CatId, SealResult, SessionStatus } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { extractRecentArtifacts } from '../agents/routing/artifact-tracking.js';
+import { stripMetaBlockSegments } from '../context/meta-persistence-guard.js';
 import { AuditEventTypes, getEventAuditLog } from '../orchestration/EventAuditLog.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ISummaryStore } from '../stores/ports/SummaryStore.js';
@@ -378,7 +379,12 @@ export class SessionSealer implements ISessionSealer {
             const allEvents = await this.transcriptReader.readAllEvents(record.id, record.threadId, record.catId);
             if (allEvents.length > 0) {
               const handoffSummaries = formatEventsHandoff(allEvents);
-              const chatMessages = formatEventsChat(allEvents);
+              // ADR-024 D3: strip META-tagged segments from the input snapshot
+              // before it feeds generative handoff-digest memory generation.
+              const chatMessages = formatEventsChat(allEvents).map((m) => ({
+                ...m,
+                content: stripMetaBlockSegments(m.content),
+              }));
               const extractive = await this.transcriptReader.readDigest(record.id, record.threadId, record.catId);
 
               const result = await generateHandoffDigest({
@@ -425,10 +431,12 @@ export class SessionSealer implements ISessionSealer {
     catId: string;
   }): Promise<ReturnType<typeof extractDecisionSignals> | undefined> {
     try {
-      // Build transcript text from events
+      // Build transcript text from events.
+      // ADR-024 D3: strip META-tagged segments before this snapshot feeds
+      // decision/open-question/artifact extraction (memory-generation input).
       const events = await this.transcriptReader!.readAllEvents(record.id, record.threadId, record.catId);
       const chatMessages = formatEventsChat(events);
-      const transcriptText = chatMessages.map((m) => m.content).join('\n');
+      const transcriptText = chatMessages.map((m) => stripMetaBlockSegments(m.content)).join('\n');
 
       // Get latest ThreadSummary conclusions (if summaryStore available)
       let summaryConclusions: string[] = [];
