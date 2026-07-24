@@ -25,7 +25,15 @@ exports.default = async function afterPack(context) {
       fs.cpSync(src, dest, { recursive: true });
       console.log(`  afterPack: ${pkg}/node_modules copied`);
     } else {
-      console.warn(`  afterPack: ${src} not found, skipping`);
+      // A missing bundled/deploy/<pkg>/node_modules means the packed app
+      // ships with no runtime dependencies for that package — an installer
+      // that looks fine but crashes on first launch. A warn+skip here lets
+      // electron-builder happily produce a hollow DMG, so fail the pack
+      // instead.
+      throw new Error(
+        `afterPack: ${src} not found. Run desktop/scripts/build-mac.sh Step 2 ` +
+          `(pnpm deploy runtime packages) to generate bundled/deploy/ before packaging.`,
+      );
     }
   }
 };

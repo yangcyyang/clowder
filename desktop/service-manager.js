@@ -4,6 +4,7 @@
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const net = require('net');
+const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
@@ -147,9 +148,9 @@ class ServiceManager {
 
     // ---- Web ----
     this.onStatus('Starting Web frontend...');
-    this._startNextJs();
-    log('Web process spawned, waiting for port ' + this.frontendPort);
-    await this._waitForPort(this.frontendPort, 'Web');
+    // _startNextJs() now owns its own reuse-check + spawn + waitForPort,
+    // mirroring _startApi()'s shape above.
+    await this._startNextJs();
 
     this.onStatus('Ready!');
   }
@@ -258,6 +259,27 @@ class ServiceManager {
 
   async _startApi(nodeExe, userDataDir) {
     const apiEntry = path.join(this.root, 'packages', 'api', 'dist', 'index.js');
+
+    // Reuse-if-alive: mirrors the Redis pattern in _startRedis (probe port,
+    // verify it's really ours, reuse). Without this, an API already bound
+    // to this.apiPort (e.g. a PM2-managed instance) gets a second, doomed
+    // spawn racing for the same port — the spawn either crashes (EADDRINUSE)
+    // leaving a dead child process behind, or _waitForPort coincidentally
+    // observes the *other* process and reports false success. Use
+    // 127.0.0.1 explicitly (not 'localhost') to avoid IPv6 (::1) resolving
+    // to a different, empty socket than the IPv4 listener.
+    if (await this._isPortOpen(this.apiPort)) {
+      const isApi = await this._httpProbe(`http://127.0.0.1:${this.apiPort}/api/ready`, {
+        timeoutMs: 3000,
+        requireOk: true,
+      });
+      if (isApi) {
+        this.onStatus(`API already running on ${this.apiPort}`);
+        return;
+      }
+      log(`Port ${this.apiPort} is occupied by a non-API process — spawning anyway (will likely fail to bind)`);
+    }
+
     // Copy cat-template.json from install root to the writable project dir,
     // and point the API at that copy via CAT_TEMPLATE_PATH. Otherwise the
     // API's cat-config-loader derives projectRoot=dirname(templatePath) from
@@ -294,7 +316,7 @@ class ServiceManager {
 
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
-    return {
+    const env = {
       TELEMETRY_HMAC_SALT: salt,
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
@@ -304,7 +326,31 @@ class ServiceManager {
       TTS_CACHE_DIR: path.join(userDataDir, 'data', 'tts-cache'),
       AUDIT_LOG_DIR: path.join(userDataDir, 'data', 'audit-logs'),
       CLI_RAW_ARCHIVE_DIR: path.join(userDataDir, 'data', 'cli-raw-archive'),
+      // Feature-flag defaults for standalone-spawn mode. These are pure
+      // behavior switches (no paths, no IDs, nothing machine-specific), so
+      // it's safe to hardcode them here. Without this, a ServiceManager-
+      // spawned API silently loses these features because PM2's ecosystem
+      // config (which normally sets them) is not in play.
+      CAT_CAFE_STEER_V2_CLAUDE: '1',
+      CAT_CAFE_CONTEXT_LAYERS: '1',
+      CAT_CAFE_COLLECTION_SECRET_QUARANTINE: '1',
     };
+
+    // Machine-specific config must NOT be hardcoded — this file ships inside
+    // a distributed installer, so values like project-context IDs or
+    // Obsidian vault roots differ per install and can only come from the
+    // host's own environment. Generic passthrough: forward any CAT_CAFE_*
+    // or OBSIDIAN_* variable already present in process.env that this
+    // function did not explicitly set above (covers today's
+    // CAT_CAFE_PROJECT_CONTEXT_IDS / OBSIDIAN_READONLY_ROOTS, and any future
+    // var in these namespaces, with no code changes needed here).
+    for (const key of Object.keys(process.env)) {
+      if ((key.startsWith('CAT_CAFE_') || key.startsWith('OBSIDIAN_')) && !(key in env)) {
+        env[key] = process.env[key];
+      }
+    }
+
+    return env;
   }
 
   async _startRedis(userDataDir) {
@@ -392,7 +438,25 @@ class ServiceManager {
     });
   }
 
-  _startNextJs() {
+  async _startNextJs() {
+    // Reuse-if-alive: same rationale as the check in _startApi — a Next.js
+    // server (e.g. PM2-managed) already bound to this.frontendPort must be
+    // reused, not raced against by a second spawn. Next.js has no /api/ready
+    // equivalent, so any HTTP response on GET / (2xx, 404, whatever) is
+    // treated as "something real is listening here." 127.0.0.1, not
+    // 'localhost', to avoid the IPv6 (::1) false-negative.
+    if (await this._isPortOpen(this.frontendPort)) {
+      const isWeb = await this._httpProbe(`http://127.0.0.1:${this.frontendPort}/`, {
+        timeoutMs: 3000,
+        requireOk: false,
+      });
+      if (isWeb) {
+        this.onStatus(`Web already running on ${this.frontendPort}`);
+        return;
+      }
+      log(`Port ${this.frontendPort} is occupied by a non-Web process — spawning anyway (will likely fail to bind)`);
+    }
+
     const webDir = path.join(this.root, 'packages', 'web');
     const nodeExe = resolveNode(this.root) || 'node';
 
@@ -440,6 +504,8 @@ class ServiceManager {
 
     log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
     this._startProcess('web', cmd, args, { cwd: webDir });
+    log('Web process spawned, waiting for port ' + this.frontendPort);
+    await this._waitForPort(this.frontendPort, 'Web');
   }
 
   _startProcess(name, cmd, args, opts = {}) {
@@ -527,6 +593,23 @@ class ServiceManager {
         resolve(false);
       });
       sock.connect(port, '127.0.0.1');
+    });
+  }
+
+  // HTTP-level "is this really our service" check, used by the API/Web
+  // reuse-if-alive probes above (the Redis equivalent is _verifyRedisPing,
+  // which speaks the Redis wire protocol instead of HTTP).
+  _httpProbe(url, { timeoutMs = 3000, requireOk = false } = {}) {
+    return new Promise((resolve) => {
+      const req = http.get(url, { timeout: timeoutMs }, (res) => {
+        res.resume(); // drain body so the socket can close cleanly
+        resolve(requireOk ? res.statusCode >= 200 && res.statusCode < 300 : true);
+      });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on('error', () => resolve(false));
     });
   }
 

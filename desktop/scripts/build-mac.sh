@@ -61,6 +61,20 @@ warn()  { printf "  \033[0;33m[!!]\033[0m %s\n" "$*"; }
 err()   { printf "  \033[0;31m[ERR]\033[0m %s\n" "$*" >&2; }
 die()   { err "$*"; exit 1; }
 
+# Step 1 silently rebuilds packages/web/.next and packages/api/dist in place.
+# If a local PM2 production instance is serving those same directories, its
+# in-memory chunk manifest goes stale the instant this finishes, and the next
+# page load throws ChunkLoadError. This banner is only a reminder — it does
+# not touch PM2 itself (that's the operator's call, not this script's).
+chunk_rebuild_warning() {
+  printf "\n\033[1;33m########################################################################\033[0m\n"
+  printf "\033[1;33m#\033[0m  \033[1;31m警告\033[0m: 本仓库 packages/web/.next 与 packages/api/dist 已被重建。\n"
+  printf "\033[1;33m#\033[0m  若本机 PM2 生产正在运行，必须立即执行:\n"
+  printf "\033[1;33m#\033[0m      pm2 restart clowder-web clowder-api\n"
+  printf "\033[1;33m#\033[0m  否则页面将出现 ChunkLoadError。\n"
+  printf "\033[1;33m########################################################################\033[0m\n\n"
+}
+
 [[ "$(uname -s)" == "Darwin" ]] || die "build-mac.sh must run on macOS (detected: $(uname -s))"
 
 # ─── Step 1: Build web app ──────────────────────────────────────────────
@@ -73,6 +87,7 @@ if [[ $SKIP_WEB -eq 0 ]]; then
   fi
   pnpm run build
   ok "Web application built"
+  chunk_rebuild_warning
 else
   ok "Skipped (--skip-web)"
 fi
@@ -311,3 +326,7 @@ echo ""
 echo "  First-launch (unsigned): right-click the app → Open, or run:"
 echo "    xattr -cr \"/Applications/Cat Cafe.app\""
 echo "  ========================================"
+
+# Final reminder before the script exits — easy to miss the Step 1 banner
+# scrolling by in a long build log, so repeat it once more at the very end.
+chunk_rebuild_warning
