@@ -89,6 +89,18 @@ export function useChatSocketCallbacks({
         const t = task as Record<string, unknown>;
         if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
         addTask(task as unknown as TaskItem);
+        // [thread-task-design §3 step 1.2] Give the source message an immediate,
+        // prominent "已建任务 …" inline notice the moment task_created lands live —
+        // history reload naturally drops this transient marker and the persistent
+        // MessageTaskBadge chip (driven by taskStore) takes over from then on.
+        const sourceMessageId = typeof t.sourceMessageId === 'string' ? t.sourceMessageId : undefined;
+        const taskThreadId = typeof t.taskThreadId === 'string' ? t.taskThreadId : undefined;
+        const taskId = typeof t.id === 'string' ? t.id : undefined;
+        if (sourceMessageId && taskThreadId && taskId) {
+          patchMessage(sourceMessageId, {
+            extra: { taskCreatedNotice: { taskId, taskThreadId } },
+          });
+        }
       },
       onTaskUpdated: (task) => {
         const t = task as Record<string, unknown>;
@@ -120,8 +132,40 @@ export function useChatSocketCallbacks({
       },
       onThreadBranched: (data) => {
         if (data.sourceThreadId !== threadId) return;
+        // [thread-task-design §2 root cause 2 / §3 step 1.1] This event can legitimately
+        // re-fire for a message that already has live reply activity (e.g. reconnect
+        // replay, or the branch being re-announced) — hardcoding replyCount:0 here used
+        // to clobber a real count that thread_reply_count_updated had already pushed in,
+        // killing the entry indicator. Preserve any existing count/latestReply instead of
+        // stomping it; a genuinely brand-new branch has no prior slockThread, so it still
+        // correctly starts at 0.
+        const existing = useChatStore.getState().messages.find((m) => m.id === data.fromMessageId)?.extra
+          ?.slockThread;
         patchMessage(data.fromMessageId, {
-          extra: { slockThread: { branchThreadId: data.newThreadId, replyCount: 0 } },
+          extra: {
+            slockThread: {
+              ...existing,
+              branchThreadId: data.newThreadId,
+              replyCount: existing?.replyCount ?? 0,
+            },
+          },
+        });
+      },
+      onThreadReplyCountUpdated: (data) => {
+        // [thread-task-design §3 step 1.1] Live counterpart to deriveThreadReplySummary:
+        // server pushes the authoritative count so the entry indicator moves without a
+        // refetch. Broadcast lands on the MAIN thread's room regardless of whether this
+        // viewer ever joined the branch room (see useSocket.ts onThreadReplyCountUpdated).
+        const existing = useChatStore.getState().messages.find((m) => m.id === data.sourceMessageId)?.extra
+          ?.slockThread;
+        patchMessage(data.sourceMessageId, {
+          extra: {
+            slockThread: {
+              ...existing,
+              branchThreadId: data.branchThreadId,
+              replyCount: data.replyCount,
+            },
+          },
         });
       },
       onAuthorizationRequest: handleAuthRequest,

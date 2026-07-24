@@ -347,6 +347,53 @@ describe('useSendMessage thread source', () => {
     }
   });
 
+  // [thread-task-design §1.1] Regression test: deliveryStatus was never consumed
+  // by the frontend — this patch is what lets ChatMessage's "排队中" badge exist
+  // at all for a normal (non-explicit-queue) send that the server smart-defaults
+  // to queued.
+  it('patches deliveryStatus:queued on the reconciled message when server smart-defaults to queued', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'queued', userMessageId: 'msg-server-queued-status' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    expect(mockPatchThreadMessage).toHaveBeenCalledWith(
+      'thread-route',
+      'msg-server-queued-status',
+      expect.objectContaining({ deliveryStatus: 'queued' }),
+    );
+  });
+
+  it('does not patch deliveryStatus when the server processes immediately', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'processing', userMessageId: 'msg-server-immediate' }),
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          overrideThreadId: undefined,
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const call = mockPatchThreadMessage.mock.calls.find(([, id]) => id === 'msg-server-immediate');
+    expect(call?.[2]).not.toHaveProperty('deliveryStatus');
+  });
+
   it('keeps an optimistic split-pane user bubble when server smart-defaults to queued', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,

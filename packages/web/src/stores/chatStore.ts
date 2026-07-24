@@ -1196,8 +1196,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const idSet = new Set(messageIds);
       const updateMsgs = (msgs: ChatMessage[]) => {
-        // Update deliveredAt on existing messages
-        const updated = msgs.map((m) => (idSet.has(m.id) ? { ...m, deliveredAt } : m));
+        // Update deliveredAt on existing messages. [thread-task-design §1.1] Also
+        // clear deliveryStatus:'queued' → 'delivered' here — this is the one place
+        // that actually confirms a queued message reached a cat, so it's the
+        // correct place to retire the "排队中" badge (rather than a timer/guess).
+        const updated = msgs.map((m) =>
+          idSet.has(m.id) ? { ...m, deliveredAt, ...(m.deliveryStatus ? { deliveryStatus: 'delivered' as const } : {}) } : m,
+        );
         const insertedIds = new Set<string>();
         const mentionMessages: ChatMessage[] = [];
         // F117: Insert user bubbles for queue-sent messages not yet in the store

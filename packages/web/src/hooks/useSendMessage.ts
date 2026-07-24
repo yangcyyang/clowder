@@ -200,7 +200,14 @@ export function useSendMessage(activeThreadId?: string) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
           if (body?.userMessageId) {
-            patchThreadMessage(threadId, body.userMessageId, { sendStatus: undefined, sendError: undefined });
+            // [thread-task-design §1.1] Smart-default 'queued' means the server is
+            // still serializing execution internally — surface the "排队中" badge
+            // until markMessagesDelivered() clears it on the messages_delivered event.
+            patchThreadMessage(threadId, body.userMessageId, {
+              sendStatus: undefined,
+              sendError: undefined,
+              ...(body?.status === 'queued' && !isQueueSend ? { deliveryStatus: 'queued' as const } : {}),
+            });
           }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
           setUploadStatus('idle');
@@ -228,7 +235,14 @@ export function useSendMessage(activeThreadId?: string) {
             replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
           }
           if (body?.userMessageId) {
-            patchThreadMessage(threadId, body.userMessageId, { sendStatus: undefined, sendError: undefined });
+            // [thread-task-design §1.1] Smart-default 'queued' means the server is
+            // still serializing execution internally — surface the "排队中" badge
+            // until markMessagesDelivered() clears it on the messages_delivered event.
+            patchThreadMessage(threadId, body.userMessageId, {
+              sendStatus: undefined,
+              sendError: undefined,
+              ...(body?.status === 'queued' && !isQueueSend ? { deliveryStatus: 'queued' as const } : {}),
+            });
           }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
           setUploadStatus('idle');

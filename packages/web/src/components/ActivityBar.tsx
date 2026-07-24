@@ -12,11 +12,20 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { isDailySettingsSection, SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
-type VisualTheme = 'claude' | 'slockv1' | 'slock' | 'kami';
+type VisualTheme = 'claude' | 'slockv1' | 'slock' | 'kami' | 'maka' | 'maka-onedark' | 'maka-nord' | 'maka-catppuccin';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
 const VISUAL_THEME_DEFAULT_MIGRATION_KEY = 'clowder:visual-theme-default:v4';
-const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slockv1', 'slock', 'kami'];
+const VISUAL_THEME_ORDER: VisualTheme[] = [
+  'claude',
+  'slockv1',
+  'slock',
+  'kami',
+  'maka',
+  'maka-onedark',
+  'maka-nord',
+  'maka-catppuccin',
+];
 const DEFAULT_VISUAL_THEME: VisualTheme = 'slock';
 
 const NAV_ITEMS = [
@@ -104,28 +113,38 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
   );
 }
 
-function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
-  const label =
-    theme === 'slockv1'
-      ? 'V1'
-      : theme === 'kami'
-        ? 'K'
-        : theme === 'slock'
-            ? 'SL'
-            : 'C';
+const VISUAL_THEME_BADGE_LABEL: Record<VisualTheme, string> = {
+  claude: 'C',
+  slockv1: 'V1',
+  slock: 'SL',
+  kami: 'K',
+  maka: 'MK',
+  'maka-onedark': 'OD',
+  'maka-nord': 'ND',
+  'maka-catppuccin': 'CP',
+};
 
+function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
   return (
     <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
-      {label}
+      {VISUAL_THEME_BADGE_LABEL[theme]}
     </span>
   );
 }
 
+const VISUAL_THEME_DISPLAY_LABEL: Record<VisualTheme, string> = {
+  claude: 'Claude',
+  slockv1: 'Slock v1',
+  slock: 'Slock',
+  kami: 'KAMI',
+  maka: '指挥室',
+  'maka-onedark': '指挥室·OneDark',
+  'maka-nord': '指挥室·Nord',
+  'maka-catppuccin': '指挥室·Catppuccin',
+};
+
 function getVisualThemeLabel(theme: VisualTheme): string {
-  if (theme === 'kami') return 'KAMI';
-  if (theme === 'slockv1') return 'Slock v1';
-  if (theme === 'slock') return 'Slock';
-  return 'Claude';
+  return VISUAL_THEME_DISPLAY_LABEL[theme];
 }
 
 function normalizeVisualTheme(theme: string | null): VisualTheme {

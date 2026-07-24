@@ -20,6 +20,7 @@ import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageReactions } from './MessageReactions';
 import { MetadataBadge } from './MetadataBadge';
+import { QUEUE_PANEL_FOCUS_EVENT } from './QueuePanel';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
@@ -209,6 +210,75 @@ function MessageTaskBadge({
   );
 }
 
+/**
+ * [thread-task-design §3 step 1.2] Prominent, one-time "task just created" bar
+ * for the exact source message a live task_created event pointed at (gated by
+ * message.extra.taskCreatedNotice — see useChatSocketCallbacks.onTaskCreated).
+ * Rendered INSTEAD OF the compact MessageTaskBadge chip for that message (see
+ * MessageBadgeRow below) so the two never stack redundantly on the same
+ * message; the compact chip still covers every other case (history reload,
+ * tasks without a taskThreadId yet).
+ */
+function TaskCreatedNoticeBar({
+  task,
+  seq,
+  onOpen,
+}: {
+  task: TaskItem;
+  seq: number;
+  onOpen?: (task: TaskItem) => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="task-created-notice-bar"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen?.(task);
+      }}
+      title={`打开任务 Thread：${task.title}`}
+      aria-label={`已建任务 #${seq}，回复将进入任务 Thread`}
+      className="mt-1.5 flex w-fit max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-conn-cyan-bg px-2.5 py-1.5 text-[11px] font-black leading-none text-conn-cyan-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-cyan-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-cyan-ring"
+    >
+      <span aria-hidden>📌</span>
+      <span>已建任务 #{seq}</span>
+      <span aria-hidden className="opacity-60">
+        ·
+      </span>
+      <span>回复将进入任务 Thread →</span>
+    </button>
+  );
+}
+
+/**
+ * [thread-task-design §1.1] "排队中" badge for message.deliveryStatus==='queued'
+ * (server smart-defaulted this send to queue — see useSendMessage.ts). Clears
+ * itself once markMessagesDelivered() flips deliveryStatus to 'delivered' on
+ * the messages_delivered socket event. Clicking opens/expands the existing
+ * QueuePanel via a CustomEvent bridge (QueuePanel owns its own collapsed
+ * state; see QueuePanel.tsx QUEUE_PANEL_FOCUS_EVENT).
+ */
+function QueuedDeliveryBadge({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="queued-delivery-badge"
+      title="排队中 · 点击查看队列"
+      aria-label="消息排队中，点击查看队列"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen();
+      }}
+      className="inline-flex items-center gap-1 rounded-full border border-conn-amber-text/40 bg-conn-amber-bg px-1.5 py-0.5 [font-size:var(--clowder-type-meta)] font-semibold text-conn-amber-text transition-colors hover:bg-conn-amber-ring"
+    >
+      <span aria-hidden>⏳</span>
+      排队中
+    </button>
+  );
+}
+
 type ThreadReplyLatest = {
   id: string;
   catId: string | null;
@@ -285,6 +355,7 @@ function ThreadReplyBadge({
  */
 function MessageBadgeRow({
   task,
+  taskCreatedNotice,
   threadReplyInfo,
   onOpenThread,
   onOpenTaskThread,
@@ -296,6 +367,7 @@ function MessageBadgeRow({
   viewer,
 }: {
   task?: { task: TaskItem; seq: number; assigneeLabel?: string };
+  taskCreatedNotice?: { taskId: string; taskThreadId: string };
   threadReplyInfo?: {
     replyCount: number;
     newCount?: number;
@@ -313,36 +385,44 @@ function MessageBadgeRow({
   const hasReply = !!(threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread);
   if (!task && !hasReply) return null;
 
+  // [thread-task-design §3 step 1.2] Show the fuller notice bar in place of the
+  // compact chip only for the task this live event actually pointed at — avoids
+  // ever rendering both for the same task.
+  const showTaskCreatedNotice = !!(task && taskCreatedNotice && taskCreatedNotice.taskId === task.task.id);
+
   return (
-    <div className="mt-1.5 flex max-w-full flex-wrap items-center gap-1.5">
-      {task && (
-        <MessageTaskBadge
-          task={task.task}
-          seq={task.seq}
-          assigneeLabel={task.assigneeLabel}
-          onOpen={onOpenTaskThread}
+    <>
+      {showTaskCreatedNotice && task && <TaskCreatedNoticeBar task={task.task} seq={task.seq} onOpen={onOpenTaskThread} />}
+      <div className="mt-1.5 flex max-w-full flex-wrap items-center gap-1.5">
+        {task && !showTaskCreatedNotice && (
+          <MessageTaskBadge
+            task={task.task}
+            seq={task.seq}
+            assigneeLabel={task.assigneeLabel}
+            onOpen={onOpenTaskThread}
+          />
+        )}
+        {hasReply && threadReplyInfo && (
+          <ThreadReplyBadge
+            count={threadReplyInfo.replyCount}
+            newCount={threadReplyInfo.newCount}
+            latestReply={threadReplyInfo.latestReply}
+            latestAuthorLabel={
+              threadReplyInfo.latestReply?.catId
+                ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
+                : '你'
+            }
+            onOpen={() => onOpenThread!(messageId)}
+            viewer={viewer}
+          />
+        )}
+        <ThreadAddressActions
+          token={threadAddressToken}
+          onReference={onReferenceThreadAddress}
+          onCopy={onCopyThreadAddress}
         />
-      )}
-      {hasReply && threadReplyInfo && (
-        <ThreadReplyBadge
-          count={threadReplyInfo.replyCount}
-          newCount={threadReplyInfo.newCount}
-          latestReply={threadReplyInfo.latestReply}
-          latestAuthorLabel={
-            threadReplyInfo.latestReply?.catId
-              ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
-              : '你'
-          }
-          onOpen={() => onOpenThread!(messageId)}
-          viewer={viewer}
-        />
-      )}
-      <ThreadAddressActions
-        token={threadAddressToken}
-        onReference={onReferenceThreadAddress}
-        onCopy={onCopyThreadAddress}
-      />
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -563,7 +643,7 @@ export function ChatMessage({
         ? 'text-conn-purple-text bg-conn-purple-bg border border-conn-purple-ring'
         : isError
           ? 'text-conn-red-text bg-conn-red-bg rounded-full'
-          : 'text-[var(--color-cafe-accent)] bg-[var(--color-cafe-accent)]/5';
+          : 'text-[var(--clowder-user-bubble-text)] bg-[var(--clowder-user-bubble-bg)]';
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div
@@ -649,6 +729,17 @@ export function ChatMessage({
             {message.editedAt && (
               <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">（已编辑）</span>
             )}
+            {message.deliveryStatus === 'queued' && (
+              <QueuedDeliveryBadge
+                onOpen={() =>
+                  window.dispatchEvent(
+                    new CustomEvent(QUEUE_PANEL_FOCUS_EVENT, {
+                      detail: { threadId: message.threadId ?? currentThreadId },
+                    }),
+                  )
+                }
+              />
+            )}
           </div>
           <div
             className={
@@ -722,6 +813,7 @@ export function ChatMessage({
             task={
               taskEntry ? { task: taskEntry.task, seq: taskEntry.seq, assigneeLabel: taskAssigneeLabel } : undefined
             }
+            taskCreatedNotice={message.extra?.taskCreatedNotice}
             threadReplyInfo={threadReplyInfo}
             onOpenThread={onOpenThread}
             onOpenTaskThread={onOpenTaskThread}
@@ -877,6 +969,7 @@ export function ChatMessage({
         <MessageReactions messageId={message.id} reactions={message.extra?.reactions} />
         <MessageBadgeRow
           task={taskEntry ? { task: taskEntry.task, seq: taskEntry.seq, assigneeLabel: taskAssigneeLabel } : undefined}
+          taskCreatedNotice={message.extra?.taskCreatedNotice}
           threadReplyInfo={threadReplyInfo}
           onOpenThread={onOpenThread}
           onOpenTaskThread={onOpenTaskThread}

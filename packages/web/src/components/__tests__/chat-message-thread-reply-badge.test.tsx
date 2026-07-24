@@ -441,4 +441,84 @@ describe('ChatMessage thread reply badge', () => {
 
     expect(onOpenTaskThread).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }));
   });
+
+  // [thread-task-design §3 step 1.2] Regression tests for the "已建任务 …" inline
+  // notice bar: task_created socket events used to give zero chat-flow feedback
+  // (useChatSocketCallbacks.onTaskCreated only called addTask into the task
+  // panel store). The bar renders in place of (never alongside) the compact
+  // MessageTaskBadge chip, gated by message.extra.taskCreatedNotice.
+  describe('task_created inline notice bar', () => {
+    it('renders the notice bar instead of the compact chip when taskCreatedNotice matches this task', () => {
+      useTaskStore.setState({ tasks: [makeTask({ taskThreadId: 'thread-task-1' })] });
+      const onOpenTaskThread = vi.fn();
+
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={{
+              ...makeUserMessage(),
+              extra: { taskCreatedNotice: { taskId: 'task-1', taskThreadId: 'thread-task-1' } },
+            }}
+            getCatById={() => undefined}
+            onOpenTaskThread={onOpenTaskThread}
+          />,
+        );
+      });
+
+      const notice = container.querySelector('[data-testid="task-created-notice-bar"]');
+      expect(notice).toBeTruthy();
+      expect(notice?.textContent).toContain('已建任务 #1');
+      expect(notice?.textContent).toContain('回复将进入任务 Thread');
+
+      // Mutually exclusive: the compact chip must not also render for the same task.
+      // ("已建任务 #1" itself contains the substring "任务 #1", so exclude the notice
+      // bar button itself before searching for the compact chip's own button.)
+      const compactChip = Array.from(container.querySelectorAll('button'))
+        .filter((button) => button !== notice)
+        .find((button) => button.textContent?.includes('任务 #1'));
+      expect(compactChip).toBeUndefined();
+
+      act(() => {
+        (notice as HTMLButtonElement).click();
+      });
+      expect(onOpenTaskThread).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }));
+    });
+
+    it('falls back to the compact chip when there is no taskCreatedNotice (history reload)', () => {
+      useTaskStore.setState({ tasks: [makeTask({ taskThreadId: 'thread-task-1' })] });
+
+      act(() => {
+        root.render(<ChatMessage message={makeUserMessage()} getCatById={() => undefined} onOpenTaskThread={vi.fn()} />);
+      });
+
+      expect(container.querySelector('[data-testid="task-created-notice-bar"]')).toBeNull();
+      const compactChip = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('任务 #1'),
+      );
+      expect(compactChip).toBeTruthy();
+    });
+
+    it('does not render the notice bar when taskCreatedNotice points at a different task', () => {
+      useTaskStore.setState({ tasks: [makeTask({ taskThreadId: 'thread-task-1' })] });
+
+      act(() => {
+        root.render(
+          <ChatMessage
+            message={{
+              ...makeUserMessage(),
+              extra: { taskCreatedNotice: { taskId: 'task-other', taskThreadId: 'thread-task-other' } },
+            }}
+            getCatById={() => undefined}
+            onOpenTaskThread={vi.fn()}
+          />,
+        );
+      });
+
+      expect(container.querySelector('[data-testid="task-created-notice-bar"]')).toBeNull();
+      const compactChip = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('任务 #1'),
+      );
+      expect(compactChip).toBeTruthy();
+    });
+  });
 });

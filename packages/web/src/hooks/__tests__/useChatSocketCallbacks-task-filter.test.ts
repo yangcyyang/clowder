@@ -13,8 +13,18 @@ const addMessageMock = vi.fn();
 const addActiveInvocationMock = vi.fn();
 const patchMessageMock = vi.fn();
 
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: () => ({
+// [thread-task-design §3 step 1.1] onThreadBranched reads current message state
+// via useChatStore.getState() (module-level, not the hook) so it can preserve an
+// already-live replyCount instead of clobbering it back to 0 — see the
+// "preserves an existing replyCount" test below. mockMessages lets each test
+// seed that read.
+let mockMessages: Array<{
+  id: string;
+  extra?: { slockThread?: { branchThreadId: string; replyCount: number } };
+}> = [];
+
+vi.mock('@/stores/chatStore', () => {
+  const useChatStore = () => ({
     updateThreadTitle: vi.fn(),
     updateThreadParticipants: vi.fn(),
     setLoading: vi.fn(),
@@ -27,8 +37,10 @@ vi.mock('@/stores/chatStore', () => ({
     removeThreadMessage: vi.fn(),
     patchMessage: patchMessageMock,
     requestStreamCatchUp: vi.fn(),
-  }),
-}));
+  });
+  useChatStore.getState = () => ({ messages: mockMessages });
+  return { useChatStore };
+});
 
 vi.mock('@/stores/gameStore', () => ({
   useGameStore: { getState: () => ({ setGameView: vi.fn() }) },
@@ -74,6 +86,7 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
     addMessageMock.mockClear();
     addActiveInvocationMock.mockClear();
     patchMessageMock.mockClear();
+    mockMessages = [];
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -147,6 +160,29 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
     });
     expect(patchMessageMock).toHaveBeenCalledWith('message-root', {
       extra: { slockThread: { branchThreadId: 'thread-task', replyCount: 0 } },
+    });
+  });
+
+  // [thread-task-design §2 root cause 2 / §3 step 1.1] Regression test for the bug fix:
+  // thread_branched used to hardcode replyCount:0 unconditionally, which could clobber a
+  // real live count (e.g. thread_reply_count_updated already bumped it) if this event
+  // ever re-fires for the same message (reconnect replay, re-announce, etc).
+  it('preserves an existing live replyCount instead of resetting it to 0 on re-branch', () => {
+    mockMessages = [
+      {
+        id: 'message-root',
+        extra: { slockThread: { branchThreadId: 'thread-task-old', replyCount: 5 } },
+      },
+    ];
+
+    captured!.onThreadBranched!({
+      sourceThreadId: 'thread-1',
+      newThreadId: 'thread-task',
+      fromMessageId: 'message-root',
+    });
+
+    expect(patchMessageMock).toHaveBeenCalledWith('message-root', {
+      extra: { slockThread: { branchThreadId: 'thread-task', replyCount: 5 } },
     });
   });
 });

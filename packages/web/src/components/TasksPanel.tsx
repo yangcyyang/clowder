@@ -65,48 +65,30 @@ const TASK_STATUS_META: Record<
   },
 };
 
+// Structural surface/text/border roles are aliased to the shared cafe/clowder
+// design tokens (theme-tokens.css) instead of hardcoded hex, so the board
+// tracks all 4 visual themes x light/dark automatically (F056 / B2 fix).
+// Status color families (--task-todo etc.) and the accent-tinted chip washes
+// are now defined directly in theme-tokens.css and consumed here by the same
+// custom-property names — no local override needed for those.
 const taskBoardStyle: TaskBoardStyle = {
-  '--task-ink': '#111111',
-  '--task-panel': '#efefef',
-  '--task-card': '#ffffff',
-  '--task-column': '#f9f9f9',
-  '--task-control': '#f7f7f7',
-  '--task-muted': '#666666',
-  '--task-subtle': '#777777',
-  '--task-border-muted': '#999999',
-  '--task-border-soft': '#d0d0d0',
-  '--task-evidence': '#ffe1f0',
-  '--task-accent': '#ff4fa3',
-  '--task-active': '#fff14f',
-  '--task-warning': '#fff1d6',
-  '--task-warning-text': '#9a5b00',
-  '--task-input-focus': '#fff8db',
-  '--task-danger': '#aa3333',
-  '--task-on-accent': '#ffffff',
-  '--task-todo': '#f5a524',
-  '--task-todo-bg': '#fff1d6',
-  '--task-todo-soft': '#fff7e8',
-  '--task-todo-text': '#9a5b00',
-  '--task-doing': '#00a7c7',
-  '--task-doing-bg': '#dff8ff',
-  '--task-doing-soft': '#effcff',
-  '--task-doing-text': '#006579',
-  '--task-review': '#b69cff',
-  '--task-review-bg': '#f0eaff',
-  '--task-review-soft': '#f8f5ff',
-  '--task-review-text': '#5940aa',
-  '--task-blocked': '#ff6b4a',
-  '--task-blocked-bg': '#ffe8df',
-  '--task-blocked-soft': '#fff4ef',
-  '--task-blocked-text': '#9a321a',
-  '--task-done': '#6ccf8d',
-  '--task-done-bg': '#e7f8ec',
-  '--task-done-soft': '#f1fff5',
-  '--task-done-text': '#1f7a3d',
-  '--task-failed': '#d83a34',
-  '--task-failed-bg': '#ffe4e1',
-  '--task-failed-soft': '#fff3f1',
-  '--task-failed-text': '#9f211c',
+  '--task-ink': 'var(--cafe-text)',
+  '--task-panel': 'var(--cafe-surface-sunken)',
+  '--task-card': 'var(--cafe-surface-elevated)',
+  '--task-column': 'var(--cafe-surface)',
+  '--task-control': 'var(--clowder-action-surface)',
+  '--task-muted': 'var(--cafe-text-secondary)',
+  '--task-subtle': 'var(--cafe-text-muted)',
+  '--task-border-muted': 'var(--cafe-border)',
+  '--task-border-soft': 'var(--cafe-border-subtle)',
+  '--task-evidence': 'var(--clowder-task-evidence-bg)',
+  '--task-accent': 'var(--cafe-accent)',
+  '--task-active': 'var(--clowder-sidebar-active-bg)',
+  '--task-warning': 'var(--notice-error-surface)',
+  '--task-warning-text': 'var(--notice-error-label)',
+  '--task-input-focus': 'var(--clowder-task-input-focus-bg)',
+  '--task-danger': 'var(--notice-error-label)',
+  '--task-on-accent': 'var(--cafe-accent-foreground)',
 };
 
 const BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; title: string }> = [
@@ -148,6 +130,32 @@ function getOwnerLabel(task: TaskItem): string {
   return task.ownerCatId ?? '未分配';
 }
 
+/**
+ * [thread-task-design item 4 root cause] The card "编号" must match the backend's
+ * getTaskLabel algorithm (packages/api/src/routes/tasks.ts:252-255): 1-based
+ * position among non-pr_tracking tasks in creation order — NOT any slice of the
+ * task's own id. This component previously rendered `#{task.id.slice(0, 6)}`.
+ * Task ids come from generateSortableId() (packages/api/.../ports/MessageStore.ts
+ * :461-466): a 16-digit zero-padded epoch-ms timestamp, then a 6-digit sequence,
+ * then a uuid suffix. The first 6 characters of that are therefore just "000" +
+ * the leading 3 digits of the millisecond timestamp, which only change roughly
+ * every ~115 days (10^10 ms) — every task created within the same ~4-month
+ * window collapses onto the same 1-2 label strings. That is exactly the
+ * reported bug: 79 cards, 2 distinct numbers (#000178 / #000177 everywhere).
+ *
+ * `tasks` here is already thread + kind=work scoped (GET /api/tasks?threadId=
+ * &kind=work uses the same taskStore.listByThread() ascending-createdAt order
+ * the backend label algorithm reads), so sorting ascending by id (lexicographic
+ * order matches creation order for sortable ids) and taking the 1-based index
+ * reproduces the backend's numbering exactly.
+ */
+export function computeTaskLabels(tasks: readonly TaskItem[]): Map<string, number> {
+  const ordered = [...tasks].filter((task) => task.kind !== 'pr_tracking').sort((a, b) => a.id.localeCompare(b.id));
+  const labels = new Map<string, number>();
+  ordered.forEach((task, index) => labels.set(task.id, index + 1));
+  return labels;
+}
+
 function TaskStatusChip({ status, count }: { status: TaskStatus; count: number }) {
   const meta = TASK_STATUS_META[status];
   return (
@@ -167,6 +175,7 @@ function TaskStatusChip({ status, count }: { status: TaskStatus; count: number }
 
 interface TaskCardViewProps {
   task: TaskItem;
+  label: number;
   expanded: boolean;
   draft: TaskEvidence;
   saving: boolean;
@@ -180,6 +189,7 @@ interface TaskCardViewProps {
 
 function TaskCardView({
   task,
+  label,
   expanded,
   draft,
   saving,
@@ -196,7 +206,7 @@ function TaskCardView({
 
   return (
     <article
-      className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5"
+      className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_var(--task-ink)] transition-transform hover:-translate-y-0.5"
       role={onOpenThread ? 'button' : undefined}
       tabIndex={onOpenThread ? 0 : undefined}
       title={onOpenThread ? `任务 Thread：${task.title}` : undefined}
@@ -210,7 +220,7 @@ function TaskCardView({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{task.id.slice(0, 6)}</div>
+          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{label}</div>
           <h3 className="mt-1 line-clamp-2 text-sm font-black leading-snug text-[var(--task-ink)]" title={task.title}>
             {task.title}
           </h3>
@@ -257,7 +267,7 @@ function TaskCardView({
         </div>
         <button
           type="button"
-          className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-2.5 py-1 text-[11px] font-black text-[var(--task-ink)] shadow-[2px_2px_0_#111] transition hover:-translate-y-0.5"
+          className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-2.5 py-1 text-[11px] font-black text-[var(--task-ink)] shadow-[2px_2px_0_var(--task-ink)] transition hover:-translate-y-0.5"
           onClick={(event) => {
             event.stopPropagation();
             onToggleEvidence(task);
@@ -285,7 +295,7 @@ function TaskCardView({
               <label key={field.key} className="block">
                 <span className="text-[11px] font-black uppercase tracking-[0.08em] text-[var(--task-muted)]">{field.label}</span>
                 <textarea
-                  className="mt-1 min-h-20 w-full resize-y rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-3 py-2 text-xs leading-[1.5] text-[var(--task-ink)] outline-none transition placeholder:text-[var(--task-border-muted)] focus:bg-[var(--task-input-focus)]"
+                  className="mt-1 min-h-20 w-full resize-y rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-3 py-2 text-xs leading-[1.5] text-[var(--task-ink)] outline-none transition placeholder:text-[var(--cafe-text-muted)] focus:bg-[var(--task-input-focus)]"
                   value={draft[field.key] ?? ''}
                   placeholder={field.placeholder}
                   onChange={(event) => onDraftChange(task.id, field.key, event.target.value)}
@@ -299,7 +309,7 @@ function TaskCardView({
           <div className="mt-3 flex justify-end">
             <button
               type="button"
-              className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-3 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-3 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_var(--task-ink)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={saving}
               onClick={(event) => {
                 event.stopPropagation();
@@ -372,6 +382,12 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
   const sortedTasks = useMemo(() => {
     return [...tasks].sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
   }, [tasks]);
+
+  // [thread-task-design item 4] Labels must be computed from creation order
+  // (see computeTaskLabels), independent of sortedTasks' updatedAt-based
+  // display order used for column grouping — otherwise a task's number would
+  // shift every time it (or another task) gets touched.
+  const taskLabels = useMemo(() => computeTaskLabels(tasks), [tasks]);
 
   const groupedTasks = useMemo(() => {
     return BOARD_COLUMNS.map((column) => ({
@@ -454,7 +470,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
   return (
     <section className="h-full overflow-y-auto bg-[var(--task-panel)] text-[var(--task-ink)]" style={taskBoardStyle}>
       <div className="mx-auto flex min-h-full max-w-[1440px] flex-col gap-4 p-4 md:p-6">
-        <header className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-4 py-3 shadow-[5px_5px_0_#111]">
+        <header className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-4 py-3 shadow-[5px_5px_0_var(--task-ink)]">
           <div className="flex flex-wrap items-center gap-3">
             <div className="mr-auto">
               <h2 className="text-base font-black uppercase tracking-[0.08em] text-[var(--task-ink)]">Tasks</h2>
@@ -465,21 +481,21 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
 
             <button
               type="button"
-              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-3 py-1.5 text-xs font-black uppercase text-[var(--task-ink)] shadow-[2px_2px_0_#111]"
+              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-3 py-1.5 text-xs font-black uppercase text-[var(--task-ink)] shadow-[2px_2px_0_var(--task-ink)]"
               title="Phase 1 占位：后续接入创建人筛选"
             >
               CREATOR ▾
             </button>
             <button
               type="button"
-              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-3 py-1.5 text-xs font-black uppercase text-[var(--task-ink)] shadow-[2px_2px_0_#111]"
+              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-control)] px-3 py-1.5 text-xs font-black uppercase text-[var(--task-ink)] shadow-[2px_2px_0_var(--task-ink)]"
               title="Phase 1 占位：后续接入负责人筛选"
             >
               ASSIGNEE ▾
             </button>
             <button
               type="button"
-              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-4 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5"
+              className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-4 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_var(--task-ink)] transition hover:-translate-y-0.5"
               onClick={() => setComposerOpen((current) => !current)}
             >
               + 新任务
@@ -492,8 +508,8 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
                   type="button"
                   className={`rounded-full px-3 py-1 text-xs font-black uppercase transition ${
                     viewMode === mode
-                      ? 'bg-[var(--task-active)] text-[var(--task-ink)]'
-                      : 'text-[var(--task-on-accent)] hover:bg-[var(--task-card)]/10'
+                      ? 'bg-[var(--task-active)] text-[var(--clowder-sidebar-row-active-text)]'
+                      : 'text-[var(--cafe-surface)] hover:bg-[var(--task-card)]/10'
                   }`}
                   onClick={() => setViewMode(mode)}
                 >
@@ -505,19 +521,19 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
         </header>
 
         {composerOpen && (
-          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-2 shadow-[5px_5px_0_#111]">
+          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-2 shadow-[5px_5px_0_var(--task-ink)]">
             <TaskComposer threadId={threadId} onClose={closeComposerAndRefresh} />
           </div>
         )}
 
         {isLoading && (
-          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-6 text-sm font-bold text-[var(--task-muted)] shadow-[5px_5px_0_#111]">
+          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-6 text-sm font-bold text-[var(--task-muted)] shadow-[5px_5px_0_var(--task-ink)]">
             加载任务中...
           </div>
         )}
 
         {!isLoading && error && (
-          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-warning)] p-6 text-sm font-black text-[var(--task-warning-text)] shadow-[5px_5px_0_#111]">
+          <div className="rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-warning)] p-6 text-sm font-black text-[var(--task-warning-text)] shadow-[5px_5px_0_var(--task-ink)]">
             {error}
           </div>
         )}
@@ -539,7 +555,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
             {groupedTasks.map((column) => (
               <section
                 key={column.status}
-                className="flex min-w-[290px] flex-1 flex-col gap-3 rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-column)] p-3 shadow-[5px_5px_0_#111]"
+                className="flex min-w-[290px] flex-1 flex-col gap-3 rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-column)] p-3 shadow-[5px_5px_0_var(--task-ink)]"
               >
                 <div className="flex items-center justify-between gap-2 border-b-2 border-[var(--task-ink)] pb-3">
                   <TaskStatusChip status={column.status} count={column.tasks.length} />
@@ -553,6 +569,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
                       <TaskCardView
                         key={task.id}
                         task={task}
+                        label={taskLabels.get(task.id) ?? 0}
                         expanded={expandedTaskId === task.id}
                         draft={evidenceDrafts[task.id] ?? task.evidence ?? {}}
                         saving={savingTaskId === task.id}
@@ -573,6 +590,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
               <TaskCardView
                 key={task.id}
                 task={task}
+                label={taskLabels.get(task.id) ?? 0}
                 expanded={expandedTaskId === task.id}
                 draft={evidenceDrafts[task.id] ?? task.evidence ?? {}}
                 saving={savingTaskId === task.id}

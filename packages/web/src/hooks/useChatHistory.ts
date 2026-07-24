@@ -516,7 +516,7 @@ export function useChatHistory(threadId: string) {
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
-              systemKind?: 'a2a_routing' | 'progress_heartbeat';
+              systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed';
               agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
               slockThread?: {
                 branchThreadId: string;
@@ -536,6 +536,7 @@ export function useChatHistory(threadId: string) {
             deliveredAt?: number;
             replyTo?: string;
             replyPreview?: ReplyPreview;
+            deliveryStatus?: 'queued' | 'delivered' | 'canceled';
           }) => {
             if (m.source) {
               const runtimeEvent = classifyRuntimeSystemEvent({
@@ -544,6 +545,7 @@ export function useChatHistory(threadId: string) {
                 source: m.source,
                 threadId: m.threadId ?? fetchForThread,
                 timestamp: m.timestamp,
+                extra: m.extra,
               });
               if (runtimeEvent) {
                 useRuntimeEventsStore.getState().addEvent(runtimeEvent);
@@ -594,6 +596,12 @@ export function useChatHistory(threadId: string) {
               ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
               ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
               ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+              // [thread-task-design §1.1] Forward-compat: history endpoint doesn't emit this
+              // field yet (see packages/api/src/routes/messages.ts chatItems mapping), but
+              // carrying it through here means a page reload will still show the "排队中"
+              // badge correctly once/if that gap is closed backend-side — no frontend change
+              // needed later.
+              ...(m.deliveryStatus ? { deliveryStatus: m.deliveryStatus } : {}),
               ...(m.source ? { source: m.source } : {}),
               ...(m.mentionsUser ? { mentionsUser: true } : {}),
               ...(m.replyTo ? { replyTo: m.replyTo } : {}),

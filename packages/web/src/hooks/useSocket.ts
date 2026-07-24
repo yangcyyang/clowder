@@ -168,6 +168,14 @@ export interface SocketCallbacks {
     reactions: import('../stores/chat-types').MessageReaction[];
   }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
+  /**
+   * [thread-task-design §3 step 1] Broadcast to `thread:{parentThreadId}` (the
+   * MAIN thread, not the branch room) whenever a durable branch/task thread
+   * gets a new reply — see packages/api/src/routes/thread-reply-summary.ts
+   * (notifyBranchThreadReply). Lets the source message's reply-count entry
+   * indicator move in real time without the viewer having joined the branch.
+   */
+  onThreadReplyCountUpdated?: (data: { sourceMessageId: string; branchThreadId: string; replyCount: number }) => void;
   onAuthorizationRequest?: (data: {
     requestId: string;
     catId: string;
@@ -825,6 +833,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       callbacksRef.current.onThreadBranched?.(data);
     });
 
+    socket.on(
+      'thread_reply_count_updated',
+      (data: { sourceMessageId: string; branchThreadId: string; replyCount: number }) => {
+        callbacksRef.current.onThreadReplyCountUpdated?.(data);
+      },
+    );
+
     socket.on('authorization:request', (data: Record<string, unknown>) => {
       const currentThread = threadIdRef.current;
       if (data.threadId && currentThread && data.threadId !== currentThread) return;
@@ -965,6 +980,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         source: data.message.source,
         threadId: data.threadId,
         timestamp: data.message.timestamp,
+        extra: data.message.extra,
       });
       if (runtimeEvent) {
         useRuntimeEventsStore.getState().addEvent(runtimeEvent);

@@ -13,7 +13,7 @@
   --cafe-surface-sunken: #eee4da;
   --cafe-text: var(--cat-deep-ink);
   --cafe-text-secondary: var(--cat-muted-stone);
-  --cafe-text-muted: #9a918a;
+  --cafe-text-muted: #6d655c;
   --cafe-border: var(--cat-border-tan);
   --cafe-border-subtle: #ede6de;
   --cafe-accent: var(--cat-paw-pink);
@@ -192,8 +192,17 @@
   --clowder-section-title-bg: rgba(204, 103, 67, 0.06);
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
-  --clowder-muted-soft: #9a918a;
+  --clowder-muted-soft: #6d655c;
   --clowder-avatar-quiet-ring: #d8cabe;
+
+  /* Body font token (maka absorption task #5): default = current global stack
+     (Space Grotesk + system/CJK fallbacks, byte-identical to the literal that
+     used to live directly in globals.css `body{}`). Every existing visual
+     theme gets zero change since none of them override this token — only the
+     maka-family blocks below repaint it with a de-branded system stack. */
+  --clowder-font-body: var(--font-raft-ui), "Space Grotesk", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    sans-serif;
 
   --guide-overlay-bg: rgba(12, 16, 24, 0.62);
   --guide-cutout-ring: #d4853a;
@@ -226,6 +235,44 @@
   --notice-error-surface: #fff8f7;
   --notice-enter-duration: 0.4s;
   --notice-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* User message bubble (M1): brand-accent-tinted surface + primary theme ink,
+     derived from --cafe-accent/--cafe-surface so it auto-adapts per visual
+     theme and per light/dark without per-theme overrides. Replaces the old
+     bare-accent-text-on-white pattern that failed AA (~2.7:1 in slock). */
+  --clowder-user-bubble-bg: color-mix(in srgb, var(--cafe-accent) 20%, var(--cafe-surface) 80%);
+  --clowder-user-bubble-text: var(--cafe-text);
+
+  /* Task board (TasksPanel, F056 migration): status color families are
+     theme-agnostic (same spirit as --conn-*), only light/dark varies. */
+  --task-todo: #d1861a;
+  --task-todo-bg: #fff1d6;
+  --task-todo-soft: #fff8ec;
+  --task-todo-text: #7a4900;
+  --task-doing: #0090ab;
+  --task-doing-bg: #dff8ff;
+  --task-doing-soft: #eefcff;
+  --task-doing-text: #00566a;
+  --task-review: #8a6fd6;
+  --task-review-bg: #f0eaff;
+  --task-review-soft: #f8f5ff;
+  --task-review-text: #4d3399;
+  --task-blocked: #e2593a;
+  --task-blocked-bg: #ffe8df;
+  --task-blocked-soft: #fff4ef;
+  --task-blocked-text: #8a2c14;
+  --task-done: #3f9e64;
+  --task-done-bg: #e7f8ec;
+  --task-done-soft: #f1fff5;
+  --task-done-text: #1f6b39;
+  --task-failed: #c23a34;
+  --task-failed-bg: #ffe4e1;
+  --task-failed-soft: #fff3f1;
+  --task-failed-text: #8f1913;
+  /* Accent-derived tints for evidence chips / focused input wells — auto-adapt
+     per visual theme and per light/dark, no separate dark overrides needed. */
+  --clowder-task-evidence-bg: color-mix(in srgb, var(--cafe-accent) 16%, var(--cafe-surface-elevated) 84%);
+  --clowder-task-input-focus-bg: color-mix(in srgb, var(--cafe-accent) 12%, var(--cafe-surface-elevated) 88%);
 }
 
 [data-visual-theme="claude"] {
@@ -241,7 +288,7 @@
   --cafe-surface-sunken: #f0e8dd;
   --cafe-text: #2d251c;
   --cafe-text-secondary: #6b5e50;
-  --cafe-text-muted: #9b8d7c;
+  --cafe-text-muted: #6b5e4f;
   --cafe-border: #e4d5c4;
   --cafe-border-subtle: #ede2d5;
   --cafe-accent: #d97706;
@@ -274,7 +321,7 @@
   --clowder-section-title-bg: rgba(217, 119, 6, 0.08);
   --clowder-sender-user: var(--cafe-text);
   --clowder-sender-agent: var(--cafe-text);
-  --clowder-muted-soft: #8a7a68;
+  --clowder-muted-soft: #6b5e4f;
   --clowder-avatar-quiet-ring: #e4d5c4;
 }
 
@@ -357,7 +404,7 @@
   --slock-pink-active: #f46fa7;
   --slock-pink-hover: #e95b99;
   --slock-white: #ffffff;
-  --slock-muted-text: #8c8c8c;
+  --slock-muted-text: #6b6b6b;
   --slock-secondary-text: #5f5f5f;
   --slock-success: #00875a;
 
@@ -373,7 +420,7 @@
   --cafe-surface-sunken: #fff0a6;
   --cafe-text: #000000;
   --cafe-text-secondary: #5f5f5f;
-  --cafe-text-muted: #8c8c8c;
+  --cafe-text-muted: #6b6b6b;
   --cafe-border: #000000;
   --cafe-border-subtle: #000000;
   --cafe-accent: #f46fa7;
@@ -431,9 +478,9 @@
   --clowder-markdown-chip-border: #000000;
   --clowder-markdown-chip-text: #000000;
   --clowder-section-title-bg: #fff0a6;
-  --clowder-sender-user: #000000;
-  --clowder-sender-agent: #000000;
-  --clowder-muted-soft: #8c8c8c;
+  --clowder-sender-user: var(--cafe-text);
+  --clowder-sender-agent: var(--cafe-text);
+  --clowder-muted-soft: #6b6b6b;
   --clowder-avatar-quiet-ring: #000000;
 }
 
@@ -502,6 +549,170 @@
   --clowder-avatar-quiet-ring: #e8e6dc;
 }
 
+/* ============================================================================
+   Maka family — "冷静指挥室" ("The Companion Command Center"): one shared
+   design language ("maka") + 3 accent-only skins (onedark / nord /
+   catppuccin), modeled after maka-tokens.css's "1 base + N skins" mechanism
+   (docs/research/maka-absorption.md §1; upstream read-only reference at
+   /Users/cy/Downloads/maka-agent-main 4/apps/desktop/src/renderer/maka-tokens.css:8-17,
+   260-267, 379-396, 594-669, 704-746).
+
+   Architecture:
+   - The block below (selector list covering "maka" + every "maka-*" skin) is
+     MODE-AGNOSTIC: geometry, the de-branded font token, the soft-ring shadow
+     recipe, and a full color-mix() derivation of every Clowder structural
+     token (sidebar chrome, markdown chips, hover rings, cat-x / bg-app /
+     text-primary aliases, etc.) from just 3 base colors — --cafe-surface /
+     --cafe-text / --cafe-accent. Because the formulas are alpha- or
+     mix-based, they stay correct when the base colors flip to their dark
+     values (no separate dark copy of these ~40 derived tokens is needed —
+     this is the "77-key checklist" coverage; see report for the exact diff
+     against the slock dark block used as the checklist).
+   - Each "skin" block below (maka / maka-onedark / maka-nord /
+     maka-catppuccin) sets ONLY --cafe-surface / --cafe-text / --cafe-accent
+     (+ a hardcoded --cafe-interactive, since a *readable-as-plain-text*
+     accent shade can't be derived by one formula that works for every hue)
+     for LIGHT mode. The matching "[data-theme=dark]" skin block below (near
+     the bottom of the file, alongside the other dark blocks) re-sets those
+     same 3 base colors for DARK mode — nothing else needs to change per
+     skin, because the shared block's derivations recompute automatically.
+   - The "maka family — dark overrides" block (also near the bottom) is the
+     dark-mode counterpart of THIS shared block: same selector shape with
+     [data-theme="dark"] added, overriding only the handful of formulas that
+     use a different recipe in dark mode (shadow collapse to a single ring,
+     text-tier percentages, canvas/elevation direction, accent-hover/
+     -foreground/-interactive).
+============================================================================ */
+[data-visual-theme="maka"],
+[data-visual-theme^="maka-"] {
+  /* geometry: control 6 / surface 8 / modal 12 / pill 999 (spec §1) — the
+     same tier Clowder already defaults to; set explicitly so this theme
+     block is self-contained and not silently dependent on the :root default. */
+  --slock-radius-sm: 6px;
+  --slock-radius-md: 8px;
+  --slock-radius-lg: 12px;
+  --slock-radius-pill: 999px;
+  --border-radius-base: 12px;
+
+  /* de-branded system font stack (spec §1 "去品牌化系统栈"). Only maka-family
+     themes repaint --clowder-font-body; every other visual theme keeps the
+     :root default (Space Grotesk) untouched. */
+  --clowder-font-body: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Microsoft YaHei UI", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei",
+    "Source Han Sans SC", sans-serif;
+
+  /* soft-ring + double low-alpha (6%) glow shadow (spec §1 / maka-tokens.css:260-267).
+     Light-mode recipe; the dark override below collapses this to a single ring. */
+  --slock-shadow:
+    0 0 0 1px color-mix(in srgb, var(--cafe-text) 8%, transparent),
+    0 3px 3px -1.5px color-mix(in srgb, var(--cafe-text) 6%, transparent),
+    0 6px 6px -3px color-mix(in srgb, var(--cafe-text) 6%, transparent);
+  --slock-shadow-soft:
+    0 0 0 1px color-mix(in srgb, var(--cafe-text) 8%, transparent),
+    0 1px 1px -0.5px color-mix(in srgb, var(--cafe-text) 6%, transparent);
+  --slock-shadow-icon: 0 0 0 1px color-mix(in srgb, var(--cafe-text) 8%, transparent);
+  --slock-shadow-chip: 0 0 0 1px color-mix(in srgb, var(--cafe-text) 8%, transparent);
+
+  /* full derivation from the 3 base colors (spec §1 methodology #1: "border /
+     muted / hover / ring all derive from foreground at low alpha"). Alpha-
+     over-transparent formulas are correct unchanged in dark mode too, since
+     --cafe-text itself becomes near-white there — no separate override needed. */
+  --cafe-border: color-mix(in srgb, var(--cafe-text) 14%, transparent);
+  --cafe-border-subtle: color-mix(in srgb, var(--cafe-text) 9%, transparent);
+  --cafe-surface-elevated: color-mix(in srgb, white 2%, var(--cafe-surface));
+  --cafe-surface-sunken: color-mix(in srgb, black 3%, var(--cafe-surface));
+  --cafe-text-secondary: color-mix(in srgb, var(--cafe-text) 84%, var(--cafe-surface));
+  --cafe-text-muted: color-mix(in srgb, var(--cafe-text) 70%, var(--cafe-surface));
+  --cafe-accent-hover: color-mix(in srgb, var(--cafe-accent) 85%, black);
+  --cafe-accent-foreground: #101014;
+  --color-cafe-accent: var(--cafe-accent);
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+
+  --cat-cream-white: var(--cafe-surface);
+  --cat-light-sand: var(--cafe-surface-elevated);
+  --cat-border-tan: var(--cafe-border);
+  --cat-deep-ink: var(--cafe-text);
+  --cat-muted-stone: var(--cafe-text-secondary);
+  --cat-paw-pink: var(--cafe-accent);
+
+  --clowder-sidebar-bg: var(--cafe-surface);
+  --clowder-sidebar-border: var(--cafe-border);
+  --clowder-sidebar-title: var(--cafe-text);
+  --clowder-sidebar-row-text: var(--cafe-text-secondary);
+  --clowder-sidebar-row-active-text: var(--cafe-text);
+  --clowder-sidebar-row-muted: var(--cafe-text-muted);
+  --clowder-sidebar-active-bg: color-mix(in srgb, var(--cafe-accent) 14%, var(--cafe-surface) 86%);
+  --clowder-sidebar-active-border: var(--cafe-accent);
+  --clowder-sidebar-hover-bg: color-mix(in srgb, var(--cafe-accent) 6%, var(--cafe-surface) 94%);
+  --clowder-message-hover-ring: color-mix(in srgb, var(--cafe-accent) 22%, transparent);
+  --clowder-input-bg: var(--cafe-surface-elevated);
+  --clowder-action-surface: color-mix(in srgb, var(--cafe-surface) 92%, transparent);
+  --clowder-running-bar-bg: var(--cafe-surface);
+  --clowder-markdown-chip-bg: color-mix(in srgb, var(--cafe-accent) 10%, transparent);
+  --clowder-markdown-chip-border: color-mix(in srgb, var(--cafe-accent) 26%, transparent);
+  --clowder-markdown-chip-text: var(--cafe-interactive);
+  --clowder-section-title-bg: color-mix(in srgb, var(--cafe-accent) 6%, transparent);
+  --clowder-sender-user: var(--cafe-text);
+  --clowder-sender-agent: var(--cafe-text);
+  --clowder-muted-soft: var(--cafe-text-muted);
+  --clowder-avatar-quiet-ring: var(--cafe-border);
+}
+
+/* --- maka (base skin, "指挥室"): cool-neutral blue accent on a near-white/
+   near-black canvas — see maka-absorption.md spec card. --cafe-interactive is
+   a hardcoded darkened accent (not derived) because a single alpha/mix
+   formula that stays >=4.5:1 against every skin's surface doesn't exist for
+   all 4 accent hues at once; verified per-skin via WCAG contrast math (see
+   report). --maka-info/-success/-destructive are inert spec-fidelity tokens
+   (Maka's other 3 "base colors"); nothing in Clowder consumes them yet since
+   Clowder's own status-color systems (--task-x / --notice-x / --guide-x) are
+   already theme-agnostic, matching how the other 4 visual themes behave. */
+[data-visual-theme="maka"] {
+  --cafe-surface: #ffffff;
+  --cafe-text: #0f0f12;
+  --cafe-accent: #57a3ef;
+  --cafe-interactive: #3d72a7;
+  --maka-info: #3ca2e0;
+  --maka-success: #098926;
+  --maka-destructive: #e6000c;
+}
+
+/* --- maka-onedark: VS Code One Dark blue accent (maka-tokens.css:705-714) --- */
+[data-visual-theme="maka-onedark"] {
+  --cafe-surface: #eceff2;
+  --cafe-text: #262f38;
+  --cafe-accent: #1690ca;
+  --cafe-interactive: #116d9a;
+  --maka-info: #e38d3d;
+  --maka-success: #399e43;
+  --maka-destructive: #e6424c;
+}
+
+/* --- maka-nord: Nord glacier-blue accent (maka-tokens.css:770-780) --- */
+[data-visual-theme="maka-nord"] {
+  --cafe-surface: #f2f6f7;
+  --cafe-text: #212b2e;
+  --cafe-accent: #0097b3;
+  --cafe-interactive: #00748a;
+  --maka-info: #48b7bd;
+  --maka-success: #66ac69;
+  --maka-destructive: #d55759;
+}
+
+/* --- maka-catppuccin: Catppuccin Mocha mauve/pink accent (maka-tokens.css:726-736) --- */
+[data-visual-theme="maka-catppuccin"] {
+  --cafe-surface: #f6f1ed;
+  --cafe-text: #2a2731;
+  --cafe-accent: #c95fc2;
+  --cafe-interactive: #9b4995;
+  --maka-info: #e58b55;
+  --maka-success: #479c4d;
+  --maka-destructive: #e64343;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --guide-breathe-animation: none;
@@ -516,7 +727,7 @@
   --cafe-surface-sunken: #080a10;
   --cafe-text: #e8eaf0;
   --cafe-text-secondary: #8892a4;
-  --cafe-text-muted: #5a6275;
+  --cafe-text-muted: #7c8499;
   --cafe-border: #1e2333;
   --cafe-border-subtle: #151a26;
   --cafe-accent: #e0547a;
@@ -632,6 +843,36 @@
   --notice-error-icon: #d98989;
   --notice-error-border: rgba(199, 107, 107, 0.32);
   --notice-error-surface: rgba(199, 107, 107, 0.08);
+
+  /* User message bubble (M1 dark) — richer accent share since dark surfaces
+     need more saturation to read as "tinted" rather than neutral. */
+  --clowder-user-bubble-bg: color-mix(in srgb, var(--cafe-accent) 26%, var(--cafe-surface) 74%);
+
+  /* Task board status families (dark) */
+  --task-todo: #e8a33c;
+  --task-todo-bg: #3a2a10;
+  --task-todo-soft: #2a1f0c;
+  --task-todo-text: #ffcf87;
+  --task-doing: #3fc4dc;
+  --task-doing-bg: #0d2f36;
+  --task-doing-soft: #0a2529;
+  --task-doing-text: #8fe3f2;
+  --task-review: #b39ce8;
+  --task-review-bg: #2c2242;
+  --task-review-soft: #231b35;
+  --task-review-text: #d9c9ff;
+  --task-blocked: #f28a63;
+  --task-blocked-bg: #3d1f12;
+  --task-blocked-soft: #31190f;
+  --task-blocked-text: #ffb493;
+  --task-done: #6fce93;
+  --task-done-bg: #12301d;
+  --task-done-soft: #0e2617;
+  --task-done-text: #a3e8bc;
+  --task-failed: #e8746c;
+  --task-failed-bg: #3a1512;
+  --task-failed-soft: #2e100e;
+  --task-failed-text: #ffaba5;
 }
 
 [data-theme="dark"] {
@@ -751,36 +992,44 @@
 }
 
 [data-theme="dark"][data-visual-theme="slock"] {
-  --slock-ink: #000000;
+  /* B2 fix: this block previously just repeated the light-mode values
+     (cafe-surface/cafe-text/etc. were identical to the light block), which is
+     why toggling dark mode with slock active left the UI un-changed (body
+     rendered rgb(255,255,255) regardless of data-theme). Every color below is
+     a real dark-mode value, contrast-checked against WCAG AA (>=4.5:1 for
+     body text). Neo-brutalist identity is kept by inverting the polarity —
+     black ink/white paper (light) becomes cream ink/charcoal paper (dark) —
+     rather than collapsing into a generic dark-gray theme. */
+  --slock-ink: #f5eee0;
   --slock-rail-yellow: #ffd440;
-  --slock-cream: #fffaef;
-  --slock-warm-yellow: #fff0a6;
-  --slock-pink-active: #f46fa7;
-  --slock-pink-hover: #e95b99;
-  --slock-white: #ffffff;
-  --slock-muted-text: #8c8c8c;
-  --slock-secondary-text: #5f5f5f;
+  --slock-cream: #241f1b;
+  --slock-warm-yellow: #2b2210;
+  --slock-pink-active: #ff8fc0;
+  --slock-pink-hover: #ffa9d2;
+  --slock-white: #2a241f;
+  --slock-muted-text: #a89d8c;
+  --slock-secondary-text: #cdc3b4;
   --slock-success: #00875a;
 
-  --cat-cream-white: #ffffff;
-  --cat-light-sand: #fffaef;
-  --cat-border-tan: #000000;
-  --cat-deep-ink: #000000;
-  --cat-muted-stone: #8c8c8c;
-  --cat-paw-pink: #f46fa7;
+  --cat-cream-white: #1c1917;
+  --cat-light-sand: #241f1b;
+  --cat-border-tan: #f5eee0;
+  --cat-deep-ink: #f7f2e8;
+  --cat-muted-stone: #cdc3b4;
+  --cat-paw-pink: #ff8fc0;
 
-  --cafe-surface: #ffffff;
-  --cafe-surface-elevated: #fffaef;
-  --cafe-surface-sunken: #fff0a6;
-  --cafe-text: #000000;
-  --cafe-text-secondary: #5f5f5f;
-  --cafe-text-muted: #8c8c8c;
-  --cafe-border: #000000;
-  --cafe-border-subtle: #000000;
-  --cafe-accent: #f46fa7;
-  --cafe-accent-hover: #e95b99;
-  --cafe-accent-foreground: #000000;
-  --cafe-interactive: #000000;
+  --cafe-surface: #1c1917;
+  --cafe-surface-elevated: #241f1b;
+  --cafe-surface-sunken: #141110;
+  --cafe-text: #f7f2e8;
+  --cafe-text-secondary: #cdc3b4;
+  --cafe-text-muted: #a89d8c;
+  --cafe-border: #f5eee0;
+  --cafe-border-subtle: rgba(245, 238, 224, 0.35);
+  --cafe-accent: #ff8fc0;
+  --cafe-accent-hover: #ffa9d2;
+  --cafe-accent-foreground: #1c1917;
+  --cafe-interactive: #f5eee0;
   --color-cafe-accent: var(--cafe-accent);
 
   --bg-app: var(--cafe-surface);
@@ -807,25 +1056,27 @@
   --slock-shadow-chip: 2px 2px 0 var(--slock-ink);
 
   --border-radius-base: 0;
-  --clowder-input-bg: #ffffff;
-  --clowder-action-surface: #ffffff;
-  --clowder-running-bar-bg: #fffaef;
-  --clowder-sidebar-bg: #fffaef;
-  --clowder-sidebar-border: #000000;
-  --clowder-sidebar-title: #000000;
-  --clowder-sidebar-row-text: #000000;
-  --clowder-sidebar-row-active-text: #000000;
-  --clowder-sidebar-row-muted: #8c8c8c;
-  --clowder-sidebar-active-bg: #f46fa7;
-  --clowder-sidebar-active-border: #000000;
-  --clowder-sidebar-hover-bg: #fff0a6;
-  --clowder-message-hover-ring: #000000;
-  --clowder-markdown-chip-bg: #fff0a6;
-  --clowder-markdown-chip-border: #000000;
-  --clowder-markdown-chip-text: #000000;
-  --clowder-section-title-bg: #fff0a6;
-  --clowder-muted-soft: #8c8c8c;
-  --clowder-avatar-quiet-ring: #000000;
+  --clowder-input-bg: #2a241f;
+  --clowder-action-surface: #2a241f;
+  --clowder-running-bar-bg: #241f1b;
+  --clowder-sidebar-bg: #241f1b;
+  --clowder-sidebar-border: #f5eee0;
+  --clowder-sidebar-title: #f7f2e8;
+  --clowder-sidebar-row-text: #e8ddd0;
+  --clowder-sidebar-row-active-text: #1c1917;
+  --clowder-sidebar-row-muted: #a89d8c;
+  --clowder-sidebar-active-bg: #ff8fc0;
+  --clowder-sidebar-active-border: #f5eee0;
+  --clowder-sidebar-hover-bg: #2b2210;
+  --clowder-message-hover-ring: #f5eee0;
+  --clowder-markdown-chip-bg: #2b2210;
+  --clowder-markdown-chip-border: #f5eee0;
+  --clowder-markdown-chip-text: #f7f2e8;
+  --clowder-section-title-bg: #2b2210;
+  --clowder-sender-user: var(--cafe-text);
+  --clowder-sender-agent: var(--cafe-text);
+  --clowder-muted-soft: #a89d8c;
+  --clowder-avatar-quiet-ring: #f5eee0;
 }
 
 [data-theme="dark"][data-visual-theme="kami"] {
@@ -884,4 +1135,81 @@
   --clowder-sender-agent: var(--cafe-text);
   --clowder-muted-soft: #b7b3a8;
   --clowder-avatar-quiet-ring: #504e49;
+}
+
+/* ============================================================================
+   Maka family — dark overrides. Dark-mode counterpart of the mode-agnostic
+   shared block above ([data-visual-theme="maka"], [data-visual-theme^="maka-"]):
+   same selector shape, [data-theme="dark"] added so specificity (0,2,0) beats
+   the light-mode formulas for the handful of tokens that need a genuinely
+   different recipe in dark mode. Everything else (sidebar chrome, markdown
+   chips, cat-x / bg-app aliases, etc.) is untouched here — it keeps resolving
+   through the shared block's formulas using whichever --cafe-surface/
+   --cafe-text/--cafe-accent the skin's own dark block below sets. */
+[data-theme="dark"][data-visual-theme="maka"],
+[data-theme="dark"][data-visual-theme^="maka-"] {
+  /* dark shadow collapse: single border ring, no blur glow (spec §1 /
+     maka-tokens.css:635-641 "暗色阴影收缩为单描边环"). */
+  --slock-shadow: 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+  --slock-shadow-soft: 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+  --slock-shadow-icon: 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+  --slock-shadow-chip: 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+
+  /* border alpha tuned to spec's dark range (白@8-10%, vs light's 10-16%). */
+  --cafe-border: color-mix(in srgb, var(--cafe-text) 10%, transparent);
+  --cafe-border-subtle: color-mix(in srgb, var(--cafe-text) 8%, transparent);
+
+  /* canvas goes darker still (not lighter) behind a dark card; text tiers use
+     dark-tuned percentages (--cafe-text is near-white here, so the light-mode
+     percentages would read too bright). accent-hover lightens instead of
+     darkens on a dark surface. accent-foreground/-interactive: in dark mode
+     the raw accent already clears >=4.5:1 against every skin's own dark
+     surface (verified 6.73-8.12:1, see report), so both can just be derived
+     instead of needing a hardcoded per-skin value like in light mode. */
+  --cafe-surface-sunken: color-mix(in srgb, black 60%, var(--cafe-surface));
+  --cafe-text-secondary: color-mix(in srgb, var(--cafe-text) 71%, var(--cafe-surface));
+  --cafe-text-muted: color-mix(in srgb, var(--cafe-text) 55%, var(--cafe-surface));
+  --cafe-accent-hover: color-mix(in srgb, var(--cafe-accent) 85%, white);
+  --cafe-accent-foreground: var(--cafe-surface);
+  --cafe-interactive: var(--cafe-accent);
+}
+
+/* --- maka dark: maka-tokens.css:594-669 base spec --- */
+[data-theme="dark"][data-visual-theme="maka"] {
+  --cafe-surface: #171719;
+  --cafe-text: #e4e4e7;
+  --cafe-accent: #58b0ff;
+  --maka-info: #52b5f4;
+  --maka-success: #279936;
+  --maka-destructive: #ff6367;
+}
+
+/* --- maka-onedark dark: maka-tokens.css:715-724 --- */
+[data-theme="dark"][data-visual-theme="maka-onedark"] {
+  --cafe-surface: #15191d;
+  --cafe-text: #d9dfe5;
+  --cafe-accent: #3ca9e5;
+  --maka-info: #e69825;
+  --maka-success: #43a84c;
+  --maka-destructive: #fa686a;
+}
+
+/* --- maka-nord dark: maka-tokens.css:781-790 --- */
+[data-theme="dark"][data-visual-theme="maka-nord"] {
+  --cafe-surface: #192123;
+  --cafe-text: #dfe6e8;
+  --cafe-accent: #00b9db;
+  --maka-info: #56c4ca;
+  --maka-success: #6dba70;
+  --maka-destructive: #fd7273;
+}
+
+/* --- maka-catppuccin dark: maka-tokens.css:737-746 --- */
+[data-theme="dark"][data-visual-theme="maka-catppuccin"] {
+  --cafe-surface: #1a1923;
+  --cafe-text: #e8e2ea;
+  --cafe-accent: #f08fe8;
+  --maka-info: #f4a25c;
+  --maka-success: #67bb6b;
+  --maka-destructive: #ff6e70;
 }

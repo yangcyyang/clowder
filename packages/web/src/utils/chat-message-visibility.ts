@@ -86,6 +86,7 @@ export function isUserVisibleChatMessage(message: ChatMessage): boolean {
       source: message.source,
       threadId: message.threadId,
       timestamp: message.timestamp,
+      extra: message.extra,
     })
   ) {
     return false;

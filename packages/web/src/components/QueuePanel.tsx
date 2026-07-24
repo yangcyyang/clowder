@@ -3,7 +3,7 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -13,6 +13,17 @@ import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 import { useConfirm } from './useConfirm';
 
 const COLLAPSE_THRESHOLD = 4;
+
+/**
+ * [thread-task-design §1] QueuePanel has no externally-owned open/close state —
+ * visibility is `queue.length > 0` and the only "switch" is this component's own
+ * local `collapsed` state (展开/收起 button). The "排队中" badge on a queued
+ * message bubble (ChatMessage.tsx) needs to make that switch flip to expanded
+ * and bring the panel into view, without either component knowing about the
+ * other's internals — a plain window CustomEvent bridge, same pattern as the
+ * existing 'guide:confirm' / SAVED_MESSAGES_VIEW_EVENT events in this codebase.
+ */
+export const QUEUE_PANEL_FOCUS_EVENT = 'clowder:queue-panel-focus';
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
@@ -48,6 +59,18 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
   const [steerMode, setSteerMode] = useState<SteerMode>('immediate');
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleFocus(event: Event) {
+      const detail = (event as CustomEvent<{ threadId?: string }>).detail;
+      if (detail?.threadId && detail.threadId !== threadId) return;
+      setCollapsed(false);
+      containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    window.addEventListener(QUEUE_PANEL_FOCUS_EVENT, handleFocus);
+    return () => window.removeEventListener(QUEUE_PANEL_FOCUS_EVENT, handleFocus);
+  }, [threadId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -208,6 +231,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
 
   return (
     <div
+      ref={containerRef}
       className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
         queuePaused
           ? 'border-conn-amber-ring bg-conn-amber-bg/50'

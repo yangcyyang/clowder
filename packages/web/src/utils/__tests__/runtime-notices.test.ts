@@ -47,6 +47,29 @@ describe('runtime notices', () => {
     expect(event?.title).toBe('任务系统事件');
   });
 
+  // [thread-task-design §2 root cause 4 / §3 step 1.2] Regression test: this notice
+  // shares the exact connector:'task-system' + meta.presentation:'system_notice'
+  // source shape as routine task-system chatter (which the previous test asserts
+  // DOES get rerouted to the buried Ops runtime-events panel) — without this
+  // exception, "nobody has claimed this task" would be silently invisible in chat.
+  it('does NOT classify task_created_unclaimed notices as runtime events even with a task-system source', () => {
+    const event = classifyRuntimeSystemEvent({
+      id: 'task-notice-unclaimed-1',
+      content: '任务 #4 已创建，待认领。',
+      source: {
+        connector: 'task-system',
+        label: 'Task',
+        icon: '📋',
+        meta: { presentation: 'system_notice', eventType: 'task_created' },
+      },
+      extra: { systemKind: 'task_created_unclaimed' },
+      threadId: 'thread_1',
+      timestamp: 789,
+    });
+
+    expect(event).toBeNull();
+  });
+
   it('does not classify unrelated system_notice connectors as runtime events', () => {
     const event = classifyRuntimeSystemEvent({
       id: 'routing-hint-1',

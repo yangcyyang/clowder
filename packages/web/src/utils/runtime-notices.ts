@@ -52,9 +52,22 @@ export function classifyRuntimeSystemEvent(input: {
   source?: ConnectorSourceData;
   threadId?: string;
   timestamp?: number;
+  /**
+   * [thread-task-design §2 root cause 4 / §3 step 1.2] task_created_unclaimed
+   * shares the exact same source shape (connector:'task-system' +
+   * meta.presentation:'system_notice') as routine task-system chatter (status
+   * flips etc.), which this classifier deliberately reroutes to the buried Ops
+   * runtime-events panel so the main feed stays quiet. But "nobody has claimed
+   * this task yet" is meant to be seen — diverting it silently is exactly the
+   * "existing renderer doesn't recognize this systemKind" failure mode. Callers
+   * pass the message's extra.systemKind through so this one kind can opt out of
+   * the reroute while every other task-system notice keeps today's behavior.
+   */
+  extra?: { systemKind?: string };
 }): RuntimeSystemEvent | null {
   const message = shortMessage(input.content ?? '');
   if (!message) return null;
+  if (input.extra?.systemKind === 'task_created_unclaimed') return null;
   if (isTaskSystemNoticeSource(input.source)) {
     return {
       id: input.id ?? `runtime-event-${Date.now()}`,

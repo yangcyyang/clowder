@@ -26,7 +26,7 @@ const visualThemeBootstrapScript = `
 (() => {
   const storageKey = 'clowder:visual-theme';
   const migrationKey = 'clowder:visual-theme-default:v4';
-  const validThemes = new Set(['claude', 'slockv1', 'slock', 'kami']);
+  const validThemes = new Set(['claude', 'slockv1', 'slock', 'kami', 'maka', 'maka-onedark', 'maka-nord', 'maka-catppuccin']);
   const defaultTheme = 'slock';
   try {
     // Honor any stored valid theme; default-version bumps must never reset a user's explicit choice.

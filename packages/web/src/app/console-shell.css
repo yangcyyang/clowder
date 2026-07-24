@@ -347,6 +347,56 @@
   --chat-code-border: #e8e6dc;
 }
 
+/* ============================================================================
+   Maka family (console shell chrome) — mode-agnostic shared block, matching
+   the theme-tokens.css companion block of the same selector. Console-* tokens
+   here derive from the 3 base colors set by the maka/maka-onedark/maka-nord/
+   maka-catppuccin skin blocks below, so this block never needs a per-skin
+   copy. Rail bg/fg follow the same "dark rail regardless of theme" precedent
+   already used by kami/claude (kami: rail-bg=#141413=its own light cafe-text,
+   rail-fg=#faf9f5=its own surface-elevated) — see the dark override block
+   near the bottom of the file for the dark-mode flip. */
+[data-visual-theme="maka"],
+[data-visual-theme^="maka-"] {
+  --console-shell-bg: var(--cafe-surface-sunken);
+  --console-panel-bg: var(--cafe-surface-sunken);
+  --console-card-bg: var(--cafe-surface);
+  --console-card-soft-bg: var(--cafe-surface-elevated);
+  --console-code-bg: var(--cafe-surface-elevated);
+  --console-pill-bg: color-mix(in srgb, var(--cafe-accent) 10%, var(--cafe-surface-elevated) 90%);
+  --console-border-soft: var(--cafe-border);
+  --console-border-strong: color-mix(in srgb, var(--cafe-text) 22%, transparent);
+  --console-shadow: var(--slock-shadow);
+  --console-shadow-soft: var(--slock-shadow-soft);
+  --console-field-bg: var(--cafe-surface-elevated);
+  --console-active-bg: color-mix(in srgb, var(--cafe-accent) 16%, var(--cafe-surface) 84%);
+  --console-active-fg: var(--cafe-text);
+  --console-active-muted: var(--cafe-text-secondary);
+  --console-hover-bg: color-mix(in srgb, var(--cafe-accent) 6%, var(--cafe-surface) 94%);
+  --console-rail-bg: var(--cafe-text);
+  --console-rail-item: transparent;
+  --console-rail-active: var(--cafe-accent);
+  --console-rail-fg: var(--cafe-surface-elevated);
+  --console-input-stroke: var(--cafe-accent);
+  --console-button-emphasis: var(--cafe-accent);
+  --console-button-emphasis-hover: var(--cafe-accent-hover);
+  --console-modal-title: var(--cafe-interactive);
+  --console-modal-close-bg: var(--cafe-surface-elevated);
+  --console-modal-close-fg: var(--cafe-text-secondary);
+  --console-cat-fallback: var(--cafe-text-muted);
+  --console-status-connected: var(--cafe-accent);
+  --chat-code-bg: var(--cafe-surface-elevated);
+  --chat-code-text: var(--cafe-text);
+  --chat-code-btn-bg: var(--cafe-border);
+  --chat-code-btn-text: var(--cafe-text);
+  --chat-code-border: var(--cafe-border);
+  --chat-code-border-width: 1px;
+  --chat-code-radius: 10px;
+  --chat-code-btn-radius: 6px;
+  --chat-code-shadow: none;
+  --chat-code-btn-shadow: 1px 1px 0 var(--chat-code-border);
+}
+
 [data-theme="dark"][data-visual-theme="slockv1"] {
   --console-shell-bg: #0f1115;
   --console-panel-bg: #141111;
@@ -386,37 +436,47 @@
 }
 
 [data-theme="dark"][data-visual-theme="slock"] {
-  --console-shell-bg: var(--slock-white);
-  --console-panel-bg: var(--slock-cream);
-  --console-card-bg: var(--slock-white);
-  --console-card-soft-bg: var(--slock-cream);
-  --console-code-bg: var(--slock-warm-yellow);
-  --console-pill-bg: var(--slock-warm-yellow);
+  /* B2 fix: previously every value here was `var(--slock-ink)` /
+     `var(--slock-white)` / etc, which (before the theme-tokens.css fix)
+     resolved to the *same* colors as light mode — a no-op dark theme. Now
+     that those aliases carry real dark values, most of this block still
+     works by reference. The exceptions are hardcoded here explicitly,
+     mirroring the slockv1 dark block's approach: --slock-ink became a light
+     cream (correct for borders/shadows/general text on the dark surface),
+     but foreground text sitting on the still-bright yellow rail / pink
+     active chip needs to stay dark ink for AA contrast, so those specific
+     roles are pinned to the dark surface color instead of var(--slock-ink). */
+  --console-shell-bg: #1c1917;
+  --console-panel-bg: #241f1b;
+  --console-card-bg: #2a241f;
+  --console-card-soft-bg: #241f1b;
+  --console-code-bg: #141110;
+  --console-pill-bg: rgba(255, 212, 64, 0.16);
   --console-border-soft: var(--slock-ink);
   --console-border-strong: var(--slock-ink);
   --console-shadow: var(--slock-shadow);
   --console-shadow-soft: var(--slock-shadow-soft);
-  --console-field-bg: var(--slock-white);
+  --console-field-bg: #141110;
   --console-active-bg: var(--slock-pink-active);
-  --console-active-fg: var(--slock-ink);
+  --console-active-fg: #1c1917;
   --console-active-muted: #2f2f2f;
-  --console-hover-bg: var(--slock-warm-yellow);
+  --console-hover-bg: #2b2210;
   --console-rail-bg: var(--slock-rail-yellow);
-  --console-rail-item: var(--slock-white);
-  --console-rail-active: var(--slock-ink);
-  --console-rail-fg: var(--slock-ink);
-  --console-input-stroke: var(--slock-ink);
-  --console-button-emphasis: var(--slock-ink);
-  --console-button-emphasis-hover: var(--slock-pink-active);
+  --console-rail-item: var(--slock-rail-yellow);
+  --console-rail-active: #1c1917;
+  --console-rail-fg: #1c1917;
+  --console-input-stroke: var(--slock-rail-yellow);
+  --console-button-emphasis: var(--slock-pink-active);
+  --console-button-emphasis-hover: var(--slock-pink-hover);
   --console-modal-title: var(--slock-ink);
-  --console-modal-close-bg: var(--slock-warm-yellow);
-  --console-modal-close-fg: var(--slock-ink);
-  --console-cat-fallback: var(--slock-ink);
+  --console-modal-close-bg: #2b2210;
+  --console-modal-close-fg: var(--slock-rail-yellow);
+  --console-cat-fallback: var(--slock-rail-yellow);
   --console-status-connected: var(--slock-success);
-  --chat-code-bg: #101827;
-  --chat-code-text: #e5edf7;
-  --chat-code-btn-bg: #111827;
-  --chat-code-btn-text: #cbd5e1;
+  --chat-code-bg: #141110;
+  --chat-code-text: #f7f2e8;
+  --chat-code-btn-bg: #241f1b;
+  --chat-code-btn-text: #cdc3b4;
   --chat-code-border: var(--slock-ink);
   --chat-code-border-width: 2px;
   --chat-code-radius: 0;
@@ -493,6 +553,17 @@
   --chat-code-btn-bg: #211a15;
   --chat-code-btn-text: #f4eee7;
   --chat-code-border: #3b3027;
+}
+
+/* Maka family (console shell chrome) — dark override. Everything else keeps
+   resolving through the shared block above; only the rail needs to flip from
+   "dark rail on light app" to "rail matches the app's own darkest surface",
+   mirroring kami's dark block (rail-bg=#0f0f0e=its own dark surface-sunken,
+   rail-fg=#f5f4ed=its own dark cafe-text). */
+[data-theme="dark"][data-visual-theme="maka"],
+[data-theme="dark"][data-visual-theme^="maka-"] {
+  --console-rail-bg: var(--cafe-surface-sunken);
+  --console-rail-fg: var(--cafe-text);
 }
 
 .console-shell {
