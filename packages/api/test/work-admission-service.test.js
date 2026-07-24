@@ -124,4 +124,120 @@ describe('F194 work admission service', () => {
       assert.equal(canViewMessage(message, recipient), true);
     }
   });
+
+  // ── [thread-task-design] §2 root cause 3: no unique @mention → no owner →
+  // must not be a silent 202. A visible system notice lands in the main thread. ──
+  describe('unclaimed task notice (F194 root cause 3)', () => {
+    test('create_from_message without an owner cat posts a visible "待认领" notice to the main thread', async () => {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const events = [];
+      const socketManager = {
+        broadcastToRoom: (...args) => events.push(args),
+      };
+      const parent = await threadStore.create('alice', '大厅');
+      const sourceMessage = await messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content: '帮我做个书籍分析',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: parent.id,
+      });
+
+      const result = await admitWorkMessage({
+        decision: {
+          kind: 'create_from_message',
+          taskTitle: '书籍分析',
+          reason: 'explicit_action',
+          // no ownerCatId — no unique @mention target
+        },
+        sourceMessage,
+        userId: 'alice',
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      });
+
+      assert.equal(result.route.ownerCatId, undefined, 'sanity: this is the no-owner path');
+
+      const parentMessages = await messageStore.getByThread(parent.id, 20);
+      const notice = parentMessages.find((m) => m.extra?.systemKind === 'task_created_unclaimed');
+      assert.ok(notice, 'a system notice must be appended to the main thread, not just the task thread');
+      assert.equal(notice.userId, 'system');
+      assert.equal(notice.catId, null);
+      assert.match(notice.content, /待认领/);
+      assert.match(notice.content, /书籍分析/);
+      assert.match(notice.content, /#1/, 'notice must reference the task by its #N label');
+
+      const connectorEvents = events.filter(([, name]) => name === 'connector_message');
+      assert.equal(connectorEvents.length, 1, 'notice must also be broadcast over the socket like other system notices');
+      const [room, , payload] = connectorEvents[0];
+      assert.equal(room, `thread:${parent.id}`);
+      assert.equal(payload.message.content, notice.content);
+      assert.equal(payload.threadId, parent.id);
+    });
+
+    test('create_from_message WITH an owner cat does not post the unclaimed notice', async () => {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const events = [];
+      const socketManager = { broadcastToRoom: (...args) => events.push(args) };
+      const parent = await threadStore.create('alice', '大厅');
+      const sourceMessage = await messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content: '@opus 修复登录超时',
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        threadId: parent.id,
+      });
+
+      await admitWorkMessage({
+        decision: {
+          kind: 'create_from_message',
+          taskTitle: '修复登录超时',
+          ownerCatId: 'opus',
+          reason: 'line_leading_mention_action',
+        },
+        sourceMessage,
+        userId: 'alice',
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      });
+
+      const parentMessages = await messageStore.getByThread(parent.id, 20);
+      const notice = parentMessages.find((m) => m.extra?.systemKind === 'task_created_unclaimed');
+      assert.equal(notice, undefined, 'an owned task must not get the unclaimed notice');
+    });
+
+    test('concurrent admission without an owner posts exactly one unclaimed notice', async () => {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const events = [];
+      const socketManager = { broadcastToRoom: (...args) => events.push(args) };
+      const parent = await threadStore.create('alice', '大厅');
+      const sourceMessage = await messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content: '帮我整理一下资料',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: parent.id,
+      });
+
+      const input = {
+        decision: { kind: 'create_from_message', taskTitle: '整理资料', reason: 'explicit_action' },
+        sourceMessage,
+        userId: 'alice',
+        deps: { taskStore, threadStore, messageStore, socketManager },
+      };
+
+      await Promise.all([admitWorkMessage(input), admitWorkMessage(input)]);
+
+      const parentMessages = await messageStore.getByThread(parent.id, 20);
+      const notices = parentMessages.filter((m) => m.extra?.systemKind === 'task_created_unclaimed');
+      assert.equal(notices.length, 1, 'concurrent duplicate admission must not double-post the notice');
+    });
+  });
 });

@@ -234,6 +234,7 @@ import { previewRoutes } from './routes/preview.js';
 import { refAudioUploadRoutes } from './routes/ref-audio-upload.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
+import { notifyBranchThreadReply } from './routes/thread-reply-summary.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
@@ -516,10 +517,17 @@ async function main(): Promise<void> {
   // F102 KD-34: append listener placeholder (wired after memoryServices init)
   let appendListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
     null;
+  // [thread-task-design] §2 root cause 2: branch-thread reply-count nudge, wired
+  // once threadStore exists (a few lines below) — reuses the same "wire later,
+  // compose here" placeholder pattern as appendListener above so every one of
+  // the ~40 messageStore.append() call sites is covered uniformly.
+  let branchReplyListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
+    null;
 
   const messageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
+      branchReplyListener?.(msg);
     },
   });
   const holdStore = createFreshnessHoldStore(redis, { maxReviews: 2 });
@@ -547,6 +555,18 @@ async function main(): Promise<void> {
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
+  // [thread-task-design] §2 root cause 2: now that threadStore/socketManager both
+  // exist, wire the branch reply-count nudge (see thread-reply-summary.ts). Fire
+  // and forget + swallow errors — a failed nudge must never break message append.
+  branchReplyListener = (msg) => {
+    if (!msg.threadId || !socketManager) return;
+    const sm = socketManager;
+    void notifyBranchThreadReply({ threadStore, messageStore, socketManager: sm }, { branchThreadId: msg.threadId }).catch(
+      (err) => {
+        app.log.warn({ err, threadId: msg.threadId }, '[thread-reply-summary] branch reply-count nudge failed');
+      },
+    );
+  };
   // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
   const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
   const guideSessionStore = new InMemoryGuideSessionStore();

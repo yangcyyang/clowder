@@ -1,7 +1,7 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore, ThreadRelationV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export function formatTaskThreadTitle(title: string): string {
@@ -67,13 +67,31 @@ export async function ensureTaskDiscussionThread(
 
   const parentThread = await threadStore.get(task.threadId);
   const userId = options.userId ?? task.userId ?? parentThread?.createdBy ?? 'default-user';
-  const taskThread = await threadStore.create(userId, formatTaskThreadTitle(task.title), parentThread?.projectPath);
+
+  // Fetched before thread creation (moved up from below) so its id can seed the
+  // branch `relation` — mirrors the manual-branch shape (thread-branch.ts) so the
+  // data model stays consistent between manual and task-auto-admitted branches.
+  // Not for sidebar visibility (task threads stay filtered out there by design,
+  // see docs/research/clowder-raft-thread-task-design.md §3 step 1.4) — this is
+  // purely so downstream relation-aware features (reply-count nudges, "jump to
+  // branch" entry points) work the same way for both branch kinds.
+  const originalSource = task.sourceMessageId ? await messageStore.getById(task.sourceMessageId) : null;
+  const relationRootMessageId =
+    originalSource && originalSource.threadId === task.threadId ? originalSource.id : (task.sourceMessageId ?? task.id);
+  const relation: ThreadRelationV1 = {
+    v: 1,
+    kind: 'task_thread',
+    parentThreadId: task.threadId,
+    rootMessageId: relationRootMessageId,
+  };
+  const taskThread = await threadStore.create(userId, formatTaskThreadTitle(task.title), parentThread?.projectPath, {
+    relation,
+  });
 
   if (parentThread?.participants?.length) {
     await threadStore.addParticipants(taskThread.id, parentThread.participants);
   }
 
-  const originalSource = task.sourceMessageId ? await messageStore.getById(task.sourceMessageId) : null;
   const sourceMessage = await messageStore.append({
     userId: originalSource?.userId ?? userId,
     catId: originalSource?.catId ?? null,

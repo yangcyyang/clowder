@@ -102,7 +102,8 @@ export interface ThreadMentionRoutingFeedback {
  */
 export interface ThreadRelationV1 {
   readonly v: 1;
-  readonly kind: 'inline_reply' | 'edit_branch';
+  /** task_thread: F194 auto-admitted task discussion thread (task-discussion-thread.ts). */
+  readonly kind: 'inline_reply' | 'edit_branch' | 'task_thread';
   readonly parentThreadId: string;
   readonly rootMessageId: string;
 }

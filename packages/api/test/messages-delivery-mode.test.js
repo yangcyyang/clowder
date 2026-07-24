@@ -1200,4 +1200,146 @@ describe('POST /api/messages deliveryMode', () => {
     // Should NOT have created InvocationRecord
     assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
   });
+
+  // ── [thread-task-design] §2 root cause 1: user queue entries must hit the
+  // durability journal, mirroring the A2A admission barrier (persistEntry). ──
+  describe('user queue entry durability (F194 root cause 1)', () => {
+    it('persists the user queue entry to the durable journal before returning 202', async () => {
+      const journal = new Map();
+      const persistence = {
+        async save(saved) {
+          journal.set(saved.id, structuredClone(saved));
+        },
+        async delete(id) {
+          journal.delete(id);
+        },
+        async list() {
+          return [...journal.values()].map((saved) => structuredClone(saved));
+        },
+      };
+      const durableDeps = buildDeps({ invocationQueue: new InvocationQueue(persistence) });
+      durableDeps.invocationTracker.has.mock.mockImplementation(() => true);
+      let seq = 0;
+      durableDeps.messageStore.append.mock.mockImplementation(async (msg) => ({ id: `msg-${++seq}`, ...msg }));
+
+      const durableApp = Fastify();
+      const { messagesRoutes } = await import('../dist/routes/messages.js');
+      await durableApp.register(messagesRoutes, durableDeps);
+      await durableApp.ready();
+
+      try {
+        const res = await durableApp.inject({
+          method: 'POST',
+          url: '/api/messages',
+          headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+          payload: { content: '持久化排队消息', threadId: 'thread-1', deliveryMode: 'queue' },
+        });
+
+        assert.equal(res.statusCode, 202);
+        const body = JSON.parse(res.body);
+        assert.equal(body.status, 'queued');
+
+        assert.equal(journal.size, 1, 'enqueue must write the entry to the durable journal, not just in-memory');
+        const persisted = [...journal.values()][0];
+        assert.equal(persisted.source, 'user');
+        assert.equal(persisted.threadId, 'thread-1');
+        assert.equal(persisted.content, '持久化排队消息');
+        assert.equal(persisted.messageId, body.userMessageId, 'journaled entry must carry the backfilled messageId');
+      } finally {
+        await durableApp.close();
+      }
+    });
+
+    it('restart recovery: a simulated process restart restores the journaled user entry and it can be dequeued', async () => {
+      const journal = new Map();
+      const persistence = {
+        async save(saved) {
+          journal.set(saved.id, structuredClone(saved));
+        },
+        async delete(id) {
+          journal.delete(id);
+        },
+        async list() {
+          return [...journal.values()].map((saved) => structuredClone(saved));
+        },
+      };
+      const durableDeps = buildDeps({ invocationQueue: new InvocationQueue(persistence) });
+      durableDeps.invocationTracker.has.mock.mockImplementation(() => true);
+      let seq = 0;
+      durableDeps.messageStore.append.mock.mockImplementation(async (msg) => ({ id: `msg-${++seq}`, ...msg }));
+
+      const durableApp = Fastify();
+      const { messagesRoutes } = await import('../dist/routes/messages.js');
+      await durableApp.register(messagesRoutes, durableDeps);
+      await durableApp.ready();
+
+      try {
+        const res = await durableApp.inject({
+          method: 'POST',
+          url: '/api/messages',
+          headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+          payload: { content: '重启前的排队消息', threadId: 'thread-1', deliveryMode: 'queue' },
+        });
+        assert.equal(res.statusCode, 202);
+      } finally {
+        await durableApp.close();
+      }
+
+      // Simulate process restart: brand-new InvocationQueue backed by the same durable journal.
+      const restoredQueue = new InvocationQueue(persistence);
+      const summary = await restoredQueue.restorePersistedEntries();
+      assert.equal(summary.restored, 1, 'restart must restore the queued user message instead of dropping it');
+
+      const restored = restoredQueue.list('thread-1', 'user-1')[0];
+      assert.ok(restored, 'restored entry must be visible after restart');
+      assert.equal(restored.source, 'user');
+      assert.equal(restored.content, '重启前的排队消息');
+
+      const dequeued = restoredQueue.dequeue('thread-1', 'user-1');
+      assert.ok(dequeued, 'restored user entry must still be dequeueable');
+      assert.equal(dequeued.content, '重启前的排队消息');
+    });
+
+    it('TOCTOU degrade-to-queue fallback also persists the entry to the durable journal', async () => {
+      const journal = new Map();
+      const persistence = {
+        async save(saved) {
+          journal.set(saved.id, structuredClone(saved));
+        },
+        async delete(id) {
+          journal.delete(id);
+        },
+        async list() {
+          return [...journal.values()].map((saved) => structuredClone(saved));
+        },
+      };
+      const durableDeps = buildDeps({ invocationQueue: new InvocationQueue(persistence) });
+      durableDeps.invocationTracker.has.mock.mockImplementation(() => false);
+      durableDeps.invocationTracker.tryStartThreadAll.mock.mockImplementation(() => null);
+      let seq = 0;
+      durableDeps.messageStore.append.mock.mockImplementation(async (msg) => ({ id: `msg-${++seq}`, ...msg }));
+
+      const durableApp = Fastify();
+      const { messagesRoutes } = await import('../dist/routes/messages.js');
+      await durableApp.register(messagesRoutes, durableDeps);
+      await durableApp.ready();
+
+      try {
+        const res = await durableApp.inject({
+          method: 'POST',
+          url: '/api/messages',
+          headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+          payload: { content: 'TOCTOU 持久化', threadId: 'thread-1', deliveryMode: 'immediate' },
+        });
+
+        assert.equal(res.statusCode, 202);
+        assert.equal(journal.size, 1, 'TOCTOU fallback enqueue must also reach the durable journal');
+        const persisted = [...journal.values()][0];
+        assert.equal(persisted.source, 'user');
+        assert.equal(persisted.content, 'TOCTOU 持久化');
+      } finally {
+        await durableApp.close();
+      }
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import type { CatId, TaskEvent, TaskItem } from '@cat-cafe/shared';
+import { createModuleLogger } from '../infrastructure/logger.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -6,6 +7,8 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
 import type { WorkAdmissionDecision } from './work-admission.js';
+
+const log = createModuleLogger('routes/work-admission-service');
 
 export interface ExecutionRouteV1 {
   version: 1;
@@ -58,6 +61,64 @@ function taskTitleForSource(sourceMessage: StoredMessage, classifiedTitle: strin
   return redactSecretsInText(classifiedTitle);
 }
 
+const UNCLAIMED_NOTICE_TITLE_MAX = 60;
+
+function truncateTaskTitleForNotice(title: string): string {
+  const trimmed = title.trim();
+  return trimmed.length > UNCLAIMED_NOTICE_TITLE_MAX ? `${trimmed.slice(0, UNCLAIMED_NOTICE_TITLE_MAX - 1)}…` : trimmed;
+}
+
+/** Same "#N" convention as tasks.ts's getTaskLabel — 1-based position among non-pr_tracking tasks in the thread. */
+async function unclaimedTaskLabel(taskStore: ITaskStore, task: TaskItem): Promise<string> {
+  const tasks = (await taskStore.listByThread(task.threadId)).filter((item) => item.kind !== 'pr_tracking');
+  const index = tasks.findIndex((item) => item.id === task.id);
+  return index >= 0 ? `#${index + 1}` : `#${task.id}`;
+}
+
+/**
+ * F194 可见性修复 (§2 root cause 3): create_from_message without a unique @mention
+ * previously left a todo task with zero trace in the main thread — the 202 response
+ * was the only signal, and only to the original HTTP caller. Post a normal, socket-visible
+ * system notice so "谁来认领" is answered without opening the Tasks tab.
+ *
+ * Mirrors the existing system-notice append shape (persistA2ARoutingMessage /
+ * persistA2APendingNotice): userId:'system', catId:null, + connector_message broadcast.
+ */
+async function persistUnclaimedTaskNotice(task: TaskItem, deps: WorkAdmissionDeps): Promise<void> {
+  const label = await unclaimedTaskLabel(deps.taskStore, task);
+  const content = `已创建任务 ${label}：${truncateTaskTitleForNotice(task.title)}（待认领）`;
+  const source = {
+    connector: 'task-system',
+    label: 'Task',
+    icon: '📋',
+    meta: { presentation: 'system_notice', noticeTone: 'info', eventType: 'task_created_unclaimed', taskId: task.id },
+  } as const;
+  try {
+    const stored = await deps.messageStore.append({
+      userId: 'system',
+      catId: null,
+      content,
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: task.threadId,
+      source,
+      extra: { systemKind: 'task_created_unclaimed' },
+    });
+    deps.socketManager.broadcastToRoom(`thread:${task.threadId}`, 'connector_message', {
+      threadId: task.threadId,
+      message: {
+        id: stored.id,
+        type: 'connector',
+        content: stored.content,
+        source,
+        timestamp: stored.timestamp,
+      },
+    });
+  } catch (err) {
+    log.warn({ err, taskId: task.id, threadId: task.threadId }, 'Failed to persist unclaimed task notice');
+  }
+}
+
 export async function admitWorkMessage(input: {
   decision: Exclude<WorkAdmissionDecision, { kind: 'reply_only' }>;
   sourceMessage: StoredMessage;
@@ -101,6 +162,11 @@ export async function admitWorkMessage(input: {
       newThreadId: discussion.threadId,
       fromMessageId: sourceMessage.id,
     });
+    // §2 root cause 3: no unique @mention → no owner → the task would otherwise
+    // sit silently in the Tasks tab with zero trace in the main thread.
+    if (!ownerCatId) {
+      await persistUnclaimedTaskNotice(discussion.task, deps);
+    }
   }
 
   return {

@@ -58,7 +58,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
-      systemKind?: 'a2a_routing' | 'progress_heartbeat';
+      systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed';
       slockThread?: { branchThreadId: string; replyCount: number };
     }
   | undefined {
@@ -85,7 +85,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
-      systemKind?: 'a2a_routing' | 'progress_heartbeat';
+      systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed';
       slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
     let hasField = false;
@@ -135,7 +135,11 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'progress_heartbeat') {
+    if (
+      parsed.systemKind === 'a2a_routing' ||
+      parsed.systemKind === 'progress_heartbeat' ||
+      parsed.systemKind === 'task_created_unclaimed'
+    ) {
       result.systemKind = parsed.systemKind;
       hasField = true;
     }

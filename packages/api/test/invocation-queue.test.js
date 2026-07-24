@@ -158,6 +158,84 @@ describe('InvocationQueue', () => {
     assert.equal(restoredEntry.a2aWaitedForQueuedUserMessages, true);
   });
 
+  // ── [thread-task-design] §2 root cause 1: user-sourced queue entries must
+  // survive a restart the same way A2A entries already do. ──
+
+  it('persists a user-sourced queue entry to the durable journal on enqueue (mirrors messages.ts)', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()].map((saved) => structuredClone(saved));
+      },
+    };
+    const source = new InvocationQueue(persistence);
+    const result = source.enqueue(entry({ content: '用户排队消息', targetCats: ['opus'] }));
+    // Mirrors messages.ts: backfill the message envelope before persisting.
+    source.backfillMessageEnvelope('t1', 'u1', result.entry.id, {
+      messageId: 'msg-user-1',
+      senderType: 'user',
+      content: '用户排队消息',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+    });
+    await source.persistEntry(result.entry);
+
+    assert.equal(rows.size, 1, 'journal must contain the user entry after enqueue');
+    const journaled = [...rows.values()][0];
+    assert.equal(journaled.source, 'user');
+    assert.equal(journaled.messageId, 'msg-user-1', 'persisted snapshot must include the post-backfill messageId');
+  });
+
+  it('restores a persisted user-sourced entry after a simulated restart and it can still be dequeued', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()].map((saved) => structuredClone(saved));
+      },
+    };
+
+    // Simulate the pre-restart process.
+    const before = new InvocationQueue(persistence);
+    const result = before.enqueue(entry({ content: '重启前排队', targetCats: ['opus'] }));
+    before.backfillMessageEnvelope('t1', 'u1', result.entry.id, {
+      messageId: 'msg-before-restart',
+      senderType: 'user',
+      content: '重启前排队',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+    });
+    await before.persistEntry(result.entry);
+
+    // Simulate a restart: brand-new in-memory queue, same durable persistence.
+    const after = new InvocationQueue(persistence);
+    const summary = await after.restorePersistedEntries();
+    assert.equal(summary.restored, 1, 'restart must restore the queued user message, not drop it');
+
+    const restoredEntry = after.list('t1', 'u1')[0];
+    assert.ok(restoredEntry, 'restored entry must be visible in the rebuilt queue');
+    assert.equal(restoredEntry.source, 'user');
+    assert.equal(restoredEntry.messageId, 'msg-before-restart');
+    assert.equal(restoredEntry.status, 'queued');
+
+    // And it must still be dequeueable — this is the actual point of persisting it.
+    const dequeued = after.dequeue('t1', 'u1');
+    assert.ok(dequeued, 'restored user entry must be dequeueable after restart');
+    assert.equal(dequeued.content, '重启前排队');
+    assert.equal(after.size('t1', 'u1'), 0);
+  });
+
   it('drops expired pending mentions during restore', async () => {
     const expired = {
       ...entry({ source: 'agent', autoExecute: true }),

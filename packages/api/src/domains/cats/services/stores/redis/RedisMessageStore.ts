@@ -1088,6 +1088,11 @@ export class RedisMessageStore {
     return this.fetchDeliveredDesc(key, n, userId ? (m) => m.userId === userId || isSystemUserMessage(m) : undefined);
   }
 
+  /** Raw ZCARD — total entries in the thread's sorted set (no hydration/filtering). */
+  async countByThread(threadId: string): Promise<number> {
+    return this.redis.zcard(MessageKeys.thread(threadId));
+  }
+
   /**
    * Get messages in a thread after a cursor ID (exclusive), oldest first.
    * If afterId is undefined, returns from thread start.

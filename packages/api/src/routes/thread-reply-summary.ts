@@ -1,5 +1,8 @@
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isDelivered, type StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage, isUserVisibleUnreadMessage, type Viewer } from '../domains/cats/services/stores/visibility.js';
+import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface ThreadReplyPreview {
   id: string;
@@ -80,4 +83,82 @@ export function deriveThreadReplySummary(
       ...(latest.revealedAt !== undefined ? { revealedAt: latest.revealedAt } : {}),
     },
   };
+}
+
+/**
+ * Socket event contract for {@link notifyBranchThreadReply}.
+ * Event name: 'thread_reply_count_updated'. Room: `thread:{parentThreadId}` —
+ * i.e. the MAIN thread the branch hangs off of, not the branch room itself, so
+ * viewers who never joined the branch still see the count move (F194 §2 root
+ * cause 2: "用户没 join 分支 thread room 收不到分支动静").
+ */
+export interface ThreadReplyCountUpdatedEvent {
+  sourceMessageId: string;
+  branchThreadId: string;
+  replyCount: number;
+}
+
+export interface BranchReplyNotifyDeps {
+  threadStore: Pick<IThreadStore, 'get'>;
+  messageStore: Pick<IMessageStore, 'getById' | 'updateExtra' | 'countByThread'>;
+  socketManager: Pick<SocketManager, 'broadcastToRoom'>;
+}
+
+/**
+ * F194 可见性修复 (§2 root cause 2 / docs/research/clowder-raft-thread-task-design.md):
+ * whenever a message lands in a durable branch thread (relation-bearing —
+ * inline_reply / edit_branch / task_thread), refresh the anchor message's
+ * persisted `extra.slockThread.replyCount` and ping the thread the branch hangs
+ * off of so users who never opened/joined the branch panel still see the reply
+ * count move in real time.
+ *
+ * Deliberately cheap: one ZCARD-equivalent count (IMessageStore#countByThread),
+ * no per-message hydration/filtering pass. The accurate, viewer-scoped count is
+ * still computed on read via deriveThreadReplySummary() above — this is only
+ * the live "something changed" nudge, not the source of truth.
+ *
+ * Race-safe by construction: this only refreshes a message that ALREADY carries
+ * `extra.slockThread.branchThreadId === branchThreadId`. During initial thread
+ * setup (history copy in thread-branch.ts, or the single source-copy append in
+ * ensureTaskDiscussionThread) that link has not been claimed yet, so this never
+ * contends with claimBranchThreadLink's / ensureTaskDiscussionThread's own CAS.
+ *
+ * Known limitation: the "-1" assumes exactly one source-copy message preceded
+ * the first real reply. That is always true for task_thread (single source
+ * copy) but undercounts for legacy inline_reply/edit_branch threads created
+ * with a full history copy (see design doc §2 root cause 6 / §3 step 2.5,
+ * tracked separately) — those are corrected on next history fetch via
+ * deriveThreadReplySummary regardless.
+ */
+export async function notifyBranchThreadReply(
+  deps: BranchReplyNotifyDeps,
+  input: { branchThreadId: string },
+): Promise<{ notified: boolean; replyCount?: number }> {
+  const branchThread = await deps.threadStore.get(input.branchThreadId);
+  const relation = branchThread?.relation;
+  if (!relation) return { notified: false };
+
+  const source = await deps.messageStore.getById(relation.rootMessageId);
+  if (!source?.extra?.slockThread || source.extra.slockThread.branchThreadId !== input.branchThreadId) {
+    return { notified: false };
+  }
+
+  const total = await deps.messageStore.countByThread(input.branchThreadId);
+  const replyCount = Math.max(0, total - 1);
+
+  if (replyCount !== source.extra.slockThread.replyCount) {
+    await deps.messageStore.updateExtra(relation.rootMessageId, {
+      ...source.extra,
+      slockThread: { branchThreadId: input.branchThreadId, replyCount },
+    });
+  }
+
+  const event: ThreadReplyCountUpdatedEvent = {
+    sourceMessageId: relation.rootMessageId,
+    branchThreadId: input.branchThreadId,
+    replyCount,
+  };
+  deps.socketManager.broadcastToRoom(`thread:${relation.parentThreadId}`, 'thread_reply_count_updated', event);
+
+  return { notified: true, replyCount };
 }

@@ -153,7 +153,7 @@ function parseThreadRelationJson(raw: string): ThreadRelationV1 | null {
       'v' in parsed &&
       parsed.v === 1 &&
       'kind' in parsed &&
-      (parsed.kind === 'inline_reply' || parsed.kind === 'edit_branch') &&
+      (parsed.kind === 'inline_reply' || parsed.kind === 'edit_branch' || parsed.kind === 'task_thread') &&
       'parentThreadId' in parsed &&
       typeof parsed.parentThreadId === 'string' &&
       parsed.parentThreadId.length > 0 &&

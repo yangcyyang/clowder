@@ -129,7 +129,7 @@ export interface StoredMessage {
       kind: 'ack' | 'heartbeat';
       invocationId?: string;
     };
-    systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'sanity_handoff';
+    systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'sanity_handoff' | 'task_created_unclaimed';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
     /** P2-3: Aggregated emoji reactions for this message. */
@@ -329,6 +329,13 @@ export interface IMessageStore {
     beforeId?: string,
   ): StoredMessage[] | Promise<StoredMessage[]>;
   getByThread(threadId: string, limit?: number, userId?: string): StoredMessage[] | Promise<StoredMessage[]>;
+  /**
+   * Cheap total message count for a thread (all statuses, including tombstones —
+   * mirrors a raw Redis ZCARD). Not viewer-scoped or delivery-filtered; callers
+   * needing an accurate/visible reply count should use deriveThreadReplySummary
+   * instead. Intended for lightweight "did anything change" real-time nudges.
+   */
+  countByThread(threadId: string): number | Promise<number>;
   getByThreadAfter(
     threadId: string,
     afterId?: string,
@@ -857,6 +864,15 @@ export class MessageStore {
       matches.push(msg);
     }
     return matches.reverse();
+  }
+
+  /** Raw total message count for a thread (all statuses — mirrors Redis ZCARD parity). */
+  countByThread(threadId: string): number {
+    let count = 0;
+    for (const msg of this.messages) {
+      if (msg.threadId === threadId) count++;
+    }
+    return count;
   }
 
   /**

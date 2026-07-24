@@ -955,6 +955,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               timestamp: userMessage.timestamp,
             });
           }
+          if (enqueueResult.entry) {
+            // [thread-task-design] §2 root cause 1 / F194: user-sourced queue entries
+            // previously never hit the durability journal, so a restart silently
+            // dropped queued user messages. Mirror the A2A path's admission barrier
+            // (persistEntry after enqueue succeeds, before reporting 202 to caller).
+            await opts.invocationQueue.persistEntry(enqueueResult.entry);
+          }
           void deliverWebUserMessageToConnector(resolvedThreadId, content, userMessage.id, opts, log, {
             visibility: whisperVisibility,
           });
@@ -1091,6 +1098,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 const queueEntryId = enqueueResult.entry?.id;
                 if (queueEntryId) {
                   opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
+                }
+                if (enqueueResult.entry) {
+                  // [thread-task-design] §2 root cause 1: same durability barrier as the
+                  // primary queue path — this TOCTOU fallback also enqueues real user work.
+                  await opts.invocationQueue.persistEntry(enqueueResult.entry);
                 }
                 void deliverWebUserMessageToConnector(resolvedThreadId, content, toctouUserMessage.id, opts, log, {
                   visibility: whisperVisibility,
@@ -2227,6 +2239,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
       ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
       ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+      // 批次1-C 集成收尾：历史接口下发 deliveryStatus，页面刷新后排队徽标可恢复
+      // （前端 useChatHistory.ts 已有 forward-compat 透传分支）。
+      ...(m.deliveryStatus ? { deliveryStatus: m.deliveryStatus } : {}),
       ...(m.source
         ? {
             source: {
