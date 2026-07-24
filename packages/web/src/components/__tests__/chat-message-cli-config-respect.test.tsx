@@ -92,7 +92,17 @@ function makeCallbackCompanion(): ChatMessageType {
   } as ChatMessageType;
 }
 
-describe('ChatMessage Slock-like CLI suppression', () => {
+// [batch 2-E] This suite originally (commit ddaca354) asserted that CLI Output
+// respects the bubbleCli/cliOutput config; commit eb5fe913's "slock-style UI
+// overhaul checkpoint" then flipped it to assert CLI Output is ALWAYS hidden.
+// Batch 2 revives CliOutputBlock (docs/research/maka-absorption.md §2/§4 +
+// docs/research/clowder-raft-thread-task-design.md §3 step 2.3) and wires its
+// defaultExpanded to the same resolveBubbleExpanded(bubbleCli, globalBubbleDefaults.cliOutput)
+// mechanism ThinkingContent already uses — restoring config-respect, minus the
+// pre-Slock "advertise stdout snippet in the collapsed header" nuance (not in
+// this batch's scope; ChatMessage passes toCliEvents(toolEvents, undefined) —
+// no stream-content merge, so the header never previews text, only tool count).
+describe('ChatMessage CLI Output config respect', () => {
   let container: HTMLDivElement;
   let root: Root;
   let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
@@ -143,7 +153,7 @@ describe('ChatMessage Slock-like CLI suppression', () => {
     });
   }
 
-  it('A. stream-origin + text content + NO callback companion → stdout is rendered as normal text, no CLI Output chrome', () => {
+  it('A. stream-origin + text content + collapsed config (default) → text shows, CLI Output stays collapsed', () => {
     const MARKER = 'STDOUT_HINT';
     storeMessages = [];
 
@@ -154,11 +164,13 @@ describe('ChatMessage Slock-like CLI suppression', () => {
     );
 
     expect(container.textContent).toContain(MARKER);
-    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.textContent).toContain('CLI Output');
+    // Config says collapsed (default) — body not mounted, tool label not visible.
     expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
+    expect(container.textContent).not.toContain('Read');
   });
 
-  it('A2. stream-origin + text content + expanded config → still no CLI Output chrome', () => {
+  it('A2. stream-origin + text content + expanded config → CLI Output respects config and expands', () => {
     const MARKER = 'STREAM_FINAL_SPEECH_MARKER_42';
     globalCliOutputDefault = 'expanded';
     storeMessages = [];
@@ -170,11 +182,13 @@ describe('ChatMessage Slock-like CLI suppression', () => {
     );
 
     expect(container.textContent).toContain(MARKER);
-    expect(container.textContent).not.toContain('CLI Output');
-    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
+    expect(container.textContent).toContain('CLI Output');
+    // globalBubbleDefaults.cliOutput='expanded' flows through resolveBubbleExpanded,
+    // same mechanism ThinkingContent already uses for bubbleThinking.
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
   });
 
-  it('B. stream-origin + text content + callback companion → no CLI Output chrome', () => {
+  it('B. stream-origin + text content + callback companion present → CLI Output still shows, collapsed by default', () => {
     const STDOUT_MARKER = 'STDOUT_MARKER_47_CODEX';
     storeMessages = [
       makeStreamMessage({ id: 'msg-stream-target', content: `narrative ${STDOUT_MARKER}` }),
@@ -189,11 +203,13 @@ describe('ChatMessage Slock-like CLI suppression', () => {
     );
 
     expect(container.textContent).toContain(STDOUT_MARKER);
-    expect(container.textContent).not.toContain('CLI Output');
+    // This batch does not special-case a callback companion — CLI Output renders
+    // whenever the message itself carries toolEvents, independent of sibling messages.
+    expect(container.textContent).toContain('CLI Output');
     expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('C. stream-origin + tools but NO text content → pure tool message is hidden', () => {
+  it('C. stream-origin + tools but NO text content → pure tool message is hidden entirely', () => {
     storeMessages = [];
 
     renderMessage(
@@ -202,12 +218,15 @@ describe('ChatMessage Slock-like CLI suppression', () => {
       }),
     );
 
+    // Empty content + no thinking/rich/crossPost → isUserVisibleChatMessage() returns
+    // false regardless of toolEvents, so the message (and any CLI Output block) never
+    // mounts at all — this is unrelated to and unaffected by the CLI Output revival.
     expect(container.textContent).not.toContain('CLI Output');
     expect(container.textContent).not.toContain('Read');
     expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
-  it('D. callback-origin message → content remains visible and CLI Output chrome is hidden', () => {
+  it('D. callback-origin message → content remains visible and CLI Output shows collapsed', () => {
     storeMessages = [];
 
     renderMessage(
@@ -220,7 +239,7 @@ describe('ChatMessage Slock-like CLI suppression', () => {
     );
 
     expect(container.textContent).toContain('callback speech');
-    expect(container.textContent).not.toContain('CLI Output');
+    expect(container.textContent).toContain('CLI Output');
     expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 

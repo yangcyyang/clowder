@@ -45,6 +45,15 @@ interface MessageActionsProps {
   onOpenThread?: (messageId: string) => void;
   onPinMessage?: (message: ChatMessage) => void;
   onEditMessage?: (message: ChatMessage) => void;
+  /**
+   * [batch 2-E] Raft rule: only top-level (main channel) messages can be
+   * converted to a task — messages already inside a thread (relation-having
+   * thread, e.g. a task/inline-reply branch) cannot be converted again, since
+   * Raft-style threads forbid nesting. Defaults to true; ChatContainer passes
+   * `!currentThread?.relation` so branch threads viewed directly are covered
+   * even though InlineThreadPanel itself never wraps messages in MessageActions.
+   */
+  canConvertToTask?: boolean;
 }
 
 export function MessageActions({
@@ -54,6 +63,7 @@ export function MessageActions({
   onOpenThread,
   onPinMessage,
   onEditMessage,
+  canConvertToTask = true,
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -103,6 +113,10 @@ export function MessageActions({
 
   const handleBranchDirect = useCallback(() => setDialog({ type: 'branch-direct' }), []);
   const handleConvertToTask = useCallback(async () => {
+    // Defensive guard — the menu item itself is hidden when canConvertToTask is
+    // false (see render below), but keep this in case a caller wires the handler
+    // directly. Raft rule: thread-nested messages cannot be converted.
+    if (!canConvertToTask) return;
     if (existingTask) {
       useToastStore.getState().addToast({
         type: 'info',
@@ -113,17 +127,21 @@ export function MessageActions({
       return;
     }
 
+    // [batch 2-E] Forces the backend's admitWorkMessage path (same task-creation
+    // machinery the auto-admission classifier uses) instead of the old bare
+    // task-store insert — see docs/research/clowder-raft-thread-task-design.md §3
+    // step 2.3. PENDING 2-A: this endpoint does not exist yet in this worktree;
+    // assumed contract — POST body {userId, title?, why?}, 200 response
+    // {task: TaskItem, created: boolean} (created:false when idempotently
+    // re-hit for a message that already has a task).
     try {
-      const res = await apiFetch('/api/tasks', {
+      const res = await apiFetch(`/api/messages/${encodeURIComponent(message.id)}/convert-to-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          threadId,
+          userId: getUserId(),
           title: formatTaskTitleFromMessage(message),
           why: '由消息转为任务',
-          createdBy: 'user',
-          userId: getUserId(),
-          sourceMessageId: message.id,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -132,17 +150,19 @@ export function MessageActions({
         return;
       }
 
-      addTask(body as TaskItem);
+      const task = (body?.task ?? body) as TaskItem;
+      const created = body?.created !== false;
+      addTask(task);
       useToastStore.getState().addToast({
         type: 'success',
-        title: '已转为任务',
-        message: '可在 TASKS 面板查看。',
+        title: created ? '已转为任务' : '已关联任务',
+        message: created ? '可在 TASKS 面板查看，回复将进入任务 Thread。' : `已关联：${task.title}`,
         duration: 2400,
       });
     } catch {
       showErrorToast('转任务失败');
     }
-  }, [addTask, existingTask, message, threadId]);
+  }, [addTask, canConvertToTask, existingTask, message]);
 
   const handleReply = useCallback(() => {
     window.dispatchEvent(new CustomEvent('chat:set-reply', { detail: { messageId: message.id } }));
@@ -416,7 +436,7 @@ export function MessageActions({
           content={message.content}
           onClose={() => setCtxMenu(null)}
           onSave={handleSave}
-          onConvertToTask={handleConvertToTask}
+          onConvertToTask={canConvertToTask ? handleConvertToTask : undefined}
           onShare={handleSharePlaceholder}
           onPin={onPinMessage ? handlePin : undefined}
           onEdit={isUser ? (canInlineEdit ? handleInlineEdit : handleEdit) : undefined}

@@ -9,7 +9,6 @@ import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
-import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
@@ -105,7 +104,13 @@ interface ChatInputProps {
     attachments?: File[],
     whisper?: WhisperOptions,
     deliveryMode?: DeliveryMode,
-  ) => Promise<{ userMessageId?: string } | string | void> | { userMessageId?: string } | string | void;
+    /** [batch 2-E] Forces the backend's admitWorkMessage path for this send — see useSendMessage.ts */
+    asTask?: boolean,
+  ) =>
+    | Promise<{ userMessageId?: string; taskId?: string } | string | void>
+    | { userMessageId?: string; taskId?: string }
+    | string
+    | void;
   onStop?: () => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -334,35 +339,22 @@ export function ChatInput({
         setSendAsTask(false);
         if (selectedPromptPrefix.prefix) updatePromptPrefix('none');
 
-        const sendResult = await onSend(contentToSend, sendImages, sendAttachments, whisper, deliveryMode);
-        const sentMessageId =
-          typeof sendResult === 'string'
-            ? sendResult
-            : sendResult && typeof sendResult.userMessageId === 'string'
-              ? sendResult.userMessageId
-              : undefined;
-
-        if (sendAsTask && sentMessageId && threadId) {
-          try {
-            const res = await apiFetch('/api/tasks', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                threadId,
-                title: (trimmed || attachments[0]?.name || fallbackContent).slice(0, 100),
-                why: '',
-                createdBy: 'user',
-                sourceMessageId: sentMessageId,
-              }),
-            });
-            if (res.ok) {
-              const task = (await res.json()) as TaskItem;
-              useTaskStore.getState().addTask(task);
-            }
-          } catch {
-            // Message send already succeeded. Task creation can be retried from the task panel later.
-          }
-        }
+        // [batch 2-E] asTask forces the backend's admitWorkMessage path directly
+        // on the send itself (packages/api/src/routes/messages.ts reads the new
+        // `asTask` field via sendMessageSchema — confirmed landed in this worktree
+        // by 2-A's parallel, still-uncommitted work as of this writing). It
+        // broadcasts task_created unconditionally whenever a new task is admitted
+        // (owned or unowned — see admitWorkMessage in work-admission-service.ts),
+        // which useChatSocketCallbacks.onTaskCreated already turns into a taskStore
+        // entry + the inline "已建任务" notice bar (ChatMessage.tsx
+        // TaskCreatedNoticeBar) with zero extra client code. Deliberately NOT
+        // falling back to the old client-only POST /api/tasks here — the "owned"
+        // admission branch (message mentions a single cat) never surfaces a
+        // taskId on this HTTP response (only the unmatched/no-owner 202 path
+        // does), so a response-shape-based fallback would double-create a task
+        // for every owned send. Trust the socket broadcast instead, same as the
+        // pre-existing auto-admission (classifyWorkAdmission) path already does.
+        await onSend(contentToSend, sendImages, sendAttachments, whisper, deliveryMode, sendAsTask);
       }
     },
     [
@@ -376,7 +368,6 @@ export function ChatInput({
       whisperTargets,
       addHistoryEntry,
       sendAsTask,
-      threadId,
       selectedPromptPrefix,
       updatePromptPrefix,
     ],
@@ -1110,14 +1101,19 @@ export function ChatInput({
 
             <div className="ml-auto flex items-center gap-1">
               <label
-                className="slock-inline-control hidden cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-text md:flex"
+                className={`slock-inline-control hidden cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors md:flex ${
+                  sendAsTask
+                    ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
+                    : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+                }`}
                 title="发送后创建任务"
               >
                 <input
                   type="checkbox"
                   checked={sendAsTask}
                   onChange={(event) => setSendAsTask(event.target.checked)}
-                  className="h-3.5 w-3.5 accent-[var(--console-input-stroke)]"
+                  aria-label="As Task"
+                  className="h-3.5 w-3.5 shrink-0 rounded-[3px] border border-current accent-[var(--console-input-stroke)]"
                 />
                 <span className="whitespace-nowrap">As Task</span>
               </label>

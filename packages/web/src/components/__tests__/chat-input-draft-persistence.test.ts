@@ -186,7 +186,8 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined, undefined);
+    // asTask (batch 2-E) travels as the new 6th positional arg — unchecked → false.
+    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined, undefined, false);
 
     // Unmount and remount — draft should be gone
     act(() => root.unmount());
@@ -263,7 +264,8 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined, undefined);
+    // asTask (batch 2-E) travels as the new 6th positional arg — unchecked → false.
+    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined, undefined, false);
     expect(getPreviewImage('pic.png')).toBeNull();
 
     act(() => root.unmount());

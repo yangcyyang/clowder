@@ -640,6 +640,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, []);
   const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentThread = storeThreads.find((thread) => thread.id === threadId);
+  // [batch 2-E] Raft rule: threads never nest — a message already living inside
+  // a relation-having thread (task/inline-reply branch) cannot be converted to
+  // a task again. `relation` is only set on branch threads (see chat-types.ts
+  // ThreadRelationV1); the main channel has none.
+  const canConvertToTask = !currentThread?.relation;
   const currentThreadTitle = threadId === 'default' ? '大厅' : (currentThread?.title ?? '未命名对话');
   const currentThreadMemberIds = currentThread?.participatingCats ?? currentThread?.preferredCats ?? EMPTY_MEMBER_IDS;
   const unreadDividerIndex = useMemo(
@@ -1116,6 +1121,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             threadId={threadId}
             onPinMessage={setPinnedMessage}
             onEditMessage={handleStartEditMessage}
+            canConvertToTask={canConvertToTask}
           >
             <ChatMessage
               message={msg}
@@ -1162,6 +1168,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       currentThreadTitle,
       handleReferenceThreadAddress,
       handleCopyThreadAddress,
+      canConvertToTask,
     ],
   );
 
@@ -1611,8 +1618,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               <ChatInput
                 key={threadId}
                 threadId={threadId}
-                onSend={(content, images, attachments, whisper, deliveryMode) =>
-                  handleSend(content, images, undefined, whisper, deliveryMode, attachments)
+                onSend={(content, images, attachments, whisper, deliveryMode, asTask) =>
+                  handleSend(content, images, undefined, whisper, deliveryMode, attachments, asTask)
                 }
                 onStop={handleStop}
                 disabled={connectionStatus.isReadonly}

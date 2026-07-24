@@ -150,6 +150,8 @@ const STATUS_LABEL: Record<CliStatus, string> = {
   interrupted: 'interrupted',
 };
 const TEXT_PREVIEW_MAX_CHARS = 48;
+/** [batch 2-E] Tool result rows truncate long output; "展开全文" reveals the rest. */
+const RESULT_PREVIEW_MAX_CHARS = 500;
 
 function appendPreviewChar(preview: string, char: string): string {
   if (/\s/.test(char)) {
@@ -218,7 +220,12 @@ function ToolRow({
   accent: string;
 }) {
   const [rowExpanded, setRowExpanded] = useState(false);
+  const [fullTextExpanded, setFullTextExpanded] = useState(false);
   const hasResult = event.detail != null;
+  const detailText = event.detail ?? '';
+  const isLongResult = detailText.length > RESULT_PREVIEW_MAX_CHARS;
+  const displayDetail =
+    isLongResult && !fullTextExpanded ? `${detailText.slice(0, RESULT_PREVIEW_MAX_CHARS)}…` : detailText;
   // Design: active = breed bg 20% + left border 2px + lighter text
   const accentLight = lighten(accent, 0.6); // ~#C084FC equivalent
   const accentVeryLight = lighten(accent, 0.9); // ~#F5F3FF equivalent
@@ -261,7 +268,32 @@ function ToolRow({
           className="w-full mt-1 pl-7 whitespace-pre-wrap text-[10px]"
           style={{ color: 'var(--cafe-text-secondary)' }}
         >
-          {event.detail}
+          {displayDetail}
+          {isLongResult && (
+            // A real <button> here would nest inside the row's own <button>
+            // (invalid HTML — browsers hoist/split it and break layout), so this
+            // toggle uses a keyboard-accessible span instead.
+            <span
+              role="button"
+              tabIndex={0}
+              data-testid={`tool-row-${event.id}-expand-full`}
+              className="ml-1 inline-block cursor-pointer font-semibold underline decoration-dotted"
+              style={{ color: 'var(--console-cli-tool-fg)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setFullTextExpanded((v) => !v);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setFullTextExpanded((v) => !v);
+                }
+              }}
+            >
+              {fullTextExpanded ? '收起' : '展开全文'}
+            </span>
+          )}
         </div>
       )}
     </button>

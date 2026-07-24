@@ -578,4 +578,68 @@ describe('CliOutputBlock', () => {
     });
     expect(container.textContent).toContain('private');
   });
+
+  // ── [batch 2-E] long tool result truncation (≤500 chars + 展开全文) ──
+  it('truncates a tool result preview at 500 chars and expands to full text on demand', () => {
+    const longResult = 'x'.repeat(800);
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [
+            { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' },
+            { id: 'r1', kind: 'tool_result', timestamp: 1001, label: 'Bash pnpm test', detail: longResult },
+          ],
+          status: 'done',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    act(() => {
+      toolsToggle?.click();
+    });
+    const toolRow = container.querySelector('[data-testid="tool-row-t1"]') as HTMLElement | null;
+    act(() => {
+      toolRow?.click();
+    });
+
+    // Preview is truncated to 500 chars + ellipsis, full 800-char text not yet shown.
+    expect(container.textContent).toContain('x'.repeat(500));
+    expect(container.textContent).not.toContain('x'.repeat(501));
+    expect(container.textContent).toContain('展开全文');
+
+    const expandFullTextControl = container.querySelector(
+      '[data-testid="tool-row-t1-expand-full"]',
+    ) as HTMLElement | null;
+    expect(expandFullTextControl).toBeTruthy();
+    act(() => {
+      expandFullTextControl?.click();
+    });
+
+    // Full text now visible; toggle now offers to collapse it again.
+    expect(container.textContent).toContain('x'.repeat(800));
+    expect(container.textContent).toContain('收起');
+  });
+
+  it('does not show the expand-full-text control for short tool results', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    act(() => {
+      toolsToggle?.click();
+    });
+    const toolRow = container.querySelector('[data-testid="tool-row-t1"]') as HTMLElement | null;
+    act(() => {
+      toolRow?.click();
+    });
+    expect(container.textContent).toContain('200 lines');
+    expect(container.textContent).not.toContain('展开全文');
+  });
 });

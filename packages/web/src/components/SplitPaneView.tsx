@@ -17,6 +17,7 @@ interface SplitPaneViewProps {
     whisper?: WhisperOptions,
     deliveryMode?: DeliveryMode,
     attachments?: File[],
+    asTask?: boolean,
   ) => void;
   onStop: (overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
@@ -144,8 +145,8 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, attachments, whisper, deliveryMode) =>
-                onSend(content, images, splitPaneTargetId ?? undefined, whisper, deliveryMode, attachments)
+              onSend={(content, images, attachments, whisper, deliveryMode, asTask) =>
+                onSend(content, images, splitPaneTargetId ?? undefined, whisper, deliveryMode, attachments, asTask)
               }
               onStop={() => onStop(splitPaneTargetId ?? undefined)}
               disabled={!splitPaneTargetId}

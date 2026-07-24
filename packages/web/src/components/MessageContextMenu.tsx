@@ -51,13 +51,17 @@ export function MessageContextMenu({
         onClose();
       },
     },
-    {
-      label: 'Convert to Task',
-      onClick: () => {
-        onConvertToTask?.();
-        onClose();
-      },
-    },
+    ...(onConvertToTask
+      ? [
+          {
+            label: 'Convert to Task',
+            onClick: () => {
+              onConvertToTask();
+              onClose();
+            },
+          },
+        ]
+      : []),
     ...(onPin
       ? [
           {

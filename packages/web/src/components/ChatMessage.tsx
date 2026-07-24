@@ -11,6 +11,8 @@ import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
+import { CliOutputBlock } from './cli-output/CliOutputBlock';
+import { toCliEvents } from './cli-output/toCliEvents';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
@@ -951,6 +953,19 @@ export function ChatMessage({
                   : resolveBubbleExpanded(currentThread?.bubbleThinking, globalBubbleDefaults.thinking)
               }
               expandInExport={false}
+              breedColor={catData?.color.primary}
+            />
+          )}
+          {message.toolEvents && message.toolEvents.length > 0 && (
+            <CliOutputBlock
+              events={toCliEvents(message.toolEvents, undefined)}
+              status={message.isStreaming ? 'streaming' : 'done'}
+              defaultExpanded={
+                bubbleRestorePending
+                  ? false
+                  : resolveBubbleExpanded(currentThread?.bubbleCli, globalBubbleDefaults.cliOutput)
+              }
+              thinkingMode={currentThread?.thinkingMode}
               breedColor={catData?.color.primary}
             />
           )}

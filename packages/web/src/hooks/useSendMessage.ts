@@ -12,6 +12,14 @@ export interface SendMessageResult {
   userMessageId?: string;
   optimisticMessageId: string;
   queued?: boolean;
+  /**
+   * [batch 2-E] Present when the server already admitted this send into a task
+   * via the forced `asTask` path (see admitWorkMessage). Callers (ChatInput) use
+   * this to skip their own client-side task-creation fallback — the server has
+   * already broadcast task_created, which drives the inline "已建任务" notice bar
+   * (ChatMessage.tsx TaskCreatedNoticeBar) through the existing socket handler.
+   */
+  taskId?: string;
 }
 
 /** F35: Whisper options for private messages */
@@ -66,6 +74,16 @@ export function useSendMessage(activeThreadId?: string) {
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
       attachments?: File[],
+      /**
+       * [batch 2-E] Explicit "As Task" intent from ChatInput's checkbox. Forces
+       * the backend's admitWorkMessage path regardless of the classifyWorkAdmission
+       * heuristic (see docs/research/clowder-raft-thread-task-design.md §3 step 2.3).
+       * Backend support for the `asTask` field on POST /api/messages is landed
+       * (packages/api/src/routes/messages.schema.ts + messages.ts) by 2-A's
+       * parallel, still-uncommitted work as of this writing — confirmed by reading
+       * the diff directly, not assumed.
+       */
+      asTask?: boolean,
     ): Promise<SendMessageResult | undefined> => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
@@ -175,6 +193,7 @@ export function useSendMessage(activeThreadId?: string) {
           formData.append('threadId', threadId);
           formData.append('idempotencyKey', clientMessageId);
           if (deliveryMode) formData.append('deliveryMode', deliveryMode);
+          if (asTask) formData.append('asTask', 'true');
           if (whisper) {
             formData.append('visibility', whisper.visibility);
             for (const catId of whisper.whisperTo) {
@@ -210,10 +229,11 @@ export function useSendMessage(activeThreadId?: string) {
             });
           }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
+          const taskId = typeof body?.taskId === 'string' ? body.taskId : undefined;
           setUploadStatus('idle');
           setUploadError(null);
           window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
-          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued' };
+          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued', taskId };
         } else {
           const res = await apiFetch('/api/messages', {
             method: 'POST',
@@ -224,6 +244,7 @@ export function useSendMessage(activeThreadId?: string) {
               idempotencyKey: clientMessageId,
               ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
               ...deliveryModePayload,
+              ...(asTask ? { asTask: true } : {}),
             }),
           });
           if (!res.ok) {
@@ -245,10 +266,11 @@ export function useSendMessage(activeThreadId?: string) {
             });
           }
           const userMessageId = typeof body?.userMessageId === 'string' ? body.userMessageId : undefined;
+          const taskId = typeof body?.taskId === 'string' ? body.taskId : undefined;
           setUploadStatus('idle');
           setUploadError(null);
           window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
-          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued' };
+          return { optimisticMessageId, userMessageId, queued: body?.status === 'queued', taskId };
         }
       } catch (err) {
         // F39: Only clear invocation flags for normal (non-queue, non-force) sends.

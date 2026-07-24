@@ -88,7 +88,8 @@ describe('ChatInput history completion', () => {
       pressKey(getTextarea(), 'Enter');
     });
 
-    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined);
+    // asTask (batch 2-E) travels as the new 6th positional arg — unchecked → false.
+    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined, false);
     expect(useInputHistoryStore.getState().entries).toContain('hello world');
   });
 

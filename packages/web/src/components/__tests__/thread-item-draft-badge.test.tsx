@@ -214,7 +214,8 @@ describe('ThreadItem draft badge', () => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
-    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined, undefined);
+    // asTask (batch 2-E) travels as the new 6th positional arg — unchecked → false.
+    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined, undefined, false);
     expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
   });
 
