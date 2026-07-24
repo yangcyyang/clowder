@@ -12,6 +12,11 @@ import { estimateTokens } from '../../../../utils/token-counter.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
 export interface ContextAssemblerOptions {
+  /**
+   * ADR-024 canary: caller-resolved layout (per-cat via resolveContextCacheLayoutForCat).
+   * Falls back to the global flag when absent — this module has no cat identity itself.
+   */
+  cacheLayout?: 'v1' | 'v2';
   /** Maximum number of recent messages to include (default: 20) */
   maxMessages?: number;
   /** Maximum characters per message content (default: 1500) */
@@ -145,7 +150,7 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   // ADR-024 OQ-3 (v2 only): evict in whole blocks instead of shifting by one message
   // every turn, so the retained front edge — and therefore the KV-cache prefix — only
   // moves at block boundaries. v1 keeps the legacy exact slice(-maxMessages) (unchanged).
-  const isV2CacheLayout = getContextCacheLayout() === 'v2';
+  const isV2CacheLayout = (options?.cacheLayout ?? getContextCacheLayout()) === 'v2';
   let evictedBlock: AssembledContext['evictedBlock'];
   const recent = (() => {
     if (deliveredMessages.length <= maxMessages) return deliveredMessages;

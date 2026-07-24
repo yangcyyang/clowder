@@ -45,7 +45,7 @@ import {
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
-import { getContextCacheLayout } from '../../../../../config/context-cache-layout.js';
+import { resolveContextCacheLayoutForCat } from '../../../../../config/context-cache-layout.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import { resolveContextLayerPlan } from '../../context/ContextLayerRouter.js';
 import { resolveSkillRouterContext } from '../../context/SkillRouter.js';
@@ -706,7 +706,7 @@ export async function* routeSerial(
       // ADR-024: v2 four-slot dispatch (flag-gated). transportPayload is wired to the
       // explicit W2-E allowlist (TRANSPORT_SEAM_CLIENT_IDS) — clientIds outside it keep
       // the v1 prepend path. v1 leaves everything below untouched.
-      const cacheLayout = getContextCacheLayout();
+      const cacheLayout = resolveContextCacheLayoutForCat(catId as string);
       const supportsSeam = supportsTransportSeam(catConfig?.clientId);
       const v2StaticIdentityOptions = { mcpAvailable, packBlocks, toolPolicy: resolvedToolPolicy.toolPolicy };
       let v2Dispatch: V2TransportDispatch | undefined;
@@ -925,6 +925,7 @@ export async function* routeSerial(
             effectiveContextBudget.maxPromptTokens - systemPartsTokens - promptTokens - 200,
           );
           const { contextText, messageCount } = assembleContext(history, {
+            cacheLayout,
             maxMessages: effectiveContextBudget.maxMessages,
             maxContentLength: effectiveContextBudget.maxContentLengthPerMsg,
             maxTotalTokens: Math.min(budgetForContext, effectiveContextBudget.maxContextTokens),

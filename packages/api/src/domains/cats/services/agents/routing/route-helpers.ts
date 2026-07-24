@@ -13,7 +13,7 @@ import type {
   ToolPolicy,
 } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getContextCacheLayout } from '../../../../../config/context-cache-layout.js';
+import { resolveContextCacheLayoutForCat } from '../../../../../config/context-cache-layout.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
@@ -3017,7 +3017,7 @@ async function assembleSmartWindowContext(
   // ADR-024 D4: navigationHeader + [Agent Inbox Snapshot] are mandated to the meta slot
   // under v2 (ADR "navigationHeader / [Agent Inbox Snapshot] → meta"). v1 keeps them
   // inline in contextText, byte-identical to pre-D4 behavior.
-  const isV2CacheLayout = getContextCacheLayout() === 'v2';
+  const isV2CacheLayout = resolveContextCacheLayoutForCat(catId as string) === 'v2';
   const navIntentHeader = [navigationHeader, intentSnapshotText].filter(Boolean).join('\n');
   const historyNavIntentHeader = isV2CacheLayout ? '' : navIntentHeader;
   const metaNavIntentHeader = isV2CacheLayout ? navIntentHeader : '';

@@ -607,6 +607,15 @@ export const ENV_VARS: EnvDefinition[] = [
     exampleRecommended: true,
   },
   {
+    name: 'CONTEXT_CACHE_LAYOUT_CATS',
+    defaultValue: '(未设置)',
+    description:
+      'ADR-024 金丝雀名单（验证计划 2）：逗号分隔的 catId。全局 CONTEXT_CACHE_LAYOUT 为 v1 时，名单内的猫单独走 v2 布局（如 "kimi" 灰度 24-48h）；全局 v2 时忽略本名单。空值 = 无金丝雀。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CAT_CAFE_MESSAGE_BATCHING_THREADS',
     defaultValue: '(未设置)',
     description: '消息批量投递灰度线程白名单，逗号分隔；空值表示关闭。',
