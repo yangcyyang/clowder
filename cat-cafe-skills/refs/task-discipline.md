@@ -18,6 +18,10 @@ topics: [task, thread, raft-replication, sop, memory, search]
 
 **为什么**：Raft 原文——"if fulfilling a message requires you to take action beyond just replying (running tools, writing code, making changes), claim the message first. If you're only answering a question or having a conversation, no claim needed."
 
+**灰区判据**（第五轮访谈实证）：为了回答而做的**只读查证**（查日志、读代码、搜历史）算"回答"，不建任务——"回答"天然包含取证。只有会留下副作用（改代码/部署/改数据）或产生需要验收的交付物才建。
+
+**方案先行，勿即派工**：探讨/方案阶段即使聊的就是活，也不在探讨阶段建任务——等 owner 明确一句 go 再转。讨论收敛出可执行工作后**另立顶层任务**（thread 内的讨论消息不转任务，与"任务不嵌套"规则同构）。宁可漏建（人可以补建），不可滥建（垃圾票稀释整个任务板的可信度）。
+
 **工具**：判断"要不要建"是你（猫）的判断层职责，工具只提供机制——`cat_cafe_task_create` / `cat_cafe_task_claim`。
 
 ## 2. 先领后干；领不到就走开
