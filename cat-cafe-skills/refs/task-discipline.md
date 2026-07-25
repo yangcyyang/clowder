@@ -30,6 +30,8 @@ topics: [task, thread, raft-replication, sop, memory, search]
 
 **为什么**：Raft CRITICAL 原文——"Always claim a task before starting work. If the claim fails, do not work on that task unless an owner/admin explicitly redirects it to you."
 
+**认领即开工**（2026-07-26 实证补充：芝芝认领后只发了一句计划就结束回合，任务挂 doing 无人推进）：claim 的**同一回合**必须至少完成第一个实质动作——读完关键材料并给出具体发现、或交出第一版产出。只宣布"我要做 A、B、C"不算开工。确实无法继续（缺权限/缺信息/被依赖卡住）→ 当场置 blocked 并写明卡点，或 unclaim 放手；**严禁认领后静默收工**——回合一结束没有任何机制会自动叫醒你，任务会无限期挂起。
+
 **工具**：`cat_cafe_task_claim`（taskId 或 messageId 两种形式）；409 响应带 `ownerCatId`，据此判断谁已经在做。
 
 ## 3. 已有消息别新建——改 claim
