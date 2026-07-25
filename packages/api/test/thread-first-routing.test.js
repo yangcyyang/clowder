@@ -14,7 +14,7 @@
  */
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { afterEach, describe, test } from 'node:test';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
@@ -366,5 +366,94 @@ describe('F194 §3 step 3: "As Task" forced admission', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal((await taskStore.listByThread(channel.id)).length, 0, 'no canary, no asTask → no task, unchanged');
     assert.equal(routeCalls[0][2], channel.id);
+  });
+});
+
+describe('thread-first 默认开的轻量豁免（CLOWDER_THREAD_FIRST_MIN_CHARS）', () => {
+  let prevDefault;
+  let prevMinChars;
+
+  beforeEach(() => {
+    prevDefault = process.env.CLOWDER_THREAD_FIRST_DEFAULT;
+    prevMinChars = process.env.CLOWDER_THREAD_FIRST_MIN_CHARS;
+    process.env.CLOWDER_THREAD_FIRST_DEFAULT = '1';
+    delete process.env.CLOWDER_THREAD_FIRST_MIN_CHARS;
+  });
+
+  afterEach(() => {
+    if (prevDefault === undefined) delete process.env.CLOWDER_THREAD_FIRST_DEFAULT;
+    else process.env.CLOWDER_THREAD_FIRST_DEFAULT = prevDefault;
+    if (prevMinChars === undefined) delete process.env.CLOWDER_THREAD_FIRST_MIN_CHARS;
+    else process.env.CLOWDER_THREAD_FIRST_MIN_CHARS = prevMinChars;
+  });
+
+  async function postAndCollect(content) {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const channel = await threadStore.create('alice', '频道 L');
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: channel.id, content },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await app.close();
+    return { events, routeCalls, channel };
+  }
+
+  test('短寒暄（去 @ 后 ≤24 字符）走主频道内联，不建分支', async () => {
+    const { events, routeCalls, channel } = await postAndCollect('@opus hi');
+    assert.equal(events.find((e) => e.event === 'thread_branched'), undefined, '短消息不应触发分支');
+    assert.equal(routeCalls.length, 1);
+    assert.equal(routeCalls[0][2], channel.id, '执行留在主频道，运行状态条可见');
+  });
+
+  test('长消息仍然进分支（豁免只放行轻量消息）', async () => {
+    const { events, routeCalls, channel } = await postAndCollect(
+      '@opus 帮我梳理一下这个模块的错误处理链路，从入口到落库每一步都列出来，并指出可能吞错误的位置。',
+    );
+    const branched = events.find((e) => e.event === 'thread_branched');
+    assert.ok(branched, '长消息必须仍走 thread-first');
+    assert.equal(routeCalls[0][2], branched.payload.newThreadId);
+    assert.notEqual(routeCalls[0][2], channel.id);
+  });
+
+  test('阈值置 0 = 关闭豁免，短消息也进分支', async () => {
+    process.env.CLOWDER_THREAD_FIRST_MIN_CHARS = '0';
+    const { events } = await postAndCollect('@opus hi');
+    assert.ok(
+      events.find((e) => e.event === 'thread_branched'),
+      '阈值 0 时豁免关闭，一切照旧进 thread',
+    );
+  });
+
+  test('thread 显式 routingPolicy 开启时豁免不适用，短消息照样进分支', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const channel = await threadStore.create('alice', '频道 E');
+    await threadStore.updateRoutingPolicy(channel.id, { v: 1, mode: 'thread-first' });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: channel.id, content: '@opus hi' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(
+      events.find((e) => e.event === 'thread_branched'),
+      '显式配置的 thread-first 不受轻量豁免影响',
+    );
+    await app.close();
   });
 });

@@ -2069,6 +2069,15 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CLOWDER_THREAD_FIRST_MIN_CHARS',
+    defaultValue: '24',
+    description:
+      'thread-first 默认开时的轻量豁免阈值：消息去掉 @提及后正文 ≤ 该字符数且无附件、非 As Task 时，回复走主频道内联而不进分支 thread（寒暄/短指令不该逼人点进 thread 看一句"收到"）。0=关闭豁免（一切照旧进 thread）。仅影响 CLOWDER_THREAD_FIRST_DEFAULT 路径，thread 显式 routingPolicy 不受影响。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CLOWDER_AUTO_CLAIM_THREADS',
     defaultValue: '(未设置 → 关闭)',
     description:

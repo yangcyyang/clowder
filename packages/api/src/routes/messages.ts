@@ -777,7 +777,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         !!routingThread &&
         !routingThread.isDM &&
         !routingThread.relation;
-      if (isThreadFirstRoutingEnabled(routingThread) || threadFirstByDefault) {
+      // 铲屎官反馈（2026-07-25）：寒暄/短指令级消息强制进 thread 不合理（"hi"→点进
+      // 分支才看到"收到"）。轻量豁免：去掉 @提及后正文 ≤ 阈值字符且无附件时走主频道
+      // 内联回复；阈值 env 可调（CLOWDER_THREAD_FIRST_MIN_CHARS，默认 24，0=关闭豁免）。
+      // 仅影响默认开关路径；thread 显式 routingPolicy 配置仍然无条件生效。
+      const threadFirstMinChars = Number(process.env.CLOWDER_THREAD_FIRST_MIN_CHARS ?? 24);
+      const strippedForThreadFirst = content
+        .replace(/@[^\s@]+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const lightweightInlineExempt =
+        threadFirstMinChars > 0 &&
+        strippedForThreadFirst.length <= threadFirstMinChars &&
+        !asTask &&
+        (!contentBlocks || contentBlocks.length === 0);
+      if (isThreadFirstRoutingEnabled(routingThread) || (threadFirstByDefault && !lightweightInlineExempt)) {
         rootUserMessage = await opts.messageStore.append({
           userId,
           catId: null,
