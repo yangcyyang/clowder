@@ -52,6 +52,14 @@ export interface BootstrapOptions {
   dryRun: boolean;
 }
 
+/** Mirrors governance-preflight's private check — EPERM/EACCES must never be mistaken for "file missing". */
+function isBootstrapPermissionError(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return code === 'EPERM' || code === 'EACCES' || /operation not permitted|permission denied/i.test(message);
+}
+
 export class GovernanceBootstrapService {
   private readonly registry: GovernanceRegistry;
 
@@ -140,8 +148,12 @@ export class GovernanceBootstrapService {
 
     try {
       existingContent = await readFile(filePath, 'utf-8');
-    } catch {
-      // File doesn't exist — will create
+    } catch (err) {
+      // File doesn't exist — will create. A permission-denied read MUST abort instead:
+      // treating an unreadable-but-existing file as missing would rewrite it with only the
+      // managed block, destroying the user's own content (2026-07-25 near-miss under macOS
+      // TCC denial of a Documents-folder read).
+      if (isBootstrapPermissionError(err)) throw err;
     }
 
     // Check if managed block already exists

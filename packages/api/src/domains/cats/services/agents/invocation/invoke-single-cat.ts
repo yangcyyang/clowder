@@ -1020,14 +1020,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       } catch (err) {
         if (!isFilesystemPermissionError(err)) throw err;
         log.warn({ catId, workingDirectory, err }, 'Governance preflight permission denied');
-        preflight = {
-          ready: false,
-          needsPermission: true,
-          reason:
-            `Clowder cannot read ${workingDirectory}. ` +
-            'macOS may be blocking protected folders such as Documents/Desktop/Downloads. ' +
-            'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
-        };
+        // The gate's contract is "governance rules present in the workdir", not "auto-sync
+        // refresh write succeeded". macOS TCC can deny bootstrap's write (or even a single
+        // read) transiently while the rules block is already on disk — blocking dispatch in
+        // that state killed runs with no user-visible trace (2026-07-25 推特日报 incident).
+        // Fall back to the read-only preflight; only block when that also cannot pass.
+        try {
+          const { checkGovernancePreflight } = await import(
+            '../../../../../config/governance/governance-preflight.js'
+          );
+          preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
+          if (preflight.ready) {
+            log.warn(
+              { catId, workingDirectory },
+              'Governance auto-sync write denied but rules already present — proceeding without refresh',
+            );
+          }
+        } catch {
+          preflight = {
+            ready: false,
+            needsPermission: true,
+            reason:
+              `Clowder cannot read ${workingDirectory}. ` +
+              'macOS may be blocking protected folders such as Documents/Desktop/Downloads. ' +
+              'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
+          };
+        }
       }
       if (!preflight.ready) {
         const reasonKind = preflight.needsPermission

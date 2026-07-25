@@ -228,3 +228,40 @@ describe('GovernanceBootstrapService', () => {
     await assert.rejects(lstat(join(targetProject, '.claude', 'hooks')), { code: 'ENOENT' });
   });
 });
+
+describe('GovernanceBootstrapService — permission-denied read must abort, never truncate', () => {
+  let catCafeRoot;
+  let targetProject;
+
+  beforeEach(async () => {
+    catCafeRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-root-'));
+    targetProject = await mkdtemp(join(tmpdir(), 'target-project-'));
+    await mkdir(join(catCafeRoot, 'cat-cafe-skills'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    const { chmod } = await import('node:fs/promises');
+    await chmod(join(targetProject, 'CLAUDE.md'), 0o644).catch(() => {});
+    await rm(catCafeRoot, { recursive: true, force: true });
+    await rm(targetProject, { recursive: true, force: true });
+  });
+
+  it('throws on unreadable CLAUDE.md and leaves the user content untouched', async () => {
+    const { chmod } = await import('node:fs/promises');
+    const userContent = '# 用户自己的项目说明\n\n绝不能被治理块覆盖的内容。\n';
+    const filePath = join(targetProject, 'CLAUDE.md');
+    await writeFile(filePath, userContent, 'utf-8');
+    await chmod(filePath, 0o000);
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await assert.rejects(
+      () => svc.bootstrap(targetProject, { dryRun: false }),
+      /EACCES|EPERM|permission denied|operation not permitted/i,
+      'a permission-denied read must abort bootstrap instead of treating the file as missing',
+    );
+
+    await chmod(filePath, 0o644);
+    const after = await readFile(filePath, 'utf-8');
+    assert.equal(after, userContent, 'user content must be byte-identical after the aborted bootstrap');
+  });
+});
