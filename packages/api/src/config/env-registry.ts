@@ -2069,6 +2069,24 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CLOWDER_AUTO_CLAIM_THREADS',
+    defaultValue: '(未设置 → 关闭)',
+    description:
+      '批次3-A 无主任务自动认领唤醒：逗号分隔的 thread id 白名单；置 "*" 为全部频道开启。任务创建且无主时，唤醒该频道最多 3 只候选猫（participatingCats 优先）用 cat_cafe_task_claim 抢单，幂等键防重复投递。默认关闭。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CLOWDER_AUTO_CLAIM_CLIENTS',
+    defaultValue: '(未设置 → 全部猫可被唤醒)',
+    description:
+      '批次3-A 自动认领候选的 client 家族白名单：逗号分隔的 CatConfig.clientId（如 anthropic,openai,kimi）。设置后只有这些家族的猫会被唤醒抢单，其余家族一律跳过；不设置则不过滤。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CLOWDER_AUTO_RETRY',
     defaultValue: '(未设置 → 关闭)',
     description:

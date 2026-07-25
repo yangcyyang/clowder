@@ -6,9 +6,8 @@ const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/T
 const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { canViewMessage } = await import('../dist/domains/cats/services/stores/visibility.js');
 const { deriveThreadReplySummary } = await import('../dist/routes/thread-reply-summary.js');
-const { admitWorkMessage, isAutoTaskThreadRoutingEnabled, isAutoClaimWakeupEnabled } = await import(
-  '../dist/routes/work-admission-service.js'
-);
+const { admitWorkMessage, isAutoTaskThreadRoutingEnabled, isAutoClaimWakeupEnabled, isAutoClaimCatEligible } =
+  await import('../dist/routes/work-admission-service.js');
 
 describe('F194 work admission service', () => {
   test('rollout remains off by default and supports an explicit thread canary', () => {
@@ -409,6 +408,21 @@ describe('F194 work admission service', () => {
       );
     });
 
+    test('isAutoClaimWakeupEnabled: "*" wildcard opts every thread in', () => {
+      assert.equal(isAutoClaimWakeupEnabled('thread-anything', { CLOWDER_AUTO_CLAIM_THREADS: '*' }), true);
+      assert.equal(isAutoClaimWakeupEnabled('thread-1', { CLOWDER_AUTO_CLAIM_THREADS: 'thread-2, *' }), true);
+    });
+
+    test('isAutoClaimCatEligible: unset allows all, allowlist filters by clientId', () => {
+      assert.equal(isAutoClaimCatEligible('pi', {}), true);
+      const env = { CLOWDER_AUTO_CLAIM_CLIENTS: 'anthropic,openai,kimi' };
+      assert.equal(isAutoClaimCatEligible('opus', env), true);
+      assert.equal(isAutoClaimCatEligible('codex', env), true);
+      assert.equal(isAutoClaimCatEligible('kimi', env), true);
+      assert.equal(isAutoClaimCatEligible('pi', env), false);
+      assert.equal(isAutoClaimCatEligible('ghost-cat-not-registered', env), false);
+    });
+
     test('gate off (default): no wake-up entries even though invocationQueue is wired', async () => {
       const { invocationQueue, queueProcessor } = await admitUnowned({
         threadOptions: { participatingCats: ['opus', 'pi'] },
@@ -463,6 +477,24 @@ describe('F194 work admission service', () => {
         enableGate: true,
       });
       assert.equal(invocationQueue.enqueued.length, 3);
+    });
+
+    test('client allowlist: only cats from allowed client families are woken', async () => {
+      const previousClients = process.env.CLOWDER_AUTO_CLAIM_CLIENTS;
+      process.env.CLOWDER_AUTO_CLAIM_CLIENTS = 'anthropic,openai,kimi';
+      try {
+        const { invocationQueue } = await admitUnowned({
+          threadOptions: { participatingCats: ['pi', 'opus', 'codex'] },
+          enableGate: true,
+        });
+        assert.deepEqual(
+          invocationQueue.enqueued.map((entry) => entry.targetCats[0]).sort(),
+          ['codex', 'opus'],
+        );
+      } finally {
+        if (previousClients === undefined) delete process.env.CLOWDER_AUTO_CLAIM_CLIENTS;
+        else process.env.CLOWDER_AUTO_CLAIM_CLIENTS = previousClients;
+      }
     });
   });
 });

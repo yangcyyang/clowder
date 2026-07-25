@@ -391,6 +391,49 @@ describe('probeLocalAgentClis', () => {
       );
     });
 
+    it('filters non-claude families out of a multi-upstream gateway catalog', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {
+          CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models',
+        },
+        async fetchRemote() {
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return {
+                data: [
+                  { id: 'claude-opus-6-preview' },
+                  { id: 'gpt-5.3-codex-spark' },
+                  { id: 'grok-4.20-0309-non-reasoning' },
+                  { id: 'kimi-k2.7-code' },
+                ],
+              };
+            },
+          };
+        },
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-opus-6-preview' && model.source === 'remote'),
+        'claude-* ids from the gateway must survive the family filter',
+      );
+      for (const foreign of ['gpt-5.3-codex-spark', 'grok-4.20-0309-non-reasoning', 'kimi-k2.7-code']) {
+        assert.equal(
+          claude?.models.some((model) => model.id === foreign),
+          false,
+          `non-claude family id must be filtered out of the claude slot: ${foreign}`,
+        );
+      }
+    });
+
     it('falls back silently to the static catalog when the remote endpoint times out or errors', async () => {
       let fetchCalls = 0;
       const results = await probeWithIsolatedHome({

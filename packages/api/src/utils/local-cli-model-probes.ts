@@ -224,7 +224,9 @@ export const LOCAL_CLI_MODELS_PROBES = {
     remote: {
       urlEnvVar: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL',
       keyEnvVar: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_KEY',
-      parse: parseRemoteModelCatalog,
+      // Multi-upstream gateways (CLIProxyAPI) list every proxied family in /v1/models;
+      // only claude-* belongs in the Claude candidate slot.
+      parse: (payload: unknown) => parseRemoteModelCatalog(payload).filter((id) => id.startsWith('claude')),
     },
   },
   // Codex 0.144.0 exposes debug models --bundled, but its ~287KB output exceeds the shared 16KB safety cap.

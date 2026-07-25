@@ -60,11 +60,30 @@ export function isAutoTaskThreadRoutingEnabled(threadId: string, env: NodeJS.Pro
  * an unowned task.
  */
 export function isAutoClaimWakeupEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.CLOWDER_AUTO_CLAIM_THREADS ?? '')
+  const entries = (env.CLOWDER_AUTO_CLAIM_THREADS ?? '')
     .split(',')
     .map((value) => value.trim())
-    .filter(Boolean)
-    .includes(threadId);
+    .filter(Boolean);
+  // '*' opts every thread in (mirrors the thread-first "全频道" rollout decision).
+  if (entries.includes('*')) return true;
+  return entries.includes(threadId);
+}
+
+/**
+ * Batch 3-A follow-up: optional client-family allowlist for auto-claim candidates.
+ * CLOWDER_AUTO_CLAIM_CLIENTS is a comma-separated list of CatConfig.clientId values
+ * (e.g. "anthropic,openai,kimi"); empty/unset = every registered cat is eligible.
+ * Filters the candidate pool so families the operator distrusts (e.g. a cat whose
+ * provider balance is dead) are never woken to claim.
+ */
+export function isAutoClaimCatEligible(catId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const allowed = (env.CLOWDER_AUTO_CLAIM_CLIENTS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (allowed.length === 0) return true;
+  const clientId = catRegistry.tryGet(catId)?.config.clientId;
+  return clientId !== undefined && allowed.includes(clientId);
 }
 
 function initialClaimEvents(ownerCatId: CatId | undefined, timestamp: number): readonly TaskEvent[] | undefined {
@@ -146,7 +165,9 @@ async function wakeCandidateCatsForUnclaimedTask(task: TaskItem, sourceMessage: 
   const thread = await deps.threadStore.get(sourceMessage.threadId);
   if (!thread) return;
   const pool = thread.participatingCats?.length ? thread.participatingCats : (thread.preferredCats ?? []);
-  const candidates = pool.filter((catId) => catRegistry.has(catId)).slice(0, MAX_AUTO_CLAIM_CANDIDATES);
+  const candidates = pool
+    .filter((catId) => catRegistry.has(catId) && isAutoClaimCatEligible(catId))
+    .slice(0, MAX_AUTO_CLAIM_CANDIDATES);
   if (candidates.length === 0) return;
 
   const content = buildAutoClaimWakeContent(task);
