@@ -607,6 +607,15 @@ export const ENV_VARS: EnvDefinition[] = [
     exampleRecommended: true,
   },
   {
+    name: 'CLOWDER_THREAD_FIRST_DEFAULT',
+    defaultValue: '(未设置)',
+    description:
+      '批次2 thread-first 路由的全局默认开关：置 1 时全部频道语义 thread（非 DM、非分支，含新建频道）默认启用 thread-first（@猫的回复进消息锚定分支，主频道只留源消息）。thread 显式 routingPolicy 优先。体感不对置 0 即全局回退。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CONTEXT_CACHE_LAYOUT_CATS',
     defaultValue: '(未设置)',
     description:
@@ -673,6 +682,24 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'governance',
     sensitive: false,
     restartRequired: true,
+  },
+  {
+    name: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL',
+    defaultValue: '(未设置 → 不启用远程发现，回退静态清单)',
+    description:
+      '本地 CLI 模型扫描第 4 来源（远程模型清单）：Anthropic 兼容网关的 /v1/models 地址，用于把网关当前实际提供的模型（如刚发布的新模型）合并进 claude 候选，不必等代码里的静态清单手动更新。仅在显式设置时才请求，3 秒超时，未配置或请求失败一律静默回退静态清单，扫描不会因此报错；扫描本身依旧绝不读取任何凭证文件。示例（本机 CLIProxyAPI 网关）：CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL=http://127.0.0.1:8317/v1/models',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_KEY',
+    defaultValue: '(未设置 → 请求不带鉴权头)',
+    description:
+      '配合 CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL 使用的可选 Bearer key；仅在这里显式提供时才会被使用，绝不从凭证文件（如 ~/.claude、CLIProxyAPI 配置文件）读取。网关部署在本机且鉴权已在网关侧完成时通常无需设置。',
+    category: 'governance',
+    sensitive: true,
+    runtimeEditable: true,
   },
   {
     name: 'MAX_PROMPT_TOKENS',
@@ -2040,6 +2067,26 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'MCP Server 只读模式：跳过 post_message 等写操作工具注册（Antigravity 持久 MCP 用）',
     category: 'antigravity',
     sensitive: false,
+  },
+  {
+    name: 'CLOWDER_AUTO_RETRY',
+    defaultValue: '(未设置 → 关闭)',
+    description:
+      '批次3-B 白名单自动重试：置 true/1 时，终态 failed 且错误分类 ∈ {transient_network, cli_crash} 的 invocation 由 AutoRetryScheduler 按指数退避（30s/120s）自动重试，每 run 上限 2 次；quota/aborted/agent_error/context_overflow 永不自动重试。默认关闭，不影响既有手动重试端点。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CLOWDER_BUDGET_ENFORCE',
+    defaultValue: '(未设置 → 关闭)',
+    description:
+      '批次3-E 预算熔断：置 true/1 时，QueueProcessor 在 spawn 前检查目标猫今日 costUsd 是否超过 catalog 配置的 costBudget.perCatDailyUsd；超限则该 run 直接以 failureClass=budget_exhausted 终止（不 spawn 任何进程），关联 task（如有）随之 → failed。costUsd 计价目前仅 Claude(anthropic) 猫可靠，非 Claude 猫或无 costBudget 配置的猫一律跳过熔断（保守放行）并记日志。默认关闭，不影响既有行为。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
   },
 ];
 

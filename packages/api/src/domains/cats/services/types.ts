@@ -3,7 +3,7 @@
  * Agent 服务的共享类型定义
  */
 
-import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
+import type { CatId, CatPermissionProfile, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 
@@ -313,6 +313,9 @@ export interface AgentServiceOptions {
   };
   /** F127: Extra --config key=value pairs to pass to the CLI. */
   cliConfigArgs?: readonly string[];
+  /** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current bypass behavior).
+   *  Only Claude/Codex providers honor this today (see permission-profile-cli-args.ts). */
+  permissionProfile?: CatPermissionProfile;
   /** F153 Phase B: Parent OTel span for creating CLI session child span */
   parentSpan?: Span;
 }

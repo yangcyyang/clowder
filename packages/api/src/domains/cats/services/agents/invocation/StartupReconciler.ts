@@ -15,8 +15,15 @@
 import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
+import { buildTerminalEvent } from '../../stores/ports/invocation-terminal-event.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
+
+/** Terminal Invariant (batch 3-B): explicit termination fact for the
+ *  process_restart convergence path, so a reconciled orphan record carries
+ *  the same auditable evidence as any other terminal transition instead of
+ *  falling back to the store's legacy-implicit synthesis. */
+const RECONCILER_TERMINAL_SOURCE = 'startup-reconciler';
 
 export interface StartupSweepResult {
   swept: number;
@@ -190,6 +197,7 @@ export class StartupReconciler {
           status: 'failed',
           expectedStatus: 'running',
           error: 'process_restart',
+          terminalEvent: buildTerminalEvent('process_restart', RECONCILER_TERMINAL_SOURCE, { previousStatus: 'running' }),
         });
         if (updated) {
           running++;
@@ -232,6 +240,7 @@ export class StartupReconciler {
           status: 'failed',
           expectedStatus: 'queued',
           error: 'process_restart',
+          terminalEvent: buildTerminalEvent('process_restart', RECONCILER_TERMINAL_SOURCE, { previousStatus: 'queued' }),
         });
         if (updated) {
           queued++;

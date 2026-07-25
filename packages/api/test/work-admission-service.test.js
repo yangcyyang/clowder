@@ -6,7 +6,9 @@ const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/T
 const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { canViewMessage } = await import('../dist/domains/cats/services/stores/visibility.js');
 const { deriveThreadReplySummary } = await import('../dist/routes/thread-reply-summary.js');
-const { admitWorkMessage, isAutoTaskThreadRoutingEnabled } = await import('../dist/routes/work-admission-service.js');
+const { admitWorkMessage, isAutoTaskThreadRoutingEnabled, isAutoClaimWakeupEnabled } = await import(
+  '../dist/routes/work-admission-service.js'
+);
 
 describe('F194 work admission service', () => {
   test('rollout remains off by default and supports an explicit thread canary', () => {
@@ -322,6 +324,145 @@ describe('F194 work admission service', () => {
       const parentMessages = await messageStore.getByThread(parent.id, 20);
       const notices = parentMessages.filter((m) => m.extra?.systemKind === 'task_created');
       assert.equal(notices.length, 1, 'concurrent duplicate admission must not double-post the owned notice either');
+    });
+  });
+
+  describe('batch 3-A item 1: auto-claim wake-up for unowned tasks', () => {
+    function fakeInvocationQueue() {
+      const enqueued = [];
+      const activeKeys = new Set();
+      return {
+        enqueued,
+        hasActiveIdempotencyKey(_threadId, _userId, key) {
+          return activeKeys.has(key);
+        },
+        enqueue(input) {
+          if (activeKeys.has(input.idempotencyKey)) {
+            return { outcome: 'enqueued', deduped: true };
+          }
+          activeKeys.add(input.idempotencyKey);
+          const entry = { id: `entry-${enqueued.length + 1}`, ...input };
+          enqueued.push(entry);
+          return { outcome: 'enqueued', deduped: false, entry };
+        },
+        async persistEntry() {},
+      };
+    }
+
+    function fakeQueueProcessor() {
+      const calls = [];
+      return {
+        calls,
+        async tryAutoExecute(threadId) {
+          calls.push(threadId);
+        },
+      };
+    }
+
+    async function admitUnowned({ threadOptions, enableGate }) {
+      const taskStore = new TaskStore();
+      const threadStore = new ThreadStore();
+      const messageStore = new MessageStore();
+      const socketManager = { broadcastToRoom: () => {} };
+      const parent = await threadStore.create('alice', '大厅');
+      if (threadOptions?.participatingCats) {
+        await threadStore.updateParticipatingCats(parent.id, threadOptions.participatingCats);
+      }
+      if (threadOptions?.preferredCats) {
+        await threadStore.updatePreferredCats(parent.id, threadOptions.preferredCats);
+      }
+      const previousEnv = process.env.CLOWDER_AUTO_CLAIM_THREADS;
+      // Exact-match allowlist gate: only the thread we just created (parent.id) is enabled
+      // when enableGate is true — proves the gate is per-thread, not global.
+      if (enableGate) process.env.CLOWDER_AUTO_CLAIM_THREADS = parent.id;
+      else delete process.env.CLOWDER_AUTO_CLAIM_THREADS;
+      try {
+        const sourceMessage = await messageStore.append({
+          userId: 'alice',
+          catId: null,
+          content: '帮我做个书籍分析',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: parent.id,
+        });
+        const invocationQueue = fakeInvocationQueue();
+        const queueProcessor = fakeQueueProcessor();
+        const result = await admitWorkMessage({
+          decision: { kind: 'create_from_message', taskTitle: '书籍分析', reason: 'as_task_explicit' },
+          sourceMessage,
+          userId: 'alice',
+          deps: { taskStore, threadStore, messageStore, socketManager, invocationQueue, queueProcessor },
+        });
+        return { result, invocationQueue, queueProcessor, parent };
+      } finally {
+        if (previousEnv === undefined) delete process.env.CLOWDER_AUTO_CLAIM_THREADS;
+        else process.env.CLOWDER_AUTO_CLAIM_THREADS = previousEnv;
+      }
+    }
+
+    test('isAutoClaimWakeupEnabled defaults to off and respects an explicit thread allowlist', () => {
+      assert.equal(isAutoClaimWakeupEnabled('thread-1', {}), false);
+      assert.equal(isAutoClaimWakeupEnabled('thread-1', { CLOWDER_AUTO_CLAIM_THREADS: 'thread-2' }), false);
+      assert.equal(
+        isAutoClaimWakeupEnabled('thread-1', { CLOWDER_AUTO_CLAIM_THREADS: 'thread-2, thread-1' }),
+        true,
+      );
+    });
+
+    test('gate off (default): no wake-up entries even though invocationQueue is wired', async () => {
+      const { invocationQueue, queueProcessor } = await admitUnowned({
+        threadOptions: { participatingCats: ['opus', 'pi'] },
+        enableGate: false,
+      });
+      assert.equal(invocationQueue.enqueued.length, 0);
+      assert.equal(queueProcessor.calls.length, 0);
+    });
+
+    test('gate on + participatingCats: enqueues one autoExecute entry per candidate and kicks tryAutoExecute', async () => {
+      const { result, invocationQueue, queueProcessor, parent } = await admitUnowned({
+        threadOptions: { participatingCats: ['opus', 'pi'] },
+        enableGate: true,
+      });
+
+      assert.equal(invocationQueue.enqueued.length, 2);
+      const targetCats = invocationQueue.enqueued.map((entry) => entry.targetCats[0]).sort();
+      assert.deepEqual(targetCats, ['opus', 'pi']);
+      for (const entry of invocationQueue.enqueued) {
+        assert.equal(entry.autoExecute, true);
+        assert.equal(entry.source, 'agent');
+        assert.equal(entry.sourceCategory, 'auto_claim');
+        assert.equal(entry.idempotencyKey, `auto-claim:${result.task.id}:${entry.targetCats[0]}`);
+        assert.match(entry.content, /cat_cafe_task_claim/);
+        assert.match(entry.content, new RegExp(result.task.id));
+        assert.match(entry.content, /already_claimed/);
+      }
+      assert.deepEqual(queueProcessor.calls, [parent.id]);
+    });
+
+    test('gate on + only preferredCats (no participatingCats): falls back to preferredCats', async () => {
+      const { invocationQueue } = await admitUnowned({
+        threadOptions: { preferredCats: ['codex'] },
+        enableGate: true,
+      });
+      assert.equal(invocationQueue.enqueued.length, 1);
+      assert.equal(invocationQueue.enqueued[0].targetCats[0], 'codex');
+    });
+
+    test('gate on but no candidates on the thread: no wake-up entries', async () => {
+      const { invocationQueue, queueProcessor } = await admitUnowned({
+        threadOptions: {},
+        enableGate: true,
+      });
+      assert.equal(invocationQueue.enqueued.length, 0);
+      assert.equal(queueProcessor.calls.length, 0);
+    });
+
+    test('candidate cap: more than 3 participatingCats still only wakes up 3', async () => {
+      const { invocationQueue } = await admitUnowned({
+        threadOptions: { participatingCats: ['opus', 'pi', 'codex', 'gemini'] },
+        enableGate: true,
+      });
+      assert.equal(invocationQueue.enqueued.length, 3);
     });
   });
 });

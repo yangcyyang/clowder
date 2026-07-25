@@ -273,6 +273,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.scannedAt, undefined);
     assert.equal(body.clients.anthropic.modelsSource, 'static');
     assert.deepEqual(body.clients.anthropic.models, [
+      'claude-opus-5',
       'claude-fable-5',
       'claude-opus-4-8',
       'claude-sonnet-5',
@@ -398,6 +399,122 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.source, 'static-presets-v1');
     assert.equal(body.scannedAt, undefined);
     assert.equal(body.clients.openai.modelsSource, 'static');
+
+    await app.close();
+    resetLocalCliModelsSnapshot();
+  });
+
+  it('GET /api/cat-model-options merges remote-sourced models additively on top of the static claude fallback', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { resetLocalCliModelsSnapshot, updateLocalCliModelsSnapshot } = await import(
+      '../dist/utils/local-cli-model-cache.js'
+    );
+    resetLocalCliModelsSnapshot();
+    updateLocalCliModelsSnapshot('remote-scan-user', {
+      scannedAt: '2026-07-25T00:00:00.000Z',
+      clis: [
+        {
+          id: 'claude',
+          label: 'Claude Code',
+          command: 'claude',
+          clientId: 'anthropic',
+          defaultModel: 'claude-sonnet-5',
+          // Mirrors what probeLocalCliModels() produces for the static_only + remote-merge case:
+          // the static tier stays intact and the new remote id is appended and tagged 'remote'.
+          models: [
+            { id: 'claude-opus-5', source: 'static' },
+            { id: 'claude-fable-5', source: 'static' },
+            { id: 'claude-opus-4-8', source: 'static' },
+            { id: 'claude-sonnet-5', source: 'static', isDefault: true },
+            { id: 'claude-opus-4-7', source: 'static' },
+            { id: 'claude-opus-4-6', source: 'static' },
+            { id: 'claude-opus-6-preview', source: 'remote' },
+          ],
+          modelsStatus: 'static_only',
+          installed: true,
+          resolvedPath: '/opt/bin/claude',
+          version: 'claude 5.0.0',
+          versionStatus: 'ok',
+          authStatus: 'unknown',
+          authStatusReason: 'safe test fixture',
+          installHint: 'install claude',
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'remote-scan-user' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    // A live signal (the remote entry) upgrades this to a real scan, exposing scannedAt.
+    assert.equal(body.source, 'local-cli-scan-v1');
+    assert.equal(body.scannedAt, '2026-07-25T00:00:00.000Z');
+    assert.equal(body.clients.anthropic.modelsSource, 'remote');
+    // The static candidates are preserved (merge is additive), plus the new remote-only model.
+    assert.deepEqual(body.clients.anthropic.models, [
+      'claude-opus-5',
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-opus-6-preview',
+    ]);
+    assert.equal(body.clients.anthropic.defaultModel, 'claude-sonnet-5');
+
+    await app.close();
+    resetLocalCliModelsSnapshot();
+  });
+
+  it('GET /api/cat-model-options prefers a live cli/config source label over remote when both are present', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { resetLocalCliModelsSnapshot, updateLocalCliModelsSnapshot } = await import(
+      '../dist/utils/local-cli-model-cache.js'
+    );
+    resetLocalCliModelsSnapshot();
+    updateLocalCliModelsSnapshot('config-plus-remote-user', {
+      scannedAt: '2026-07-25T01:00:00.000Z',
+      clis: [
+        {
+          id: 'claude',
+          label: 'Claude Code',
+          command: 'claude',
+          clientId: 'anthropic',
+          defaultModel: 'claude-sonnet-5',
+          models: [
+            { id: 'claude-sonnet-5', source: 'config', isDefault: true },
+            { id: 'claude-opus-6-preview', source: 'remote' },
+          ],
+          modelsStatus: 'config_only',
+          installed: true,
+          resolvedPath: '/opt/bin/claude',
+          version: 'claude 5.0.0',
+          versionStatus: 'ok',
+          authStatus: 'unknown',
+          authStatusReason: 'safe test fixture',
+          installHint: 'install claude',
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/cat-model-options',
+      headers: { 'x-cat-cafe-user': 'config-plus-remote-user' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.clients.anthropic.modelsSource, 'config');
+    assert.deepEqual(body.clients.anthropic.models, ['claude-sonnet-5', 'claude-opus-6-preview']);
 
     await app.close();
     resetLocalCliModelsSnapshot();

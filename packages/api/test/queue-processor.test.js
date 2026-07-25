@@ -508,7 +508,15 @@ describe('QueueProcessor', () => {
         /wechat-cli/,
       );
       const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
-      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_completed', 'artifact']);
+      // Batch 3-A item 2: task↔run linkage appends a trailing 'run_succeeded' bookkeeping
+      // event once the entry completes (task status is left untouched — see task-run-linkage.ts).
+      assert.deepEqual(eventTypes, [
+        'fast_lane_decision',
+        'fast_lane_started',
+        'fast_lane_completed',
+        'artifact',
+        'run_succeeded',
+      ]);
       const completed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_completed');
       assert.equal(completed.data.workflowId, 'project-init');
       assert.equal(completed.data.routeExecutionBypassed, true);
@@ -571,8 +579,10 @@ describe('QueueProcessor', () => {
 
       assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'post-spawn failure must not rerun slow lane');
       const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
-      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_failed']);
-      const failed = updatedTasks.at(-1).events.at(-1);
+      // Batch 3-A item 2: task↔run linkage appends a trailing 'failed' bookkeeping event
+      // once the entry completes (see task-run-linkage.ts).
+      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_failed', 'failed']);
+      const failed = updatedTasks.at(-1).events.find((event) => event.type === 'fast_lane_failed');
       assert.match(failed.data.stderr, /拒绝覆盖/);
       const errorMessage = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
         (call) => call.arguments[0].type === 'error',
@@ -2479,7 +2489,9 @@ describe('QueueProcessor', () => {
       await artifactProcessor.processNext('t1', 'u1');
       await new Promise((r) => setTimeout(r, 80));
 
-      assert.equal(updatedTasks.length, 1);
+      // Batch 3-A item 2: task↔run linkage appends a second update (trailing
+      // 'run_succeeded' bookkeeping event) after the artifact task event above.
+      assert.equal(updatedTasks.length, 2);
       const event = updatedTasks[0].events.at(-1);
       assert.equal(event.type, 'artifact');
       assert.equal(event.catId, 'opus');
@@ -2556,7 +2568,9 @@ describe('QueueProcessor', () => {
       await usageProcessor.processNext('t1', 'u1');
       await new Promise((r) => setTimeout(r, 80));
 
-      assert.equal(updatedTasks.length, 1);
+      // Batch 3-A item 2: task↔run linkage appends a second update (trailing
+      // 'run_succeeded' bookkeeping event) after the usage task event above.
+      assert.equal(updatedTasks.length, 2);
       const event = updatedTasks[0].events.at(-1);
       assert.equal(event.type, 'usage');
       assert.equal(event.catId, 'opus');

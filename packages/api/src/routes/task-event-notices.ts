@@ -84,7 +84,12 @@ export async function appendTaskLifecycleNotice(params: {
   tone?: 'info' | 'success' | 'warning';
   /** Dedupe scope beyond task id, e.g. the target status ("doing", "in_review"). */
   dedupeKey: string;
-  deps: { messageStore: IMessageStore; socketManager: SocketManager };
+  /**
+   * Batch 3-A item 2: narrowed to the one method this function actually calls so that
+   * callers holding a minimal test-seam interface (e.g. QueueProcessor's SocketManagerLike)
+   * can reuse this notice helper without needing a full concrete SocketManager instance.
+   */
+  deps: { messageStore: IMessageStore; socketManager: Pick<SocketManager, 'broadcastToRoom'> };
 }): Promise<{ posted: boolean }> {
   const now = Date.now();
   if (!dedupeGateOpen(`${params.task.id}:${params.systemKind}:${params.dedupeKey}`, now)) {

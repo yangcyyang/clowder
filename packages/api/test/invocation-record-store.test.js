@@ -330,4 +330,165 @@ describe('InvocationRecordStore', () => {
     assert.ok(store.get(ids[3]));
     assert.ok(store.get(ids[4]));
   });
+
+  // ─── Terminal Invariant (batch 3-B, item 1) ───
+
+  describe('Terminal Invariant: terminalEvent', () => {
+    test('succeeded transition without explicit terminalEvent gets a benign implicit fact', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-succeeded',
+      });
+      store.update(invocationId, { status: 'running' });
+      const updated = store.update(invocationId, { status: 'succeeded' });
+
+      assert.ok(updated.terminalEvent);
+      assert.equal(updated.terminalEvent.kind, 'succeeded');
+      assert.equal(updated.terminalEvent.source, 'legacy-implicit');
+    });
+
+    test('canceled transition without explicit terminalEvent gets a benign implicit fact', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-canceled',
+      });
+      const updated = store.update(invocationId, { status: 'canceled' });
+
+      assert.equal(updated.terminalEvent.kind, 'canceled_system');
+    });
+
+    test('failed transition with an error string derives classification via provider-error-classification', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-failed-network',
+      });
+      store.update(invocationId, { status: 'running' });
+      const updated = store.update(invocationId, { status: 'failed', error: 'connect ECONNRESET' });
+
+      assert.equal(updated.status, 'failed');
+      assert.equal(updated.error, 'connect ECONNRESET', 'error field behavior must stay unchanged');
+      assert.equal(updated.terminalEvent.kind, 'transient_network');
+      assert.equal(updated.terminalEvent.source, 'derived-from-error');
+    });
+
+    test('failed transition with no error and no terminalEvent is tagged missing_terminal_event and backfills error', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-missing',
+      });
+      store.update(invocationId, { status: 'running' });
+      const updated = store.update(invocationId, { status: 'failed' });
+
+      assert.equal(updated.status, 'failed');
+      assert.equal(updated.terminalEvent.kind, 'missing_terminal_event');
+      assert.equal(updated.error, 'missing_terminal_event', 'error is backfilled only when caller left it empty');
+    });
+
+    test('failed transition never overwrites a caller-supplied error, even when tagged missing_terminal_event would not apply', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-preserve-error',
+      });
+      store.update(invocationId, { status: 'running' });
+      const updated = store.update(invocationId, { status: 'failed', error: 'CLI timeout' });
+
+      assert.equal(updated.error, 'CLI timeout');
+      assert.notEqual(updated.terminalEvent.kind, 'missing_terminal_event');
+    });
+
+    test('explicit terminalEvent is honored verbatim over automatic derivation', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-explicit',
+      });
+      store.update(invocationId, { status: 'running' });
+      const explicit = { kind: 'process_restart', at: 12345, source: 'startup-reconciler', detail: { foo: 'bar' } };
+      const updated = store.update(invocationId, { status: 'failed', error: 'connect ECONNRESET', terminalEvent: explicit });
+
+      assert.deepEqual(updated.terminalEvent, explicit);
+    });
+
+    test('terminalEvent is cleared when a failed record is retried back to running', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-retry-clear',
+      });
+      store.update(invocationId, { status: 'running' });
+      store.update(invocationId, { status: 'failed', error: 'connect ECONNRESET' });
+      assert.ok(store.get(invocationId).terminalEvent);
+
+      const retried = store.update(invocationId, { status: 'running', expectedStatus: 'failed', error: '' });
+      assert.equal(retried.terminalEvent, undefined);
+    });
+
+    test('non-terminal update (e.g. phase-only) does not touch an existing terminalEvent', async () => {
+      const { InvocationRecordStore } = await import(
+        '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+      );
+      const store = new InvocationRecordStore();
+      const { invocationId } = store.create({
+        threadId: 't1',
+        userId: 'u1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'term-phase-only',
+      });
+      store.update(invocationId, { status: 'running' });
+      store.update(invocationId, { status: 'succeeded' });
+      const before = store.get(invocationId).terminalEvent;
+
+      // A phase-only update (no status field) must not clear or mutate the terminal fact.
+      const updated = store.update(invocationId, { phase: 'done' });
+      assert.deepEqual(updated.terminalEvent, before);
+    });
+  });
 });

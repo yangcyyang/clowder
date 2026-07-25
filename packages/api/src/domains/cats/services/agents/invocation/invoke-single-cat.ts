@@ -1573,6 +1573,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         stallAutoKill: true,
       },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
+      // Batch 3-E item 1: forward the resolved CatConfig permission profile so
+      // ClaudeAgentService/CodexAgentService can map it to their own CLI flags.
+      ...(catConfig?.permissionProfile ? { permissionProfile: catConfig.permissionProfile } : {}),
       // ADR-024 D2: v2 transport seam — hand the system slot to the adapter's system
       // channel and forward the structured payload for direct slot mapping.
       ...(params.transportPayload

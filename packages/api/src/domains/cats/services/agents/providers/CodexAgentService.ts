@@ -32,6 +32,7 @@ import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
+import { resolveCodexPermissionCliOverrides } from '../providers/permission-profile-cli-args.js';
 import {
   type CodexStreamState,
   flushCodexCompletionText,
@@ -381,8 +382,10 @@ export class CodexAgentService implements AgentService {
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
-    const sandboxMode = getCodexSandboxMode();
-    const approvalPolicy = getCodexApprovalPolicy();
+    // Batch 3-E item 1: permissionProfile absent/'trusted' → {} → env-driven defaults below (unchanged).
+    const permissionOverrides = resolveCodexPermissionCliOverrides(options?.permissionProfile);
+    const sandboxMode = permissionOverrides.sandboxMode ?? getCodexSandboxMode();
+    const approvalPolicy = permissionOverrides.approvalPolicy ?? getCodexApprovalPolicy();
     const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];

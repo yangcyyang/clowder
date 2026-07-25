@@ -21,6 +21,7 @@ import {
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import type { ICooldownStore } from '../../stores/ports/CooldownStore.js';
+import { buildTerminalEvent } from '../../stores/ports/invocation-terminal-event.js';
 import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
@@ -56,6 +57,7 @@ import type {
   QueueEntry,
   QueueMessageEnvelope,
 } from './InvocationQueue.js';
+import { applyTaskRunOutcome } from '../../tasks/task-run-linkage.js';
 import type {
   ConsumedContinuationToken,
   InvocationFinalStatus,
@@ -115,6 +117,15 @@ interface TrackerLike {
 export interface InvocationRecordStoreLike {
   create(input: Record<string, unknown>): Promise<{ outcome: string; invocationId: string }>;
   update(id: string, data: Record<string, unknown>): Promise<void>;
+}
+
+/** Batch 3-E item 2: minimal seam for the daily cost budget gate — kept duck-typed
+ *  like the other *Like deps above so existing test fakes stay unaffected. */
+export interface BudgetGateLike {
+  check(targetCats: readonly string[]): Promise<{
+    allowed: boolean;
+    blocked?: { catId: string; spentUsd: number; capUsd: number };
+  }>;
 }
 
 export interface RouterLike {
@@ -525,6 +536,10 @@ export interface QueueProcessorDeps {
   /** 理智线 T6 (task #388): per-cat quota-cooldown state. Optional so existing deps
    *  construction sites keep compiling without it. */
   cooldownStore?: ICooldownStore;
+  /** Batch 3-E item 2: pre-run daily cost budget gate. Optional + no-op when the
+   *  underlying CLOWDER_BUDGET_ENFORCE env flag is off — existing deps construction
+   *  sites (and all tests) that omit it are completely unaffected. */
+  budgetGate?: BudgetGateLike;
 }
 
 /** F122B B6: Completion hook — called when a queue entry finishes execution. */
@@ -1041,6 +1056,45 @@ export class QueueProcessor {
       }
     } catch (err) {
       this.deps.log.warn({ err, threadId: params.threadId }, '[QueueProcessor] append fast lane task event failed');
+    }
+  }
+
+  /**
+   * Batch 3-A item 2 (docs/research/clowder-raft-thread-task-design.md): task↔run status
+   * linkage. Called once per executeEntry() completion (see the `finally` block below) —
+   * reuses the same sourceMessageId/taskThreadId task lookup as appendUsageTaskEvents/
+   * appendArtifactTaskEvent above. Only 'succeeded'/'failed' carry a rule; 'canceled'/
+   * 'canceled_by_user' are intentionally no-ops (see task-run-linkage.ts doc comment).
+   * Best-effort: any failure here must never affect queue draining or entry cleanup.
+   */
+  private async linkTaskRunOutcome(params: {
+    threadId: string;
+    sourceMessageIds: readonly string[];
+    invocationId: string;
+    finalStatus: InvocationFinalStatus;
+    errorText?: string;
+  }): Promise<void> {
+    if (params.finalStatus !== 'succeeded' && params.finalStatus !== 'failed') return;
+    const { taskStore } = this.deps;
+    if (!taskStore) return;
+    try {
+      const sourceTask = await this.findSourceTaskForLedger({
+        threadId: params.threadId,
+        sourceMessageIds: params.sourceMessageIds,
+      });
+      if (!sourceTask) return;
+      await applyTaskRunOutcome({
+        task: sourceTask,
+        invocationId: params.invocationId,
+        finalStatus: params.finalStatus,
+        errorText: params.errorText,
+        deps: { taskStore, messageStore: this.deps.messageStore, socketManager: this.deps.socketManager },
+      });
+    } catch (err) {
+      this.deps.log.warn(
+        { err, threadId: params.threadId, invocationId: params.invocationId },
+        '[QueueProcessor] task-run linkage failed',
+      );
     }
   }
 
@@ -2033,6 +2087,8 @@ export class QueueProcessor {
     let controller: AbortController | undefined;
     let invocationId: string | undefined;
     let finalStatus: InvocationFinalStatus = 'failed';
+    /** Batch 3-A item 2: terminal error text captured for linkTaskRunOutcome (finally block). */
+    let finalErrorForTaskLink: string | undefined;
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
     const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
@@ -2071,6 +2127,53 @@ export class QueueProcessor {
       }
       const activeInvocationId = createResult.invocationId;
       invocationId = activeInvocationId;
+
+      // Batch 3-E item 2: pre-run daily cost budget gate (env CLOWDER_BUDGET_ENFORCE,
+      // default off — this.deps.budgetGate is always safe to call, it no-ops when the
+      // flag is off). Placed before F175 batching / invocationTracker.startAll(), so a
+      // blocked run never spawns any process and never claims other queued messages —
+      // mirrors the 'duplicate' early-return above (also returns before startAll()).
+      if (this.deps.budgetGate) {
+        const budgetResult = await this.deps.budgetGate.check(targetCats);
+        if (!budgetResult.allowed && budgetResult.blocked) {
+          const { catId: blockedCatId, spentUsd, capUsd } = budgetResult.blocked;
+          // NOTE: must not contain the substring "spawn" (or enoent/econnrefused/enotfound/
+          // process_restart/infra/timeout) — task-run-linkage.ts's classifyRunFailureForTask()
+          // checks those infra/timeout buckets BEFORE its 'budget' check, so any of those words
+          // here would misclassify this as infra_error/timeout instead of budget_exhausted.
+          const budgetErrorText =
+            `Budget cap exceeded (quota): cat "${blockedCatId}" spent $${spentUsd.toFixed(4)} of daily cap ` +
+            `$${capUsd.toFixed(2)} — CLOWDER_BUDGET_ENFORCE blocked this run before starting any process.`;
+          log.warn(
+            { threadId, invocationId, blockedCatId, spentUsd, capUsd },
+            '[QueueProcessor] budget_exhausted — blocked before spawn',
+          );
+          await invocationRecordStore.update(invocationId, {
+            status: 'failed',
+            error: budgetErrorText,
+            terminalEvent: buildTerminalEvent('budget_exhausted', 'QueueProcessor.daily-cost-budget-gate', {
+              catId: blockedCatId,
+              spentUsd,
+              capUsd,
+            }),
+          });
+          socketManager.broadcastAgentMessage(
+            {
+              type: 'error',
+              catId: primaryCat,
+              error: budgetErrorText,
+              isFinal: true,
+              origin: 'budget_gate',
+              timestamp: Date.now(),
+              invocationId,
+            },
+            threadId,
+          );
+          finalStatus = 'failed';
+          finalErrorForTaskLink = budgetErrorText;
+          return 'failed';
+        }
+      }
 
       // F175: user-message batching — collect adjacent matching entries
       // Placed after idempotency check so batched entries aren't dropped on duplicate
@@ -2973,6 +3076,7 @@ export class QueueProcessor {
             : {}),
         });
         finalStatus = 'failed';
+        finalErrorForTaskLink = persistenceError;
         return finalStatus;
       }
 
@@ -3001,6 +3105,7 @@ export class QueueProcessor {
             : {}),
         });
         finalStatus = 'failed';
+        finalErrorForTaskLink = terminalError;
         return finalStatus;
       }
 
@@ -3086,6 +3191,7 @@ export class QueueProcessor {
         }
       }
       const errMsg = err instanceof Error ? err.message : String(err);
+      finalErrorForTaskLink = errMsg;
       // Best-effort: mark record failed + broadcast error
       try {
         if (invocationId) {
@@ -3151,6 +3257,19 @@ export class QueueProcessor {
         } catch (err) {
           log.warn({ threadId, targetCats, err }, '[QueueProcessor] F224: commitInvocationOutcome failed');
         }
+      }
+      // Batch 3-A item 2: task↔run linkage — best-effort, never throws (see method doc).
+      if (invocationId) {
+        const linkedSourceMessageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
+          Boolean,
+        );
+        await this.linkTaskRunOutcome({
+          threadId,
+          sourceMessageIds: linkedSourceMessageIds,
+          invocationId,
+          finalStatus,
+          errorText: finalErrorForTaskLink,
+        });
       }
       socketManager.emitToUser(userId, 'queue_updated', {
         threadId,

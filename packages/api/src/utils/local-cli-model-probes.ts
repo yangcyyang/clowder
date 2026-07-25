@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
-export type LocalCliModelSource = 'cli' | 'config' | 'static';
+export type LocalCliModelSource = 'cli' | 'config' | 'static' | 'remote';
 export type LocalCliModelsStatus = 'ok' | 'config_only' | 'static_only' | 'failed' | 'unsupported';
 
 export interface LocalCliModelCandidate {
@@ -12,10 +12,32 @@ export interface LocalCliModelCandidate {
   readonly isDefault?: boolean;
 }
 
+/**
+ * Fourth model discovery source: an explicitly env-configured HTTP endpoint (e.g. a local
+ * Anthropic-compatible gateway such as CLIProxyAPI) that reports the model catalog it actually
+ * serves. Opt-in only — no URL/key is ever inferred from disk, only from env vars the operator sets.
+ * This is a per-provider table; providers without an entry here simply have no remote source (yet).
+ */
+export interface RemoteModelDiscoveryDefinition {
+  /** Env var holding the discovery endpoint, e.g. an OpenAI/Anthropic-compatible `/v1/models` URL. */
+  readonly urlEnvVar: string;
+  /** Optional env var holding a bearer key for the discovery endpoint. Only used when explicitly set. */
+  readonly keyEnvVar?: string;
+  /** Parses the endpoint's already-JSON-decoded response body into a flat list of model ids. */
+  readonly parse: (payload: unknown) => string[];
+}
+
 export interface LocalCliModelsProbeDefinition {
   readonly command?: { readonly args: readonly string[]; readonly parse: (stdout: string) => string[] };
   readonly configFile?: { readonly path: string; readonly extract: (content: string) => string[] };
   readonly static?: readonly string[];
+  readonly remote?: RemoteModelDiscoveryDefinition;
+}
+
+export interface RemoteFetchResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  json(): Promise<unknown>;
 }
 
 export interface ModelChainOptions {
@@ -26,6 +48,13 @@ export interface ModelChainOptions {
   readonly homeDir?: string;
   readonly runCommand: (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
   readonly readFile?: (path: string) => Promise<string>;
+  /** Env source for remote discovery lookups; defaults to `process.env`. Injectable for tests. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Fetch implementation for remote discovery; defaults to the global `fetch`. Injectable for tests. */
+  readonly fetchRemote?: (
+    url: string,
+    init: { readonly signal: AbortSignal; readonly headers?: Record<string, string> },
+  ) => Promise<RemoteFetchResponse>;
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes are the intended input.
@@ -144,6 +173,27 @@ export function extractKimiConfigModels(content: string): string[] {
   }
 }
 
+/**
+ * Parses an OpenAI/Anthropic-compatible `/v1/models` JSON body (`{ data: [{ id }, ...] }`, or a
+ * bare array of ids/objects) into a flat list of model ids. Tolerant of unexpected shapes — a
+ * malformed or non-conforming payload simply yields no ids rather than throwing.
+ */
+export function parseRemoteModelCatalog(payload: unknown): string[] {
+  const list: unknown[] = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).data)
+      ? ((payload as Record<string, unknown>).data as unknown[])
+      : [];
+  const ids = list.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object' && typeof (item as Record<string, unknown>).id === 'string') {
+      return (item as Record<string, unknown>).id as string;
+    }
+    return '';
+  });
+  return uniqueModelIds(ids);
+}
+
 export function parseCursorModelCatalog(stdout: string): string[] {
   const models: string[] = [];
   for (const rawLine of stripAnsi(stdout).split(/\r?\n/)) {
@@ -160,7 +210,22 @@ export const LOCAL_CLI_MODELS_PROBES = {
   // Claude Code 2.1.203 has no non-interactive model-list command; settings.json is the safe L2 source.
   claude: {
     configFile: { path: '~/.claude/settings.json', extract: extractJsonModelFields },
-    static: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-4-7', 'claude-opus-4-6'],
+    static: [
+      'claude-opus-5',
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+    ],
+    // Remote source (4th tier): an explicit local Anthropic-compatible gateway (e.g. CLIProxyAPI)
+    // that can report newly released models before the static list above is next hand-updated.
+    // Opt-in only via env; the key (if any) is provided by env too, never read from a credential file.
+    remote: {
+      urlEnvVar: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL',
+      keyEnvVar: 'CLOWDER_MODEL_DISCOVERY_ANTHROPIC_KEY',
+      parse: parseRemoteModelCatalog,
+    },
   },
   // Codex 0.144.0 exposes debug models --bundled, but its ~287KB output exceeds the shared 16KB safety cap.
   // L1 is still attempted; normal execution therefore falls through to the explicit, non-credential model cache.
@@ -197,7 +262,7 @@ export const LOCAL_CLI_MODELS_PROBES = {
   // Kimi CLI 1.48.0 has no models command; config.toml exposes default_model and the models table.
   kimi: {
     configFile: { path: '~/.kimi/config.toml', extract: extractKimiConfigModels },
-    static: ['kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
+    static: ['kimi-code/k3', 'kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
   },
   // Grok CLI 0.2.93 prints a human-readable catalog with one bullet per model.
   grok: {
@@ -240,21 +305,97 @@ function candidates(
   }));
 }
 
+/** Adds remote-only candidates (by id) on top of a base tier's result, tagged with source 'remote'. */
+function mergeRemoteCandidates(
+  base: readonly LocalCliModelCandidate[],
+  remote: readonly LocalCliModelCandidate[],
+): LocalCliModelCandidate[] {
+  if (remote.length === 0) return [...base];
+  const seen = new Set(base.map((item) => item.id));
+  const merged = [...base];
+  for (const item of remote) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+const REMOTE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
+
+/**
+ * Best-effort remote model discovery. Never throws: an unconfigured URL, network error, timeout,
+ * non-2xx response, or unparsable body all resolve to an empty list so the caller silently falls
+ * back to whatever the command/config/static tiers already produced (fail-open).
+ * Never reads a credential file — the URL and key can only come from explicit env vars.
+ */
+async function probeRemoteModels(
+  options: ModelChainOptions,
+  probe: LocalCliModelsProbeDefinition,
+): Promise<LocalCliModelCandidate[]> {
+  const remote = probe.remote;
+  if (!remote) return [];
+
+  const env = options.env ?? process.env;
+  const url = env[remote.urlEnvVar]?.trim();
+  if (!url) return [];
+  const key = remote.keyEnvVar ? env[remote.keyEnvVar]?.trim() : undefined;
+
+  const fetchImpl =
+    options.fetchRemote ??
+    ((target: string, init: { signal: AbortSignal; headers?: Record<string, string> }) =>
+      fetch(target, init) as Promise<RemoteFetchResponse>);
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), REMOTE_MODEL_DISCOVERY_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      ...(key ? { headers: { Authorization: `Bearer ${key}` } } : {}),
+    });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    return candidates(remote.parse(payload), 'remote', options.defaultModel);
+  } catch {
+    // Timeout (AbortError), network failure, or a body that isn't valid JSON — all fail open.
+    return [];
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
 export async function probeLocalCliModels(
   options: ModelChainOptions,
 ): Promise<{ models: LocalCliModelCandidate[]; modelsStatus: LocalCliModelsStatus }> {
   const probe = options.modelsProbe;
   if (!probe) return { models: [], modelsStatus: 'unsupported' };
 
+  const remoteModelsPromise = probeRemoteModels(options, probe);
+
   const commandModels = await probeCommandModels(options, probe);
-  if (commandModels.length > 0) return { models: commandModels, modelsStatus: 'ok' };
+  if (commandModels.length > 0) {
+    return { models: mergeRemoteCandidates(commandModels, await remoteModelsPromise), modelsStatus: 'ok' };
+  }
 
   const configModels = await probeConfigModels(options, probe);
-  if (configModels.length > 0) return { models: configModels, modelsStatus: 'config_only' };
+  if (configModels.length > 0) {
+    return { models: mergeRemoteCandidates(configModels, await remoteModelsPromise), modelsStatus: 'config_only' };
+  }
+
+  const remoteModels = await remoteModelsPromise;
 
   if (probe.static && probe.static.length > 0) {
-    return { models: candidates(probe.static, 'static', options.defaultModel), modelsStatus: 'static_only' };
+    const staticModels = candidates(probe.static, 'static', options.defaultModel);
+    return { models: mergeRemoteCandidates(staticModels, remoteModels), modelsStatus: 'static_only' };
   }
+
+  // No static fallback configured for this provider, but the remote source alone produced a
+  // catalog (currently unreachable for any built-in provider, since every `remote` entry above
+  // is paired with a non-empty `static` list; kept for forward-compatibility with future tables).
+  if (remoteModels.length > 0) {
+    return { models: remoteModels, modelsStatus: 'ok' };
+  }
+
   const hasProbeLayer = Boolean(probe.command || probe.configFile);
   return { models: [], modelsStatus: hasProbeLayer ? 'failed' : 'unsupported' };
 }

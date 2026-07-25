@@ -1,4 +1,7 @@
-import type { CatId, TaskEvent, TaskItem } from '@cat-cafe/shared';
+import { catRegistry, type CatId, type TaskEvent, type TaskItem } from '@cat-cafe/shared';
+import { PENDING_MENTION_TTL_MS } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -31,11 +34,33 @@ export interface WorkAdmissionDeps {
   threadStore: IThreadStore;
   messageStore: IMessageStore;
   socketManager: SocketManager;
+  /**
+   * Batch 3-A item 1: optional wake-candidate-cats enqueue hook (auto-claim canary).
+   * Omitted at call sites that don't wire the queue (e.g. tests) — the wake-up is then
+   * silently skipped, matching the default-off gate below.
+   */
+  invocationQueue?: InvocationQueue;
+  queueProcessor?: Pick<QueueProcessor, 'tryAutoExecute'>;
 }
 
 export function isAutoTaskThreadRoutingEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CLOWDER_AUTO_TASK_THREAD_ROUTING === 'true') return true;
   return (env.CLOWDER_AUTO_TASK_THREAD_THREADS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .includes(threadId);
+}
+
+/**
+ * Batch 3-A item 1: gray-rollout gate for auto-claim wake-up.
+ * docs/research/clowder-raft-thread-task-design.md §1 + §5.2 rule 1/2 — Raft claim is
+ * automatic (a candidate agent claims or backs off), never human-assigned. Default is
+ * empty = off; only threads named in CLOWDER_AUTO_CLAIM_THREADS wake candidate cats for
+ * an unowned task.
+ */
+export function isAutoClaimWakeupEnabled(threadId: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.CLOWDER_AUTO_CLAIM_THREADS ?? '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)
@@ -83,6 +108,78 @@ async function persistUnclaimedTaskNotice(task: TaskItem, deps: WorkAdmissionDep
     dedupeKey: 'created',
     deps,
   });
+}
+
+/** Batch 3-A item 1: candidate cap — bounds fan-out and avoids a claim-storm on wide-roster channels. */
+const MAX_AUTO_CLAIM_CANDIDATES = 3;
+
+function buildAutoClaimWakeContent(task: TaskItem): string {
+  const lines = [
+    `[系统] 出现一个无主任务：${truncateTaskTitleForNotice(task.title)}`,
+    task.why ? `背景：${task.why}` : undefined,
+    '',
+    `请使用 cat_cafe_task_claim 认领任务 #${task.id}（taskId=${task.id}）。`,
+    '若认领失败（already_claimed，说明已被其他猫抢先），请直接结束，不要输出任何内容。',
+  ];
+  return lines.filter((line): line is string => line !== undefined).join('\n');
+}
+
+/**
+ * Batch 3-A item 1: docs/research/clowder-raft-thread-task-design.md §1 + §5.2 rule 1/2 —
+ * Raft's claim model is automatic (a candidate agent claims or backs off; humans never
+ * assign). This wakes up to MAX_AUTO_CLAIM_CANDIDATES candidate cats for a freshly-created
+ * unowned task by dropping one autoExecute queue entry per candidate — same durable
+ * enqueue pattern as A2A (callback-a2a-trigger.ts's enqueueA2ATargets), same idempotency
+ * convention shape (`auto-claim:{taskId}:{catId}`).
+ *
+ * Anti-storm: gated to an explicit thread allowlist (isAutoClaimWakeupEnabled, default
+ * off), fires only once per task (caller only invokes this on first admission, guarded by
+ * `discussion.created`), caps candidates to 3, and otherwise relies on the existing
+ * per-cat concurrency slot to naturally throttle (a busy candidate's entry just waits).
+ * Candidates who lose the claim race are instructed to end without output — no visible
+ * message is posted here; only the eventual claim winner's own work becomes visible.
+ */
+async function wakeCandidateCatsForUnclaimedTask(task: TaskItem, sourceMessage: StoredMessage, deps: WorkAdmissionDeps): Promise<void> {
+  if (!deps.invocationQueue) return;
+  if (!isAutoClaimWakeupEnabled(sourceMessage.threadId)) return;
+
+  const thread = await deps.threadStore.get(sourceMessage.threadId);
+  if (!thread) return;
+  const pool = thread.participatingCats?.length ? thread.participatingCats : (thread.preferredCats ?? []);
+  const candidates = pool.filter((catId) => catRegistry.has(catId)).slice(0, MAX_AUTO_CLAIM_CANDIDATES);
+  if (candidates.length === 0) return;
+
+  const content = buildAutoClaimWakeContent(task);
+  const expiresAt = Date.now() + PENDING_MENTION_TTL_MS;
+  let enqueuedAny = false;
+
+  for (const catId of candidates) {
+    const idempotencyKey = `auto-claim:${task.id}:${catId}`;
+    if (deps.invocationQueue.hasActiveIdempotencyKey(sourceMessage.threadId, sourceMessage.userId, idempotencyKey)) {
+      continue;
+    }
+    const result = deps.invocationQueue.enqueue({
+      threadId: sourceMessage.threadId,
+      userId: sourceMessage.userId,
+      idempotencyKey,
+      content,
+      source: 'agent',
+      sourceCategory: 'auto_claim',
+      targetCats: [catId],
+      intent: 'execute',
+      autoExecute: true,
+      pendingMentionId: idempotencyKey,
+      expiresAt,
+    });
+    if (result.outcome === 'enqueued' && !result.deduped && result.entry) {
+      await deps.invocationQueue.persistEntry(result.entry);
+      enqueuedAny = true;
+    }
+  }
+
+  if (enqueuedAny) {
+    await deps.queueProcessor?.tryAutoExecute(sourceMessage.threadId);
+  }
 }
 
 /**
@@ -159,6 +256,9 @@ export async function admitWorkMessage(input: {
     // batch 1 only covered the unowned branch.
     if (!ownerCatId) {
       await persistUnclaimedTaskNotice(discussion.task, deps);
+      // Batch 3-A item 1: wake candidate cats for this freshly-created unowned task.
+      // Best-effort — a wake-up failure must never fail task creation itself.
+      await wakeCandidateCatsForUnclaimedTask(discussion.task, sourceMessage, deps).catch(() => {});
     } else {
       await persistOwnedTaskCreatedNotice(discussion.task, deps);
     }

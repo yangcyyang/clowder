@@ -17,8 +17,10 @@ import type {
   IInvocationRecordStore,
   InvocationRecord,
   InvocationStatus,
+  TerminalEvent,
   UpdateInvocationInput,
 } from '../ports/InvocationRecordStore.js';
+import { isTerminalInvocationStatus, resolveTerminalEvent } from '../ports/invocation-terminal-event.js';
 import { InvocationKeys } from '../redis-keys/invocation-keys.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
@@ -172,11 +174,40 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.userMessageIds !== undefined) pairs.push('userMessageIds', JSON.stringify(input.userMessageIds));
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) pairs.push('usageByCat', JSON.stringify(input.usageByCat));
+    if (input.autoRetryCount !== undefined) pairs.push('autoRetryCount', String(input.autoRetryCount));
 
     // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
     if (input.usageByCat !== undefined) {
       const existing = await this.redis.hget(key, 'usageRecordedAt');
       if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+    }
+
+    // Terminal Invariant (batch 3-B, Maka absorption #2): resolve the
+    // termination fact before the atomic HSET so it lands in the SAME
+    // write as the status transition (invocation-terminal-event.ts owns
+    // the resolution logic — shared with the in-memory store).
+    if (isTerminalInvocationStatus(input.status)) {
+      let effectiveError = input.error;
+      if (input.status === 'failed' && effectiveError === undefined && !input.terminalEvent) {
+        // Only need the pre-existing error for the 'failed' + no-fresh-error
+        // case — succeeded/canceled don't consult it (see resolveTerminalEvent).
+        effectiveError = (await this.redis.hget(key, 'error')) ?? undefined;
+      }
+      const resolved = resolveTerminalEvent({
+        status: input.status,
+        error: effectiveError,
+        terminalEvent: input.terminalEvent,
+      });
+      if (resolved) {
+        pairs.push('terminalEvent', JSON.stringify(resolved));
+        if (resolved.kind === 'missing_terminal_event' && !effectiveError && input.error === undefined) {
+          pairs.push('error', 'missing_terminal_event');
+        }
+      }
+    } else if (input.status !== undefined) {
+      // Re-entering a non-terminal status (e.g. failed→running retry) —
+      // the previous terminal fact no longer describes the current attempt.
+      pairs.push('terminalEvent', '');
     }
 
     // All updates go through ATOMIC_UPDATE_LUA for consistent guard behavior.
@@ -297,6 +328,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const hasError = errorValue !== undefined && errorValue !== '';
     const usageByCat = safeParseObject(data.usageByCat);
     const userMessageIds = safeParseArray(data.userMessageIds);
+    const terminalEvent = safeParseTerminalEvent(data.terminalEvent);
     return {
       id: data.id!,
       threadId: data.threadId!,
@@ -313,6 +345,8 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       ...(hasError ? { error: errorValue } : {}),
       ...(usageByCat ? { usageByCat } : {}),
       ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
+      ...(terminalEvent ? { terminalEvent } : {}),
+      ...(data.autoRetryCount ? { autoRetryCount: parseInt(data.autoRetryCount, 10) } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };
@@ -336,6 +370,25 @@ function safeParseObject(value: string | undefined): Record<string, TokenUsage> 
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, TokenUsage>)
       : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeParseTerminalEvent(value: string | undefined): TerminalEvent | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof parsed.kind === 'string' &&
+      typeof parsed.at === 'number' &&
+      typeof parsed.source === 'string'
+    ) {
+      return parsed as TerminalEvent;
+    }
+    return null;
   } catch {
     return null;
   }

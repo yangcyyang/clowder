@@ -1,4 +1,5 @@
 export { accountsRoutes } from './accounts.js';
+export { activityRoutes } from './activity.js';
 export { agentHooksRoutes } from './agent-hooks.js';
 export { agentMemoryRoutes } from './agent-memory.js';
 export { auditRoutes } from './audit.js';

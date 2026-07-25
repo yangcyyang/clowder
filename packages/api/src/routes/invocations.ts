@@ -20,9 +20,16 @@ import type { PersistenceContext } from '../domains/cats/services/agents/routing
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { buildTerminalEvent } from '../domains/cats/services/stores/ports/invocation-terminal-event.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+
+/** Terminal Invariant (batch 3-B): explicit termination-fact source tag for
+ *  every terminal transition this route drives directly (manual cancel +
+ *  the retry execution path), so they don't fall back to the store's
+ *  legacy-implicit synthesis. */
+const TERMINAL_SOURCE = 'routes/invocations';
 
 export interface InvocationsRoutesOptions {
   invocationRecordStore: IInvocationRecordStore;
@@ -62,6 +69,9 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       // cacheCreationTokens when the provider reports them) so cache-hit
       // telemetry is queryable per invocation, not just in the daily rollup.
       ...(record.usageByCat ? { usageByCat: record.usageByCat } : {}),
+      // Batch 3-B: Terminal Invariant + error classification presentation —
+      // the immutable termination fact backing the current terminal status.
+      ...(record.terminalEvent ? { terminalEvent: record.terminalEvent } : {}),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
@@ -86,7 +96,11 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       opts.queueProcessor?.clearPause(record.threadId, catId);
       opts.queueProcessor?.releaseSlot(record.threadId, catId);
     }
-    await opts.invocationRecordStore.update(id, { status: 'canceled', phase: 'done' });
+    await opts.invocationRecordStore.update(id, {
+      status: 'canceled',
+      phase: 'done',
+      terminalEvent: buildTerminalEvent('canceled_by_user', TERMINAL_SOURCE, { endpoint: 'cancel' }),
+    });
 
     opts.socketManager.broadcastAgentMessage(
       {
@@ -174,7 +188,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
     const primaryCat = record.targetCats[0] ?? 'unknown';
     const controller = opts.invocationTracker.startAll(record.threadId, record.targetCats, record.userId);
     if (controller.signal.aborted) {
-      await opts.invocationRecordStore.update(id, { status: 'canceled' });
+      await opts.invocationRecordStore.update(id, {
+        status: 'canceled',
+        terminalEvent: buildTerminalEvent('canceled_system', TERMINAL_SOURCE, { reason: 'thread_deleting' }),
+      });
       reply.status(409);
       return {
         error: '对话正在删除中',
@@ -306,9 +323,15 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         }
 
         if (controller.signal.aborted) {
+          const abortReason = typeof controller.signal.reason === 'string' ? controller.signal.reason : undefined;
           await opts.invocationRecordStore.update(id, {
             status: 'canceled',
             phase: 'done',
+            terminalEvent: buildTerminalEvent(
+              abortReason === 'user_cancel' ? 'canceled_by_user' : 'canceled_system',
+              TERMINAL_SOURCE,
+              { endpoint: 'retry', ...(abortReason ? { abortReason } : {}) },
+            ),
             ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
           finalStatus = 'canceled';
@@ -319,6 +342,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             status: 'failed',
             phase: 'done',
             error: `Message delivered but persistence failed: ${errorDetail}`,
+            terminalEvent: buildTerminalEvent('agent_error', TERMINAL_SOURCE, {
+              reason: 'message_persistence_failed',
+              persistenceErrors: persistenceContext.errors,
+            }),
             ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
           opts.socketManager.broadcastAgentMessage(
@@ -335,9 +362,16 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             status: 'failed',
             phase: 'done',
             error: governanceErrorCode,
+            terminalEvent: buildTerminalEvent('agent_error', TERMINAL_SOURCE, {
+              reason: 'governance_block',
+              governanceErrorCode,
+            }),
             ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
         } else if (pendingProviderErrors.size > 0) {
+          // No explicit terminalEvent here on purpose: this is raw provider
+          // error text, exactly what provider-error-classification.ts is for
+          // — let the store derive the classification from `error` (batch 3-B item 2).
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
             phase: 'done',
@@ -359,6 +393,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           await opts.invocationRecordStore.update(id, {
             status: 'succeeded',
             phase: 'done',
+            terminalEvent: buildTerminalEvent('succeeded', TERMINAL_SOURCE, { endpoint: 'retry' }),
             ...(collectedUsage.size > 0 ? { usageByCat: Object.fromEntries(collectedUsage) } : {}),
           });
           finalStatus = 'succeeded';
@@ -366,6 +401,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       } catch (err) {
         log.error({ err }, 'Retry execution error');
         const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        // No explicit terminalEvent here either: errorMsg may itself be a
+        // provider error that bubbled up as a thrown Error (e.g. router
+        // execution failure) — let the store's classifyProviderErrorText
+        // derivation run on it, same as the pendingProviderErrors branch above.
         await opts.invocationRecordStore.update(id, {
           status: 'failed',
           phase: 'done',

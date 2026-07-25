@@ -769,7 +769,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // costs one missing card, never a misrouted reply.
     if (!executionRoute && hasMentions && !validatedReplyTo && opts.threadStore) {
       const routingThread = resolvedThreadId === 'default' ? null : await opts.threadStore.get(resolvedThreadId);
-      if (isThreadFirstRoutingEnabled(routingThread)) {
+      // 铲屎官拍板（2026-07-24）：CLOWDER_THREAD_FIRST_DEFAULT=1 时全部频道（含新建）
+      // 默认 thread-first——仅频道语义的 thread（非 DM、非分支）。体感不对时 env 置 0
+      // 一键全局回退，无需回滚版本。thread 显式 routingPolicy 仍然优先。
+      const threadFirstByDefault =
+        process.env.CLOWDER_THREAD_FIRST_DEFAULT === '1' &&
+        !!routingThread &&
+        !routingThread.isDM &&
+        !routingThread.relation;
+      if (isThreadFirstRoutingEnabled(routingThread) || threadFirstByDefault) {
         rootUserMessage = await opts.messageStore.append({
           userId,
           catId: null,
@@ -826,6 +834,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   threadStore: opts.threadStore,
                   messageStore: opts.messageStore,
                   socketManager: opts.socketManager,
+                  invocationQueue: opts.invocationQueue,
+                  queueProcessor: opts.queueProcessor,
                 },
               });
               // Routing is already settled above — ensureTaskDiscussionThread
@@ -891,6 +901,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             threadStore: opts.threadStore,
             messageStore: opts.messageStore,
             socketManager: opts.socketManager,
+            invocationQueue: opts.invocationQueue,
+            queueProcessor: opts.queueProcessor,
           },
         });
         executionRoute = admitted.route;
@@ -2196,6 +2208,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           threadStore: opts.threadStore,
           messageStore: opts.messageStore,
           socketManager: opts.socketManager,
+          invocationQueue: opts.invocationQueue,
+          queueProcessor: opts.queueProcessor,
         },
       });
       return { task: admitted.task, created: admitted.created };

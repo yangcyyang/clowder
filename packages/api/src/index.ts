@@ -47,6 +47,10 @@ import type {
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import {
+  checkDailyBudgetCap,
+  type DailyCostBudgetGateInvocationStoreLike,
+} from './domains/cats/services/agents/invocation/daily-cost-budget-gate.js';
 import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/invocation/RedisInvocationQueuePersistence.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
@@ -94,6 +98,7 @@ import { createBacklogStore } from './domains/cats/services/stores/factories/Bac
 import { createCapabilityReceiptStore } from './domains/cats/services/stores/factories/CapabilityReceiptStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
 import { createCooldownStore } from './domains/cats/services/stores/factories/CooldownStoreFactory.js';
+import { createFollowStore } from './domains/cats/services/stores/factories/FollowStoreFactory.js';
 import { createFreshnessHoldStore } from './domains/cats/services/stores/factories/FreshnessHoldStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
@@ -148,6 +153,7 @@ import { freshnessHoldsRoutes } from './routes/freshness-holds.js';
 import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
+  activityRoutes,
   agentHooksRoutes,
   agentMemoryRoutes,
   auditRoutes,
@@ -228,6 +234,7 @@ import {
   workspaceRoutes,
   worldRoutes,
 } from './routes/index.js';
+import { autoFollowOnAppend } from './routes/activity-auto-follow.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
@@ -523,11 +530,17 @@ async function main(): Promise<void> {
   // the ~40 messageStore.append() call sites is covered uniformly.
   let branchReplyListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
     null;
+  // batch 3-D: auto-follow on participation/mention, wired once followStore
+  // exists (well after messageStore) — same "wire later, compose here" pattern.
+  let activityFollowListener:
+    | ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void)
+    | null = null;
 
   const messageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
       branchReplyListener?.(msg);
+      activityFollowListener?.(msg);
     },
   });
   const holdStore = createFreshnessHoldStore(redis, { maxReviews: 2 });
@@ -598,6 +611,19 @@ async function main(): Promise<void> {
   const invocationRecordStore = createInvocationRecordStore(redis);
   const draftStore = createDraftStore(redis);
   const readStateStore = createReadStateStore(redis);
+  // batch 3-D: follow + Activity aggregated inbox (docs/research/clowder-raft-thread-task-design.md §3 step 2)
+  const followStore = createFollowStore(redis);
+  if (followStore) {
+    const fs = followStore;
+    // "参与（发消息）/被@ 自动 follow" — human side only (§3 step 2). Fire-and-forget:
+    // see activity-auto-follow.ts for the (independently unit-tested) decision logic.
+    activityFollowListener = (msg) => {
+      if (!msg.threadId) return;
+      void autoFollowOnAppend({ followStore: fs, messageStore }, msg).catch((err) => {
+        app.log.warn({ err, threadId: msg.threadId }, '[activity] auto-follow failed');
+      });
+    };
+  }
   const { ExecutionDigestStore } = await import('./domains/projects/execution-digest-store.js');
   const executionDigestStore = new ExecutionDigestStore();
 
@@ -1452,6 +1478,14 @@ async function main(): Promise<void> {
     catSupervisor,
     sessionContinuationCoordinator,
     cooldownStore,
+    // Batch 3-E item 2: always wired — checkDailyBudgetCap itself no-ops when
+    // CLOWDER_BUDGET_ENFORCE is off, so there is no conditional-wiring branch to get wrong.
+    budgetGate: {
+      check: (targetCats: readonly string[]) =>
+        checkDailyBudgetCap(targetCats, {
+          invocationRecordStore: invocationRecordStore as unknown as DailyCostBudgetGateInvocationStoreLike,
+        }),
+    },
   });
   const restoredQueue = await invocationQueue.restorePersistedEntries();
   if (restoredQueue.restored > 0) {
@@ -1782,6 +1816,7 @@ async function main(): Promise<void> {
     taskProgressStore,
     backlogStore,
     ...(readStateStore ? { readStateStore } : {}),
+    ...(followStore ? { followStore } : {}),
     guideSessionStore,
   });
   await app.register(threadBranchRoutes, {
@@ -1812,6 +1847,14 @@ async function main(): Promise<void> {
     });
   }
   await app.register(tasksRoutes, { taskStore, threadStore, messageStore, socketManager });
+  // batch 3-D: Activity aggregated inbox (follow + task-status + mentions feed)
+  await app.register(activityRoutes, {
+    threadStore,
+    messageStore,
+    taskStore,
+    ...(followStore ? { followStore } : {}),
+    ...(readStateStore ? { readStateStore } : {}),
+  });
 
   // F093: World Engine — routes (store + coordinator initialized above, before AgentRouter)
   await app.register(worldRoutes, { worldStore, coordinator: worldCoordinator });
@@ -2316,6 +2359,21 @@ async function main(): Promise<void> {
     } catch (err) {
       app.log.warn(`[api] Startup sweep failed (best-effort): ${String(err)}`);
     }
+
+    // Batch 3-B item 3: whitelisted auto-retry (env CLOWDER_AUTO_RETRY, default off).
+    // Only meaningful in Redis mode — same scanByStatus surface StartupReconciler needs.
+    // tick() itself no-ops when the env var is unset, so this is a cheap, safe timer
+    // to always start; it just won't do anything until explicitly enabled.
+    const { AutoRetryScheduler } = await import('./domains/cats/services/agents/invocation/AutoRetryScheduler.js');
+    const autoRetryScheduler = new AutoRetryScheduler({
+      invocationRecordStore,
+      messageStore,
+      router,
+      socketManager,
+      invocationTracker,
+      queueProcessor,
+    });
+    autoRetryScheduler.start();
   }
 
   // F145 P0: Kill orphan agent-browser headless Chrome processes from previous sessions.

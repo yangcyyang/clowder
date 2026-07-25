@@ -1612,3 +1612,100 @@ test('[F172] yields system_info rich_block for images found in codex generated_i
     rmSync(uploadDir, { recursive: true, force: true });
   }
 });
+
+// ── Batch 3-E item 1: permissionProfile → CLI args (real spawn wiring) ──
+
+test('HARD CONSTRAINT: no permissionProfile option → env-driven sandbox/approval defaults unchanged', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello'));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-no-profile' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('--sandbox'), 'sandbox flag should be present');
+  assert.ok(args.includes('danger-full-access'), 'default sandbox unchanged without a permissionProfile');
+  assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy unchanged without a permissionProfile');
+});
+
+test('permissionProfile: trusted → identical to the no-option default (env-driven sandbox/approval)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello', { permissionProfile: 'trusted' }));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-trusted' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('danger-full-access'));
+  assert.ok(args.includes('approval_policy="on-request"'));
+});
+
+test('permissionProfile: strict → --sandbox workspace-write + approval_policy="untrusted"', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello', { permissionProfile: 'strict' }));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-strict' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('--sandbox'));
+  assert.ok(args.includes('workspace-write'), 'strict must confine sandbox to the workspace');
+  assert.ok(args.includes('approval_policy="untrusted"'), 'strict must use the most conservative approval policy');
+});
+
+test('permissionProfile: standard → --sandbox workspace-write + approval_policy="on-failure"', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+  const promise = collect(service.invoke('hello', { permissionProfile: 'standard' }));
+  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-standard' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('--sandbox'));
+  assert.ok(args.includes('workspace-write'), 'standard must also confine sandbox to the workspace');
+  assert.ok(args.includes('approval_policy="on-failure"'), 'standard must be less strict than strict, more than trusted');
+});
+
+test('permissionProfile overrides win over env vars (profile takes precedence over CAT_CODEX_* env)', async () => {
+  const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+  const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
+  process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
+  process.env.CAT_CODEX_APPROVAL_POLICY = 'never';
+
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+
+    const promise = collect(service.invoke('hello', { permissionProfile: 'strict' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-override-wins' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('workspace-write'), 'profile sandbox override must win over CAT_CODEX_SANDBOX_MODE env');
+    assert.ok(!args.includes('read-only'), 'the env-configured sandbox must not leak through when a profile is set');
+    assert.ok(
+      args.includes('approval_policy="untrusted"'),
+      'profile approval override must win over CAT_CODEX_APPROVAL_POLICY env',
+    );
+  } finally {
+    if (oldSandbox === undefined) {
+      delete process.env.CAT_CODEX_SANDBOX_MODE;
+    } else {
+      process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+    }
+    if (oldApproval === undefined) {
+      delete process.env.CAT_CODEX_APPROVAL_POLICY;
+    } else {
+      process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
+    }
+  }
+});

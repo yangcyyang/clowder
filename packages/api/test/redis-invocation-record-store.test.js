@@ -385,4 +385,88 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     const r2 = await store.getByIdempotencyKey('thread-1', 'user-2', 'scoped-key');
     assert.equal(r2, null);
   });
+
+  // ─── Terminal Invariant (batch 3-B, item 1) — parity with the in-memory store ───
+
+  it('succeeded transition without explicit terminalEvent gets a benign implicit fact', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'term-succeeded',
+    });
+    await store.update(invocationId, { status: 'running' });
+    const updated = await store.update(invocationId, { status: 'succeeded' });
+
+    assert.equal(updated.terminalEvent.kind, 'succeeded');
+    assert.equal(updated.terminalEvent.source, 'legacy-implicit');
+  });
+
+  it('failed transition with an error string derives classification atomically alongside the status write', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'term-failed-network',
+    });
+    await store.update(invocationId, { status: 'running' });
+    const updated = await store.update(invocationId, { status: 'failed', error: 'connect ECONNRESET' });
+
+    assert.equal(updated.status, 'failed');
+    assert.equal(updated.error, 'connect ECONNRESET');
+    assert.equal(updated.terminalEvent.kind, 'transient_network');
+    assert.equal(updated.terminalEvent.source, 'derived-from-error');
+  });
+
+  it('failed transition with no error and no terminalEvent is tagged missing_terminal_event and backfills error', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'term-missing',
+    });
+    await store.update(invocationId, { status: 'running' });
+    const updated = await store.update(invocationId, { status: 'failed' });
+
+    assert.equal(updated.terminalEvent.kind, 'missing_terminal_event');
+    assert.equal(updated.error, 'missing_terminal_event');
+  });
+
+  it('explicit terminalEvent is honored verbatim over automatic derivation', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'term-explicit',
+    });
+    await store.update(invocationId, { status: 'running' });
+    const explicit = { kind: 'process_restart', at: 12345, source: 'startup-reconciler', detail: { foo: 'bar' } };
+    const updated = await store.update(invocationId, {
+      status: 'failed',
+      error: 'connect ECONNRESET',
+      terminalEvent: explicit,
+    });
+
+    assert.deepEqual(updated.terminalEvent, explicit);
+  });
+
+  it('terminalEvent is cleared when a failed record is retried back to running', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'term-retry-clear',
+    });
+    await store.update(invocationId, { status: 'running' });
+    await store.update(invocationId, { status: 'failed', error: 'connect ECONNRESET' });
+    assert.ok((await store.get(invocationId)).terminalEvent);
+
+    const retried = await store.update(invocationId, { status: 'running', expectedStatus: 'failed', error: '' });
+    assert.equal(retried.terminalEvent, undefined);
+  });
 });

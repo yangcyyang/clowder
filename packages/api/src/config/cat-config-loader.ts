@@ -66,6 +66,14 @@ const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
 
 const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
 
+/** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current behavior). */
+const permissionProfileSchema = z.enum(['strict', 'standard', 'trusted']);
+
+/** Batch 3-E item 2: per-cat daily cost cap (env-gated, see CLOWDER_BUDGET_ENFORCE). */
+const costBudgetSchema = z.object({
+  perCatDailyUsd: z.number().positive(),
+});
+
 const capabilityContractSchema = z.object({
   primaryRoles: z.array(z.string().min(1)).default([]),
   canHandle: z.array(z.string().min(1)).default([]),
@@ -157,6 +165,8 @@ const catVariantSchema = z.object({
   defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
   mcpSupport: z.boolean(),
   toolPolicy: toolPolicySchema.optional(),
+  permissionProfile: permissionProfileSchema.optional(), // Batch 3-E item 1: variant-level override
+  costBudget: costBudgetSchema.optional(), // Batch 3-E item 2: per-cat daily cost cap
   sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384): variant-level sanityLine override
   cli: cliConfigSchema.optional(),
   commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
@@ -252,6 +262,7 @@ const catBreedSchema = z.object({
   defaultVariantId: z.string().min(1),
   variants: z.array(catVariantSchema).min(1),
   toolPolicy: toolPolicySchema.optional(),
+  permissionProfile: permissionProfileSchema.optional(), // Batch 3-E item 1: breed-level default
   sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384): breed-level sanityLine default
   features: catFeaturesSchema,
   teamStrengths: z.string().optional(), // F-Ground-3: breed-level default
@@ -543,6 +554,15 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
         toolPolicy: variant.toolPolicy ?? breed.toolPolicy ?? defaultToolPolicyForCat(catId),
+        // Batch 3-E item 1: variant 显式值 > breed 显式值 > undefined（= 'trusted'，现状不变）。
+        // 与 toolPolicy 不同，缺省时刻意不落回任何兜底函数——undefined 本身就是契约的一部分。
+        ...(variant.permissionProfile != null
+          ? { permissionProfile: variant.permissionProfile }
+          : breed.permissionProfile != null
+            ? { permissionProfile: breed.permissionProfile }
+            : {}),
+        // Batch 3-E item 2: variant-only（无 breed 级回落，跟 contextBudget 同款）。
+        ...(variant.costBudget != null ? { costBudget: variant.costBudget } : {}),
         // 理智线 T2 (#384): variant 显式值 > breed 显式值 > 模型先验表 > 120K 兜底；
         // 总是解析出一个数字（不像 toolPolicy 那样兜底函数可能因猫而异），故不做 spread guard。
         sanityLine: resolveSanityLine(variant.sanityLine, breed.sanityLine, variant.defaultModel),

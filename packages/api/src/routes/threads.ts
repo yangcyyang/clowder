@@ -18,6 +18,7 @@ import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orch
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
+import type { IFollowStore } from '../domains/cats/services/stores/ports/FollowStore.js';
 import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
@@ -26,8 +27,10 @@ import type {
   BootcampStateV1,
   IThreadStore,
   Thread,
+  ThreadKind,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { computeThreadKind } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { auditDangerousActionBestEffort, requireDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
 import { validateProjectPath } from '../utils/project-path.js';
@@ -62,6 +65,8 @@ export interface ThreadsRoutesOptions {
   backlogStore?: IBacklogStore;
   /** B-4: Cascade delete guide session when thread is deleted */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** batch 3-D: Cascade delete follow records when thread is deleted */
+  followStore?: IFollowStore;
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -150,8 +155,11 @@ function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean
   return undefined;
 }
 
-function sanitizeThreadForResponse(thread: Thread, _userId: string): Thread {
-  return thread;
+/** F194 Raft-parity batch 3-C: computed sidebar kind. See computeThreadKind. */
+const threadKindSchema = z.enum(['channel', 'dm', 'lobby', 'branch', 'task_discussion']);
+
+function sanitizeThreadForResponse(thread: Thread, _userId: string): Thread & { kind: ThreadKind } {
+  return { ...thread, kind: computeThreadKind(thread) };
 }
 
 function getDmThreadTitle(catId: CatId): string {
@@ -210,6 +218,8 @@ const updateThreadSchema = z
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
     preferredWorkspaceMode: z.enum(['dev', 'recall', 'schedule', 'tasks', 'community']).nullable().optional(),
+    /** F194 Raft-parity batch 3-C: manual override for computed sidebar kind. null clears back to derived value. */
+    kindOverride: threadKindSchema.nullable().optional(),
   })
   .strict()
   .refine(
@@ -225,7 +235,8 @@ const updateThreadSchema = z
       data.bootcampState !== undefined ||
       data.bubbleThinking !== undefined ||
       data.bubbleCli !== undefined ||
-      data.preferredWorkspaceMode !== undefined,
+      data.preferredWorkspaceMode !== undefined ||
+      data.kindOverride !== undefined,
     {
       message: 'At least one field must be provided',
     },
@@ -517,6 +528,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       reply.status(404);
       return { error: 'Thread not found' };
     }
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
 
     const {
       title,
@@ -531,6 +543,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       bubbleThinking,
       bubbleCli,
       preferredWorkspaceMode,
+      kindOverride,
     } = parseResult.data;
     if (title !== undefined) await threadStore.updateTitle(id, title);
     if (pinned !== undefined) await threadStore.updatePin(id, pinned);
@@ -552,6 +565,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     if (preferredWorkspaceMode !== undefined) {
       await threadStore.updatePreferredWorkspaceMode(id, preferredWorkspaceMode);
     }
+    if (kindOverride !== undefined) {
+      await threadStore.updateKindOverride(id, kindOverride);
+    }
 
     const updated = await threadStore.get(id);
     if (!updated) {
@@ -559,7 +575,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    return updated;
+    return sanitizeThreadForResponse(updated, userId);
   });
 
   // F004: User-only context reset. Audit history and durable workspace/memory remain intact.
@@ -720,6 +736,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
       // B-4: Cascade delete guide session to prevent stale sessions on deleted threads
       void opts.guideSessionStore?.delete(id).catch(() => {});
+
+      // batch 3-D: Cascade delete follow records so a deleted thread's followers
+      // don't linger in Activity aggregation (docs/research/clowder-raft-thread-task-design.md §3 step 2)
+      void opts.followStore?.deleteByThread(id).catch(() => {});
 
       // I-2: Audit thread deletion for traceability (best-effort, don't block response)
       const userId = resolveUserId(request, {});

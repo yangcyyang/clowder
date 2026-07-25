@@ -1475,3 +1475,68 @@ test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROP
   // ANTHROPIC_MODEL must NOT be set (native model goes through --model)
   assert.ok(!spawnOpts.env.ANTHROPIC_MODEL, 'ANTHROPIC_MODEL env var must not be set for native Anthropic model');
 });
+
+// ── Batch 3-E item 1: permissionProfile → CLI args (real spawn wiring, not just the pure mapping table) ──
+
+test('HARD CONSTRAINT: no permissionProfile option → --permission-mode bypassPermissions (current behavior unchanged)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('hi'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modeIdx = args.indexOf('--permission-mode');
+  assert.ok(modeIdx >= 0, '--permission-mode must be present');
+  assert.equal(args[modeIdx + 1], 'bypassPermissions');
+  assert.equal(args.indexOf('--allowedTools'), -1, '--allowedTools must not appear for the default/trusted profile');
+});
+
+test('permissionProfile: trusted → identical to the no-option default (--permission-mode bypassPermissions)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('hi', { permissionProfile: 'trusted' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modeIdx = args.indexOf('--permission-mode');
+  assert.equal(args[modeIdx + 1], 'bypassPermissions');
+  assert.equal(args.indexOf('--allowedTools'), -1);
+});
+
+test('permissionProfile: strict → --permission-mode acceptEdits, no --allowedTools', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('hi', { permissionProfile: 'strict' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modeIdx = args.indexOf('--permission-mode');
+  assert.equal(args[modeIdx + 1], 'acceptEdits');
+  assert.equal(args.indexOf('--allowedTools'), -1, 'strict must not grant Bash');
+});
+
+test('permissionProfile: standard → --permission-mode acceptEdits --allowedTools Bash', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new ClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('hi', { permissionProfile: 'standard' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const modeIdx = args.indexOf('--permission-mode');
+  assert.equal(args[modeIdx + 1], 'acceptEdits');
+  const allowedToolsIdx = args.indexOf('--allowedTools');
+  assert.ok(allowedToolsIdx >= 0, 'standard must grant --allowedTools');
+  assert.equal(args[allowedToolsIdx + 1], 'Bash');
+});

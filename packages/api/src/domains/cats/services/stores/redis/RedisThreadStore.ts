@@ -23,6 +23,7 @@ import type {
   PendingContinuationEntry,
   Thread,
   ThreadCreateOptions,
+  ThreadKind,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
   ThreadParticipantActivity,
@@ -569,6 +570,16 @@ export class RedisThreadStore implements IThreadStore {
       await this.deleteDetailFields(key, 'preferredWorkspaceMode');
     } else {
       await this.setDetailFields(key, 'preferredWorkspaceMode', mode);
+    }
+  }
+
+  /** F194 Raft-parity batch 3-C: manual override hook for computed sidebar kind. */
+  async updateKindOverride(threadId: string, kind: ThreadKind | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (kind === null) {
+      await this.deleteDetailFields(key, 'kindOverride');
+    } else {
+      await this.setDetailFields(key, 'kindOverride', kind);
     }
   }
 
@@ -1128,6 +1139,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.preferredWorkspaceMode) {
       result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
     }
+    if (thread.kindOverride) {
+      result.kindOverride = thread.kindOverride;
+    }
     return result;
   }
 
@@ -1244,6 +1258,16 @@ export class RedisThreadStore implements IThreadStore {
     const validModes = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
     if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
       result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
+    }
+    const validKindOverrides: ReadonlySet<string> = new Set([
+      'channel',
+      'dm',
+      'lobby',
+      'branch',
+      'task_discussion',
+    ]);
+    if (data.kindOverride && validKindOverrides.has(data.kindOverride)) {
+      result.kindOverride = data.kindOverride as ThreadKind;
     }
     return result;
   }

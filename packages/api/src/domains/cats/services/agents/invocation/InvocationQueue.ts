@@ -89,7 +89,16 @@ export interface QueueEntry {
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
   priority: 'urgent' | 'normal';
   /** F175: origin category for visual grouping */
-  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'freshness_review';
+  sourceCategory?:
+    | 'ci'
+    | 'review'
+    | 'conflict'
+    | 'scheduled'
+    | 'a2a'
+    | 'continuation'
+    | 'freshness_review'
+    /** Batch 3-A item 1: unowned-task wake-up nudge to a candidate cat (auto-claim canary). */
+    | 'auto_claim';
   /** Existing message type with scheduler-specific presentation metadata. */
   responsePresentation?: 'silent_receipt';
   /** Queue-internal dedup key for agent control-flow work. */

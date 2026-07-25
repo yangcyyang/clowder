@@ -751,6 +751,100 @@ describe('Thread API', () => {
     });
     assert.equal(res.statusCode, 400);
   });
+
+  // F194 Raft-parity batch 3-C: computed sidebar `kind` on read responses.
+  it('GET /api/threads/:id includes computed kind for a plain channel thread', async () => {
+    const thread = threadStore.create('alice', 'Plain Channel');
+    const res = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).kind, 'channel');
+  });
+
+  it('GET /api/threads/:id derives kind=lobby for the default thread', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/threads/default' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).kind, 'lobby');
+  });
+
+  it('GET /api/threads derives kind=dm for DM threads and kind=channel for regular threads', async () => {
+    const dmThread = threadStore.create('alice', 'DM With Codex');
+    threadStore.updateIsDM(dmThread.id, true);
+    threadStore.create('alice', 'Regular Channel');
+
+    const res = await app.inject({ method: 'GET', url: '/api/threads', headers: { 'x-cat-cafe-user': 'alice' } });
+    assert.equal(res.statusCode, 200);
+    const { threads } = JSON.parse(res.body);
+    const kinds = new Map(threads.map((t) => [t.id, t.kind]));
+    assert.equal(kinds.get(dmThread.id), 'dm');
+    const regular = threads.find((t) => t.title === 'Regular Channel');
+    assert.equal(regular.kind, 'channel');
+  });
+
+  it('GET /api/threads derives kind=task_discussion for task/message-thread relations and kind=branch for inline/edit relations', async () => {
+    const root = threadStore.create('alice', 'Root Channel');
+    const taskThread = threadStore.create('alice', 'Task Discussion (分支)', undefined, {
+      relation: { v: 1, kind: 'task_thread', parentThreadId: root.id, rootMessageId: 'msg-1' },
+    });
+    const messageThread = threadStore.create('alice', 'Message Anchor (分支)', undefined, {
+      relation: { v: 1, kind: 'message_thread', parentThreadId: root.id, rootMessageId: 'msg-2' },
+    });
+    const inlineBranch = threadStore.create('alice', 'Inline Reply Branch', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: root.id, rootMessageId: 'msg-3' },
+    });
+    const editBranch = threadStore.create('alice', 'Edit Branch', undefined, {
+      relation: { v: 1, kind: 'edit_branch', parentThreadId: root.id, rootMessageId: 'msg-4' },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/threads', headers: { 'x-cat-cafe-user': 'alice' } });
+    const { threads } = JSON.parse(res.body);
+    const kinds = new Map(threads.map((t) => [t.id, t.kind]));
+    assert.equal(kinds.get(taskThread.id), 'task_discussion');
+    assert.equal(kinds.get(messageThread.id), 'task_discussion');
+    assert.equal(kinds.get(inlineBranch.id), 'branch');
+    assert.equal(kinds.get(editBranch.id), 'branch');
+  });
+
+  it('PATCH /api/threads/:id sets kindOverride and read-time kind reflects the override', async () => {
+    const thread = threadStore.create('alice', 'Override Me');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { kindOverride: 'task_discussion' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).kind, 'task_discussion');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).kind, 'task_discussion');
+  });
+
+  it('PATCH /api/threads/:id clears kindOverride with null, reverting to derived kind', async () => {
+    const thread = threadStore.create('alice', 'Override Then Clear');
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { kindOverride: 'task_discussion' },
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { kindOverride: null },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).kind, 'channel');
+  });
+
+  it('PATCH /api/threads/:id rejects invalid kindOverride', async () => {
+    const thread = threadStore.create('alice', 'Bad Kind Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { kindOverride: 'not-a-real-kind' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
 });
 
 describe('Thread soft-delete preserves data (Phase D)', () => {

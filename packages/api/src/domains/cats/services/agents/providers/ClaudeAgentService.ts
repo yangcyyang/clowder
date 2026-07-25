@@ -42,10 +42,9 @@ import {
   isClaudeRuntimeSteerEnabled,
   registerClaudeRuntimeSteerChannel,
 } from './claude-runtime-steer.js';
+import { resolveClaudePermissionCliArgs } from './permission-profile-cli-args.js';
 
 const log = createModuleLogger('claude-agent');
-
-const PERMISSION_MODE = 'bypassPermissions';
 
 const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
@@ -208,6 +207,8 @@ export class ClaudeAgentService implements AgentService {
     const useEnvModelOverride = isApiKeyMode && !isKnownAnthropicModel(effectiveModel);
     const useRuntimeSteer =
       isClaudeRuntimeSteerEnabled() && options?.auditContext !== undefined && options.spawnCliOverride === undefined;
+    // Batch 3-E item 1: permissionProfile absent/'trusted' → bypassPermissions (unchanged).
+    const permissionArgs = resolveClaudePermissionCliArgs(options?.permissionProfile);
     const args: string[] = [
       '-p',
       ...(useRuntimeSteer ? ['--input-format', 'stream-json'] : [effectivePrompt]),
@@ -218,7 +219,8 @@ export class ClaudeAgentService implements AgentService {
       '--effort',
       getCatEffort(this.catId as string, undefined, 'anthropic'),
       '--permission-mode',
-      PERMISSION_MODE,
+      permissionArgs.permissionMode,
+      ...(permissionArgs.allowedTools?.length ? ['--allowedTools', permissionArgs.allowedTools.join(',')] : []),
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
       // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',

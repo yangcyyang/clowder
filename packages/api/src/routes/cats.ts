@@ -61,6 +61,12 @@ const assetCardSchema = z.object({
 
 const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
 const toolPolicySchema = z.enum(['minimal', 'standard', 'full']);
+/** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current behavior). */
+const permissionProfileSchema = z.enum(['strict', 'standard', 'trusted']);
+/** Batch 3-E item 2: per-cat daily cost cap (env-gated, see CLOWDER_BUDGET_ENFORCE). */
+const costBudgetSchema = z.object({
+  perCatDailyUsd: z.number().positive(),
+});
 const capabilityContractSchema = z.object({
   primaryRoles: z.array(z.string().min(1)).default([]),
   canHandle: z.array(z.string().min(1)).default([]),
@@ -108,6 +114,8 @@ const baseCatSchema = z.object({
   assetCard: assetCardSchema.optional(),
   contextBudget: contextBudgetSchema.optional(),
   toolPolicy: toolPolicySchema.optional(),
+  permissionProfile: permissionProfileSchema.optional(),
+  costBudget: costBudgetSchema.optional(),
   sanityLine: z.number().int().positive().optional(), // 理智线 T2 (#384)
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
@@ -165,6 +173,8 @@ const updateCatSchema = z.object({
   assetCard: assetCardSchema.nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   toolPolicy: toolPolicySchema.nullable().optional(),
+  permissionProfile: permissionProfileSchema.nullable().optional(),
+  costBudget: costBudgetSchema.nullable().optional(),
   sanityLine: z.number().int().positive().nullable().optional(), // 理智线 T2 (#384)
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
@@ -504,6 +514,8 @@ async function toCatResponse(
     defaultModel: cat.defaultModel,
     cli: cat.cli,
     toolPolicy: cat.toolPolicy,
+    permissionProfile: cat.permissionProfile,
+    costBudget: cat.costBudget,
     contextBudget: cat.contextBudget,
     sanityLine: cat.sanityLine, // 理智线 T2 (#384)
     avatar: resolveResponseAvatar(projectRoot, cat.avatar),
@@ -684,6 +696,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
           toolPolicy: body.toolPolicy,
+          ...(body.permissionProfile ? { permissionProfile: body.permissionProfile } : {}),
+          ...(body.costBudget ? { costBudget: body.costBudget } : {}),
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -716,6 +730,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
           contextBudget: body.contextBudget,
           toolPolicy: body.toolPolicy,
+          ...(body.permissionProfile ? { permissionProfile: body.permissionProfile } : {}),
+          ...(body.costBudget ? { costBudget: body.costBudget } : {}),
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -882,6 +898,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
         ...(body.assetCard !== undefined ? { assetCard: body.assetCard } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.toolPolicy !== undefined ? { toolPolicy: body.toolPolicy } : {}),
+        ...(body.permissionProfile !== undefined ? { permissionProfile: body.permissionProfile } : {}),
+        ...(body.costBudget !== undefined ? { costBudget: body.costBudget } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),

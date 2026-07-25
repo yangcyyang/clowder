@@ -11,6 +11,13 @@
 import { randomUUID } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
 import { isValidTransition } from './invocation-state-machine.js';
+import {
+  isTerminalInvocationStatus,
+  resolveTerminalEvent,
+  type TerminalEvent,
+} from './invocation-terminal-event.js';
+
+export type { TerminalEvent, TerminalEventKind } from './invocation-terminal-event.js';
 
 /** InvocationRecord lifecycle statuses */
 export type InvocationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
@@ -54,6 +61,19 @@ export interface InvocationRecord {
   /** F128: Epoch ms when usageByCat was first recorded. Stable for daily bucketing
    *  (unlike updatedAt which any subsequent update can shift). */
   usageRecordedAt?: number;
+  /**
+   * Terminal Invariant (batch 3-B, Maka absorption #2): the immutable
+   * termination fact backing the current terminal status, if any. Present
+   * only while status ∈ {succeeded, failed, canceled}; cleared whenever the
+   * record re-enters a non-terminal status (e.g. failed→running retry).
+   */
+  terminalEvent?: TerminalEvent;
+  /**
+   * Batch 3-B, item 3: number of times AutoRetryScheduler has claimed a
+   * failed→running retry for this record. Capped at 2. Distinct from manual
+   * retries via POST /api/invocations/:id/retry, which aren't counted here.
+   */
+  autoRetryCount?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -87,6 +107,17 @@ export interface UpdateInvocationInput {
   expectedStatus?: InvocationStatus;
   /** F8: Per-cat token usage (key = catId) */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
+  /**
+   * Terminal Invariant (batch 3-B): explicit termination fact for this
+   * transition. Required in spirit for every succeeded/failed/canceled
+   * transition; when omitted the store derives a best-effort fact instead
+   * of rejecting the write outright (see invocation-terminal-event.ts doc
+   * for the backward-compat rationale). Ignored when `status` isn't
+   * business-terminal.
+   */
+  terminalEvent?: TerminalEvent;
+  /** Batch 3-B, item 3: set by AutoRetryScheduler when it claims a retry. */
+  autoRetryCount?: number;
 }
 
 /**
@@ -192,6 +223,16 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       return null;
     }
 
+    // Terminal Invariant (batch 3-B): resolve before mutating so classification
+    // sees the pre-update error alongside whatever this call is setting.
+    const terminalEventToApply = isTerminalInvocationStatus(input.status)
+      ? resolveTerminalEvent({
+          status: input.status,
+          error: input.error ?? record.error,
+          terminalEvent: input.terminalEvent,
+        })
+      : undefined;
+
     if (input.status !== undefined) record.status = input.status;
     if (input.phase !== undefined) record.phase = input.phase;
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
@@ -202,6 +243,21 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       // F128: stamp usageRecordedAt only on first write (stable for daily bucketing)
       if (record.usageRecordedAt == null) record.usageRecordedAt = Date.now();
     }
+    if (input.autoRetryCount !== undefined) record.autoRetryCount = input.autoRetryCount;
+
+    if (terminalEventToApply) {
+      record.terminalEvent = terminalEventToApply;
+      // Backfill a visible reason only when the caller truly left it empty —
+      // never overwrites a real error message.
+      if (terminalEventToApply.kind === 'missing_terminal_event' && !record.error) {
+        record.error = 'missing_terminal_event';
+      }
+    } else if (input.status !== undefined) {
+      // Re-entering a non-terminal status (e.g. failed→running retry) —
+      // the previous terminal fact no longer describes the current attempt.
+      record.terminalEvent = undefined;
+    }
+
     record.updatedAt = Date.now();
 
     return record;

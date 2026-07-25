@@ -299,4 +299,169 @@ describe('probeLocalAgentClis', () => {
     assert.doesNotMatch(parserInput, /secret123/);
     assert.equal(results[0]?.models[1]?.id, 'sk_agent_<redacted>');
   });
+
+  describe('remote model discovery (4th source)', () => {
+    it('includes claude-opus-5 in the built-in claude static catalog', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {},
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-opus-5' && model.source === 'static'),
+        `expected claude-opus-5 in static models, got: ${JSON.stringify(claude?.models)}`,
+      );
+    });
+
+    it('does not attempt remote discovery when the discovery URL env var is unset', async () => {
+      let fetchCalls = 0;
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {},
+        async fetchRemote() {
+          fetchCalls += 1;
+          return { ok: true, status: 200, async json() { return { data: [] }; } };
+        },
+      });
+
+      assert.equal(fetchCalls, 0);
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.equal(claude?.models.some((model) => model.source === 'remote'), false);
+    });
+
+    it('merges a remote model catalog into the claude candidates, tagging new ids with source remote', async () => {
+      let fetchedUrl;
+      let fetchedInit;
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {
+          CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models',
+          CLOWDER_MODEL_DISCOVERY_ANTHROPIC_KEY: 'test-gateway-key',
+        },
+        async fetchRemote(url, init) {
+          fetchedUrl = url;
+          fetchedInit = init;
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              // 'claude-opus-5' already exists in the static list (dedup check); 'claude-opus-6-preview' is new.
+              return { data: [{ id: 'claude-opus-5' }, { id: 'claude-opus-6-preview' }] };
+            },
+          };
+        },
+      });
+
+      assert.equal(fetchedUrl, 'http://127.0.0.1:8317/v1/models');
+      assert.equal(fetchedInit?.headers?.Authorization, 'Bearer test-gateway-key');
+      assert.ok(fetchedInit?.signal instanceof AbortSignal);
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-opus-5' && model.source === 'static'),
+        'id already present in static tier should keep its original source, not be duplicated',
+      );
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-opus-6-preview' && model.source === 'remote'),
+        'new id only returned by the remote endpoint should be tagged source remote',
+      );
+      assert.equal(
+        claude?.models.filter((model) => model.id === 'claude-opus-5').length,
+        1,
+        'dedup: the overlapping id must appear only once',
+      );
+    });
+
+    it('falls back silently to the static catalog when the remote endpoint times out or errors', async () => {
+      let fetchCalls = 0;
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: { CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models' },
+        async fetchRemote() {
+          fetchCalls += 1;
+          const abortError = new Error('The operation was aborted');
+          abortError.name = 'AbortError';
+          throw abortError;
+        },
+      });
+
+      assert.equal(fetchCalls, 1);
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.equal(claude?.models.some((model) => model.source === 'remote'), false);
+      assert.ok(claude?.models.some((model) => model.id === 'claude-opus-5'));
+    });
+
+    it('treats a non-2xx remote discovery response as a silent failure', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: { CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models' },
+        async fetchRemote() {
+          return {
+            ok: false,
+            status: 503,
+            async json() {
+              throw new Error('should not be called when response is not ok');
+            },
+          };
+        },
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.models.some((model) => model.source === 'remote'), false);
+    });
+
+    it('does not read a remote discovery endpoint for providers without a remote table entry', async () => {
+      let fetchCalls = 0;
+      // Scope the allowlist to only 'grok' (no `remote` entry in LOCAL_CLI_MODELS_PROBES.grok) so the
+      // assertion isn't confounded by 'claude' also being probed and reading the same env var.
+      const results = await probeWithIsolatedHome({
+        definitions: LOCAL_CLI_ALLOWLIST.filter((definition) => definition.id === 'grok'),
+        resolveCommand(command) {
+          return command === 'grok' ? '/opt/bin/grok' : null;
+        },
+        async runCommand(_file, args) {
+          if (args[0] === '--version') return { stdout: 'grok 0.2.93', stderr: '' };
+          return { stdout: '', stderr: '' };
+        },
+        env: { CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models' },
+        async fetchRemote() {
+          fetchCalls += 1;
+          return { ok: true, status: 200, async json() { return { data: [] }; } };
+        },
+      });
+
+      assert.equal(fetchCalls, 0);
+      assert.equal(results.find((item) => item.id === 'grok')?.installed, true);
+    });
+  });
 });

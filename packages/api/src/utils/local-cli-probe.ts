@@ -6,6 +6,7 @@ import {
   type LocalCliModelCandidate,
   type LocalCliModelsProbeDefinition,
   type LocalCliModelsStatus,
+  type ModelChainOptions,
   probeLocalCliModels,
   redactProbeOutput,
 } from './local-cli-model-probes.js';
@@ -129,6 +130,10 @@ export interface ProbeLocalClisOptions {
   readonly resolveCommand?: (command: string) => string | null;
   readonly runCommand?: (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
   readonly readFile?: (path: string) => Promise<string>;
+  /** Env source for remote model discovery (4th source); defaults to `process.env`. Injectable for tests. */
+  readonly env?: ModelChainOptions['env'];
+  /** Fetch implementation for remote model discovery; defaults to the global `fetch`. Injectable for tests. */
+  readonly fetchRemote?: ModelChainOptions['fetchRemote'];
 }
 
 function firstLine(value: string): string | undefined {
@@ -187,6 +192,8 @@ export async function probeLocalAgentClis(options: ProbeLocalClisOptions = {}): 
       homeDir: options.homeDir,
       runCommand,
       readFile: options.readFile,
+      env: options.env,
+      fetchRemote: options.fetchRemote,
     });
     results.push({
       id: definition.id,

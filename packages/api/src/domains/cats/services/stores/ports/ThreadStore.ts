@@ -135,6 +135,41 @@ export interface ThreadCreateOptions {
   readonly relation?: ThreadRelationV1;
 }
 
+/**
+ * F194 Raft-parity batch 3-C: sidebar-facing coarse classification, derived
+ * at read time from `id`/`isDM`/`relation` — never backfilled onto existing
+ * threads. See docs/research/clowder-raft-thread-task-design.md §1/§4
+ * ("侧边栏 91 项混乱的另一半解药（Thread.kind 分组）").
+ */
+export type ThreadKind = 'channel' | 'dm' | 'lobby' | 'branch' | 'task_discussion';
+
+/** relation.kind values that count as a task/message discussion branch, not a regular manual branch. */
+const TASK_DISCUSSION_RELATION_KINDS: ReadonlySet<ThreadRelationV1['kind']> = new Set([
+  'task_thread',
+  'message_thread',
+]);
+
+/**
+ * Pure, read-time derivation of a thread's sidebar `kind`. No storage
+ * migration — every existing thread derives its kind on every read.
+ * `kindOverride` (manually set via PATCH) always wins when present; it is
+ * the hook the design doc leaves open for future manual reclassification.
+ *
+ * Derivation order: kindOverride → lobby (id === 'default') → dm (isDM) →
+ * task_discussion (relation.kind ∈ {task_thread, message_thread}) →
+ * branch (any other relation.kind) → channel (no relation).
+ */
+export function computeThreadKind(thread: Pick<Thread, 'id' | 'isDM' | 'relation' | 'kindOverride'>): ThreadKind {
+  if (thread.kindOverride) return thread.kindOverride;
+  if (thread.id === DEFAULT_THREAD_ID) return 'lobby';
+  if (thread.isDM) return 'dm';
+  const relationKind = thread.relation?.kind;
+  if (relationKind) {
+    return TASK_DISCUSSION_RELATION_KINDS.has(relationKind) ? 'task_discussion' : 'branch';
+  }
+  return 'channel';
+}
+
 /** Copy only the v1 contract fields so accidental parent metadata cannot enter persistence. */
 export function copyThreadRelation(relation: ThreadRelationV1): ThreadRelationV1 {
   return {
@@ -158,6 +193,12 @@ export interface Thread {
   createdAt: number;
   /** Durable, server-derived branch identity. Missing means root/legacy thread. */
   readonly relation?: ThreadRelationV1;
+  /**
+   * F194 Raft-parity batch 3-C: manual override for the computed sidebar
+   * `kind` (see computeThreadKind). Optional storage-layer hook for future
+   * manual reclassification — settable via PATCH, no automatic backfill.
+   */
+  kindOverride?: ThreadKind;
   pinned?: boolean;
   pinnedAt?: number | null;
   favorited?: boolean;
@@ -411,6 +452,8 @@ export interface IThreadStore {
     threadId: string,
     mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
   ): void | Promise<void>;
+  /** F194 Raft-parity batch 3-C: manual override hook for computed sidebar kind. `null` clears back to derived value. */
+  updateKindOverride(threadId: string, kind: ThreadKind | null): void | Promise<void>;
   updateMemberSessionStrategy(
     threadId: string,
     catId: string,
@@ -822,6 +865,17 @@ export class ThreadStore implements IThreadStore {
       delete thread.preferredWorkspaceMode;
     } else {
       thread.preferredWorkspaceMode = mode;
+    }
+  }
+
+  /** F194 Raft-parity batch 3-C: manual override hook for computed sidebar kind. */
+  updateKindOverride(threadId: string, kind: ThreadKind | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (kind === null) {
+      delete thread.kindOverride;
+    } else {
+      thread.kindOverride = kind;
     }
   }
 

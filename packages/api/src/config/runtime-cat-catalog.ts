@@ -6,6 +6,8 @@ import type {
   CatCafeConfig,
   CatCapabilityContract,
   CatColor,
+  CatCostBudget,
+  CatPermissionProfile,
   CatVariant,
   CliConfig,
   ClientId,
@@ -50,6 +52,10 @@ export interface RuntimeCatInput {
   defaultModel: string;
   mcpSupport: boolean;
   toolPolicy?: ToolPolicy;
+  /** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current behavior). */
+  permissionProfile?: CatPermissionProfile;
+  /** Batch 3-E item 2: per-cat daily cost cap (env-gated). */
+  costBudget?: CatCostBudget;
   cli: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
@@ -88,6 +94,10 @@ export interface RuntimeCatUpdate {
   defaultModel?: string;
   mcpSupport?: boolean;
   toolPolicy?: ToolPolicy | null;
+  /** Batch 3-E item 1: CLI permission tri-level gate. null clears back to breed default/'trusted'. */
+  permissionProfile?: CatPermissionProfile | null;
+  /** Batch 3-E item 2: per-cat daily cost cap. null clears the cap (no enforcement for this cat). */
+  costBudget?: CatCostBudget | null;
   cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
@@ -273,6 +283,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
         ...(input.toolPolicy ? { toolPolicy: input.toolPolicy } : {}),
+        ...(input.permissionProfile ? { permissionProfile: input.permissionProfile } : {}),
+        ...(input.costBudget ? { costBudget: input.costBudget } : {}),
         cli: input.cli,
         ...(input.accountRef != null && input.accountRef.trim().length > 0
           ? { accountRef: input.accountRef.trim() }
@@ -493,6 +505,20 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.toolPolicy = patch.toolPolicy;
     } else {
       delete variant.toolPolicy;
+    }
+  }
+  if (patch.permissionProfile !== undefined) {
+    if (patch.permissionProfile) {
+      variant.permissionProfile = patch.permissionProfile;
+    } else {
+      delete variant.permissionProfile;
+    }
+  }
+  if (patch.costBudget !== undefined) {
+    if (patch.costBudget) {
+      variant.costBudget = patch.costBudget;
+    } else {
+      delete variant.costBudget;
     }
   }
   if (patch.cli !== undefined) variant.cli = patch.cli;
