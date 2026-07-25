@@ -2161,6 +2161,24 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: true,
   },
+  {
+    name: 'CLOWDER_CLI_SESSION_MAX_MB',
+    defaultValue: '0（未设置/0 → 只观测不轮转，零行为变化）',
+    description:
+      'F-G（docs/prd/PRD-memory-upgrade.md 批次 3）CLI 原生 session 撑爆治理：各 provider CLI 自己维护的续接历史（grok/kimi/claude/codex/gemini 的 --resume/--continue/--session 机制）体积上限（单位 MB）。invoke-single-cat.ts 即将 --resume 一个旧 session 之前会检查其原生磁盘体积——超过此值且该猫在 CLOWDER_CLI_SESSION_ROTATE_CATS 白名单内时，本次调用不带 sessionId（等效强制轮转），旧文件只改名归档为 "<path>.rotated-<yyyy-mm-dd>" 后缀，绝不删除。轮转前会补一次 autoUpdateAgentMemory 蒸馏写入两层记忆。本轮只对 grok（clientId）实现了原生 session 路径解析，其余 provider 会安全短路为不轮转（见 cli-native-session-rotation.ts 顶部调研表）。默认 0 = 关闭，不做任何 fs 访问。灰度建议：先设 8（MB）+ CLOWDER_CLI_SESSION_ROTATE_CATS=grok。改值无需重启——每次 invocation 都会重新读取。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_CLI_SESSION_ROTATE_CATS',
+    defaultValue: '(未设置 → 全部关闭，不轮转任何猫)',
+    description:
+      '配合 CLOWDER_CLI_SESSION_MAX_MB 使用：逗号分隔的 catId 白名单（如 "grok" 或 "grok,kimi"），只有名单内的猫会被 CLI 原生 session 体积轮转门控中；未设置或为空则即使 CLOWDER_CLI_SESSION_MAX_MB>0 也不轮转任何猫。灰度纪律：先只开 grok（事故猫，也是本轮唯一实现了原生 session 路径解析的 provider）。改值无需重启——每次 invocation 都会重新读取。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: true,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */

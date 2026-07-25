@@ -135,7 +135,8 @@ export interface StoredMessage {
       | 'sanity_handoff'
       | 'task_created_unclaimed'
       | 'task_created'
-      | 'task_status_changed';
+      | 'task_status_changed'
+      | 'cli_session_rotated';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
     /** P2-3: Aggregated emoji reactions for this message. */

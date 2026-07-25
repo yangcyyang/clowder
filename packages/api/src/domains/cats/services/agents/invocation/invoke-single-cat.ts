@@ -86,6 +86,10 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
 import { evaluateClaudeBudgetGate } from './claude-budget-gate.js';
+import {
+  maybeRotateCliNativeSession,
+  type CliSessionRotationResult,
+} from './cli-native-session-rotation.js';
 
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -589,6 +593,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   // crosses into 'red' this turn, consumed by the forced-seal check inside F33's
   // block below (reset per turn — this function handles exactly one invocation).
   let sanityRedTriggerSessionId: string | undefined;
+  // F-G (PRD-memory-upgrade 批次 3, docs/research/memory-absorption.md §3): set when
+  // maybeRotateCliNativeSession() decided to rotate this invocation's CLI-native
+  // session (over size threshold + cat on the CLOWDER_CLI_SESSION_ROTATE_CATS
+  // whitelist). Consumed in the `finally` block to force a supplementary memory
+  // distillation write tied to the rotation event (autoUpdateAgentMemory needs
+  // invocation-complete state, so it can't be called at decision time — see the
+  // call site below for the reasoning).
+  let rotationEvent: CliSessionRotationResult | undefined;
 
   const captureAssistantTextForMemory = (message: AgentMessage): void => {
     // F193: the route owns the freshness verdict. Until it publishes, stdout is
@@ -947,6 +959,64 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
     const workingProjectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : undefined;
+
+    // F-G (PRD-memory-upgrade 批次 3): CLI 原生 session 撑爆治理——即将 --resume 一个旧
+    // session 之前，检查它在磁盘上的原生体积。默认全关（CLOWDER_CLI_SESSION_MAX_MB
+    // 未设置/0）时 maybeRotateCliNativeSession 在任何 fs 访问之前就短路返回
+    // disabled，零行为变化。超限且该猫在 CLOWDER_CLI_SESSION_ROTATE_CATS 白名单内时，
+    // 把本地 sessionId 清空——下面 session_init 的既有 'cli_session_replaced' 分支
+    // （约:1780+）会自动 seal 旧 chain 记录、绑定新记录，不需要额外接线。
+    if (sessionId) {
+      try {
+        rotationEvent = await maybeRotateCliNativeSession({
+          catId: catId as string,
+          clientId: preResumeCatConfig?.clientId,
+          sessionId,
+          workingDirectory,
+        });
+      } catch (err) {
+        log.warn({ catId, threadId, invocationId, sessionId, err }, 'CLI native session rotation check failed (non-blocking, resume proceeds)');
+        rotationEvent = undefined;
+      }
+      if (rotationEvent?.rotated) {
+        log.warn(
+          {
+            catId,
+            threadId,
+            invocationId,
+            oldSessionId: rotationEvent.sessionId,
+            sessionPath: rotationEvent.sessionPath,
+            sizeBytes: rotationEvent.sizeBytes,
+            thresholdBytes: rotationEvent.thresholdBytes,
+            archivedPath: rotationEvent.archivedPath,
+          },
+          'CLI native session rotated — starting a fresh session; archived old session file (not deleted)',
+        );
+        sessionId = undefined;
+        if (deps.messageStore) {
+          const sizeMb = rotationEvent.sizeBytes != null ? (rotationEvent.sizeBytes / (1024 * 1024)).toFixed(1) : '?';
+          try {
+            await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              content: `已为 ${catId} 开启新会话（旧会话 ${sizeMb} MB 已归档），要点已沉淀记忆。`,
+              mentions: [],
+              timestamp: Date.now(),
+              threadId,
+              source: {
+                connector: 'session-governance',
+                label: 'Session',
+                icon: '🗂️',
+                meta: { presentation: 'system_notice', noticeTone: 'info', eventType: 'cli_session_rotated' },
+              },
+              extra: { systemKind: 'cli_session_rotated' },
+            });
+          } catch (err) {
+            log.warn({ catId, threadId, invocationId, err }, 'CLI session rotation notice append failed (non-blocking)');
+          }
+        }
+      }
+    }
 
     // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
     // Three-layer defense model (shared-rules §14):
@@ -2913,6 +2983,41 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         completedAt: Date.now(),
       }).catch((err) => {
         log.warn({ catId, threadId, invocationId, err }, 'memory auto-update failed (non-blocking)');
+      });
+    }
+
+    // F-G (PRD-memory-upgrade 批次 3): rotation happened for this invocation's
+    // would-be --resume session. autoUpdateAgentMemory needs invocation-complete
+    // state (a non-empty assistantText) to write anything, but the rotation
+    // decision fires before the CLI subprocess even starts — there's no "this
+    // turn's" content yet at that point. Per docs/research/memory-absorption.md
+    // §3 item 2 ("若该机制需要 invocation 完成态才跑，就改为轮转事件后补一次蒸馏
+    // 调用"), the distillation call is placed here instead — after completion —
+    // using a distinct invocationId suffix so it can never collide with / overwrite
+    // the real turn's own "最近验证" line above (updateRecentValidationBody in
+    // AgentMemoryAutoWriter.ts dedupes by exact invocationId substring match).
+    // `force: true` only bypasses the 60s rate limit (MEMORY_AUTO_WRITE_MIN_INTERVAL_MS)
+    // — the write still goes through the same promotion gate as any other memory
+    // write (off/shadow/enforce), never a bypass of that review discipline.
+    // Skipped when deferMemoryWriteback is set: that flag means the route layer
+    // owns memory-writeback timing for this invocation, and firing a second writer
+    // here would race its architecture rather than support it.
+    if (rotationEvent?.rotated && !params.deferMemoryWriteback) {
+      const sizeMb = rotationEvent.sizeBytes != null ? (rotationEvent.sizeBytes / (1024 * 1024)).toFixed(1) : '?';
+      const rotationSummary =
+        assistantTextForMemory.trim() ||
+        `CLI 原生 session 因超限已轮转：旧 session ${rotationEvent.sessionId ?? '?'}（约 ${sizeMb} MB）已归档为 ${rotationEvent.archivedPath ?? '?'}，本轮新开会话。`;
+      autoUpdateAgentMemory(
+        {
+          catId,
+          invocationId: `${invocationId}:cli-session-rotation`,
+          threadId,
+          assistantText: rotationSummary,
+          completedAt: Date.now(),
+        },
+        { force: true },
+      ).catch((err) => {
+        log.warn({ catId, threadId, invocationId, err }, 'CLI session rotation distillation write failed (non-blocking)');
       });
     }
 
