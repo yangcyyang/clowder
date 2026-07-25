@@ -228,6 +228,7 @@ import {
   ttsRoutes,
   uploadsRoutes,
   usageRoutes,
+  userProfileRoutes,
   workflowSopRoutes,
   workspaceEditRoutes,
   workspaceGitRoutes,
@@ -1992,6 +1993,7 @@ async function main(): Promise<void> {
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(configRoutes);
+  await app.register(userProfileRoutes);
   await app.register(configSecretsRoutes);
   await app.register(featureDocDetailRoutes);
   await app.register(knowledgeRoutes);

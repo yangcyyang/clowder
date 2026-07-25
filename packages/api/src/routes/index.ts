@@ -77,6 +77,7 @@ export { toolUsageRoutes } from './tool-usage.js';
 export { ttsRoutes } from './tts.js';
 export { uploadsRoutes } from './uploads.js';
 export { usageRoutes } from './usage.js';
+export { userProfileRoutes } from './user-profile.js';
 export { voteRoutes } from './votes.js';
 export { workflowSopRoutes } from './workflow-sop.js';
 export { workspaceRoutes } from './workspace.js';

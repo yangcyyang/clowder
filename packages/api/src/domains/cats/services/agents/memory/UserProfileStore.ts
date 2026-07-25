@@ -18,6 +18,13 @@ import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { getAgentMemoryDir } from './AgentMemoryStore.js';
 
 export const USER_PROFILE_MAX_CHARS = 12_000;
+/**
+ * Per-section defense cap for the Owner direct-edit API (batch 3-H). Three
+ * sections at this cap (~11_400 chars) plus title/heading overhead stay
+ * comfortably under USER_PROFILE_MAX_CHARS, so the common case never hits the
+ * total-length rejection in the route handler.
+ */
+export const USER_PROFILE_SECTION_MAX_CHARS = 3_800;
 export const USER_PROFILE_FILE_NAME = 'USER.md';
 
 export type UserProfileSection = '偏好' | '硬约束' | '账号级事实';
@@ -69,12 +76,17 @@ export async function readUserProfileForPrompt(projectRoot = findMonorepoRoot())
   }
 }
 
-interface ParsedUserProfile {
+export interface ParsedUserProfile {
   readonly title: string;
   readonly sections: Map<UserProfileSection, string[]>;
 }
 
-function parseUserProfile(content: string): ParsedUserProfile {
+/**
+ * Exported (batch 3-H) so the Owner direct-edit route (`routes/user-profile.ts`)
+ * can reuse the exact same section-splitting rules the promotion gate relies on,
+ * instead of re-deriving heading-matching logic in the API layer.
+ */
+export function parseUserProfile(content: string): ParsedUserProfile {
   const sections = new Map<UserProfileSection, string[]>(USER_PROFILE_SECTIONS.map((s) => [s, []]));
   const trimmed = content.trim();
   if (!trimmed) return { title: '# 铲屎官画像', sections };
@@ -98,7 +110,13 @@ function parseUserProfile(content: string): ParsedUserProfile {
   return { title, sections };
 }
 
-function renderUserProfile(parsed: ParsedUserProfile): string {
+/**
+ * Exported (batch 3-H) for the same reason as `parseUserProfile` — the Owner
+ * direct-edit route rebuilds a `ParsedUserProfile` from three edited section
+ * texts and renders it back to canonical markdown through this function,
+ * rather than hand-rolling its own markdown assembly.
+ */
+export function renderUserProfile(parsed: ParsedUserProfile): string {
   const chunks = [parsed.title.trim()];
   for (const section of USER_PROFILE_SECTIONS) {
     chunks.push(`## ${section}`);
@@ -147,6 +165,18 @@ export function appendUserProfileLine(
   if (!already) entries.push(bulletLine);
   parsed.sections.set(section, entries);
   return renderUserProfile(parsed);
+}
+
+/**
+ * Rough token estimate — same `chars / 4` convention as
+ * `SystemPromptBuilder.roughTokenEstimate` (that module is injection-only and
+ * intentionally untouched by batch 3-H, so this is a small, deliberate
+ * duplication rather than an import across layers). Used by the Owner
+ * direct-edit API to echo a `tokenEstimate` the web UI can compare against the
+ * ≤1k-token injection budget (`USER_PROFILE_INDEX_MAX_TOKENS`).
+ */
+export function estimateUserProfileTokens(text: string): number {
+  return Math.ceil(text.trim().length / 4);
 }
 
 async function writeFileAtomically(path: string, content: string): Promise<void> {

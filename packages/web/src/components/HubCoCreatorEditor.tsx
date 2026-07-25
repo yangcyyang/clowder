@@ -2,11 +2,28 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import type { CoCreatorConfig } from './config-viewer-types';
 import { uploadAvatarAsset } from './hub-cat-editor.client';
-import { PersistenceBanner, SectionCard, TextField } from './hub-cat-editor-fields';
+import { PersistenceBanner, SectionCard, TextAreaField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
+
+/** Same `chars / 4` rough estimate as the API (UserProfileStore.estimateUserProfileTokens / SystemPromptBuilder.roughTokenEstimate). */
+function estimateProfileTokens(text: string): number {
+  return Math.ceil(text.trim().length / 4);
+}
+
+/** Mirrors SystemPromptBuilder's USER_PROFILE_INDEX_MAX_TOKENS injection budget. */
+const USER_PROFILE_TOKEN_BUDGET = 1000;
+
+interface UserProfileSections {
+  preferences: string;
+  constraints: string;
+  facts: string;
+}
+
+const EMPTY_PROFILE_SECTIONS: UserProfileSections = { preferences: '', constraints: '', facts: '' };
 
 const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   name: 'ME',
@@ -49,6 +66,12 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [profilePreferences, setProfilePreferences] = useState('');
+  const [profileConstraints, setProfileConstraints] = useState('');
+  const [profileFacts, setProfileFacts] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const next = coCreator ?? DEFAULT_CO_CREATOR;
@@ -61,7 +84,40 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
     setError(null);
   }, [open, coCreator]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setProfileLoading(true);
+    setProfileLoadError(null);
+    (async () => {
+      try {
+        const res = await apiFetch('/api/user-profile');
+        if (cancelled) return;
+        if (!res.ok) {
+          setProfileLoadError(`铲屎官画像加载失败 (${res.status})`);
+          return;
+        }
+        const payload = (await res.json().catch(() => null)) as { sections?: Partial<UserProfileSections> } | null;
+        const sections = { ...EMPTY_PROFILE_SECTIONS, ...payload?.sections };
+        setProfilePreferences(sections.preferences);
+        setProfileConstraints(sections.constraints);
+        setProfileFacts(sections.facts);
+      } catch (err) {
+        if (!cancelled) setProfileLoadError(err instanceof Error ? err.message : '铲屎官画像加载失败');
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   if (!open) return null;
+
+  const profileTokenEstimate =
+    estimateProfileTokens(profilePreferences) + estimateProfileTokens(profileConstraints) + estimateProfileTokens(profileFacts);
+  const profileOverBudget = profileTokenEstimate > USER_PROFILE_TOKEN_BUDGET;
 
   const handleAvatarUpload = async (file: File) => {
     setUploadingAvatar(true);
@@ -109,6 +165,22 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
       }
+
+      const profileRes = await apiFetch('/api/user-profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preferences: profilePreferences,
+          constraints: profileConstraints,
+          facts: profileFacts,
+        }),
+      });
+      if (!profileRes.ok) {
+        const payload = (await profileRes.json().catch(() => ({}))) as Record<string, unknown>;
+        setError((payload.error as string) ?? `铲屎官画像保存失败 (${profileRes.status})`);
+        return;
+      }
+
       primeCoCreatorConfigCache({
         name: cleanedName,
         aliases: uniqueTags(aliases.map((alias) => alias.trim())),
@@ -118,6 +190,12 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
           primary: colorPrimary,
           secondary: colorSecondary,
         },
+      });
+      useToastStore.getState().addToast({
+        type: 'success',
+        title: '已保存',
+        message: '身份信息与铲屎官画像已更新。',
+        duration: 2400,
       });
       await onSaved();
       onClose();
@@ -257,6 +335,42 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
                 />
               </div>
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title="铲屎官画像"
+            description="全体猫共享的只读名片（当前仅新布局猫可见）。你主动写的永远比 AI 猜的准。"
+          >
+            {profileLoading ? <p className="text-xs text-cafe-muted">加载中…</p> : null}
+            {profileLoadError ? (
+              <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{profileLoadError}</p>
+            ) : null}
+            <TextAreaField
+              label="偏好"
+              ariaLabel="Owner Profile Preferences"
+              value={profilePreferences}
+              onChange={setProfilePreferences}
+              placeholder="例如：全中文交流与汇报；只写结论、证据、下一步。"
+            />
+            <TextAreaField
+              label="硬约束"
+              ariaLabel="Owner Profile Constraints"
+              value={profileConstraints}
+              onChange={setProfileConstraints}
+              placeholder="例如：生产 Redis 端口 6399 绝不外连。"
+            />
+            <TextAreaField
+              label="账号级事实"
+              ariaLabel="Owner Profile Facts"
+              value={profileFacts}
+              onChange={setProfileFacts}
+              placeholder="例如：时区 Asia/Shanghai。"
+            />
+            <p className={`text-xs ${profileOverBudget ? 'font-bold text-conn-red-text' : 'text-cafe-muted'}`}>
+              {profileOverBudget
+                ? `约 ${profileTokenEstimate} tokens，超出注入预算（${USER_PROFILE_TOKEN_BUDGET}），超出部分猫看不到`
+                : `约 ${profileTokenEstimate} / ${USER_PROFILE_TOKEN_BUDGET} tokens`}
+            </p>
           </SectionCard>
 
           <PersistenceBanner />
