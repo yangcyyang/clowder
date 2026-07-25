@@ -120,7 +120,7 @@ describe('InlineThreadPanel — Raft-parity context menu on thread messages', ()
       frameFor(replyRow).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }));
     });
 
-    const labels = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
+    const labels = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
       (b) => b.textContent,
     );
     expect(labels).toEqual(expect.arrayContaining(['Copy Link', 'Copy Markdown', 'Select Message', 'Save Message']));
@@ -134,7 +134,7 @@ describe('InlineThreadPanel — Raft-parity context menu on thread messages', ()
       frameFor(replyRow).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }));
     });
 
-    const labels = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
+    const labels = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
       (b) => b.textContent,
     );
     // Sanity check the menu actually opened (otherwise "not toContain" would pass vacuously).
@@ -152,7 +152,7 @@ describe('InlineThreadPanel — Raft-parity context menu on thread messages', ()
       frameFor(sourceRow).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }));
     });
 
-    const labels = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
+    const labels = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).map(
       (b) => b.textContent,
     );
     expect(labels).toEqual(expect.arrayContaining(['Copy Link', 'Copy Markdown']));

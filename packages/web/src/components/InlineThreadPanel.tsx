@@ -16,7 +16,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { isCommandInvocation } from '@/hooks/useChatCommands';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
-import type { CatStatusType } from '@/stores/chat-types';
+import type { CatStatusType, InvocationPhase } from '@/stores/chat-types';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -24,6 +24,7 @@ import { compressImage } from '@/utils/compressImage';
 import { RESET_CONTEXT_CONFIRMATION, resetThreadContext } from '@/utils/reset-thread-context';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
+import { formatElapsed, getAgentStatusLabel } from './AgentStatusIndicator';
 import { ChatMessage, shouldRenderChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
 import {
@@ -96,28 +97,15 @@ const TASK_EVIDENCE_KEYS: ReadonlyArray<keyof Omit<TaskEvidence, 'updatedAt'>> =
   'lesson',
 ];
 
-const THREAD_STATUS_LABELS: Record<CatStatusType, string> = {
-  spawning: '启动中',
-  pending: '排队中',
-  streaming: '回复中',
-  done: '已完成',
-  error: '异常',
-  alive_but_silent: '静默等待',
-  suspected_stall: '疑似卡住',
-};
-
-const THREAD_STATUS_TONE: Record<CatStatusType, string> = {
-  spawning: 'text-[var(--cafe-accent)]',
-  pending: 'text-cafe-secondary',
-  streaming: 'text-conn-emerald-text',
-  done: 'text-conn-emerald-text',
-  error: 'text-conn-red-text',
-  alive_but_silent: 'text-conn-amber-text',
-  suspected_stall: 'text-conn-amber-text',
-};
-
 type InlineThreadApiMessage = ChatMessageData & { isDraft?: boolean };
-type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number };
+// #agent-status-parity: the `phase` field is optional and, in practice, almost always
+// absent for this REST poll (packages/api's /api/threads/:id/queue only returns
+// {catId, startedAt} — see InvocationTracker.getActiveSlots) — it's here so this type
+// stays structurally compatible with ThreadState['activeInvocations'] values (which DO
+// carry `phase` from room-scoped socket events) when the two are merged in runtimeCats,
+// and so getAgentStatusLabel's phase-aware branch is exercised whenever richer data
+// (from the store) IS available, e.g. via a future room-join for branch threads.
+type InlineThreadActiveInvocation = { catId: string; mode?: string; startedAt?: number; phase?: InvocationPhase };
 export type InlineThreadSearchHit = { id: string; index: number };
 type InlineThreadSendKeyEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>;
 type ReplyCountUpdateOptions = {
@@ -676,6 +664,19 @@ export function InlineThreadPanel({
   const pollBaselineCountRef = useRef<number>(0);
   const latestMessagesRef = useRef<ChatMessageData[]>([]);
   const mountedRef = useRef(false);
+  // Bug fix (thread-anchor race): ChatContainer reuses a SINGLE InlineThreadPanel instance
+  // across thread switches (no key={threadId}), so switching threads only changes props —
+  // it does not unmount/remount. loadMessages/loadQueueRuntime below are useCallback-bound
+  // to the `threadId` that was active when each fetch started, but their async completions
+  // used to be gated only by `mountedRef` (true unmount vs alive), which stays true across a
+  // thread switch. So a slow in-flight fetch for the thread the user just navigated AWAY
+  // FROM could resolve after the newly-anchored thread's own (faster) fetch and clobber its
+  // messages/runtime state — the exact "回复自 shows thread B, content shows thread A" bug.
+  // This ref always mirrors the latest `threadId` prop (kept current every render, not just
+  // in an effect, so it's accurate even mid-flight); each async completion below checks it
+  // before touching state, so only the thread the panel is CURRENTLY anchored to may update it.
+  const anchorThreadIdRef = useRef(threadId);
+  anchorThreadIdRef.current = threadId;
   const getCatById = useCallback((catId: string) => cats.find((cat) => cat.id === catId), [cats]);
   const runtimeCats = useMemo(() => {
     const storeActiveEntries = Object.values(threadRuntime?.activeInvocations ?? {});
@@ -688,6 +689,7 @@ export function InlineThreadPanel({
       const cat = getCatById(catId);
       const status = threadRuntime?.catStatuses?.[catId] ?? (activeCatIds.includes(catId) ? 'streaming' : 'pending');
       const active = activeEntries.find((entry) => entry.catId === catId);
+      const catInvocation = threadRuntime?.catInvocations?.[catId];
       return {
         catId,
         label: cat?.displayName ?? cat?.name ?? catId,
@@ -695,10 +697,38 @@ export function InlineThreadPanel({
         provider: cat?.provider ?? cat?.clientId ?? '',
         color: cat?.color.primary ?? 'var(--console-cat-fallback)',
         status,
-        startedAt: active?.startedAt,
+        // AgentStatusIndicator-parity: same slot.startedAt ?? catInvocations[catId]?.startedAt
+        // and slot.phase ?? catInvocations[catId]?.phase fallback chain as the main channel's
+        // buildRows() — see AgentStatusIndicator.tsx. `phase` is usually undefined here (see
+        // the InlineThreadActiveInvocation comment above), so getAgentStatusLabel below falls
+        // back to its status-based branch, same as the main channel does when phase is unknown.
+        startedAt: active?.startedAt ?? catInvocation?.startedAt,
+        phase: active?.phase ?? catInvocation?.phase,
       };
     });
-  }, [getCatById, queueActiveInvocations, threadRuntime?.activeInvocations, threadRuntime?.catStatuses]);
+  }, [
+    getCatById,
+    queueActiveInvocations,
+    threadRuntime?.activeInvocations,
+    threadRuntime?.catInvocations,
+    threadRuntime?.catStatuses,
+  ]);
+  // Ticking timer for the runtime-status chip row's elapsed display — same 1s-refresh
+  // pattern as AgentStatusIndicator.tsx (only runs while there's something to time).
+  const [runtimeStatusNow, setRuntimeStatusNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (runtimeCats.length === 0) return undefined;
+    const timer = setInterval(() => setRuntimeStatusNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [runtimeCats.length]);
+  const handleStopRuntimeCat = useCallback(
+    async (catId: string) => {
+      await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/cancel/${encodeURIComponent(catId)}`, {
+        method: 'POST',
+      });
+    },
+    [threadId],
+  );
   const stopScrollPropagation = useCallback((event: WheelEvent<HTMLDivElement>) => {
     event.stopPropagation();
   }, []);
@@ -803,44 +833,52 @@ export function InlineThreadPanel({
 
   const loadMessages = useCallback(
     async (options?: { showLoading?: boolean }) => {
+      const requestedThreadId = threadId;
       if (options?.showLoading !== false) setLoading(true);
 
+      // Still anchored to the thread this fetch was made for? A stale response for a
+      // thread the panel has since navigated away from must never touch state (see the
+      // anchorThreadIdRef comment above `mountedRef`).
+      const isStillAnchored = () => mountedRef.current && anchorThreadIdRef.current === requestedThreadId;
+
       try {
-        const res = await apiFetch(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=60`);
+        const res = await apiFetch(`/api/messages?threadId=${encodeURIComponent(requestedThreadId)}&limit=60`);
         if (!res.ok) return [];
         const data = (await res.json()) as { messages?: ChatMessageData[] };
         const normalized = (data.messages ?? []).map((message) => normalizeInlineThreadMessage(message));
-        if (mountedRef.current) {
+        if (isStillAnchored()) {
           latestMessagesRef.current = normalized;
           setMessages(normalized);
         }
         return normalized;
       } catch {
-        if (mountedRef.current) {
+        if (isStillAnchored()) {
           latestMessagesRef.current = [];
           setMessages([]);
         }
         return [];
       } finally {
-        if (mountedRef.current && options?.showLoading !== false) setLoading(false);
+        if (isStillAnchored() && options?.showLoading !== false) setLoading(false);
       }
     },
     [threadId],
   );
 
   const loadQueueRuntime = useCallback(async () => {
+    const requestedThreadId = threadId;
+    const isStillAnchored = () => mountedRef.current && anchorThreadIdRef.current === requestedThreadId;
     try {
-      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/queue`);
+      const res = await apiFetch(`/api/threads/${encodeURIComponent(requestedThreadId)}/queue`);
       if (!res.ok) {
-        if (mountedRef.current) setQueueActiveInvocations([]);
+        if (isStillAnchored()) setQueueActiveInvocations([]);
         return [];
       }
       const data = (await res.json()) as { activeInvocations?: InlineThreadActiveInvocation[] };
       const activeInvocations = Array.isArray(data.activeInvocations) ? data.activeInvocations : [];
-      if (mountedRef.current) setQueueActiveInvocations(activeInvocations);
+      if (isStillAnchored()) setQueueActiveInvocations(activeInvocations);
       return activeInvocations;
     } catch {
-      if (mountedRef.current) setQueueActiveInvocations([]);
+      if (isStillAnchored()) setQueueActiveInvocations([]);
       return [];
     }
   }, [threadId]);
@@ -944,11 +982,15 @@ export function InlineThreadPanel({
 
   // The panel instance is reused across thread switches (no key={threadId} at the call
   // site), so per-thread scroll-follow state must reset explicitly, not just on unmount.
+  // Also stop any reply-polling interval started for the thread we're leaving — it's
+  // already made harmless by the anchorThreadIdRef guard in loadMessages/loadQueueRuntime,
+  // but there's no reason to keep hitting the network for a thread the panel no longer shows.
   useEffect(() => {
     wasNearBottomRef.current = true;
     previousVisibleReplyCountRef.current = 0;
     setPendingNewReplyCount(0);
-  }, [threadId]);
+    stopReplyPolling();
+  }, [threadId, stopReplyPolling]);
 
   const searchableMessages = useMemo(
     () => [sourceMessage, ...visibleReplyMessages],
@@ -1614,6 +1656,14 @@ export function InlineThreadPanel({
             for the main channel (mx-4 mb-2 flex-wrap chips, no section heading needed since
             each chip already names the cat + its status). Same underlying info (label,
             status tone, model/provider), just no longer fixed screen real estate.
+
+            Stage label / elapsed timer / stop button reuse the exact main-channel functions
+            (getAgentStatusLabel, formatElapsed) and cancel endpoint (AgentStatusIndicator's
+            handleStop) — parity requested so a cat streaming inside a thread reads the same
+            way it does in the main channel, just fed this panel's own thread-scoped data
+            (runtimeCats, built from threadRuntime + the anchored per-thread queue poll — see
+            the anchorThreadIdRef fix above — so a cat active in some OTHER thread never
+            appears in this row).
           */}
           {runtimeCats.length > 0 && (
             <div
@@ -1632,14 +1682,27 @@ export function InlineThreadPanel({
                     style={{ backgroundColor: item.color }}
                   />
                   <span className="max-w-[96px] truncate font-medium text-[var(--cafe-text)]">{item.label}</span>
-                  <span className={`flex-shrink-0 font-medium ${THREAD_STATUS_TONE[item.status]}`}>
-                    {THREAD_STATUS_LABELS[item.status]}
+                  <span className="flex-shrink-0 text-[var(--cafe-text-muted)]">
+                    {getAgentStatusLabel(item.status, item.phase)}
                   </span>
                   {(item.model || item.provider) && (
                     <span className="max-w-[100px] flex-shrink truncate text-[10px] text-[var(--cafe-text-muted)]">
                       {[item.model, item.provider].filter(Boolean).join(' · ')}
                     </span>
                   )}
+                  {item.startedAt !== undefined && (
+                    <span className="flex-shrink-0 tabular-nums text-[var(--cafe-text-muted)]">
+                      {formatElapsed(item.startedAt, runtimeStatusNow)}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleStopRuntimeCat(item.catId)}
+                    className="flex-shrink-0 text-[var(--cafe-text-muted)] transition-colors hover:text-conn-red-text"
+                    aria-label={`停止 ${item.label}`}
+                  >
+                    停止
+                  </button>
                 </span>
               ))}
             </div>

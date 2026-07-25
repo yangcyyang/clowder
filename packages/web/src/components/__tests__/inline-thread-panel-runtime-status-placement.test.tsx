@@ -112,7 +112,11 @@ describe('InlineThreadPanel runtime status placement', () => {
     const statusRow = container.querySelector('[data-testid="inline-thread-runtime-status"]');
     expect(statusRow).toBeTruthy();
     expect(statusRow?.textContent).toContain('Opus');
-    expect(statusRow?.textContent).toContain('回复中');
+    // Stage label now reuses AgentStatusIndicator's getAgentStatusLabel (main-channel parity —
+    // see inline-thread-panel-runtime-status-timer.test.tsx) instead of the old bespoke
+    // THREAD_STATUS_LABELS map, so a plain 'streaming' status with no finer-grained phase
+    // reads as "正在生成", matching what the main channel shows for the same case.
+    expect(statusRow?.textContent).toContain('正在生成');
     expect(statusRow?.textContent).toContain('claude-opus');
 
     // Scoped to the composer, not the fixed header area above the scrollable reply list.

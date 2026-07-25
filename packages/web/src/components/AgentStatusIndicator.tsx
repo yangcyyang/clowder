@@ -25,7 +25,10 @@ interface AgentStatusRow {
   contextBudget?: CatInvocationInfo['contextBudget'];
 }
 
-function formatElapsed(startedAt: number, now: number): string {
+/** Exported for reuse by InlineThreadPanel.tsx's own runtime-status chip row, which
+ * mirrors this same "cat + stage + ticking timer + stop" pattern but is fed thread-scoped
+ * (not currentThreadId-scoped) data — see InlineThreadPanel's runtimeCats/threadRuntime. */
+export function formatElapsed(startedAt: number, now: number): string {
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
