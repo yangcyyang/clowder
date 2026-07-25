@@ -435,6 +435,117 @@ describe('probeLocalAgentClis', () => {
     });
   });
 
+  describe('cloud model catalog (5th source)', () => {
+    it('is a pure no-op when modelCatalog is not supplied (every existing caller, zero behavior change)', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {},
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.equal(claude?.models.some((model) => model.source === 'catalog'), false);
+    });
+
+    it('merges catalog-only ids additively on top of the static claude fallback, tagging new ids source catalog', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: {},
+        modelCatalog: {
+          // 'claude-opus-5' already exists in the static list (dedup check); 'claude-haiku-4-5' is new.
+          claude: ['claude-opus-5', 'claude-haiku-4-5'],
+        },
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.equal(claude?.modelsStatus, 'static_only');
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-opus-5' && model.source === 'static'),
+        'id already present in the static tier must keep its original source, not be relabeled catalog',
+      );
+      assert.equal(
+        claude?.models.filter((model) => model.id === 'claude-opus-5').length,
+        1,
+        'dedup: the overlapping id must appear only once',
+      );
+      assert.ok(
+        claude?.models.some((model) => model.id === 'claude-haiku-4-5' && model.source === 'catalog'),
+        'a catalog-only id must be appended and tagged source catalog',
+      );
+    });
+
+    it('merges catalog ids on top of a config-tier result too (not just static)', async () => {
+      const results = await probeWithIsolatedHome({
+        homeDir: '/tmp/home',
+        resolveCommand(command) {
+          return command === 'gemini' ? '/opt/bin/gemini' : null;
+        },
+        async runCommand() {
+          return { stdout: '0.28.2', stderr: '' };
+        },
+        async readFile() {
+          return JSON.stringify({ model: 'gemini-2.5-pro' });
+        },
+        // Deliberately not gemini's hardcoded default ('gemini-3.1-pro-preview') so this test isn't
+        // confounded by the isDefault-matching behavior shared with the other merge tiers.
+        modelCatalog: { gemini: ['gemini-2.5-flash'] },
+      });
+
+      const gemini = results.find((item) => item.id === 'gemini');
+      assert.equal(gemini?.modelsStatus, 'config_only');
+      assert.deepEqual(gemini?.models, [
+        { id: 'gemini-2.5-pro', source: 'config' },
+        { id: 'gemini-2.5-flash', source: 'catalog' },
+      ]);
+    });
+
+    it('merges catalog ids on top of the remote source as well (both additive, no overwrite)', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'claude' ? '/opt/bin/claude' : null;
+        },
+        async runCommand() {
+          return { stdout: 'claude 5.0.0', stderr: '' };
+        },
+        env: { CLOWDER_MODEL_DISCOVERY_ANTHROPIC_URL: 'http://127.0.0.1:8317/v1/models' },
+        async fetchRemote() {
+          return { ok: true, status: 200, async json() { return { data: [{ id: 'claude-opus-6-preview' }] }; } };
+        },
+        modelCatalog: { claude: ['claude-fable-6-preview'] },
+      });
+
+      const claude = results.find((item) => item.id === 'claude');
+      assert.ok(claude?.models.some((model) => model.id === 'claude-opus-6-preview' && model.source === 'remote'));
+      assert.ok(claude?.models.some((model) => model.id === 'claude-fable-6-preview' && model.source === 'catalog'));
+    });
+
+    it('is ignored for a CLI id not present in modelCatalog (e.g. grok, since getModelCatalog only ever returns claude/codex/gemini)', async () => {
+      const results = await probeWithIsolatedHome({
+        resolveCommand(command) {
+          return command === 'grok' ? '/opt/bin/grok' : null;
+        },
+        async runCommand(_file, args) {
+          if (args[0] === '--version') return { stdout: 'grok 0.2.93', stderr: '' };
+          return { stdout: 'Available models:\n  * grok-4.5 (default)', stderr: '' };
+        },
+        modelCatalog: { claude: ['claude-haiku-4-5'] },
+      });
+
+      const grok = results.find((item) => item.id === 'grok');
+      assert.equal(grok?.models.some((model) => model.source === 'catalog'), false);
+    });
+  });
+
   describe('kimi config home migration (~/.kimi → ~/.kimi-code)', () => {
     const NEW_HOME_TOML = [
       'default_model = "kimi-code/k3-256k"',

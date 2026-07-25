@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
-export type LocalCliModelSource = 'cli' | 'config' | 'static' | 'remote';
+export type LocalCliModelSource = 'cli' | 'config' | 'static' | 'remote' | 'catalog';
 export type LocalCliModelsStatus = 'ok' | 'config_only' | 'static_only' | 'failed' | 'unsupported';
 
 export interface LocalCliModelCandidate {
@@ -68,6 +68,15 @@ export interface ModelChainOptions {
     url: string,
     init: { readonly signal: AbortSignal; readonly headers?: Record<string, string> },
   ) => Promise<RemoteFetchResponse>;
+  /**
+   * Fifth model discovery source: an already-fetched, already-family-filtered cloud model catalog
+   * id list (models.dev + LiteLLM, see model-catalog.ts) for this specific CLI's provider. This
+   * field is intentionally a plain array, not a fetcher — probeLocalCliModels() never performs the
+   * network call itself; the caller (local-cli-probe.ts) fetches the shared catalog once per scan
+   * and slices out the relevant provider's ids before constructing these per-CLI chain options.
+   * Undefined/empty means "no catalog data available or not applicable to this CLI" — a pure no-op.
+   */
+  readonly catalogModels?: readonly string[];
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes are the intended input.
@@ -327,7 +336,12 @@ function candidates(
   }));
 }
 
-/** Adds remote-only candidates (by id) on top of a base tier's result, tagged with source 'remote'. */
+/**
+ * Adds additional candidates (by id) on top of a base tier's result, keeping the base entry's
+ * source when an id already exists there (dedup-by-id, additive). Used for both the 4th (remote)
+ * and 5th (catalog) sources — each is a separate call, applied in sequence, so an id present in
+ * more than one of {base, remote, catalog} keeps whichever source produced it first.
+ */
 function mergeRemoteCandidates(
   base: readonly LocalCliModelCandidate[],
   remote: readonly LocalCliModelCandidate[],
@@ -393,29 +407,38 @@ export async function probeLocalCliModels(
   if (!probe) return { models: [], modelsStatus: 'unsupported' };
 
   const remoteModelsPromise = probeRemoteModels(options, probe);
+  // Fifth source: an already-fetched, already-family-filtered cloud catalog id list (or [] when
+  // absent/disabled/not applicable to this CLI — see the `catalogModels` doc comment above). Like
+  // remote, this never gates on options.installed and is merged additively on top of whichever tier
+  // fires below, tagged 'catalog'; a static list is still the final backstop, never removed.
+  const catalogCandidates = candidates(options.catalogModels ?? [], 'catalog', options.defaultModel);
 
   const commandModels = await probeCommandModels(options, probe);
   if (commandModels.length > 0) {
-    return { models: mergeRemoteCandidates(commandModels, await remoteModelsPromise), modelsStatus: 'ok' };
+    const merged = mergeRemoteCandidates(mergeRemoteCandidates(commandModels, await remoteModelsPromise), catalogCandidates);
+    return { models: merged, modelsStatus: 'ok' };
   }
 
   const configModels = await probeConfigModels(options, probe);
   if (configModels.length > 0) {
-    return { models: mergeRemoteCandidates(configModels, await remoteModelsPromise), modelsStatus: 'config_only' };
+    const merged = mergeRemoteCandidates(mergeRemoteCandidates(configModels, await remoteModelsPromise), catalogCandidates);
+    return { models: merged, modelsStatus: 'config_only' };
   }
 
   const remoteModels = await remoteModelsPromise;
 
   if (probe.static && probe.static.length > 0) {
     const staticModels = candidates(probe.static, 'static', options.defaultModel);
-    return { models: mergeRemoteCandidates(staticModels, remoteModels), modelsStatus: 'static_only' };
+    const merged = mergeRemoteCandidates(mergeRemoteCandidates(staticModels, remoteModels), catalogCandidates);
+    return { models: merged, modelsStatus: 'static_only' };
   }
 
-  // No static fallback configured for this provider, but the remote source alone produced a
-  // catalog (currently unreachable for any built-in provider, since every `remote` entry above
-  // is paired with a non-empty `static` list; kept for forward-compatibility with future tables).
-  if (remoteModels.length > 0) {
-    return { models: remoteModels, modelsStatus: 'ok' };
+  // No static fallback configured for this provider, but the remote and/or catalog sources alone
+  // produced a catalog (currently unreachable for any built-in provider, since every remote/catalog
+  // -eligible entry above is paired with a non-empty `static` list; kept for forward-compatibility).
+  const remoteAndCatalogModels = mergeRemoteCandidates(remoteModels, catalogCandidates);
+  if (remoteAndCatalogModels.length > 0) {
+    return { models: remoteAndCatalogModels, modelsStatus: 'ok' };
   }
 
   const hasProbeLayer = Boolean(probe.command || probe.configFile);

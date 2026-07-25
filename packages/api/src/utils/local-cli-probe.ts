@@ -134,6 +134,16 @@ export interface ProbeLocalClisOptions {
   readonly env?: ModelChainOptions['env'];
   /** Fetch implementation for remote model discovery; defaults to the global `fetch`. Injectable for tests. */
   readonly fetchRemote?: ModelChainOptions['fetchRemote'];
+  /**
+   * Fifth model discovery source (cloud catalog): already-fetched, already-family-filtered model id
+   * lists per CLI, keyed by `LocalCliId`. Only 'claude'/'codex'/'gemini' entries are meaningful —
+   * those are the CLIs whose model id can be handed to the CLI directly (see model-catalog.ts for
+   * why kimi/grok/opencode/cursor/opencli are excluded). This function never fetches the catalog
+   * itself; the caller (the /api/local-cli-probes route in production) fetches it once via
+   * getModelCatalog() and passes the result here. Undefined ⇒ no-op, zero network — this is what
+   * every existing test (which never sets this field) gets.
+   */
+  readonly modelCatalog?: Partial<Record<LocalCliId, readonly string[]>>;
 }
 
 function firstLine(value: string): string | undefined {
@@ -194,6 +204,7 @@ export async function probeLocalAgentClis(options: ProbeLocalClisOptions = {}): 
       readFile: options.readFile,
       env: options.env,
       fetchRemote: options.fetchRemote,
+      catalogModels: options.modelCatalog?.[definition.id],
     });
     results.push({
       id: definition.id,

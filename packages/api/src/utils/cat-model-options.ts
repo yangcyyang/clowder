@@ -56,15 +56,24 @@ export function getCatModelOptionsResponse(userId: string): {
   let hasScannedModels = false;
   for (const cli of snapshot.clis) {
     if (!cli.clientId) continue;
-    // 'remote' (the 4th, env-configured discovery source) is merged additively on top of
+    // 'remote' (4th source) and 'catalog' (5th source) are both merged additively on top of
     // whichever base tier (cli/config/static) already ran — see probeLocalCliModels(). So a live
     // signal here means "any cli/config/remote entry exists", but the exposed candidate list must
-    // still include every id in cli.models (static siblings included), or a small remote catalog
-    // would wipe out the rest of the known-good static options instead of just extending them.
-    const hasLiveSignal = cli.models.some(
+    // still include every id in cli.models (static siblings included), or a small remote/catalog
+    // addition would wipe out the rest of the known-good static options instead of just extending them.
+    const hasNonCatalogLiveSignal = cli.models.some(
       (model) => model.source === 'cli' || model.source === 'config' || model.source === 'remote',
     );
-    if (!hasLiveSignal) continue;
+    // 'catalog' is a generic, machine-independent cloud model list (models.dev + LiteLLM) — unlike
+    // 'remote' (an operator explicitly pointed at a gateway that reported these models), its mere
+    // presence says nothing about *this* machine. Counting it alone as a live signal would flip
+    // every user to local-cli-scan-v1 as soon as the cloud fetch succeeds, even with zero CLIs
+    // installed — misrepresenting "we detected your machine". So it only counts when paired with
+    // the CLI actually being installed; otherwise this cli entry is skipped entirely this round
+    // (its catalog ids are silently dropped, static preset stays as-is) rather than surfaced with
+    // an unclear half-live state.
+    const hasCatalogSignal = cli.installed && cli.models.some((model) => model.source === 'catalog');
+    if (!hasNonCatalogLiveSignal && !hasCatalogSignal) continue;
 
     const models = uniqueModels(cli.models.map((model) => model.id));
     if (models.length === 0) continue;
@@ -75,6 +84,7 @@ export function getCatModelOptionsResponse(userId: string): {
       cli.models.find((model) => model.source === 'cli')?.source ??
       cli.models.find((model) => model.source === 'config')?.source ??
       cli.models.find((model) => model.source === 'remote')?.source ??
+      cli.models.find((model) => model.source === 'catalog')?.source ??
       'static';
     clients[cli.clientId] = {
       defaultModel:

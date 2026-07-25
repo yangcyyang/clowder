@@ -2106,6 +2106,23 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
     restartRequired: true,
   },
+  {
+    name: 'CLOWDER_MODEL_CATALOG',
+    defaultValue: '1（默认开）',
+    description:
+      '本地 CLI 模型扫描第 5 来源（云端模型目录）：并行拉取 models.dev（https://models.dev/api.json）与 LiteLLM（model_prices_and_context_window.json）的公开模型清单，合并去重后按家族过滤（claude-*/gpt-*·o[0-9]*·codex-*/gemini-*）补充进 claude/codex/gemini 三个候选槽，替代静态清单手动更新的时效性短板；kimi/grok/opencode 等使用自有别名体系，不接入此源。置 "0"/"false" 关闭整个来源。单次拉取 5 秒超时，两源任一失败或解析失败一律静默跳过，扫描不会因此报错；进程内缓存 CLOWDER_MODEL_CATALOG_TTL_HOURS 小时。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_MODEL_CATALOG_TTL_HOURS',
+    defaultValue: '24',
+    description: '配合 CLOWDER_MODEL_CATALOG 使用：云端模型目录的进程内缓存时长（小时）。非正数或非法值一律回退默认 24。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */

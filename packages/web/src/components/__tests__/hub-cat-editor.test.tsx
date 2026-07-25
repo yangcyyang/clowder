@@ -643,6 +643,63 @@ describe('HubCatEditor', () => {
     expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
   });
 
+  it('shows the 云目录 label for catalog-sourced candidates and reports drift against them (5th source)', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(
+          jsonResponse({
+            scannedAt: '2026-07-25T00:00:00.000Z',
+            clients: {
+              anthropic: {
+                defaultModel: 'claude-sonnet-5',
+                // Mirrors what getCatModelOptionsResponse() exposes when the CLI is installed and
+                // the cloud catalog (models.dev + LiteLLM) contributed the only live-ish signal.
+                models: ['claude-sonnet-5', 'claude-haiku-4-5'],
+                modelsSource: 'catalog',
+              },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'anthropic', accountRef: undefined, defaultModel: 'claude-sonnet-5' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    await act(async () => {
+      modelInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('云目录');
+    // The currently selected model IS in the catalog-provided list -> no drift warning.
+    expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
+
+    // Switching to a model absent from the catalog list flips on the drift warning, exactly like
+    // the existing cli/config/remote sources — catalog counts as "scanned" for this purpose too.
+    await changeField(modelInput, 'claude-not-in-catalog');
+    expect(container.textContent).toContain('当前模型未在最近扫描中发现');
+    await changeField(modelInput, 'claude-haiku-4-5');
+    expect(container.textContent).not.toContain('当前模型未在最近扫描中发现');
+  });
+
   it('reports a model-candidate refresh failure after a successful local CLI scan', async () => {
     let modelOptionsCalls = 0;
     mockApiFetch.mockImplementation((path: string) => {

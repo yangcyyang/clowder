@@ -104,7 +104,7 @@ export function LocalCliProbeSection({
   return (
     <SectionCard
       title="本地 CLI 探测"
-      description="点击后扫描固定 allowlist：claude / codex / gemini / grok / opencode / kimi / cursor / opencli，按命令、白名单配置、内置清单依次获取模型；若配置了远程模型清单地址（如本机网关），还会合并该端点上报的模型。不会读取凭证文件。"
+      description="点击后扫描固定 allowlist：claude / codex / gemini / grok / opencode / kimi / cursor / opencli，按命令、白名单配置、内置清单依次获取模型；若配置了远程模型清单地址（如本机网关），还会合并该端点上报的模型；claude / codex / gemini 三家还会额外合并 models.dev + LiteLLM 的云端模型目录（不受本机是否安装该 CLI 影响，失败静默跳过）。不会读取凭证文件。"
     >
       <div className="flex flex-col gap-2 rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-[12px] leading-5 text-cafe-secondary sm:flex-row sm:items-center sm:justify-between">
         <span>用于确认后端机器是否能启动本地 Agent CLI；扫描是手动触发，不会后台自动跑。</span>
