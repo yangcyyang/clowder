@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { getThreadHref } from './ThreadSidebar/thread-navigation';
 
-type KnowledgeType = 'feature' | 'lesson' | 'decision';
+type KnowledgeType = 'feature' | 'lesson' | 'decision' | 'vault';
 
 interface KnowledgeCaptureResult {
   type: KnowledgeType;
   path: string;
   id: string;
+}
+
+interface VaultStatus {
+  available: boolean;
+  reason?: string;
 }
 
 interface KnowledgeCaptureModalProps {
@@ -24,6 +30,11 @@ const TYPE_OPTIONS: Array<{ value: KnowledgeType; label: string; description: st
   { value: 'feature', label: 'Feature', description: '生成 docs/features/Fxxx-*.md' },
   { value: 'lesson', label: 'Lesson', description: '追加到 docs/public-lessons.md' },
   { value: 'decision', label: 'Decision', description: '生成 docs/decisions/0xx-*.md' },
+  {
+    value: 'vault',
+    label: '知识库',
+    description: '投递到 Obsidian 收件夹（00待确认/clowder-inbox），你审核归位后可被全体猫检索。',
+  },
 ];
 
 export function KnowledgeCaptureModal({
@@ -39,6 +50,7 @@ export function KnowledgeCaptureModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<KnowledgeCaptureResult | null>(null);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +60,30 @@ export function KnowledgeCaptureModal({
     setIsSubmitting(false);
     setError(null);
     setResult(null);
+    setVaultStatus(null);
   }, [defaultTitle, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/api/knowledge/vault-status');
+        const body = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && body && typeof body.available === 'boolean') {
+          setVaultStatus({ available: body.available, reason: body.reason });
+        } else {
+          setVaultStatus({ available: false, reason: '无法确认知识库收件夹状态，请稍后重试' });
+        }
+      } catch {
+        if (!cancelled) setVaultStatus({ available: false, reason: '无法确认知识库收件夹状态，请稍后重试' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,9 +94,14 @@ export function KnowledgeCaptureModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isSubmitting, onClose, open]);
 
+  const isVaultAvailable = vaultStatus?.available === true;
   const canSubmit = useMemo(
-    () => title.trim().length > 0 && summary.trim().length > 0 && !isSubmitting,
-    [isSubmitting, summary, title],
+    () =>
+      title.trim().length > 0 &&
+      summary.trim().length > 0 &&
+      !isSubmitting &&
+      (type !== 'vault' || isVaultAvailable),
+    [isSubmitting, isVaultAvailable, summary, title, type],
   );
 
   if (!open) return null;
@@ -73,6 +113,13 @@ export function KnowledgeCaptureModal({
     setError(null);
     setResult(null);
     try {
+      const vaultExtras =
+        type === 'vault'
+          ? {
+              sourceThreadTitle: defaultTitle,
+              sourceUrl: typeof window !== 'undefined' ? `${window.location.origin}${getThreadHref(sourceThreadId)}` : undefined,
+            }
+          : {};
       const res = await apiFetch('/api/knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -81,6 +128,7 @@ export function KnowledgeCaptureModal({
           title: title.trim(),
           summary: summary.trim(),
           sourceThreadId,
+          ...vaultExtras,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -116,7 +164,7 @@ export function KnowledgeCaptureModal({
               沉淀为知识
             </h2>
             <p className="mt-1 text-xs leading-[1.5] text-[var(--cafe-text-secondary)]">
-              手动把当前讨论沉淀成 Feature、Lesson 或 Decision。暂不做 AI 自动总结。
+              手动把当前讨论沉淀成 Feature、Lesson、Decision 或投递到知识库收件夹。暂不做 AI 自动总结。
             </p>
           </div>
           <button
@@ -135,24 +183,45 @@ export function KnowledgeCaptureModal({
             <span className="text-[11px] font-semibold tracking-[0.14em] text-[var(--cafe-text-secondary)]">
               类型
             </span>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {TYPE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setType(option.value)}
-                  className={`rounded-xl border px-3 py-2 text-left transition-colors ${
-                    type === option.value
-                      ? 'border-[var(--cafe-accent)] bg-[var(--console-card-soft-bg)] text-[var(--cafe-text)]'
-                      : 'border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] text-[var(--cafe-text-secondary)] hover:bg-[var(--console-hover-bg)]'
-                  }`}
-                >
-                  <span className="block text-sm font-semibold">{option.label}</span>
-                  <span className="mt-1 block text-[11px] leading-[1.4] text-[var(--cafe-text-muted)]">
-                    {option.description}
-                  </span>
-                </button>
-              ))}
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {TYPE_OPTIONS.map((option) => {
+                const isVaultOption = option.value === 'vault';
+                const vaultDisabled = isVaultOption && !isVaultAvailable;
+                const disabledReason = isVaultOption
+                  ? (vaultStatus?.reason ?? (vaultStatus === null ? '正在检查知识库收件夹可用性…' : undefined))
+                  : undefined;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    data-testid={`knowledge-type-${option.value}`}
+                    onClick={() => {
+                      if (vaultDisabled) return;
+                      setType(option.value);
+                    }}
+                    disabled={vaultDisabled}
+                    aria-disabled={vaultDisabled}
+                    title={disabledReason}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                      vaultDisabled
+                        ? 'cursor-not-allowed border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] text-[var(--cafe-text-muted)] opacity-50'
+                        : type === option.value
+                          ? 'border-[var(--cafe-accent)] bg-[var(--console-card-soft-bg)] text-[var(--cafe-text)]'
+                          : 'border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] text-[var(--cafe-text-secondary)] hover:bg-[var(--console-hover-bg)]'
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{option.label}</span>
+                    <span className="mt-1 block text-[11px] leading-[1.4] text-[var(--cafe-text-muted)]">
+                      {option.description}
+                    </span>
+                    {vaultDisabled && disabledReason && (
+                      <span className="mt-1 block text-[10px] leading-[1.3] text-conn-crimson-text">
+                        {disabledReason}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -189,7 +258,17 @@ export function KnowledgeCaptureModal({
 
           {result && (
             <div className="rounded-lg border border-conn-green-ring bg-conn-green-bg px-3 py-2 text-xs leading-[1.5] text-conn-green-text">
-              已生成：{result.id} → <code>{result.path}</code>
+              {result.type === 'vault' ? (
+                <>
+                  已投递收件夹，下次索引重建后可被检索（或手动触发重建）。
+                  <br />
+                  {result.id} → <code>{result.path}</code>
+                </>
+              ) : (
+                <>
+                  已生成：{result.id} → <code>{result.path}</code>
+                </>
+              )}
             </div>
           )}
 
@@ -207,7 +286,7 @@ export function KnowledgeCaptureModal({
               disabled={!canSubmit}
               className="rounded-lg bg-[var(--cafe-accent)] px-3 py-2 text-sm font-semibold text-[var(--cafe-accent-foreground)] transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSubmitting ? '生成中...' : '生成文档'}
+              {isSubmitting ? (type === 'vault' ? '投递中...' : '生成中...') : type === 'vault' ? '投递到收件夹' : '生成文档'}
             </button>
           </div>
         </form>

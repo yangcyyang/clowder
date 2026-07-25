@@ -1,10 +1,11 @@
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, resolve as resolvePath, sep } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { loadObsidianReadonlyCollections } from '../domains/memory/obsidian-readonly-collections.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 
-const knowledgeTypeSchema = z.enum(['feature', 'lesson', 'decision']);
+const knowledgeTypeSchema = z.enum(['feature', 'lesson', 'decision', 'vault']);
 
 const createKnowledgeSchema = z
   .object({
@@ -12,6 +13,11 @@ const createKnowledgeSchema = z
     title: z.string().trim().min(1).max(160),
     summary: z.string().trim().min(1).max(8000),
     sourceThreadId: z.string().trim().min(1).max(200).optional(),
+    // F-I: only meaningful for type 'vault' — used to render the "来源" section
+    // in the inbox note. Optional so existing feature/lesson/decision callers
+    // are unaffected.
+    sourceThreadTitle: z.string().trim().min(1).max(200).optional(),
+    sourceUrl: z.string().trim().min(1).max(2000).optional(),
   })
   .strict();
 
@@ -22,12 +28,64 @@ export interface CreateKnowledgeInput {
   title: string;
   summary: string;
   sourceThreadId?: string;
+  sourceThreadTitle?: string;
+  sourceUrl?: string;
 }
 
 export interface CreateKnowledgeResult {
   type: KnowledgeType;
   path: string;
   id: string;
+}
+
+/**
+ * F-I: thrown when the 'vault' target is selected but OBSIDIAN_READONLY_ROOTS
+ * is unset or doesn't resolve to an existing directory. The frontend is
+ * expected to grey out the "知识库" card in this case (GET /api/knowledge/vault-status),
+ * so hitting this in the POST route means the client is stale or bypassed the UI.
+ */
+export class VaultUnavailableError extends Error {}
+
+const VAULT_INBOX_SEGMENTS = ['00待确认', 'clowder-inbox'] as const;
+
+/**
+ * Resolves the absolute path of the Obsidian inbox folder we're allowed to write to.
+ * Reuses loadObsidianReadonlyCollections (read-only elsewhere) purely to parse
+ * OBSIDIAN_READONLY_ROOTS and find the vault root — behavior of that function is
+ * untouched. Returns null when no usable collection is configured.
+ */
+function resolveVaultInboxDir(rootsEnv: string | undefined): string | null {
+  const manifests = loadObsidianReadonlyCollections(rootsEnv);
+  const first = manifests[0];
+  if (!first) return null;
+  return join(first.root, ...VAULT_INBOX_SEGMENTS);
+}
+
+/**
+ * True iff `target` (after resolving `..`/symlink-free path math) is `dir`
+ * itself or a descendant of it. Used as the last-line guard before any vault
+ * write — kept as a standalone pure function so the escape-rejection case can
+ * be unit-tested directly (slugify() already strips path separators from
+ * titles, so the escape path is otherwise unreachable through the public API).
+ */
+export function isPathWithinDir(dir: string, target: string): boolean {
+  const resolvedDir = resolvePath(dir);
+  const resolvedTarget = resolvePath(target);
+  return resolvedTarget === resolvedDir || resolvedTarget.startsWith(resolvedDir + sep);
+}
+
+export function getVaultInboxStatus(rootsEnv = process.env.OBSIDIAN_READONLY_ROOTS): {
+  available: boolean;
+  reason?: string;
+} {
+  if (!rootsEnv?.trim()) {
+    return { available: false, reason: 'OBSIDIAN_READONLY_ROOTS 未配置，知识库沉淀暂不可用' };
+  }
+  const inboxDir = resolveVaultInboxDir(rootsEnv);
+  if (!inboxDir) {
+    return { available: false, reason: 'OBSIDIAN_READONLY_ROOTS 已配置但目录不存在或无效，知识库沉淀暂不可用' };
+  }
+  return { available: true };
 }
 
 function slugify(input: string): string {
@@ -56,9 +114,74 @@ async function nextNumberFromFiles(dir: string, pattern: RegExp): Promise<number
   return max + 1;
 }
 
-export async function createKnowledgeDoc(input: CreateKnowledgeInput, root = findMonorepoRoot()): Promise<CreateKnowledgeResult> {
+/**
+ * F-I: writes a vault-inbox note. Only ever touches
+ * `<vault root>/00待确认/clowder-inbox/` — every other path under the vault is
+ * off limits (the mount stays read-only elsewhere). Filenames never clobber an
+ * existing file: collisions bump a numeric suffix, and the final write uses
+ * the 'wx' flag so a race lands as EEXIST instead of silently overwriting.
+ */
+async function createVaultInboxDoc(
+  input: CreateKnowledgeInput,
+  created: string,
+  vaultRootsEnv: string | undefined,
+): Promise<CreateKnowledgeResult> {
+  const inboxDir = resolveVaultInboxDir(vaultRootsEnv);
+  if (!inboxDir) {
+    throw new VaultUnavailableError('OBSIDIAN_READONLY_ROOTS 未配置或目录不存在，知识库沉淀不可用');
+  }
+
+  const inboxDirResolved = resolvePath(inboxDir);
+  await mkdir(inboxDirResolved, { recursive: true });
+
+  const baseSlug = `${created}-${slugify(input.title)}`;
+  const sourceThreadRef = input.sourceThreadId ? `thread:${input.sourceThreadId}` : 'unknown';
+  const sourceThreadLabel = input.sourceThreadTitle?.trim() || (input.sourceThreadId ? sourceThreadRef : '未知频道');
+  const sourceUrlValue = input.sourceUrl?.trim() ?? '';
+  const linkLine = sourceUrlValue ? `- 链接：${sourceUrlValue}` : '- 链接：（未提供）';
+
+  const content = `---\ncreated: ${created}\nsource_thread: ${yamlString(sourceThreadRef)}\nsource_url: ${yamlString(sourceUrlValue)}\ntopics: [clowder-inbox]\nstatus: inbox\n---\n\n# ${input.title}\n\n${input.summary}\n\n## 来源\n\n- 频道：${sourceThreadLabel}\n${linkLine}\n`;
+
+  let filename = `${baseSlug}.md`;
+  let attempt = 2;
+  for (let i = 0; i < 1000; i++) {
+    const targetPath = resolvePath(inboxDirResolved, filename);
+    if (!isPathWithinDir(inboxDirResolved, targetPath)) {
+      // Defense in depth: slugify() already strips path separators from
+      // titles so this branch should be unreachable, but we refuse to write
+      // outside the inbox directory under any circumstance (path-escape guard).
+      throw new Error('Refusing to write outside the vault inbox directory');
+    }
+    try {
+      await writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx' });
+      return {
+        type: 'vault',
+        path: join(...VAULT_INBOX_SEGMENTS, filename),
+        id: filename.replace(/\.md$/, ''),
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        filename = `${baseSlug}-${attempt}.md`;
+        attempt += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Too many filename collisions in vault inbox directory');
+}
+
+export async function createKnowledgeDoc(
+  input: CreateKnowledgeInput,
+  root = findMonorepoRoot(),
+  vaultRootsEnv = process.env.OBSIDIAN_READONLY_ROOTS,
+): Promise<CreateKnowledgeResult> {
   const created = new Date().toISOString().slice(0, 10);
   const sourceLine = input.sourceThreadId ? `source_refs: [${yamlString(`thread:${input.sourceThreadId}`)}]\n` : '';
+
+  if (input.type === 'vault') {
+    return createVaultInboxDoc(input, created, vaultRootsEnv);
+  }
 
   if (input.type === 'feature') {
     const featuresDir = join(root, 'docs', 'features');
@@ -97,6 +220,13 @@ export async function createKnowledgeDoc(input: CreateKnowledgeInput, root = fin
 }
 
 export const knowledgeRoutes: FastifyPluginAsync = async (app) => {
+  // F-I: lets the "沉淀为知识" modal know upfront whether the vault-inbox
+  // target is usable, so it can grey out the "知识库" card instead of letting
+  // the user submit into a guaranteed VaultUnavailableError.
+  app.get('/api/knowledge/vault-status', async () => {
+    return getVaultInboxStatus();
+  });
+
   app.post('/api/knowledge', async (request, reply) => {
     const parsed = createKnowledgeSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -107,6 +237,10 @@ export const knowledgeRoutes: FastifyPluginAsync = async (app) => {
     try {
       return await createKnowledgeDoc(parsed.data);
     } catch (err) {
+      if (err instanceof VaultUnavailableError) {
+        reply.status(409);
+        return { error: err.message };
+      }
       request.log.error({ err }, '[knowledge] failed to create knowledge doc');
       reply.status(500);
       return { error: err instanceof Error ? err.message : 'Failed to create knowledge doc' };
