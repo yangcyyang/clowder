@@ -98,7 +98,9 @@ export interface QueueEntry {
     | 'continuation'
     | 'freshness_review'
     /** Batch 3-A item 1: unowned-task wake-up nudge to a candidate cat (auto-claim canary). */
-    | 'auto_claim';
+    | 'auto_claim'
+    /** ClaimedIdleScheduler: claimed-but-idle wake-up nudge to the task's own owner cat. */
+    | 'claimed_idle_nudge';
   /** Existing message type with scheduler-specific presentation metadata. */
   responsePresentation?: 'silent_receipt';
   /** Queue-internal dedup key for agent control-flow work. */

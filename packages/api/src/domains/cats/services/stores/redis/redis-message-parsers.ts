@@ -64,7 +64,9 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_created_unclaimed'
         | 'task_created'
         | 'task_status_changed'
-        | 'cli_session_rotated';
+        | 'task_idle_escalated'
+        | 'cli_session_rotated'
+        | 'sanity_handoff';
       slockThread?: { branchThreadId: string; replyCount: number };
     }
   | undefined {
@@ -97,7 +99,9 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_created_unclaimed'
         | 'task_created'
         | 'task_status_changed'
-        | 'cli_session_rotated';
+        | 'task_idle_escalated'
+        | 'cli_session_rotated'
+        | 'sanity_handoff';
       slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
     let hasField = false;
@@ -153,7 +157,9 @@ export function safeParseExtra(raw: string | undefined):
       parsed.systemKind === 'task_created_unclaimed' ||
       parsed.systemKind === 'task_created' ||
       parsed.systemKind === 'task_status_changed' ||
-      parsed.systemKind === 'cli_session_rotated'
+      parsed.systemKind === 'task_idle_escalated' ||
+      parsed.systemKind === 'cli_session_rotated' ||
+      parsed.systemKind === 'sanity_handoff'
     ) {
       result.systemKind = parsed.systemKind;
       hasField = true;

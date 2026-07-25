@@ -37,7 +37,15 @@ export type TaskEventType =
   | 'fast_lane_failed'
   /** Batch 3-A item 2: bookkeeping-only marker — a linked run succeeded while the task
    *  stayed in its current status (platform never auto-advances to in_review/done). */
-  | 'run_succeeded';
+  | 'run_succeeded'
+  /** ClaimedIdleScheduler: a claimed-but-idle wake-up nudge was sent to the owner cat.
+   *  Scoped per claim cycle — only events after the most recent 'claimed' event count
+   *  toward the 2-nudge cap (see ClaimedIdleScheduler.ts). */
+  | 'idle_nudged'
+  /** ClaimedIdleScheduler: the 2-nudge cap was exhausted and the task is still idle —
+   *  terminal marker for this claim cycle; the scheduler never acts on this task again
+   *  until it is unclaimed/re-claimed. A system notice is posted to the main thread. */
+  | 'task_idle_escalated';
 
 /**
  * Task kind discriminator (#320).

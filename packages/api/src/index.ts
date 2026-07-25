@@ -2376,6 +2376,24 @@ async function main(): Promise<void> {
       queueProcessor,
     });
     autoRetryScheduler.start();
+
+    // 认领闲置唤醒器 (env CLOWDER_CLAIMED_IDLE_WAKEUP, default ON — see env-registry.ts).
+    // Only meaningful in Redis mode, same as AutoRetryScheduler above: a single live API
+    // instance per Redis namespace (apiInstanceLease) is what makes the in-memory
+    // InvocationTracker/InvocationQueue reads below a reliable "is this cat actually
+    // idle right now" signal. Covers the claimed-but-idle gap left by
+    // wakeCandidateCatsForUnclaimedTask (work-admission-service.ts), which only wakes
+    // candidates for *unowned* tasks.
+    const { ClaimedIdleScheduler } = await import('./domains/cats/services/agents/invocation/ClaimedIdleScheduler.js');
+    const claimedIdleScheduler = new ClaimedIdleScheduler({
+      taskStore,
+      messageStore,
+      socketManager,
+      invocationQueue,
+      invocationTracker,
+      queueProcessor,
+    });
+    claimedIdleScheduler.start();
   }
 
   // F145 P0: Kill orphan agent-browser headless Chrome processes from previous sessions.
