@@ -2,7 +2,6 @@
 
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
-import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
@@ -10,19 +9,24 @@ import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { useToastStore } from '@/stores/toastStore';
-import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
 import { ChatInputMenus } from './ChatInputMenus';
-import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
+import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import {
+  CVO_MODE_STORAGE_KEY,
+  isPromptPrefixId,
+  PROMPT_PREFIX_OPTIONS,
+  PROMPT_PREFIX_STORAGE_KEY,
+  type PromptPrefixId,
+} from './chat-input-prompt-prefix';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
-import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
 import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
+import { ImageUploadIcon } from './icons/ImageUploadIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { SlashCommandPicker, type SlashCommandItem } from './SlashCommandPicker';
-import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { hasPendingThreadDraft, threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
@@ -32,68 +36,6 @@ export { threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-draf
 const MAX_IMAGE_DRAFT_THREADS = 5;
 const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const CVO_MODE_STORAGE_KEY = 'cat-cafe:cvoMode';
-const PROMPT_PREFIX_STORAGE_KEY = 'cat-cafe:promptPrefix';
-const CVO_MODE_PREFIX = `[CVO_MODE] 在执行任何操作之前，你必须先以采访者身份问我 3 个问题，帮助澄清需求：
-① 你希望的最终产物/结果是什么？
-② 有什么约束条件或不能动的边界？
-③ 完成的标准是什么，怎样算"做好了"？
-请等我逐一回答后再开始执行。`;
-
-const PROMPT_PREFIX_OPTIONS = [
-  {
-    id: 'none',
-    label: '无前缀',
-    shortLabel: '提示词',
-    description: '直接发送当前输入内容',
-    prefix: '',
-  },
-  {
-    id: 'requirements',
-    label: '需求前置',
-    shortLabel: '需求前置',
-    description: '先问清目标、边界和验收标准',
-    prefix: CVO_MODE_PREFIX,
-  },
-  {
-    id: 'debug',
-    label: '问题排查',
-    shortLabel: '排查',
-    description: '先定位现象、根因、影响面和修复方案',
-    prefix:
-      '[DEBUG_MODE] 请先按问题排查流程处理：明确现象、复现路径、可能根因、影响范围、最小修复方案和验证方式。不要直接给泛泛建议。',
-  },
-  {
-    id: 'plan',
-    label: '方案规划',
-    shortLabel: '规划',
-    description: '输出目标、范围、步骤、风险和验收点',
-    prefix:
-      '[PLAN_MODE] 请先做方案规划：明确目标、边界、执行步骤、依赖、风险、验收标准。优先给可落地的最小方案。',
-  },
-  {
-    id: 'review',
-    label: '代码审查',
-    shortLabel: '审查',
-    description: '优先找 bug、回归风险和缺失测试',
-    prefix:
-      '[REVIEW_MODE] 请以代码审查视角回答：优先指出 bug、行为回归、边界风险和缺失测试，再给修改建议。不要只做总结。',
-  },
-  {
-    id: 'summary',
-    label: '总结提炼',
-    shortLabel: '总结',
-    description: '提炼结论、关键点和下一步行动',
-    prefix:
-      '[SUMMARY_MODE] 请做结构化总结：先给一句核心结论，再提炼关键点、决策、待办和下一步行动。避免长篇复述。',
-  },
-] as const;
-
-type PromptPrefixId = (typeof PROMPT_PREFIX_OPTIONS)[number]['id'];
-
-function isPromptPrefixId(value: string | null): value is PromptPrefixId {
-  return PROMPT_PREFIX_OPTIONS.some((option) => option.id === value);
-}
 
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
@@ -127,16 +69,6 @@ function detectSlashCommand(value: string, cursor: number): string | null {
   const token = value.match(/^\/[^\s]*/)?.[0] ?? '';
   if (cursor > token.length) return null;
   return value.slice(1, cursor);
-}
-
-function ImageUploadIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="3" y="4" width="14" height="12" rx="2.5" />
-      <circle cx="7.5" cy="8" r="1.3" fill="currentColor" stroke="none" />
-      <path d="M5.5 14l3.2-3.3 2.2 2.1 1.6-1.7L16 14" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
 }
 
 function formatFileSize(bytes: number) {
@@ -185,19 +117,17 @@ export function ChatInput({
 
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
-  const [showGameMenu, setShowGameMenu] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [slashSelectedIdx, setSlashSelectedIdx] = useState(0);
   const [slashItems, setSlashItems] = useState<SlashCommandItem[]>([]);
-  const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
   const [attachments, setAttachments] = useState<File[]>(() => (threadId ? (threadFileDrafts.get(threadId) ?? []) : []));
   const [isPreparingImages, setIsPreparingImages] = useState(false);
-  const [whisperMode] = useState(false);
+  const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
   const [sendAsTask, setSendAsTask] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -248,11 +178,9 @@ export function ChatInput({
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
-  const [lobbyMode, setLobbyMode] = useState<'player' | 'god-view' | 'detective' | null>(null);
   const addToast = useToastStore((s) => s.addToast);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const gameBtnRef = useRef<HTMLButtonElement>(null);
   const promptPrefixMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
@@ -299,9 +227,8 @@ export function ChatInput({
     );
   }, [catOptions, mentionFilter]);
 
-  const activeMenu = showMentions ? 'mention' : showGameMenu ? 'game' : null;
-  const gameMenuItems = gameStep === 'list' ? GAME_LIST : WEREWOLF_MODES;
-  const activeOptions = activeMenu === 'mention' ? filteredCatOptions : (gameMenuItems as unknown as CatOption[]);
+  const activeMenu = showMentions ? 'mention' : null;
+  const activeOptions = filteredCatOptions;
 
   const addHistoryEntry = useInputHistoryStore((s) => s.addEntry);
   const findHistoryMatch = useInputHistoryStore((s) => s.findMatch);
@@ -334,7 +261,6 @@ export function ChatInput({
         setImages([]);
         setAttachments([]);
         setShowMentions(false);
-        setShowGameMenu(false);
         setShowPromptPrefixMenu(false);
         setSendAsTask(false);
         if (selectedPromptPrefix.prefix) updatePromptPrefix('none');
@@ -380,57 +306,8 @@ export function ChatInput({
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
-    setShowGameMenu(false);
     setShowSlashCommands(false);
   }, []);
-
-  const [gameStarting, setGameStarting] = useState(false);
-
-  const startGame = useCallback(
-    async (payload: GameStartPayload) => {
-      closeMenus();
-      if (disabled || sendTemporarilyDisabled || gameStarting) return;
-      setGameStarting(true);
-      try {
-        const res = await apiFetch('/api/game/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          useChatStore.getState().addMessage({
-            id: `game-err-${Date.now()}`,
-            type: 'system',
-            variant: 'error',
-            content: `开局失败: ${data.error ?? `HTTP ${res.status}`}`,
-            timestamp: Date.now(),
-          });
-          // Restore lobby so user can retry without re-selecting
-          setLobbyMode(payload.humanRole);
-          return;
-        }
-        // Success — dismiss lobby and navigate
-        setLobbyMode(null);
-        pushThreadRouteWithHistory(data.gameThreadId, typeof window !== 'undefined' ? window : undefined);
-        // Hydrate game state immediately (socket reconnect won't fire for same connection)
-        reconnectGame(data.gameThreadId).catch(() => {});
-      } catch (err) {
-        useChatStore.getState().addMessage({
-          id: `game-err-${Date.now()}`,
-          type: 'system',
-          variant: 'error',
-          content: `开局失败: ${err instanceof Error ? err.message : '网络异常'}`,
-          timestamp: Date.now(),
-        });
-        // Restore lobby so user can retry
-        setLobbyMode(payload.humanRole);
-      } finally {
-        setGameStarting(false);
-      }
-    },
-    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting],
-  );
 
   const insertMention = useCallback(
     (option: CatOption) => {
@@ -454,20 +331,12 @@ export function ChatInput({
         setSlashQuery(slashQuery);
         setSlashSelectedIdx(0);
         setShowMentions(false);
-        setShowGameMenu(false);
         return;
       }
       const trigger = detectMenuTrigger(val, e.target.selectionStart);
-      if (trigger?.type === 'game') {
-        setShowSlashCommands(false);
-        setShowGameMenu(true);
-        setGameStep('list');
-        setShowMentions(false);
-        setSelectedIdx(0);
-      } else if (trigger?.type === 'mention') {
+      if (trigger?.type === 'mention') {
         setShowSlashCommands(false);
         setShowMentions(true);
-        setShowGameMenu(false);
         setMentionStart(trigger.start);
         setMentionFilter(trigger.filter);
         setSelectedIdx(0);
@@ -565,24 +434,12 @@ export function ChatInput({
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        if (activeMenu === 'mention') {
-          const opt = filteredCatOptions[selectedIdx];
-          if (!opt) {
-            closeMenus();
-            return;
-          }
-          insertMention(opt);
-        } else if (gameStep === 'list') {
-          // Layer 1: drill into mode selection
-          setGameStep('modes');
-          setSelectedIdx(0);
-        } else {
-          // Layer 2: open lobby for mode configuration
-          const mode = WEREWOLF_MODES[selectedIdx];
-          const role = mode.id === 'detective' ? 'detective' : mode.id.startsWith('god') ? 'god-view' : 'player';
+        const opt = filteredCatOptions[selectedIdx];
+        if (!opt) {
           closeMenus();
-          setLobbyMode(role as 'player' | 'god-view' | 'detective');
+          return;
         }
+        insertMention(opt);
         return;
       }
       if (e.key === 'Escape') {
@@ -798,9 +655,17 @@ export function ChatInput({
     });
   }, []);
 
+  const handleWhisperToggle = useCallback(() => {
+    setWhisperMode((prev) => {
+      if (!prev) {
+        // F108B P1-1: Default to NO cats selected (design spec Scene 1: "默认都不选")
+        setWhisperTargets(new Set());
+      }
+      return !prev;
+    });
+  }, []);
+
   // Clamp selectedIdx when catOptions shrink — only when mention menu is active.
-  // selectedIdx is shared by mention/game menus; clamping to catOptions.length
-  // when game menu is open would corrupt game selection.
   useEffect(() => {
     if (!showMentions) return;
     setSelectedIdx((i) => Math.min(i, Math.max(0, filteredCatOptions.length - 1)));
@@ -877,10 +742,10 @@ export function ChatInput({
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       // React 18 may flush state synchronously during event bubbling,
-      // detaching the original target (e.g. layer 1 unmounts when drilling
-      // into layer 2). A detached target is not a genuine outside click.
+      // detaching the original target. A detached target is not a genuine
+      // outside click.
       if (!target.isConnected) return;
-      if (menuRef.current && !menuRef.current.contains(target) && !gameBtnRef.current?.contains(target)) {
+      if (menuRef.current && !menuRef.current.contains(target)) {
         closeMenus();
       }
     };
@@ -920,27 +785,14 @@ export function ChatInput({
       <ChatInputMenus
         catOptions={filteredCatOptions}
         showMentions={showMentions}
-        showGameMenu={showGameMenu}
-        gameStep={gameStep}
-        onGameStepChange={setGameStep}
         selectedIdx={selectedIdx}
         onSelectIdx={setSelectedIdx}
         onInsertMention={insertMention}
-        onSendCommand={(command) => {
-          // Open lobby instead of sending directly
-          const role = command.includes('detective')
-            ? 'detective'
-            : command.includes('god-view')
-              ? 'god-view'
-              : 'player';
-          closeMenus();
-          setLobbyMode(role as 'player' | 'god-view' | 'detective');
-        }}
         menuRef={menuRef}
         catStatuses={catStatuses}
       />
 
-      {whisperMode && !showMentions && !showGameMenu && (
+      {whisperMode && !showMentions && (
         <WhisperCatSelector
           cats={whisperCats}
           selected={whisperTargets}
@@ -1012,10 +864,12 @@ export function ChatInput({
       {mobileToolbar && (
         <MobileInputToolbar
           onAttach={() => attachmentInputRef.current?.click()}
+          onWhisperToggle={handleWhisperToggle}
           onClose={() => setMobileToolbar(false)}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           maxImages={hasReachedAttachmentLimit}
+          whisperMode={whisperMode}
         />
       )}
 
@@ -1096,6 +950,27 @@ export function ChatInput({
                 title="上传文件"
               >
                 <AttachIcon className="h-[18px] w-[18px]" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleWhisperToggle}
+                disabled={disabled || sendTemporarilyDisabled}
+                className={`slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                  whisperMode
+                    ? 'bg-conn-amber-bg text-conn-amber-text ring-1 ring-conn-amber-text/30'
+                    : 'text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-conn-amber-text'
+                }`}
+                aria-label="Whisper mode"
+                title="悄悄话模式"
+              >
+                <svg className="h-[18px] w-[18px]" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                    clipRule="evenodd"
+                  />
+                </svg>
               </button>
             </div>
 
@@ -1224,17 +1099,6 @@ export function ChatInput({
 
       {showHistorySearch && (
         <HistorySearchModal onSelect={handleHistorySelect} onClose={() => setShowHistorySearch(false)} />
-      )}
-
-      {lobbyMode && (
-        <GameLobby
-          mode={lobbyMode}
-          cats={cats}
-          onConfirm={(payload) => {
-            startGame(payload);
-          }}
-          onCancel={() => setLobbyMode(null)}
-        />
       )}
     </div>
   );

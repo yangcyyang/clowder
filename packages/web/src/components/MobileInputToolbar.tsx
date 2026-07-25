@@ -2,22 +2,26 @@ import { AttachIcon } from './icons/AttachIcon';
 
 interface MobileInputToolbarProps {
   onAttach: () => void;
+  onWhisperToggle: () => void;
   onClose: () => void;
   disabled?: boolean;
   sendDisabled?: boolean;
   maxImages?: boolean;
+  whisperMode?: boolean;
 }
 
 /**
- * Expandable toolbar for mobile input — compact attachment access.
+ * Expandable toolbar for mobile input — compact attachment + whisper access.
  * Shown above the main input row when user taps the + button.
  */
 export function MobileInputToolbar({
   onAttach,
+  onWhisperToggle,
   onClose,
   disabled,
   sendDisabled,
   maxImages,
+  whisperMode,
 }: MobileInputToolbarProps) {
   const btnBase =
     'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border transition-colors disabled:opacity-30';
@@ -33,6 +37,27 @@ export function MobileInputToolbar({
         className={`${btnBase} text-cafe-secondary bg-cafe-surface border-[var(--console-border-soft)] hover:border-cafe-accent hover:text-cafe-accent`}
       >
         <AttachIcon className="w-4 h-4" /> 附件
+      </button>
+      <button
+        onClick={() => {
+          onWhisperToggle();
+          onClose();
+        }}
+        disabled={disabled || sendDisabled}
+        className={`${btnBase} ${
+          whisperMode
+            ? 'text-conn-amber-text bg-conn-amber-bg border-conn-amber-ring'
+            : 'text-cafe-secondary bg-cafe-surface border-[var(--console-border-soft)] hover:border-conn-amber-ring hover:text-conn-amber-text'
+        }`}
+      >
+        <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fillRule="evenodd"
+            d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+        悄悄话
       </button>
     </div>
   );

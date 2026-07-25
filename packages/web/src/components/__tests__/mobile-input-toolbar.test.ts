@@ -31,6 +31,7 @@ describe('MobileInputToolbar', () => {
   function render(props: Partial<React.ComponentProps<typeof MobileInputToolbar>> = {}) {
     const defaults = {
       onAttach: vi.fn(),
+      onWhisperToggle: vi.fn(),
       onClose: vi.fn(),
       ...props,
     };
@@ -40,13 +41,25 @@ describe('MobileInputToolbar', () => {
     return defaults;
   }
 
-  it('renders only the attachment action', () => {
+  it('renders attach and whisper actions (no game entry)', () => {
     render();
     const buttons = container.querySelectorAll('button');
-    expect(buttons.length).toBe(1);
+    expect(buttons.length).toBe(2);
     expect(container.textContent).toContain('附件');
-    expect(container.textContent).not.toContain('悄悄话');
+    expect(container.textContent).toContain('悄悄话');
     expect(container.textContent).not.toContain('游戏');
+  });
+
+  it('calls onWhisperToggle + onClose when whisper button is clicked', () => {
+    const fns = render();
+    const whisperBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('悄悄话'),
+    );
+    act(() => {
+      whisperBtn?.click();
+    });
+    expect(fns.onWhisperToggle).toHaveBeenCalledTimes(1);
+    expect(fns.onClose).toHaveBeenCalledTimes(1);
   });
 
   it('calls onAttach + onClose when attach button is clicked', () => {

@@ -151,15 +151,16 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
     }
   });
 
-  it('F108B AC-B7: whisper to idle cat shows whisper placeholder, not queue placeholder', () => {
+  it('F108B AC-B7: whisper to idle cat shows whisper placeholder, not default placeholder', () => {
     useChatStore.setState({
       activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
       hasActiveInvocation: true,
     });
-    // Before whisper mode: should show queue placeholder (cat is active)
+    // Before whisper mode: default placeholder (queue-send path removed in cdd49a4e —
+    // agents are always-online since CatSupervisor, so there is no queue placeholder anymore)
     act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
     const textarea = container.querySelector('textarea')!;
-    expect(textarea.placeholder).toContain('排队');
+    expect(textarea.placeholder).toContain('输入消息');
 
     // Enter whisper mode — default is no selection (F108B P1-1 fix)
     enterWhisperMode();

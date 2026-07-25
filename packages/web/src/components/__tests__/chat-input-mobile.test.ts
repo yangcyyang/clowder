@@ -97,10 +97,10 @@ describe('ChatInput mobile toolbar', () => {
 });
 
 describe('ChatInput textarea auto-grow', () => {
-  it('starts with rows=1', () => {
+  it('starts with rows=2 (intentional: enlarged in f41f975e, tightened to 2 in 9d4d6564)', () => {
     render();
     const ta = container.querySelector('textarea')!;
-    expect(ta.getAttribute('rows')).toBe('1');
+    expect(ta.getAttribute('rows')).toBe('2');
   });
 
   it('auto-grow uses matchMedia guard (no crash in test env)', () => {
