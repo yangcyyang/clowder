@@ -433,6 +433,92 @@ describe('probeLocalAgentClis', () => {
         );
       }
     });
+  });
+
+  describe('kimi config home migration (~/.kimi → ~/.kimi-code)', () => {
+    const NEW_HOME_TOML = [
+      'default_model = "kimi-code/k3-256k"',
+      '[models."kimi-code/kimi-for-coding"]',
+      '[models."kimi-code/kimi-for-coding-highspeed"]',
+      '[models."kimi-code/k3"]',
+      '[models."kimi-code/k3-256k"]',
+    ].join('\n');
+    const LEGACY_HOME_TOML = [
+      'default_model = "kimi-code/k3"',
+      '[models."kimi-code/kimi-for-coding"]',
+      '[models."kimi-code/kimi-for-coding-highspeed"]',
+      '[models."kimi-code/k3"]',
+    ].join('\n');
+
+    function kimiProbeOptions(files, env) {
+      return {
+        resolveCommand(command) {
+          return command === 'kimi' ? '/opt/bin/kimi' : null;
+        },
+        async runCommand() {
+          return { stdout: 'kimi 0.29.1', stderr: '' };
+        },
+        ...(env ? { env } : {}),
+        async readFile(path) {
+          assert.ok(path.startsWith(TEST_HOME), `probe escaped isolated HOME: ${path}`);
+          const content = files[path];
+          if (content === undefined) throw new Error(`fixture has no file at ${path}`);
+          return content;
+        },
+      };
+    }
+
+    it('prefers the new ~/.kimi-code/config.toml over the stale legacy file and follows its default_model', async () => {
+      const results = await probeWithIsolatedHome(
+        kimiProbeOptions({
+          [`${TEST_HOME}/.kimi-code/config.toml`]: NEW_HOME_TOML,
+          [`${TEST_HOME}/.kimi/config.toml`]: LEGACY_HOME_TOML,
+        }),
+      );
+      const kimi = results.find((item) => item.id === 'kimi');
+      assert.equal(kimi?.modelsStatus, 'config_only');
+      assert.deepEqual(
+        kimi?.models.map((model) => model.id).sort(),
+        ['kimi-code/k3', 'kimi-code/k3-256k', 'kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
+        'all four models from the new config home must surface',
+      );
+      assert.equal(
+        kimi?.models.find((model) => model.isDefault)?.id,
+        'kimi-code/k3-256k',
+        "the CLI's own default_model must win over the hardcoded allowlist default",
+      );
+    });
+
+    it('falls back to the legacy ~/.kimi/config.toml when the new home does not exist', async () => {
+      const results = await probeWithIsolatedHome(
+        kimiProbeOptions({
+          [`${TEST_HOME}/.kimi/config.toml`]: LEGACY_HOME_TOML,
+        }),
+      );
+      const kimi = results.find((item) => item.id === 'kimi');
+      assert.equal(kimi?.modelsStatus, 'config_only');
+      assert.equal(kimi?.models.filter((model) => model.source === 'config').length, 3);
+      assert.equal(kimi?.models.find((model) => model.isDefault)?.id, 'kimi-code/k3');
+    });
+
+    it('honors a KIMI_CODE_HOME env override ahead of both default homes', async () => {
+      const results = await probeWithIsolatedHome(
+        kimiProbeOptions(
+          {
+            [`${TEST_HOME}/custom-kimi-home/config.toml`]: NEW_HOME_TOML,
+            [`${TEST_HOME}/.kimi-code/config.toml`]: LEGACY_HOME_TOML,
+          },
+          { KIMI_CODE_HOME: `${TEST_HOME}/custom-kimi-home` },
+        ),
+      );
+      const kimi = results.find((item) => item.id === 'kimi');
+      assert.equal(
+        kimi?.models.some((model) => model.id === 'kimi-code/k3-256k' && model.source === 'config'),
+        true,
+        'models must come from the KIMI_CODE_HOME override file',
+      );
+      assert.equal(kimi?.models.find((model) => model.isDefault)?.id, 'kimi-code/k3-256k');
+    });
 
     it('falls back silently to the static catalog when the remote endpoint times out or errors', async () => {
       let fetchCalls = 0;

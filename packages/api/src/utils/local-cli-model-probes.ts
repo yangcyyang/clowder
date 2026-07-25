@@ -29,7 +29,20 @@ export interface RemoteModelDiscoveryDefinition {
 
 export interface LocalCliModelsProbeDefinition {
   readonly command?: { readonly args: readonly string[]; readonly parse: (stdout: string) => string[] };
-  readonly configFile?: { readonly path: string; readonly extract: (content: string) => string[] };
+  readonly configFile?: {
+    /**
+     * One or more candidate config locations, tried in order; the first readable file whose
+     * extract yields ids wins. Supports CLI home migrations (e.g. kimi ~/.kimi → ~/.kimi-code).
+     * A `$VAR/...` entry resolves VAR from env and is skipped when unset (e.g. $KIMI_CODE_HOME).
+     */
+    readonly path: string | readonly string[];
+    readonly extract: (content: string) => string[];
+    /**
+     * Treat the extractor's first returned id as the CLI's own declared default (extractors that
+     * read a `default_model`-style field emit it first). Otherwise the allowlist default applies.
+     */
+    readonly defaultFromFirstEntry?: boolean;
+  };
   readonly static?: readonly string[];
   readonly remote?: RemoteModelDiscoveryDefinition;
 }
@@ -261,10 +274,17 @@ export const LOCAL_CLI_MODELS_PROBES = {
     configFile: { path: '~/.config/opencode/opencode.json', extract: extractOpenCodeConfigModels },
     static: ['xiaomi-mimo/mimo-v2.5-pro'],
   },
-  // Kimi CLI 1.48.0 has no models command; config.toml exposes default_model and the models table.
+  // Kimi Code CLI has no models command; config.toml exposes default_model and the models table.
+  // The CLI's home migrated ~/.kimi → ~/.kimi-code (official docs: KIMI_CODE_HOME overrides it),
+  // so newer installs keep the legacy file around with a stale, smaller model table — probe the
+  // env override first, then the new home, then the legacy one.
   kimi: {
-    configFile: { path: '~/.kimi/config.toml', extract: extractKimiConfigModels },
-    static: ['kimi-code/k3', 'kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
+    configFile: {
+      path: ['$KIMI_CODE_HOME/config.toml', '~/.kimi-code/config.toml', '~/.kimi/config.toml'],
+      extract: extractKimiConfigModels,
+      defaultFromFirstEntry: true,
+    },
+    static: ['kimi-code/k3', 'kimi-code/k3-256k', 'kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed'],
   },
   // Grok CLI 0.2.93 prints a human-readable catalog with one bullet per model.
   grok: {
@@ -421,12 +441,29 @@ async function probeConfigModels(
   probe: LocalCliModelsProbeDefinition,
 ): Promise<LocalCliModelCandidate[]> {
   if (!probe.configFile || !options.installed) return [];
-  try {
-    const path = resolveExplicitConfigPath(probe.configFile.path, options.homeDir ?? homedir());
-    const content = await (options.readFile ?? ((value) => readFileFs(value, 'utf8')))(path);
-    return candidates(probe.configFile.extract(redactProbeOutput(content)), 'config', options.defaultModel);
-  } catch {
-    // Includes explicit rejection of sensitive or traversing paths, then falls through to L3.
-    return [];
+  const env = options.env ?? process.env;
+  const home = options.homeDir ?? homedir();
+  const rawPaths = Array.isArray(probe.configFile.path) ? probe.configFile.path : [probe.configFile.path];
+  for (const rawPath of rawPaths) {
+    let candidatePath = rawPath;
+    const envPrefix = /^\$([A-Z0-9_]+)\//.exec(rawPath);
+    if (envPrefix) {
+      const base = env[envPrefix[1] ?? ''];
+      if (!base) continue;
+      candidatePath = `${base}/${rawPath.slice(envPrefix[0].length)}`;
+    }
+    try {
+      const path = resolveExplicitConfigPath(candidatePath, home);
+      const content = await (options.readFile ?? ((value) => readFileFs(value, 'utf8')))(path);
+      const ids = probe.configFile.extract(redactProbeOutput(content));
+      if (ids.length === 0) continue;
+      const defaultId = probe.configFile.defaultFromFirstEntry ? ids[0] : options.defaultModel;
+      return candidates(ids, 'config', defaultId);
+    } catch {
+      // Includes explicit rejection of sensitive or traversing paths; try the next candidate
+      // location, and only after all of them fail fall through to L3.
+      continue;
+    }
   }
+  return [];
 }
