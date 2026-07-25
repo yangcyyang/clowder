@@ -1,0 +1,267 @@
+# 批次 1 F-A 评测尺：notes/ 层召回 Gold Set
+#
+# 背景：docs/research/memory-absorption.md §4 批次 1 —— "扩展 gold set 覆盖 notes/
+# 召回"。notes/{catId}/ 目前是"零机制"（AgentMemoryStore.ts 只给路径约定，无索引/
+# 排序），这份 gold set 建立第一个可回放的召回基线，供批次 2/3 给 notes/ 接
+# F163 salience() 排序时做前后对比（docs/research/memory-absorption.md 可抄清单
+# 第 2 条）。
+#
+# 素材来源（两类，每条 note 标注 source + sourceRef）：
+#  - real-cat-memory: 摘自生产 .cat-cafe/memory/{catId}.md 索引层真实内容
+#    （只读读取于 2026-07-25；these are the SAME distilled bullets a future
+#    notes/{catId}/*.md file would hold — 索引层现状就是 notes/ 存量迁移的起点，
+#    见 AgentMemoryStore.ts 顶部注释"存量迁移：现有单文件记忆自动视为索引"）。
+#  - real-docs-history: 摘自仓库 docs/ 下真实历史文档（F163 feature spec、
+#    ADR-024），当作 project/reference 类 notes 的真实素材补充。
+#
+# 运行方式：test/memory/notes-recall-eval.test.js 把下面 `notes` 列表逐条物化成
+# 临时目录里的 notes/{catId}/{topic}.md fixture 文件（不写生产 .cat-cafe/memory/），
+# 用生产代码里已导出的 topicSimilarity()（AgentMemoryPromotionGate.ts）做朴素
+# bigram-Jaccard 排序，作为"notes/ 目前零机制"状态下唯一可复现的基线打分器 ——
+# 批次 2/3 换成 salience() 加权后，重跑这份 gold set 即可量化提升。
+
+notes:
+  - id: N-grok-session-incident
+    catId: grok
+    file: grok/session-blowup-incident.md
+    type: project
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/grok.md 当前状态节（2026-07-25 读取）"
+    body: >-
+      Grok 定时刊连续断更的根因已确认：不是 opencli、登录态或采集脚本坏了，而是
+      Grok 一直 resume 同一个已经撑爆的 CLI 原生 session，启动就卡死，最后 1
+      小时 hard timeout、零产出。最后一次成功产出是 2026-07-22 中午，故障
+      session 目录整包已经涨到 25MB。
+
+  - id: N-kimi-writing-discipline
+    catId: kimi
+    file: kimi/closed-decision-writing-style.md
+    type: feedback
+    why: "避免主消息过长、埋没结论"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/kimi.md 已关闭决策节（2026-07-25 读取）"
+    body: >-
+      不把调研过程流水账全部写进主消息——主消息只给结论，调研过程、证据链和引用
+      清单应该放进 thread 或独立文档，不要堆在给铲屎官看的主消息里。
+
+  - id: N-kimi-mention-only
+    catId: kimi
+    file: kimi/feedback-mention-only.md
+    type: feedback
+    why: "铲屎官纠正过的响应边界"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/kimi.md 行为偏好节（2026-07-25 读取）"
+    body: >-
+      只有被明确 @ 到时才响应；不要在别的猫或用户对话中主动抢答插话。调研类
+      输出要给出可以直接决策的结论，不能只是复述资料。
+
+  - id: N-kimi-citation-cleanup
+    catId: kimi
+    file: kimi/gotcha-citation-cleanup.md
+    type: reference
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/kimi.md 环境 gotcha 节（2026-07-25 读取）"
+    body: >-
+      引用外部资料时要清理工具原始的 citation 标记（比如 cite:turn... 这类内部
+      标记），绝不能让这种标记漏进发给用户的主消息里。
+
+  - id: N-kimi-cloudflare-dns
+    catId: kimi
+    file: kimi/gotcha-cloudflare-dns.md
+    type: reference
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/kimi.md 环境 gotcha 节（2026-07-25 读取）"
+    body: >-
+      sticker-shop.yangcyyang.cn 的 DNS 曾经从 Vercel A 记录切换成 CNAME 指向
+      sticker-shop.pages.dev，并通过 Cloudflare Pages 自定义域验证。对应的
+      DNS Edit token 存放在本地配置目录、权限收紧为 600。Cloudflare 新版 dash
+      的 react-select 地区选择器要先对下拉指示器 dispatch mousedown/click 才能
+      展开菜单，直接 type 不生效。
+
+  - id: N-opus45-no-single-repo-structure
+    catId: opus-45
+    file: opus-45/closed-decision-no-single-repo-structure.md
+    type: feedback
+    why: "架构现状不同，照搬会文不对题"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/opus-45.md 已关闭决策节（2026-07-25 读取）"
+    body: >-
+      不把 Clowder 直接照搬单 repo 的 AGENTS.md + docs/versions 结构——Clowder
+      的真相源是 task board、channel 上下文和 git 状态，不是那一套文档目录约定。
+
+  - id: N-opus45-table-format
+    catId: opus-45
+    file: opus-45/feedback-table-format.md
+    type: feedback
+    why: "铲屎官纠正过：给我看这么多东西应该以表格形式"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/opus-45.md 行为偏好节（2026-07-25 读取）"
+    body: >-
+      批量条目或长清单必须用 Markdown 表格，不能用"·"或逗号把几十条串成一段
+      ——多于 5 条默认用表格，超长可以分组多表或双列。这是铲屎官明确纠正过的
+      格式要求。
+
+  - id: N-opus45-plain-summary
+    catId: opus-45
+    file: opus-45/feedback-plain-summary.md
+    type: feedback
+    why: "铲屎官听不懂很多技术细节，固定习惯不是可选项"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/opus-45.md 行为偏好节（2026-07-25 读取）"
+    body: >-
+      每次回复铲屎官，结尾必须带一段简短的大白话解释——说清这条回复做了什么、
+      说了什么、下一步是什么。铲屎官听不懂很多技术细节，一段就够，别写太长。
+
+  - id: N-opus45-autonomy-scope
+    catId: opus-45
+    file: opus-45/feedback-autonomy-scope.md
+    type: feedback
+    why: "铲屎官明确授权：你负责内部，我负责看效果"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/opus-45.md 行为偏好节（2026-07-25 读取）"
+    body: >-
+      内部工程动作自己拍板，不必事事等铲屎官点头——可逆的运行态操作（reconcile、
+      重建重启、灰度/金丝雀测试、改 env flag、合并放行）都可以自行决定并派
+      执行，完成后向铲屎官报"效果"即可。只有真正不可逆的操作、愿景级决策、
+      跨猫僵局，或者持续烧钱的开关，才需要升级给铲屎官。
+
+  - id: N-opus45-codex-delegation
+    catId: opus-45
+    file: opus-45/gotcha-codex-delegation.md
+    type: reference
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/opus-45.md 环境 gotcha 节（2026-07-25 读取）"
+    body: >-
+      给 Codex 这类执行猫派工时，必须写明确的文件路径、验收标准和验证命令；
+      对 Clowder 的改造应该优先复用已有基础设施，不要引入新架构。
+
+  - id: N-pi-lightweight-no-heavy-context
+    catId: pi
+    file: pi/closed-decision-no-heavy-context.md
+    type: feedback
+    why: "保证快速响应"
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/pi.md 已关闭决策节（2026-07-25 读取）"
+    body: >-
+      轻量 Agent（Pi、默认回复、微信自动回复这类）不默认加载重型上下文——优先
+      使用 minimal/toolbox 轻工具箱，保证快速响应。
+
+  - id: N-pi-handoff-to-engineering
+    catId: pi
+    file: pi/gotcha-handoff-to-engineering.md
+    type: reference
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/pi.md 环境 gotcha 节（2026-07-25 读取）"
+    body: >-
+      Pi 这类轻量 agent 不应该主动拉取重型文档或完整历史，除非任务明确需要；
+      遇到工程执行、文件修改、复杂调试这类任务，应该转交给 Codex 或其他工程类
+      agent 处理。
+
+  - id: N-gpt52-legacy-sync-gotcha
+    catId: gpt52
+    file: gpt52/project-legacy-sync-path.md
+    type: project
+    source: real-cat-memory
+    source_ref: ".cat-cafe/memory/gpt52.md 最近验证节（2026-07-18 条目，2026-07-25 读取）"
+    body: >-
+      旧货站点级商品图批跑闭环时，接棒脚本 sync-legacy.mjs 必须优先读取
+      商品图/站点/{siteId} 路径下的素材，否则一个商品包对应两个站点会互相
+      回退成同一张 cover 图。
+
+  - id: N-f163-conflict-not-time
+    catId: shared
+    file: shared/reference-f163-conflict-not-time.md
+    type: reference
+    source: real-docs-history
+    source_ref: "docs/features/F163-memory-entropy-reduction.md:71"
+    body: >-
+      F163 知识元数据骨架里的 invalid_at 字段是冲突触发失效，不是按时间自动
+      过期——时间是陪审员不是法官，旧知识不会因为过了多久就自动失效，只有
+      检测到明确冲突时才会被标记 invalid_at/replaced_by，交给人审确认。
+
+  - id: N-adr024-volatile-tail
+    catId: shared
+    file: shared/reference-adr024-volatile-tail.md
+    type: reference
+    source: real-docs-history
+    source_ref: "docs/decisions/024-kv-cache-friendly-context-layout.md:113"
+    body: >-
+      ADR-024 D1 分类规定：volatile（session 内任何频率会写的内容）禁止进
+      system 静态前缀，只能进队尾 meta 块；缓存失效的传播方向是"从变动点往后
+      全废"，位置才是杠杆，不是靠 epoch 标注能救的。
+
+queries:
+  - id: NQ-01
+    context: "荧荧的推特定时刊连续几天都没有新内容，需要排查断更的根本原因"
+    expected_note: N-grok-session-incident
+    note: "real-cat-memory sourced — grok.md 当前状态节的真实生产事故记录"
+
+  - id: NQ-02
+    context: "写记忆条目的时候，要不要把整个调研排查的完整过程都记进主消息？"
+    expected_note: N-kimi-writing-discipline
+    note: "real-cat-memory sourced — kimi.md 已关闭决策"
+
+  - id: NQ-03
+    context: "别的猫在群里聊天讨论，kimi 没被 @ 到，要不要主动插话回应？"
+    expected_note: N-kimi-mention-only
+    note: "real-cat-memory sourced — kimi.md 行为偏好"
+
+  - id: NQ-04
+    context: "调研输出里出现了 cite:turn 这种奇怪的内部标记，要怎么处理？"
+    expected_note: N-kimi-citation-cleanup
+    note: "real-cat-memory sourced — kimi.md 环境 gotcha"
+
+  - id: NQ-05
+    context: "sticker-shop 站点的 DNS 和 Cloudflare token 之前是怎么配置切换的？"
+    expected_note: N-kimi-cloudflare-dns
+    note: "real-cat-memory sourced — kimi.md 环境 gotcha"
+
+  - id: NQ-06
+    context: "有人建议把 Clowder 改造成单 repo 那种 AGENTS.md + docs/versions 结构，要不要跟进？"
+    expected_note: N-opus45-no-single-repo-structure
+    note: "real-cat-memory sourced — opus-45.md 已关闭决策"
+
+  - id: NQ-07
+    context: "要给铲屎官汇报一大堆条目，用什么格式呈现比较合适？"
+    expected_note: N-opus45-table-format
+    note: "real-cat-memory sourced — opus-45.md 行为偏好"
+
+  - id: NQ-08
+    context: "回复铲屎官一段技术内容之后，还需要额外加点什么吗？"
+    expected_note: N-opus45-plain-summary
+    note: "real-cat-memory sourced — opus-45.md 行为偏好"
+
+  - id: NQ-09
+    context: "内部要做一次可逆的灰度测试，需要每次都先等铲屎官点头吗？"
+    expected_note: N-opus45-autonomy-scope
+    note: "real-cat-memory sourced — opus-45.md 行为偏好"
+
+  - id: NQ-10
+    context: "要把一个工程任务派给 Codex，派工的时候要注意写清楚什么？"
+    expected_note: N-opus45-codex-delegation
+    note: "real-cat-memory sourced — opus-45.md 环境 gotcha"
+
+  - id: NQ-11
+    context: "Pi 这种轻量对话 agent 要不要默认加载完整的历史上下文文档？"
+    expected_note: N-pi-lightweight-no-heavy-context
+    note: "real-cat-memory sourced — pi.md 已关闭决策"
+
+  - id: NQ-12
+    context: "轻量 agent 接到一个需要改代码、复杂调试的工程任务，应该怎么处理？"
+    expected_note: N-pi-handoff-to-engineering
+    note: "real-cat-memory sourced — pi.md 环境 gotcha"
+
+  - id: NQ-13
+    context: "旧货站点商品图同步的时候，素材路径读取上有什么已知的坑？"
+    expected_note: N-gpt52-legacy-sync-gotcha
+    note: "real-cat-memory sourced — gpt52.md 最近验证"
+
+  - id: NQ-14
+    context: "记忆条目发生冲突的时候，要不要按时间自动让旧的那条失效？"
+    expected_note: N-f163-conflict-not-time
+    note: "real-docs-history sourced — docs/features/F163-memory-entropy-reduction.md:71"
+
+  - id: NQ-15
+    context: "每轮都会变化的判定信息，应该放进 system 静态前缀还是队尾 meta 块？"
+    expected_note: N-adr024-volatile-tail
+    note: "real-docs-history sourced — docs/decisions/024-kv-cache-friendly-context-layout.md:113"

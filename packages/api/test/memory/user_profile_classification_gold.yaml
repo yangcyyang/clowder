@@ -1,0 +1,178 @@
+# 批次 1 F-A 评测尺: USER.md 晋级分类准确率 Gold Set
+#
+# 背景: docs/research/memory-absorption.md §4 批次 1 —— "USER.md 候选队列准确率
+# (清单第 3 条依赖此)"。UserProfilePromotionGate.ts 恒为 enforce 档, 全部写入都
+# 经 evaluateMemoryPromotion (AgentMemoryPromotionGate.ts:453) 这张确定性规则表
+# 判定 promote/candidate/hold/skip —— 规则表是确定性的, 天然适合做金测
+# (给定输入 -> 唯一期望输出), 不需要真实语料, 但每条用例都对应 evaluateMemoryPromotion
+# 文档注释里列出的 7 步判定分支之一 (见该文件顶部 "Decision order" 注释)。
+#
+# 覆盖范围 (12 条, 每条标 rule 对应 evaluateMemoryPromotion 的判定步骤):
+#   1 session-temp skip
+#   2 duplicate skip (对生产 USER.md 内容去重 / 对候选队列去重各一条)
+#   3 closed-decision hold (含"试图用户 fast-track 强行覆盖已关闭决策仍被 hold"一条)
+#   4 user-stated fast-track promote (含无冲突 / 有 port 冲突两种)
+#   5 fact/preference 冲突 hold (port 一条, brevity 一条)
+#   6 low-confidence skip
+#   7 candidate (默认队列: fact 一条, preference 一条)
+#
+# 运行方式: test/memory/user-profile-classification-eval.test.js 直接把每条
+# `input` 喂给生产代码 evaluateMemoryPromotion() (零 mock、零改写), 断言
+# `expected` 里声明的字段全部吻合, 汇总"分类准确率" = 全部吻合的用例数 / 总用例数。
+
+cases:
+  - id: UPC-01
+    rule: "1. session-temp"
+    input:
+      candidateText: "这次对话里我们临时约定用中文回复，仅本次会话有效"
+      existingMemory: ""
+    expected:
+      action: skip
+      skipReason: session_temp
+
+  - id: UPC-02
+    rule: "2. duplicate (vs durable USER.md)"
+    input:
+      candidateText: "铲屎官偏好回复简短，不要长篇大论"
+      existingMemory: |
+        # 铲屎官画像
+
+        ## 偏好
+
+        - [2026-07-01] 铲屎官偏好回复简短，不要长篇大论
+
+        ## 硬约束
+
+        ## 账号级事实
+    expected:
+      action: skip
+      skipReason: duplicate
+
+  - id: UPC-03
+    rule: "2. duplicate (vs pending candidate queue)"
+    input:
+      candidateText: "用户所有项目统一使用 pnpm 管理依赖"
+      existingMemory: ""
+      queuedContents:
+        - "用户所有项目统一使用 pnpm 管理依赖"
+    expected:
+      action: skip
+      skipReason: duplicate
+
+  - id: UPC-04
+    rule: "3. closed-decision hold (no fast-track attempt)"
+    input:
+      candidateText: "手动重跑断更期间的推特采集任务"
+      existingMemory: |
+        # grok 记忆
+
+        ## 已关闭决策（别再提了）
+
+        - 不手动重跑断更期间的推特采集任务，等自动巡检恢复。
+    expected:
+      action: hold
+      conflictKind: closed-decision
+      conflictFlagged: true
+
+  - id: UPC-05
+    rule: "3. closed-decision hold WINS even over an explicit user fast-track attempt"
+    input:
+      candidateText: "手动重跑断更期间的推特采集任务"
+      userMessageText: "请记住：手动重跑断更期间的推特采集任务"
+      existingMemory: |
+        # grok 记忆
+
+        ## 已关闭决策（别再提了）
+
+        - 不手动重跑断更期间的推特采集任务，等自动巡检恢复。
+    expected:
+      action: hold
+      conflictKind: closed-decision
+      conflictFlagged: true
+
+  - id: UPC-06
+    rule: "4. user-stated fast-track promote, no conflict"
+    input:
+      candidateText: "以后周报默认发给我和运营同事两个人"
+      userMessageText: "记住：以后周报默认发给我和运营同事两个人"
+      existingMemory: |
+        # 铲屎官画像
+
+        ## 账号级事实
+
+        - [2026-07-01] 铲屎官在杭州
+    expected:
+      action: promote
+      reviewer: user
+
+  - id: UPC-07
+    rule: "4. user-stated fast-track promote, WITH port conflict recorded (user directive still wins)"
+    input:
+      candidateText: "把端口改成 3005"
+      userMessageText: "请记住：把端口改成 3005"
+      existingMemory: |
+        # 铲屎官画像
+
+        ## 硬约束
+
+        - [2026-07-01] 服务默认端口 3003
+    expected:
+      action: promote
+      reviewer: user
+      conflictKind: fact
+      conflictKey: port
+
+  - id: UPC-08
+    rule: "5. fact conflict (port) hold — not user-stated"
+    input:
+      candidateText: "服务这次端口改成了 3005，注意更新"
+      existingMemory: |
+        # 铲屎官画像
+
+        ## 硬约束
+
+        - [2026-07-01] 服务默认端口 3003
+    expected:
+      action: hold
+      conflictKind: fact
+      conflictKey: port
+
+  - id: UPC-09
+    rule: "5. preference conflict (brevity) hold — not user-stated"
+    input:
+      candidateText: "以后请给详细报告，把内容都写全"
+      existingMemory: |
+        # 铲屎官画像
+
+        ## 偏好
+
+        - [2026-07-01] 消息回复要简短
+    expected:
+      action: hold
+      conflictKind: preference
+      conflictKey: brevity
+
+  - id: UPC-10
+    rule: "6. low-confidence unsourced guess skip"
+    input:
+      candidateText: "大概这个项目可能默认用 TypeScript 严格模式"
+      existingMemory: ""
+    expected:
+      action: skip
+      skipReason: low_confidence
+
+  - id: UPC-11
+    rule: "7. candidate (default) — clean fact, medium confidence"
+    input:
+      candidateText: "项目 API 服务运行在 3004 端口，前端运行在 3003 端口"
+      existingMemory: ""
+    expected:
+      action: candidate
+
+  - id: UPC-12
+    rule: "7. candidate (default) — clean preference, medium confidence"
+    input:
+      candidateText: "以后汇报默认使用中文，语气可以随意一些"
+      existingMemory: ""
+    expected:
+      action: candidate
