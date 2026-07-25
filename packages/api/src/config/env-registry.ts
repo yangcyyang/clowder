@@ -2152,6 +2152,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
     restartRequired: true,
   },
+  {
+    name: 'CLOWDER_LIBRARY_REBUILD_HOURS',
+    defaultValue: '24',
+    description:
+      'F-H 知识库运维闭环：LibraryRebuildScheduler 按此小时数周期性对所有只读库集合（readOnly:true，目前即 Obsidian 挂载，如 domain:orbitos-knowledge）自动执行与手动 POST /api/library/:collectionId/rebuild 相同的增量重建（不阻塞请求，进程内 .unref() 定时器）。置 "0" 关闭自动重建，仅保留手动触发。非正数或非法值一律回退默认 24。改值无需重启——每次内部 15 分钟 tick 都会重新读取该值。',
+    category: 'evidence',
+    sensitive: false,
+    runtimeEditable: true,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */

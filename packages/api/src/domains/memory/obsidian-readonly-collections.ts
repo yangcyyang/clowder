@@ -68,7 +68,15 @@ function parseRootEntry(entry: string): { id?: string; root: string } {
     validateCollectionId(maybeId);
     return { id: maybeId, root };
   } catch {
-    return { root: stripQuotes(entry) };
+    // Bug fix: the id half of "id=path" failed validation (e.g. non-ASCII or
+    // digit-leading name like "domain:400知识库"). Fall back to the already-
+    // split `root` (path after "="), NOT the raw `entry` — the raw entry
+    // still has the invalid "id=" prefix glued to the front, which almost
+    // never resolves to an existing directory, so the whole collection was
+    // silently dropped (isExistingDirectory() false → skipped, no error).
+    // Falling back to `root` lets allocateId() derive a usable ascii-slug id
+    // from the path's basename instead of losing the collection entirely.
+    return { root };
   }
 }
 

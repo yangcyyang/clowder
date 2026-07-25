@@ -20,6 +20,7 @@ import type {
 import { resolveEmbedConfig } from './interfaces.js';
 import { KnowledgeResolver } from './KnowledgeResolver.js';
 import { LibraryCatalog } from './LibraryCatalog.js';
+import { LibraryRebuildScheduler } from './LibraryRebuildScheduler.js';
 import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
 import { loadObsidianReadonlyCollections } from './obsidian-readonly-collections.js';
@@ -52,6 +53,8 @@ export interface MemoryServices {
   collectionStores?: Map<string, IEvidenceStore>;
   /** F186 Phase D: Data directory for external collection persistence */
   dataDir?: string;
+  /** F-H batch 0: periodic auto-rebuild timer for read-only library collections (already started) */
+  libraryRebuildScheduler?: LibraryRebuildScheduler;
 }
 
 export interface MemoryConfig {
@@ -220,6 +223,15 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore, catalog, stores });
 
+  // F-H batch 0, item 1: periodic auto-rebuild for read-only library collections
+  // (Obsidian vault mounts). Independent of Redis — operates purely on the
+  // in-process catalog/stores just built above, so it's safe to start
+  // unconditionally here rather than from index.ts's Redis-gated block.
+  // Gated by env CLOWDER_LIBRARY_REBUILD_HOURS (default 24h, 0=off); the
+  // timer itself is a cheap no-op each tick when disabled.
+  const libraryRebuildScheduler = new LibraryRebuildScheduler({ catalog, stores });
+  libraryRebuildScheduler.start();
+
   return {
     evidenceStore: store,
     store,
@@ -236,5 +248,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     catalog,
     collectionStores: stores,
     dataDir,
+    libraryRebuildScheduler,
   };
 }
