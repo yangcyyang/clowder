@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ReactionQuickPick {
   emoji: string;
@@ -172,7 +173,18 @@ export function MessageContextMenu({
     }
   }
 
-  return (
+  // Portal straight to document.body (Raft parity + containing-block safety): `position: fixed`
+  // is only viewport-relative when there's no transformed/filtered/contain-ing ancestor between
+  // this node and the initial containing block. Surfaces like InlineThreadPanel wrap their
+  // content in a `transform`-animated shell (see .thread-panel-motion in globals.css) for the
+  // slide-in/out transition — any non-`none` transform value (even `translateX(0)`) makes that
+  // ancestor the containing block for fixed descendants, so clientX/clientY-based coordinates
+  // land relative to the panel's box instead of the viewport and the menu renders far off to the
+  // side. Rendering via a portal at document.body sidesteps any ancestor's containing-block games
+  // entirely, regardless of which surface opened the menu.
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
       <div className="fixed inset-0 z-[9998]" onClick={onClose} aria-hidden="true" />
       <div
@@ -246,6 +258,7 @@ export function MessageContextMenu({
           </>
         )}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

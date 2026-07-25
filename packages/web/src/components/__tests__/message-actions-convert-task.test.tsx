@@ -79,8 +79,10 @@ describe('MessageActions convert to task', () => {
     });
   }
 
+  // MessageContextMenu portals to document.body (see MessageContextMenu.tsx) so it can't be
+  // mis-positioned by a transformed ancestor — query document.body, not the local `container`.
   function findConvertMenuItem() {
-    return Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+    return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
       (button) => button.textContent === 'Convert to Task',
     );
   }

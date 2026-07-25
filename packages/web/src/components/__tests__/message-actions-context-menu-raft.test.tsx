@@ -94,8 +94,12 @@ describe('MessageActions — Raft-parity context menu wiring', () => {
     });
   }
 
+  // MessageContextMenu portals to document.body (see MessageContextMenu.tsx) so its own
+  // containing block is never hijacked by a transformed ancestor (e.g. InlineThreadPanel's
+  // .thread-panel-motion slide animation) — query document.body here, not `container`, since
+  // the menu no longer lives inside the component's own subtree.
   function findMenuItem(label: string) {
-    return Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+    return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
       (button) => button.textContent === label,
     );
   }
@@ -190,7 +194,7 @@ describe('MessageActions — Raft-parity context menu wiring', () => {
       json: async () => ({ reactions: [{ emoji: '👍', users: ['user-1'], updatedAt: 1 }] }),
     });
     await openContextMenu();
-    const reactionGroup = container.querySelector('[role="group"]');
+    const reactionGroup = document.body.querySelector('[role="group"]');
     expect(reactionGroup?.textContent).toContain('👍');
 
     const thumbButton = Array.from(reactionGroup?.querySelectorAll('button') ?? []).find(
