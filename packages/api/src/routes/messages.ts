@@ -833,10 +833,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }
 
         // Decorative task-card judgment only — never gates routing above.
+        // docs/prd/task-creation-raft-alignment.md §"实施修正"(2026-07-25): this is
+        // the second classifyWorkAdmission call site (introduced in batch 2, commit
+        // 6ece9b09) — since thread-first routing went default-on for all channels
+        // (CLOWDER_THREAD_FIRST_DEFAULT=1), this had quietly become the PRIMARY
+        // auto-task-creation entrance, entirely independent of the env gate below.
+        // Gated here by the same isAutoTaskThreadRoutingEnabled switch so both
+        // classifyWorkAdmission call sites share one kill switch. asTask (explicit
+        // "As Task" declaration) is never gated — it forces admission regardless.
         if (opts.taskStore) {
           const cardDecision = asTask
             ? forceCreateFromMessage({ content, targetCatIds: targetCats })
-            : classifyWorkAdmission({ content, targetCatIds: targetCats });
+            : isAutoTaskThreadRoutingEnabled(resolvedThreadId)
+              ? classifyWorkAdmission({ content, targetCatIds: targetCats })
+              : { kind: 'reply_only' as const, reason: 'rollout_or_dependencies_unavailable' };
           if (cardDecision.kind !== 'reply_only') {
             try {
               const admitted = await admitWorkMessage({

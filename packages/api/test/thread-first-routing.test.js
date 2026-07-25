@@ -206,7 +206,17 @@ describe('F194 §3 step 2: thread-first routing', () => {
     await app.close();
   });
 
-  test('ON: an action-shaped @mention also gets a decorative task card, attached to the SAME anchor thread (no duplicate branch)', async () => {
+  // docs/prd/task-creation-raft-alignment.md §"实施修正"(2026-07-25): this call site
+  // (messages.ts ~836-845, "decorative task-card judgment") turned out to be the
+  // PRIMARY classifyWorkAdmission entrance once thread-first went default-on for
+  // all channels — the original single test below asserted it always fires ("ON: an
+  // action-shaped @mention also gets a decorative task card..."). It is now gated by
+  // isAutoTaskThreadRoutingEnabled, the same switch as the legacy autoTaskDecision
+  // path. Three states, matching the gate's own three branches:
+  //   ① default (both envs unset) → no card, routing (anchor branch + execution) unaffected
+  //   ② CLOWDER_AUTO_TASK_THREAD_ROUTING=true (global legacy fallback) → card restored
+  //   ③ CLOWDER_AUTO_TASK_THREAD_THREADS matches this thread (per-channel fallback) → card restored
+  test('① OFF (default): an action-shaped @mention in a thread-first channel gets no decorative task card — anchor-branch routing is unaffected', async () => {
     const taskStore = new TaskStore();
     const threadStore = new ThreadStore();
     const messageStore = new MessageStore();
@@ -226,7 +236,40 @@ describe('F194 §3 step 2: thread-first routing', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     const tasks = await taskStore.listByThread(channel.id);
-    assert.equal(tasks.length, 1, 'the classifier still fires as a decorative task-card judgment');
+    assert.equal(tasks.length, 0, '平台分类器默认退出任务创建 — no decorative task card by default');
+
+    const branchedEvents = events.filter((e) => e.event === 'thread_branched');
+    assert.equal(branchedEvents.length, 1, 'anchor-branch routing itself is untouched by the task-card gate');
+    const anchorThreadId = branchedEvents[0].payload.newThreadId;
+
+    assert.equal(routeCalls.length, 1);
+    assert.equal(routeCalls[0][2], anchorThreadId, 'execution still targets the anchor branch even with no task card');
+    assert.equal(res.statusCode, 200);
+    await app.close();
+  });
+
+  test('② legacy fallback ON (CLOWDER_AUTO_TASK_THREAD_ROUTING=true): decorative task card restored, attached to the SAME anchor thread (no duplicate branch)', async () => {
+    process.env.CLOWDER_AUTO_TASK_THREAD_ROUTING = 'true';
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const channel = await threadStore.create('alice', '频道 D2');
+    await threadStore.updateRoutingPolicy(channel.id, { v: 1, mode: 'thread-first' });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: channel.id, content: '@opus 修复登录超时' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const tasks = await taskStore.listByThread(channel.id);
+    assert.equal(tasks.length, 1, 'global legacy-fallback env restores the classifier decorative task card');
     assert.equal(tasks[0].ownerCatId, 'opus');
 
     const branchedEvents = events.filter((e) => e.event === 'thread_branched');
@@ -238,6 +281,40 @@ describe('F194 §3 step 2: thread-first routing', () => {
 
     // Response must not short-circuit with the legacy "task_created, no invocation" 202 —
     // routing already happened above and is unaffected by ownership.
+    assert.equal(res.statusCode, 200);
+    await app.close();
+  });
+
+  test('③ legacy fallback per-channel (CLOWDER_AUTO_TASK_THREAD_THREADS matches this thread): decorative task card restored only for the whitelisted channel', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const channel = await threadStore.create('alice', '频道 D3');
+    await threadStore.updateRoutingPolicy(channel.id, { v: 1, mode: 'thread-first' });
+    process.env.CLOWDER_AUTO_TASK_THREAD_THREADS = channel.id;
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: channel.id, content: '@opus 修复登录超时' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const tasks = await taskStore.listByThread(channel.id);
+    assert.equal(tasks.length, 1, 'per-channel whitelist restores the decorative task card for this thread only');
+    assert.equal(tasks[0].ownerCatId, 'opus');
+
+    const branchedEvents = events.filter((e) => e.event === 'thread_branched');
+    assert.equal(branchedEvents.length, 1, 'only one branch is ever created for this message');
+    assert.equal(tasks[0].taskThreadId, branchedEvents[0].payload.newThreadId);
+
+    assert.equal(routeCalls.length, 1);
+    assert.equal(routeCalls[0][2], tasks[0].taskThreadId);
     assert.equal(res.statusCode, 200);
     await app.close();
   });

@@ -56,9 +56,15 @@ const apiSecurityEnv = {
   ANTIGRAVITY_AUTO_APPROVE: 'false',
   // 票C: memory promotion review gate mode (off|shadow|enforce).
   CAT_CAFE_MEMORY_PROMOTION_MODE: 'shadow',
-  // F194: auto task+thread creation on admitted work messages (live on all channels).
-  CLOWDER_AUTO_TASK_THREAD_ROUTING: 'true',
-  CLOWDER_AUTO_TASK_THREAD_THREADS: 'thread_mrqr35sjajks9qlg,thread_mrrmu5i66vxj55ia',
+  // F194: legacy classifier auto task+thread creation — retired 2026-07-25 per
+  // docs/prd/task-creation-raft-alignment.md (platform classifier exits task creation;
+  // task creation is now human-explicit As Task/Convert-to-Task, or a cat's own
+  // cat_cafe_task_claim). Flip back to 'true' + restart to restore the old behavior.
+  CLOWDER_AUTO_TASK_THREAD_ROUTING: 'false',
+  // Cleared 2026-07-25 (docs/prd/task-creation-raft-alignment.md): the two thread ids
+  // here were F194 early-canary leftovers, not a deliberate 铲屎官 config — removed as
+  // part of the same PRD flip rather than left as unexplained per-channel legacy grants.
+  CLOWDER_AUTO_TASK_THREAD_THREADS: '',
   CLOWDER_THREAD_ADDRESS_ROUTING: 'false',
   CLOWDER_THREAD_ADDRESS_THREADS: 'thread_mrqr35sjajks9qlg',
   // 理智线全开批 (2026-07-21): the red-zone forced-seal itself has been running live in

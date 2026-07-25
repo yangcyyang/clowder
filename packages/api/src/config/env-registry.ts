@@ -2132,6 +2132,26 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: true,
   },
+  {
+    name: 'CLOWDER_AUTO_TASK_THREAD_ROUTING',
+    defaultValue: 'false（2026-07-25 起）',
+    description:
+      'legacy 回退开关：默认 false（2026-07-25 PRD docs/prd/task-creation-raft-alignment.md 拍板——平台分类器退出任务自动创建，建任务只剩两条路：人类显式声明 As Task/右键 Convert to Task，或猫自主判断后 cat_cafe_task_claim 认领）。置 true 恢复旧的 classifyWorkAdmission 自动建任务行为，全局生效——同时门控 messages.ts 里两个调用点：非 thread-first 消息的 autoTaskDecision 判定，以及 thread-first 消息里"decorative task-card"判定（批次2 引入；thread-first 于 2026-07-24 default 全频道开启后，这条一度是实际的主入口，2026-07-25 补齐同一门控，详见 PRD"实施修正"节）。改值需重启 api 才生效。频道级回退见 CLOWDER_AUTO_TASK_THREAD_THREADS。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CLOWDER_AUTO_TASK_THREAD_THREADS',
+    defaultValue: '(未设置 → 关闭)',
+    description:
+      'legacy 回退开关（按频道白名单）：逗号分隔的 thread id，命中的频道单独恢复旧的分类器自动建任务行为，无需翻全局 CLOWDER_AUTO_TASK_THREAD_ROUTING。2026-07-25 PRD task-creation-raft-alignment 拍板后默认清空——此前遗留的两个 F194 早期金丝雀 thread id 已随本次改动移除（非铲屎官刻意配置，属灰度残留）。改值需重启 api 才生效。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */
