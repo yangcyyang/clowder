@@ -20,6 +20,10 @@ import {
 import { getCatModel } from '../../../../config/cat-models.js';
 import { resolveWithLocalOverlay } from '../../../../utils/local-override.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
+// F-C（批次 2，PRD-memory-upgrade.md）: reused, not forked — same frontmatter
+// parser + expiry check the Memory-layer promotion gate exports for
+// notes/candidates documents (AgentMemoryPromotionGate.ts). No new algorithm.
+import { isMemoryFrontmatterExpired, parseMemoryFrontmatter } from '../agents/memory/AgentMemoryPromotionGate.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
@@ -716,14 +720,29 @@ const AGENT_MEMORY_INDEX_MAX_CHARS = AGENT_MEMORY_INDEX_MAX_TOKENS * 4;
  * v2-only: full-text index injection (Raft 对齐："索引全量注入，细节按需读文件").
  * Only reached via the layout:'v2' branch of buildAgentMemoryLines — the v1
  * branch below is byte-frozen and never calls this.
+ *
+ * F-C（批次 2，PRD-memory-upgrade.md）: 过期条目在索引层渲染时跳过。实测确认
+ * （2026-07-25）notes/{catId}/ 目前没有任何读取/注入机制（AgentMemoryStore.ts
+ * 头部注释："不新增读取机制"——猫用文件读取工具按需展开，从不进 prompt），批次
+ * 2-D 的既定设计也是如此；本次不新增 notes/ 读取管道（那是 F-D/批次 3 的范围）。
+ * 这里能动、且真实存在的渲染点只有这一个：整份索引文件（`.cat-cafe/memory/
+ * {catId}.md`）作为单一文档的 frontmatter 过期检查——复用
+ * parseMemoryFrontmatter/isMemoryFrontmatterExpired（AgentMemoryPromotionGate.ts），
+ * 不新写检测逻辑。存量索引文件没有 frontmatter（实测：grok.md/kimi.md 等生产
+ * 文件均以 `# xxx 记忆` 开头，不以 `---` 起始），因此
+ * parseMemoryFrontmatter 对它们返回 `frontmatter: null`，本变更对现状零字节
+ * 影响；只有未来的索引/notes 文档显式带上过期的 `invalid_at` 时才会被跳过。
  */
 function buildAgentMemoryIndexLines(agentMemoryContext?: string | null): string[] {
   const raw = (agentMemoryContext ?? '').trim();
   if (!raw) return [];
-  const overBudget = roughTokenEstimate(raw) > AGENT_MEMORY_INDEX_MAX_TOKENS;
+  const { frontmatter, body: parsedBody } = parseMemoryFrontmatter(raw);
+  if (isMemoryFrontmatterExpired(frontmatter)) return [];
+  const content = frontmatter ? parsedBody.trim() : raw;
+  const overBudget = roughTokenEstimate(content) > AGENT_MEMORY_INDEX_MAX_TOKENS;
   const body = overBudget
-    ? `${raw.slice(0, AGENT_MEMORY_INDEX_MAX_CHARS)}\n\n[记忆索引超出 ${AGENT_MEMORY_INDEX_MAX_TOKENS} tokens 预算，已截断——建议整理为两层结构：本文件收窄为索引（Role / Key Knowledge 指针 / Active Context / Memories 链接），细节移到 \`.cat-cafe/memory/notes/{catId}/\` 按需读取。]`
-    : raw;
+    ? `${content.slice(0, AGENT_MEMORY_INDEX_MAX_CHARS)}\n\n[记忆索引超出 ${AGENT_MEMORY_INDEX_MAX_TOKENS} tokens 预算，已截断——建议整理为两层结构：本文件收窄为索引（Role / Key Knowledge 指针 / Active Context / Memories 链接），细节移到 \`.cat-cafe/memory/notes/{catId}/\` 按需读取。]`
+    : content;
   return [
     '',
     '## 跨 Session 记忆（持久化）',

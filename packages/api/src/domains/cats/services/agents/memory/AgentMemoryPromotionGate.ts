@@ -82,6 +82,54 @@ export interface MemoryPromotionConflict {
   readonly flagged: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// F-B（批次 2，PRD-memory-upgrade.md）: hold 出口子建议——影子模式
+// ---------------------------------------------------------------------------
+
+/**
+ * 抄 Mem0 的"内容级"合并/退休语义（不是抄提示词原文，见
+ * docs/research/memory-absorption.md §2 第 1 条）：hold 分支细分两个内容级子
+ * 建议，**只在 hold 出口附加，不改变 evaluateMemoryPromotion 的 7 步判定表本
+ * 体、不改变 action 的 promote/candidate/hold/skip 归类**。
+ *
+ *  - `mergeable`: 与既有条目 topicSimilarity 高但不矛盾——生成合并后的建议
+ *    文案，人审时可一键接受（旧行 + 新事实揉成一句更完整的话）。
+ *  - `supersede`: 冲突具有"重开/替换"性质——建议旧条目失效，附带 F-C 的
+ *    结构化字段（`invalid_at`/`superseded_by`），供人审批准后写回旧条目的
+ *    frontmatter；本函数**只生成建议，绝不自动写入** invalid_at。
+ */
+export interface MemoryHoldMergeSuggestion {
+  readonly kind: 'mergeable';
+  /** The existing durable-memory line the candidate overlaps with. */
+  readonly existingLine: string;
+  /** topicSimilarity(candidateText, existingLine) that triggered this classification. */
+  readonly similarity: number;
+  /** Suggested merged bullet text — human reviews/edits before accepting. */
+  readonly mergedText: string;
+}
+
+export interface MemoryHoldSupersedeSuggestion {
+  readonly kind: 'supersede';
+  /** The existing durable-memory line that should be marked invalid once approved. */
+  readonly staleLine: string;
+  readonly similarity: number;
+  /**
+   * F-C（批次 2）: structured patch a human reviewer applies to the stale
+   * line's frontmatter once they approve — never auto-applied (conflict-
+   * triggered, human-confirmed, same F163 discipline as
+   * F163-memory-entropy-reduction.md:171). `superseded_by` is left as a
+   * human-fillable placeholder: the candidate's own durable id doesn't exist
+   * yet at evaluation time (only assigned when the candidate record is
+   * appended to the queue).
+   */
+  readonly proposedFrontmatterPatch: {
+    readonly invalid_at: string;
+    readonly superseded_by: string;
+  };
+}
+
+export type MemoryHoldSuggestion = MemoryHoldMergeSuggestion | MemoryHoldSupersedeSuggestion;
+
 export interface MemoryPromotionEvaluation {
   readonly action: MemoryPromotionAction;
   readonly sourceGrade: MemorySourceGrade;
@@ -99,6 +147,13 @@ export interface MemoryPromotionEvaluation {
    * purely surfaced for shadow-mode observability and human review.
    */
   readonly lintWarnings: readonly string[];
+  /**
+   * F-B（批次 2）: only set when action === 'hold'. Shadow-mode content-level
+   * suggestion (mergeable | supersede) — persisted alongside the evaluation on
+   * the candidate queue entry (MemoryCandidateRecord.evaluation.suggestion),
+   * never auto-applied.
+   */
+  readonly suggestion?: MemoryHoldSuggestion;
 }
 
 export interface MemoryPromotionInput {
@@ -116,6 +171,13 @@ export interface MemoryPromotionInput {
    * only affects lintWarnings' "unclassified" hint).
    */
   readonly frontmatter?: MemoryFrontmatter | null;
+  /**
+   * F-B（批次 2）: epoch ms used to timestamp hold-supersede suggestions'
+   * `proposedFrontmatterPatch.invalid_at` — injected for deterministic testing;
+   * defaults to `Date.now()` in evaluateMemoryPromotion. Never affects the
+   * action/skipReason/conflict decision, only the suggestion payload.
+   */
+  readonly now?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +203,21 @@ export interface MemoryFrontmatter {
   readonly type?: MemoryFrontmatterType;
   /** Required (by convention, warn-only) when type === 'feedback'. */
   readonly why?: string;
+  /**
+   * F-C（批次 2，PRD-memory-upgrade.md）：冲突触发的失效字段扩展——对齐 F163
+   * knowledge-layer schema（`valid_from`/`invalid_at`/`replaced_by`，
+   * docs/features/F163-memory-entropy-reduction.md:70-76）到 Memory 层的
+   * notes/candidates frontmatter。字段名沿用调研文档既定命名（
+   * docs/research/memory-absorption.md §2 第 4 条用 `superseded_by`；F163 原文
+   * 用 `replaced_by`——同一语义，两处历史命名不同，本次落地遵照 PRD/调研文档）。
+   * 全部可选，且**冲突触发才写，不按时间自动过期**（F163 纪律："时间是陪审员
+   * 不是法官"，F163-memory-entropy-reduction.md:171）——缺省 = 永远有效，向后
+   * 兼容存量 notes/candidates 文档（零字段变更即可继续工作，见
+   * `isMemoryFrontmatterExpired` 的 fail-open 语义）。
+   */
+  readonly valid_from?: string;
+  readonly invalid_at?: string;
+  readonly superseded_by?: string;
   readonly [key: string]: unknown;
 }
 
@@ -150,6 +227,24 @@ export interface ParsedMemoryDocument {
 }
 
 const MEMORY_FRONTMATTER_TYPES: ReadonlySet<string> = new Set(['user', 'feedback', 'project', 'reference']);
+
+// F-C（批次 2）: light validation for the date-shaped fields — accepts any
+// `YYYY-MM-DD` prefixed string (optionally with a time/offset suffix), same
+// looseness as the rest of this file's date-in-string conventions (no strict
+// calendar validation; malformed values are dropped rather than throwing).
+const ISO_DATE_PREFIX_RE = /^\d{4}-\d{2}-\d{2}/;
+
+function parseFrontmatterDateField(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed && ISO_DATE_PREFIX_RE.test(trimmed) ? trimmed : undefined;
+}
+
+function parseFrontmatterStringField(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 
 /**
  * Parse optional YAML frontmatter (`---\n...\n---\n`) from a memory/candidate/
@@ -172,16 +267,37 @@ export function parseMemoryFrontmatter(raw: string): ParsedMemoryDocument {
     const typeRaw = typeof record.type === 'string' ? record.type.trim() : undefined;
     const type = typeRaw && MEMORY_FRONTMATTER_TYPES.has(typeRaw) ? (typeRaw as MemoryFrontmatterType) : undefined;
     const why = typeof record.why === 'string' ? record.why.trim() : undefined;
+    // F-C（批次 2）: same explicit-assignment discipline as type/why above — an
+    // invalid raw value (wrong type, malformed date) must be overwritten to
+    // undefined, never left over from `...record`.
+    const valid_from = parseFrontmatterDateField(record.valid_from);
+    const invalid_at = parseFrontmatterDateField(record.invalid_at);
+    const superseded_by = parseFrontmatterStringField(record.superseded_by);
     return {
-      // Explicit `type`/`why` assignment (not conditional spread): an invalid raw
-      // `type` value (e.g. "banana") must be overwritten to undefined, not left
-      // over from `...record` — only the validated closed-set value survives.
-      frontmatter: { ...record, type, why },
+      frontmatter: { ...record, type, why, valid_from, invalid_at, superseded_by },
       body: raw.slice(endIndex + marker.length),
     };
   } catch {
     return { frontmatter: null, body: raw };
   }
+}
+
+/**
+ * F-C（批次 2）: 冲突触发失效检查——`invalid_at` 缺失、格式不可解析都一律判定
+ * "未过期"（fail-open，向后兼容：存量 notes/candidates/index 文档零字段变更即
+ * 可继续全量注入）。只有 `invalid_at` 存在且早于等于 `referenceMs` 时才判定过
+ * 期。不做任何时间驱动的自动衰减判断之外的事——是否标记 `invalid_at` 本身仍
+ * 由冲突检测 + 人审决定（F163 纪律，见 MemoryFrontmatter 文档注释）。
+ */
+export function isMemoryFrontmatterExpired(
+  frontmatter: MemoryFrontmatter | null | undefined,
+  referenceMs: number = Date.now(),
+): boolean {
+  const invalidAt = frontmatter?.invalid_at;
+  if (!invalidAt) return false;
+  const invalidMs = Date.parse(invalidAt);
+  if (Number.isNaN(invalidMs)) return false;
+  return invalidMs <= referenceMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +542,63 @@ function findBrevityConflict(candidate: string, existingMemory: string): MemoryP
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// F-B（批次 2）: hold 出口子建议 — mergeable vs supersede
+// ---------------------------------------------------------------------------
+
+/** topicSimilarity(candidate, conflict line) at/above this = "same entry, updated wording" → mergeable. */
+const HOLD_MERGE_SIMILARITY_THRESHOLD = 0.5;
+
+function buildMergedText(existingLine: string, candidate: string): string {
+  return `${existingLine}（更新：${candidate}）`;
+}
+
+/**
+ * 复用现有 findClosedDecisionConflict/findPortConflict/findBrevityConflict 已
+ * 产出的 MemoryPromotionConflict + 已导出的 topicSimilarity，不新增检测算法
+ * （docs/research/memory-absorption.md §2 第 1 条纪律）：
+ *
+ *  - `closed-decision` 冲突恒为 supersede：重开一个"已关闭决策"，语义上只能
+ *    "明确废止旧决策"，不存在"和旧决策揉成一句合并文案"的中间态——这也是
+ *    findClosedDecisionConflict 本身只在极性反转（真矛盾）时才触发的原因，
+ *    高 topicSimilarity 在这里恰恰是"同一句话被直接反着说一遍"，不是"值得合
+ *    并的换个说法"。
+ *  - `fact`/`preference` 冲突（port/brevity）按 topicSimilarity(candidate,
+ *    conflict.existingLine) 分流：相似度达到阈值，视为"同一条目的更新表述"
+ *    （建议合并成一句话）；相似度低则是结构上不同的两句话，合并会显得生硬，
+ *    走 supersede（旧行标记失效，新事实单独成行，引用 F-C 的
+ *    invalid_at/superseded_by 结构化字段）。
+ *
+ * 只生成建议文案/结构化 patch，绝不自动写入——影子纪律，人审决定。
+ */
+function buildHoldSuggestion(candidate: string, conflict: MemoryPromotionConflict, now: number): MemoryHoldSuggestion {
+  const proposedInvalidAt = new Date(now).toISOString();
+  const supersedeSuggestion = (staleLine: string, similarity: number): MemoryHoldSupersedeSuggestion => ({
+    kind: 'supersede',
+    staleLine,
+    similarity,
+    proposedFrontmatterPatch: {
+      invalid_at: proposedInvalidAt,
+      superseded_by: '<待人审批准后回填：本候选记录 id>',
+    },
+  });
+
+  if (conflict.kind === 'closed-decision') {
+    return supersedeSuggestion(conflict.existingLine, topicSimilarity(candidate, conflict.existingLine));
+  }
+
+  const similarity = topicSimilarity(candidate, conflict.existingLine);
+  if (similarity >= HOLD_MERGE_SIMILARITY_THRESHOLD) {
+    return {
+      kind: 'mergeable',
+      existingLine: conflict.existingLine,
+      similarity,
+      mergedText: buildMergedText(conflict.existingLine, candidate),
+    };
+  }
+  return supersedeSuggestion(conflict.existingLine, similarity);
+}
+
 function classifyContent(candidate: string): MemoryContentClass {
   if (SESSION_TEMP_RE.test(candidate)) return 'session-temp';
   if (PREFERENCE_RE.test(candidate)) return 'preference';
@@ -458,6 +631,9 @@ export function evaluateMemoryPromotion(input: MemoryPromotionInput): MemoryProm
   const hedged = HEDGING_RE.test(candidate) && !SOURCE_MARK_RE.test(candidate) && !userStated;
   const sourceGrade: MemorySourceGrade = userStated ? 'user-stated' : hedged ? 'model-guess' : 'observed-behavior';
   const confidence: MemoryConfidence = userStated ? 'high' : hedged ? 'low' : 'medium';
+  // F-B（批次 2）: only used to timestamp hold-supersede suggestions below —
+  // never read by the action/skipReason/conflict decision steps themselves.
+  const now = input.now ?? Date.now();
   // 批次 2-D 任务三: warn-only lint, computed once and carried by every return
   // path below via `...base` — never changes the action/skipReason decisions.
   const lintWarnings = lintMemoryWriteCandidate({ candidateText: candidate, frontmatter: input.frontmatter });
@@ -506,7 +682,13 @@ export function evaluateMemoryPromotion(input: MemoryPromotionInput): MemoryProm
   const closedConflict = findClosedDecisionConflict(candidate, input.existingMemory);
   if (closedConflict) {
     rules.push('conflict:closed-decision');
-    return { ...base, action: 'hold', conflict: closedConflict, rules };
+    return {
+      ...base,
+      action: 'hold',
+      conflict: closedConflict,
+      suggestion: buildHoldSuggestion(candidate, closedConflict, now),
+      rules,
+    };
   }
 
   // 4. Explicit user instruction fast-tracks (reviewer=user recorded).
@@ -528,12 +710,24 @@ export function evaluateMemoryPromotion(input: MemoryPromotionInput): MemoryProm
   const portConflict = findPortConflict(candidate, input.existingMemory);
   if (portConflict) {
     rules.push('conflict:port');
-    return { ...base, action: 'hold', conflict: portConflict, rules };
+    return {
+      ...base,
+      action: 'hold',
+      conflict: portConflict,
+      suggestion: buildHoldSuggestion(candidate, portConflict, now),
+      rules,
+    };
   }
   const brevityConflict = findBrevityConflict(candidate, input.existingMemory);
   if (brevityConflict) {
     rules.push('conflict:brevity');
-    return { ...base, action: 'hold', conflict: brevityConflict, rules };
+    return {
+      ...base,
+      action: 'hold',
+      conflict: brevityConflict,
+      suggestion: buildHoldSuggestion(candidate, brevityConflict, now),
+      rules,
+    };
   }
 
   // 6. Unsourced hedged guesses are dropped, not even queued.
