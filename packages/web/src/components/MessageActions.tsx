@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useMessageSelectionStore } from '@/stores/messageSelectionStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { buildMessageMarkdownQuote, resolveMessageAuthorLabel } from '@/utils/message-markdown';
 import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
 import { getDefaultReactionEmojis, hasUserReaction, toggleMessageReaction } from '@/utils/message-reactions';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageContextMenu } from './MessageContextMenu';
-import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { getMessageHref, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
   useToastStore.getState().addToast({
@@ -50,10 +52,15 @@ interface MessageActionsProps {
    * converted to a task — messages already inside a thread (relation-having
    * thread, e.g. a task/inline-reply branch) cannot be converted again, since
    * Raft-style threads forbid nesting. Defaults to true; ChatContainer passes
-   * `!currentThread?.relation` so branch threads viewed directly are covered
-   * even though InlineThreadPanel itself never wraps messages in MessageActions.
+   * `!currentThread?.relation` so branch threads viewed directly are covered.
+   * InlineThreadPanel.tsx passes `canConvertToTask={false}` explicitly for every
+   * message it renders (source-message copy + replies), since all of them live
+   * inside a branch thread by construction.
    */
   canConvertToTask?: boolean;
+  /** Cat display-name lookup for the "Copy Markdown" author header. Optional — falls back to
+   * the raw catId (or '你' for user messages) when not provided. */
+  getCatById?: (catId: string) => { displayName: string } | undefined;
 }
 
 export function MessageActions({
@@ -64,6 +71,7 @@ export function MessageActions({
   onPinMessage,
   onEditMessage,
   canConvertToTask = true,
+  getCatById,
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -72,6 +80,11 @@ export function MessageActions({
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const patchMessage = useChatStore((s) => s.patchMessage);
   const existingTask = useTaskStore((s) => s.tasks.find((task) => task.sourceMessageId === message.id));
+  const selection = useMessageSelectionStore((s) => ({ threadId: s.threadId, selectedIds: s.selectedIds }));
+  const startSelection = useMessageSelectionStore((s) => s.start);
+  const toggleSelection = useMessageSelectionStore((s) => s.toggle);
+  const isSelectingThread = selection.threadId === threadId;
+  const isSelected = isSelectingThread && selection.selectedIds.includes(message.id);
   const addTask = useTaskStore((s) => s.addTask);
 
   const isUser = message.type === 'user' && !message.catId;
@@ -184,6 +197,42 @@ export function MessageActions({
       duration: 1800,
     });
   }, [message, threadId]);
+
+  const handleCopyLink = useCallback(async () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const href = `${origin}${getMessageHref(threadId, message.id)}`;
+    try {
+      await navigator.clipboard.writeText(href);
+      useToastStore.getState().addToast({
+        type: 'success',
+        title: '链接已复制',
+        message: '打开后会自动定位并高亮这条消息',
+        duration: 1800,
+      });
+    } catch {
+      useToastStore.getState().addToast({ type: 'error', title: '复制失败', message: '请手动复制链接', duration: 2400 });
+    }
+  }, [message.id, threadId]);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    const author = resolveMessageAuthorLabel(message, getCatById);
+    const quote = buildMessageMarkdownQuote({ author, timestamp: message.timestamp, content: message.content });
+    try {
+      await navigator.clipboard.writeText(quote);
+      useToastStore.getState().addToast({ type: 'success', title: 'Markdown 已复制', message: '', duration: 1400 });
+    } catch {
+      useToastStore.getState().addToast({ type: 'error', title: '复制失败', message: '请手动复制内容', duration: 2400 });
+    }
+  }, [getCatById, message]);
+
+  const handleSelectMessage = useCallback(() => {
+    startSelection(threadId, message.id);
+  }, [message.id, startSelection, threadId]);
+
+  const handleToggleSelected = useCallback(() => {
+    toggleSelection(threadId, message.id);
+  }, [message.id, threadId, toggleSelection]);
+
   const handleReaction = useCallback(
     async (emoji: string) => {
       const userId = getUserId();
@@ -331,6 +380,13 @@ export function MessageActions({
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 
+  // Raft-parity quick-react row for the context menu — same emoji palette + toggle semantics
+  // as the hover-toolbar picker above, just surfaced as a top row inside the right-click menu.
+  const reactionsForMenu = getDefaultReactionEmojis().map((emoji) => ({
+    emoji,
+    active: hasUserReaction(message.extra?.reactions, emoji, getUserId()),
+  }));
+
   return (
     <div
       className="slock-message-frame group relative rounded-[var(--slock-radius-lg)] px-3 py-2 transition-shadow hover:ring-1 hover:ring-[var(--clowder-message-hover-ring)]"
@@ -340,6 +396,25 @@ export function MessageActions({
         setCtxMenu({ x: event.clientX, y: event.clientY });
       }}
     >
+      {isSelectingThread && (
+        <button
+          type="button"
+          onClick={handleToggleSelected}
+          role="checkbox"
+          aria-checked={isSelected}
+          aria-label={isSelected ? '取消选中此消息' : '选中此消息'}
+          className={`absolute -left-7 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-[var(--slock-radius-sm)] border transition-colors ${
+            isSelected
+              ? 'border-[var(--cafe-accent)] bg-[var(--cafe-accent)] text-[var(--cafe-accent-foreground)]'
+              : 'border-[var(--slock-border-color)] bg-[var(--cafe-surface)] text-transparent hover:border-[var(--cafe-accent)]'
+          }`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M3.5 8.5l3 3 6-7" />
+          </svg>
+        </button>
+      )}
+
       {children}
 
       {canAct && (
@@ -432,9 +507,13 @@ export function MessageActions({
         <MessageContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          messageId={message.id}
-          content={message.content}
           onClose={() => setCtxMenu(null)}
+          reactions={reactionsForMenu}
+          onReact={handleReaction}
+          onCopyLink={handleCopyLink}
+          onCopyMarkdown={handleCopyMarkdown}
+          onSelectMessage={handleSelectMessage}
+          saved={saved}
           onSave={handleSave}
           onConvertToTask={canConvertToTask ? handleConvertToTask : undefined}
           onShare={handleSharePlaceholder}

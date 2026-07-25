@@ -31,6 +31,18 @@ export function getThreadHref(threadId: string, prefix = ''): string {
   return `${normalizedPrefix}/thread/${encodeURIComponent(threadId)}`;
 }
 
+/**
+ * Deep link to a specific message within its thread — `?highlight=<messageId>` is the
+ * established convention this app already reads on load (see ChatContainer.tsx's
+ * consumeUrlMessageHighlight + useChatHistory.ts's `around` param, and the ad hoc copies of
+ * this exact string template in ActivityBar.tsx / GlobalSearchPage.tsx / ThreadSidebar.tsx /
+ * InlineThreadPanel.tsx's getViewInChannelHref). Centralized here so new callers (e.g. the
+ * message context menu's "Copy Link") don't reimplement the query-param format.
+ */
+export function getMessageHref(threadId: string, messageId: string, prefix = ''): string {
+  return `${getThreadHref(threadId, prefix)}?highlight=${encodeURIComponent(messageId)}`;
+}
+
 export function getThreadIdFromPathname(pathname: string, prefix = ''): string {
   const normalizedPrefix = normalizePrefix(prefix);
   if (!pathname || pathname === normalizedPrefix || pathname === `${normalizedPrefix}/`) return 'default';

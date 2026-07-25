@@ -74,6 +74,7 @@ import {
 } from './inline-thread-reply-state';
 import { KnowledgeCaptureModal } from './KnowledgeCaptureModal';
 import { MessageActions } from './MessageActions';
+import { MessageSelectionBar } from './MessageSelectionBar';
 import { MobileStatusSheet } from './MobileStatusSheet';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { QueuePanel } from './QueuePanel';
@@ -1122,6 +1123,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             onPinMessage={setPinnedMessage}
             onEditMessage={handleStartEditMessage}
             canConvertToTask={canConvertToTask}
+            getCatById={getCatById}
           >
             <ChatMessage
               message={msg}
@@ -1350,6 +1352,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   return (
     <TaskThreadActionsContext.Provider value={taskThreadActions}>
       <div ref={containerRef} className="flex h-full">
+        <MessageSelectionBar threadId={threadId} messages={messages} getCatById={getCatById} />
         {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
         {sidebarOpen && (
           <div className="md:hidden">

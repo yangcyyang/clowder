@@ -26,10 +26,21 @@ import { scrollToMessage } from '@/utils/scrollToMessage';
 import { getUserId } from '@/utils/userId';
 import { ChatMessage, shouldRenderChatMessage } from './ChatMessage';
 import { buildCatOptions, type CatOption, detectMenuTrigger } from './chat-input-options';
+import {
+  CVO_MODE_STORAGE_KEY,
+  isPromptPrefixId,
+  PROMPT_PREFIX_OPTIONS,
+  PROMPT_PREFIX_STORAGE_KEY,
+  type PromptPrefixId,
+} from './chat-input-prompt-prefix';
 import { ImagePreview } from './ImagePreview';
+import { AttachIcon } from './icons/AttachIcon';
+import { ImageUploadIcon } from './icons/ImageUploadIcon';
 import { MentionPicker } from './MentionPicker';
+import { MessageActions } from './MessageActions';
+import { MessageSelectionBar } from './MessageSelectionBar';
 import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
-import { CHAT_THREAD_ROUTE_EVENT, getThreadHref } from './ThreadSidebar/thread-navigation';
+import { CHAT_THREAD_ROUTE_EVENT, getMessageHref, getThreadHref } from './ThreadSidebar/thread-navigation';
 import { canViewerSeeThreadMessage, type ThreadViewer } from './ThreadSidebar/thread-perceptibility';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
@@ -40,6 +51,24 @@ const THREAD_PANEL_MAX_VIEWPORT_RATIO = 0.66;
 const MAX_THREAD_IMAGES = 5;
 const MAX_THREAD_IMAGE_BYTES = 10 * 1024 * 1024;
 const THREAD_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+/** #Raft-parity §2: combined images+attachments cap matches the backend's single
+ * MAX_ATTACHMENTS_PER_MESSAGE check in parse-multipart.ts (imageFiles + attachmentFiles). */
+const MAX_THREAD_ATTACHMENTS = 5;
+const MAX_THREAD_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** How many chars of the source message show in the collapsed "回复自" summary line. */
+const PARENT_CARD_PREVIEW_LENGTH = 48;
+
+export function buildParentCardPreview(content: string): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= PARENT_CARD_PREVIEW_LENGTH) return normalized;
+  return `${normalized.slice(0, PARENT_CARD_PREVIEW_LENGTH)}…`;
+}
+
+function formatThreadAttachmentSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: '待办',
@@ -107,12 +136,14 @@ export function createInlineThreadImageFormData({
   userId,
   replyTo,
   images,
+  attachments = [],
 }: {
   content: string;
   threadId: string;
   userId: string;
   replyTo?: string;
   images: File[];
+  attachments?: File[];
 }): FormData {
   const formData = new FormData();
   formData.append('content', content);
@@ -120,11 +151,12 @@ export function createInlineThreadImageFormData({
   formData.append('userId', userId);
   if (replyTo) formData.append('replyTo', replyTo);
   for (const image of images) formData.append('images', image);
+  for (const attachment of attachments) formData.append('attachments', attachment);
   return formData;
 }
 
 export function getViewInChannelHref(parentThreadId: string, sourceMessageId: string): string {
-  return `${getThreadHref(parentThreadId)}?highlight=${encodeURIComponent(sourceMessageId)}`;
+  return getMessageHref(parentThreadId, sourceMessageId);
 }
 
 export function navigateViewInChannel(
@@ -451,10 +483,41 @@ export function InlineThreadTaskStatusCard({
   );
 }
 
+/** localStorage key for the "回复自" parent-message card collapse memory (Raft-parity #1). */
+export function parentCardCollapsedStorageKey(threadId: string): string {
+  return `clowder:thread-parentcard-collapsed:${threadId}`;
+}
+
+/** Unlike the task card (default expanded), the parent-message card defaults to
+ * COLLAPSED — absent localStorage means "never expanded yet", not "expanded". */
+function readParentCardCollapsed(threadId: string): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const stored = window.localStorage.getItem(parentCardCollapsedStorageKey(threadId));
+    return stored === null ? true : stored === '1';
+  } catch {
+    return true;
+  }
+}
+
+function writeParentCardCollapsed(threadId: string, collapsed: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(parentCardCollapsedStorageKey(threadId), collapsed ? '1' : '0');
+  } catch {
+    /* storage unavailable — collapse state just won't persist */
+  }
+}
+
 /**
- * #404 §1: context region for NON-task threads — a small quoted-style card
- * showing which message this thread branches from. Mutually exclusive with
+ * #404 §1 / Raft-parity #1: context region for NON-task threads — a small quoted-style
+ * card showing which message this thread branches from. Mutually exclusive with
  * InlineThreadTaskStatusCard (a thread is either a task thread or not).
+ *
+ * Raft-parity #1: defaults COLLAPSED to a single summary line ("回复自 X：<preview>…")
+ * so it stops competing with the scrollable reply list for fixed header space — click to
+ * expand the full quoted source message. Same collapse/expand mechanics as
+ * InlineThreadTaskStatusCard (grid-template-rows 0fr/1fr), just a different default.
  *
  * #404 whisper 钉：跟任务卡同一条纪律——message 本身可能是 whisper，
  * canViewerSeeThreadMessage 判断不可见时整卡降级为占位，不渲染内容/发送者。
@@ -462,12 +525,20 @@ export function InlineThreadTaskStatusCard({
 export function InlineThreadParentMessageCard({
   message,
   getCatById,
+  threadId,
   viewer = DEFAULT_VIEWER,
 }: {
   message: ChatMessageData;
   getCatById: (catId: string) => { displayName: string } | undefined;
+  threadId?: string;
   viewer?: ThreadViewer;
 }) {
+  const [collapsed, setCollapsed] = useState(() => (threadId ? readParentCardCollapsed(threadId) : true));
+
+  useEffect(() => {
+    if (threadId) setCollapsed(readParentCardCollapsed(threadId));
+  }, [threadId]);
+
   if (!canViewerSeeThreadMessage(message, viewer)) {
     return (
       <section
@@ -482,15 +553,53 @@ export function InlineThreadParentMessageCard({
   const cat = message.catId ? getCatById(message.catId) : undefined;
   const authorLabel = cat?.displayName ?? message.catId ?? '你';
 
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      if (threadId) writeParentCardCollapsed(threadId, next);
+      return next;
+    });
+  };
+
   return (
     <section
-      className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-3"
+      className="flex flex-shrink-0 flex-col border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)]"
       aria-label="父消息"
     >
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">回复自</div>
-      <div className="min-w-0">
-        <div className="truncate text-xs font-semibold text-[var(--cafe-text)]">{authorLabel}</div>
-        <p className="line-clamp-2 text-xs leading-relaxed text-[var(--cafe-text-muted)]">{message.content}</p>
+      <button
+        type="button"
+        onClick={toggleCollapsed}
+        className="flex w-full min-w-0 items-center gap-2 px-4 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--cafe-accent)]"
+        aria-label={collapsed ? '展开父消息' : '折叠父消息'}
+        aria-expanded={!collapsed}
+      >
+        <span
+          aria-hidden="true"
+          className={`inline-block flex-shrink-0 text-[10px] text-[var(--cafe-text-muted)] transition-transform duration-200 ease-out ${collapsed ? '' : 'rotate-180'}`}
+        >
+          ⌄
+        </span>
+        {collapsed ? (
+          <span className="min-w-0 flex-1 truncate text-xs text-[var(--cafe-text-muted)]">
+            <span className="font-semibold text-[var(--cafe-text)]">回复自 {authorLabel}</span>
+            <span>：{buildParentCardPreview(message.content)}</span>
+          </span>
+        ) : (
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
+            回复自
+          </span>
+        )}
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: collapsed ? '0fr' : '1fr' }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="min-w-0 px-4 pb-3">
+            <div className="truncate text-xs font-semibold text-[var(--cafe-text)]">{authorLabel}</div>
+            <p className="text-xs leading-relaxed text-[var(--cafe-text-muted)]">{message.content}</p>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -540,8 +649,13 @@ export function InlineThreadPanel({
   const [input, setInput] = useState('');
   const [images, setImages] = useState<File[]>([]);
   const [isPreparingImages, setIsPreparingImages] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [promptPrefixId, setPromptPrefixId] = useState<PromptPrefixId>('none');
+  const [showPromptPrefixMenu, setShowPromptPrefixMenu] = useState(false);
+  const promptPrefixMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -605,6 +719,59 @@ export function InlineThreadPanel({
   useEffect(() => {
     setPanelWidth((prev) => clampThreadPanelWidth(prev));
   }, [setPanelWidth]);
+
+  // Raft-parity §2: same "提示词" preset menu as the main channel's ChatInput, reading the
+  // same localStorage key (chat-input-prompt-prefix.ts) so a choice made on either surface
+  // stays in sync — the thread composer doesn't need its own legacy-migration write, only
+  // ChatInput performs that one-time migration since it's always mounted alongside it.
+  const selectedPromptPrefix = useMemo(
+    () => PROMPT_PREFIX_OPTIONS.find((option) => option.id === promptPrefixId) ?? PROMPT_PREFIX_OPTIONS[0],
+    [promptPrefixId],
+  );
+
+  useEffect(() => {
+    try {
+      const storedPrefix = window.localStorage.getItem(PROMPT_PREFIX_STORAGE_KEY);
+      if (isPromptPrefixId(storedPrefix)) {
+        setPromptPrefixId(storedPrefix);
+        return;
+      }
+      if (window.localStorage.getItem(CVO_MODE_STORAGE_KEY) === '1') {
+        setPromptPrefixId('requirements');
+      }
+    } catch {
+      // Keep the SSR-safe default when localStorage is unavailable.
+    }
+  }, []);
+
+  const updatePromptPrefix = useCallback((next: PromptPrefixId) => {
+    setPromptPrefixId(next);
+    if (typeof window === 'undefined') return;
+    try {
+      if (next === 'none') {
+        window.localStorage.removeItem(PROMPT_PREFIX_STORAGE_KEY);
+        window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(PROMPT_PREFIX_STORAGE_KEY, next);
+        window.localStorage.removeItem(CVO_MODE_STORAGE_KEY);
+      }
+    } catch {
+      // LocalStorage is a convenience preference; sending should not depend on it.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showPromptPrefixMenu) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!target.isConnected) return;
+      if (promptPrefixMenuRef.current && !promptPrefixMenuRef.current.contains(target)) {
+        setShowPromptPrefixMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPromptPrefixMenu]);
 
   const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
   const filteredCatOptions = useMemo(() => {
@@ -872,7 +1039,9 @@ export function InlineThreadPanel({
   }, [countableReplyMessages, loading, onReplyCountChange, sourceMessage.id, threadId]);
 
   const handleSend = useCallback(async () => {
-    const content = input.trim() || (images.length > 0 ? '上传图片' : '');
+    const hasFiles = images.length > 0 || attachments.length > 0;
+    const fallbackContent = images.length > 0 ? '上传图片' : attachments.length > 0 ? '上传文件' : '';
+    const content = input.trim() || fallbackContent;
     if (!content || sending || isPreparingImages) return;
 
     setSending(true);
@@ -882,7 +1051,7 @@ export function InlineThreadPanel({
         throw new Error('Thread 未创建成功，已阻止把回复写入主频道');
       }
       if (isCommandInvocation(content, '/reset-context')) {
-        if (content !== '/reset-context' || images.length > 0) {
+        if (content !== '/reset-context' || hasFiles) {
           throw new Error('用法：/reset-context');
         }
         await resetThreadContext(threadId);
@@ -897,24 +1066,30 @@ export function InlineThreadPanel({
         });
         return;
       }
+      // Raft-parity §2: same prompt-prefix behavior as the main channel's ChatInput —
+      // prepend the selected preset ahead of the user's raw content before sending.
+      const contentToSend = selectedPromptPrefix.prefix
+        ? `${selectedPromptPrefix.prefix}\n\n用户原始需求：\n${content}`
+        : content;
       const res = await apiFetch(
         '/api/messages',
-        images.length > 0
+        hasFiles
           ? {
               method: 'POST',
               body: createInlineThreadImageFormData({
-                content,
+                content: contentToSend,
                 threadId,
                 userId: getUserId(),
                 ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
                 images,
+                attachments,
               }),
             }
           : {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                content,
+                content: contentToSend,
                 threadId,
                 userId: getUserId(),
                 ...(sourceThreadMessageId ? { replyTo: sourceThreadMessageId } : {}),
@@ -927,6 +1102,8 @@ export function InlineThreadPanel({
       }
       setInput('');
       setImages([]);
+      setAttachments([]);
+      if (selectedPromptPrefix.prefix) updatePromptPrefix('none');
       closeMentionPicker();
       onReplyCountChange?.(sourceMessage.id, threadId, countableReplyMessages.length + 1, {
         authoritative: false,
@@ -948,22 +1125,27 @@ export function InlineThreadPanel({
     closeSlashPicker,
     input,
     images,
+    attachments,
     isPreparingImages,
     loadMessages,
     loadQueueRuntime,
     onReplyCountChange,
     countableReplyMessages.length,
+    selectedPromptPrefix,
     sending,
     sourceThreadMessageId,
     sourceMessage,
     startReplyPolling,
     task,
     threadId,
+    updatePromptPrefix,
   ]);
 
   const addImages = useCallback(
     async (candidates: File[]) => {
-      const capacity = MAX_THREAD_IMAGES - images.length;
+      // Combined cap matches the backend's single MAX_ATTACHMENTS_PER_MESSAGE check
+      // (imageFiles.length + attachmentFiles.length) in parse-multipart.ts.
+      const capacity = MAX_THREAD_IMAGES - images.length - attachments.length;
       if (capacity <= 0) {
         setSendError(`每条消息最多 ${MAX_THREAD_IMAGES} 张图片`);
         return;
@@ -991,7 +1173,7 @@ export function InlineThreadPanel({
         setIsPreparingImages(false);
       }
     },
-    [images.length],
+    [images.length, attachments.length],
   );
 
   const handleImageSelect = useCallback(
@@ -1001,6 +1183,53 @@ export function InlineThreadPanel({
     },
     [addImages],
   );
+
+  /** Non-image file attachments — mirrors ChatInput.tsx's handleAttachmentSelect
+   * (Raft-parity §2), synchronous (no compression step needed). */
+  const addAttachments = useCallback(
+    (candidates: File[]) => {
+      const capacity = MAX_THREAD_ATTACHMENTS - attachments.length - images.length;
+      if (capacity <= 0) {
+        setSendError(`每条消息最多 ${MAX_THREAD_ATTACHMENTS} 个附件`);
+        return;
+      }
+      const accepted: File[] = [];
+      let rejectedTooLarge = 0;
+      for (const file of candidates) {
+        if (accepted.length >= capacity) break;
+        if (file.size > MAX_THREAD_ATTACHMENT_BYTES) {
+          rejectedTooLarge += 1;
+          continue;
+        }
+        accepted.push(file);
+      }
+      if (rejectedTooLarge > 0 || candidates.length > capacity) {
+        const reasons = [
+          rejectedTooLarge > 0 ? `${rejectedTooLarge} 个文件超过 10MB` : '',
+          candidates.length > capacity ? `最多还能添加 ${capacity} 个附件` : '',
+        ].filter(Boolean);
+        setSendError(reasons.join('，'));
+      } else {
+        setSendError(null);
+      }
+      if (accepted.length > 0) {
+        setAttachments((current) => [...current, ...accepted].slice(0, MAX_THREAD_ATTACHMENTS));
+      }
+    },
+    [attachments.length, images.length],
+  );
+
+  const handleAttachmentSelect = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      addAttachments(Array.from(event.target.files ?? []));
+      event.target.value = '';
+    },
+    [addAttachments],
+  );
+
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((current) => current.filter((_, i) => i !== index));
+  }, []);
 
   const handleImagePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1159,6 +1388,7 @@ export function InlineThreadPanel({
 
   return (
     <div className={getInlineThreadPanelShellClassName()} data-open={isClosing ? 'false' : 'true'}>
+      <MessageSelectionBar threadId={threadId} messages={messages} getCatById={getCatById} />
       <div className="hidden lg:block">
         <ResizeHandle direction="horizontal" onResize={handlePanelResize} onDoubleClick={resetPanelWidth} />
       </div>
@@ -1294,34 +1524,7 @@ export function InlineThreadPanel({
         {task ? (
           <InlineThreadTaskStatusCard task={task} sourceMessage={sourceMessage} threadId={threadId} />
         ) : (
-          <InlineThreadParentMessageCard message={sourceMessage} getCatById={getCatById} />
-        )}
-        {runtimeCats.length > 0 && (
-          <div className="flex flex-shrink-0 flex-col gap-1 border-b border-[var(--slock-border-color)] bg-[var(--console-card-soft-bg)] px-4 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--cafe-text-muted)]">
-              当前回复
-            </div>
-            {runtimeCats.map((item) => (
-              <div
-                key={item.catId}
-                className="flex min-w-0 items-center gap-2 rounded-[var(--slock-radius-lg)] border border-[var(--console-border-soft)] bg-[var(--console-shell-bg)] px-2 py-1.5 text-xs"
-              >
-                <span
-                  className="h-2 w-2 flex-shrink-0 rounded-full animate-pulse"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span className="min-w-0 flex-1 truncate font-semibold text-[var(--cafe-text)]">{item.label}</span>
-                <span className={`flex-shrink-0 font-medium ${THREAD_STATUS_TONE[item.status]}`}>
-                  {THREAD_STATUS_LABELS[item.status]}
-                </span>
-                {(item.model || item.provider) && (
-                  <span className="max-w-[110px] flex-shrink truncate text-[10px] text-[var(--cafe-text-muted)]">
-                    {[item.model, item.provider].filter(Boolean).join(' · ')}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
+          <InlineThreadParentMessageCard message={sourceMessage} getCatById={getCatById} threadId={threadId} />
         )}
         <div className="relative min-h-0 flex-1">
           <div
@@ -1339,12 +1542,18 @@ export function InlineThreadPanel({
                 }`}
                 data-inline-thread-message-id={sourceMessage.id}
               >
-                <ChatMessage
-                  message={sourceMessage}
-                  getCatById={getCatById}
-                  showRuntimeMetadata
-                  searchHighlight={searchHits.some((hit) => hit.id === sourceMessage.id) ? searchQuery : undefined}
-                />
+                {/* Bug fix: sourceMessage lives in the PARENT thread (see ChatContainer.tsx's
+                    `parentThreadId: sourceMessage.threadId ?? threadId`), not this branch —
+                    Copy Link/Save/Delete must operate against parentThreadId or they'd
+                    target/link to the wrong thread. */}
+                <MessageActions message={sourceMessage} threadId={parentThreadId} canConvertToTask={false} getCatById={getCatById}>
+                  <ChatMessage
+                    message={sourceMessage}
+                    getCatById={getCatById}
+                    showRuntimeMetadata
+                    searchHighlight={searchHits.some((hit) => hit.id === sourceMessage.id) ? searchQuery : undefined}
+                  />
+                </MessageActions>
               </div>
             </div>
             <div className="slock-thread-replies-divider mb-4 text-center text-[11px] tracking-[0.08em] text-[var(--cafe-text-muted)]">
@@ -1371,12 +1580,14 @@ export function InlineThreadPanel({
                         : ''
                     }`}
                   >
-                    <ChatMessage
-                      message={msg}
-                      getCatById={getCatById}
-                      showRuntimeMetadata
-                      searchHighlight={isHit ? searchQuery : undefined}
-                    />
+                    <MessageActions message={msg} threadId={threadId} canConvertToTask={false} getCatById={getCatById}>
+                      <ChatMessage
+                        message={msg}
+                        getCatById={getCatById}
+                        showRuntimeMetadata
+                        searchHighlight={isHit ? searchQuery : undefined}
+                      />
+                    </MessageActions>
                   </div>
                 );
               })
@@ -1395,10 +1606,74 @@ export function InlineThreadPanel({
 
         <div className="slock-inline-thread-composer flex-shrink-0 border-t border-[var(--slock-border-color)] p-4">
           {sendError && <div className="mb-2 text-xs text-conn-red-text">{sendError}</div>}
+          {/*
+            Raft-parity §1: "当前回复" (who's replying + what model) used to live in a
+            fixed header block above the scrollable reply list, permanently eating header
+            space even when idle-adjacent. Moved here — a lightweight chip row right above
+            the input, matching how AgentStatusIndicator.tsx renders the SAME kind of status
+            for the main channel (mx-4 mb-2 flex-wrap chips, no section heading needed since
+            each chip already names the cat + its status). Same underlying info (label,
+            status tone, model/provider), just no longer fixed screen real estate.
+          */}
+          {runtimeCats.length > 0 && (
+            <div
+              className="mb-2 flex flex-wrap items-center gap-1.5"
+              aria-live="polite"
+              aria-label="当前回复状态"
+              data-testid="inline-thread-runtime-status"
+            >
+              {runtimeCats.map((item) => (
+                <span
+                  key={item.catId}
+                  className="inline-flex min-w-0 items-center gap-1.5 border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-2 py-1 text-[11px]"
+                >
+                  <span
+                    className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="max-w-[96px] truncate font-medium text-[var(--cafe-text)]">{item.label}</span>
+                  <span className={`flex-shrink-0 font-medium ${THREAD_STATUS_TONE[item.status]}`}>
+                    {THREAD_STATUS_LABELS[item.status]}
+                  </span>
+                  {(item.model || item.provider) && (
+                    <span className="max-w-[100px] flex-shrink truncate text-[10px] text-[var(--cafe-text-muted)]">
+                      {[item.model, item.provider].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
           <ImagePreview
             files={images}
             onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))}
           />
+          {attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachments.map((file, index) => (
+                <div
+                  key={`${file.name}-${file.size}-${index}`}
+                  className="flex max-w-[240px] items-center gap-2 rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface px-2 py-1.5 text-xs text-cafe-primary"
+                >
+                  <span className="shrink-0 rounded bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-[10px] text-cafe-muted">
+                    FILE
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{file.name}</span>
+                    <span className="block text-cafe-muted">{formatThreadAttachmentSize(file.size)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(index)}
+                    className="shrink-0 rounded px-1 text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-primary"
+                    aria-label={`移除文件 ${file.name}`}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <input
             ref={imageInputRef}
             type="file"
@@ -1407,12 +1682,19 @@ export function InlineThreadPanel({
             className="hidden"
             onChange={handleImageSelect}
           />
+          <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentSelect} />
           {/*
-            #404 §4 re-skin: visually matches ChatInput's composer frame (border/radius/bg/
-            focus-ring tokens + bottom toolbar row) by referencing the SAME CSS custom
-            properties and utility classes ChatInput.tsx uses, so the two stay in visual sync
-            without literally reusing ChatInput's send/mention/whisper logic (see #404 gate
-            discussion: full component reuse was rejected as high-risk, re-skin was approved).
+            #404 §4 re-skin, extended for Raft-parity §2: visually matches ChatInput's
+            composer frame (border/radius/bg/focus-ring tokens + bottom toolbar row) AND now
+            shares its attachment + prompt-prefix affordances (image/attach buttons, "提示词"
+            preset menu) by referencing the SAME CSS custom properties, shared icon
+            components (icons/ImageUploadIcon.tsx, icons/AttachIcon.tsx) and shared prefix
+            options (chat-input-prompt-prefix.ts) ChatInput.tsx uses — without literally
+            reusing ChatInput's stateful component. Full reuse was rejected: ChatInput reads
+            activeInvocations/catStatuses/targetCats from chatStore's flat "currently active
+            thread" mirror (mirrorActiveFlat), not from this panel's own threadId, so a second
+            permanently-mounted instance here would show the main channel's busy-cat state in
+            its @mention picker instead of this thread's — see report for the full writeup.
           */}
           <div className="slock-composer-frame group relative flex min-h-[var(--slock-input-height-min)] flex-col rounded-[var(--slock-radius-lg)] border border-[var(--console-input-stroke)] bg-[var(--clowder-input-bg)] transition-colors focus-within:ring-1 focus-within:ring-[var(--console-input-stroke)]">
             {showMentionPicker && (
@@ -1447,33 +1729,103 @@ export function InlineThreadPanel({
                 <button
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
-                  disabled={sending || isPreparingImages || images.length >= MAX_THREAD_IMAGES}
+                  disabled={sending || isPreparingImages || images.length + attachments.length >= MAX_THREAD_IMAGES}
                   className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
                   aria-label="上传图片"
                   title="上传图片"
                 >
-                  ▧
+                  <ImageUploadIcon className="h-[18px] w-[18px]" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  disabled={sending || images.length + attachments.length >= MAX_THREAD_ATTACHMENTS}
+                  className="slock-tool-button flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="上传文件"
+                  title="上传文件"
+                >
+                  <AttachIcon className="h-[18px] w-[18px]" />
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={(!input.trim() && images.length === 0) || sending || isPreparingImages}
-                className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--cafe-accent)] disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label={sending ? '发送中' : '发送 Thread 回复'}
-                title={sending ? '发送中...' : '发送'}
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 16 16"
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
+              <div className="flex items-center gap-1">
+                <div ref={promptPrefixMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowPromptPrefixMenu((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={showPromptPrefixMenu}
+                    title="选择发送前自动追加的提示词前缀"
+                    className={`slock-inline-control flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+                      selectedPromptPrefix.id !== 'none'
+                        ? 'bg-[var(--console-input-stroke)] text-[var(--cafe-surface)]'
+                        : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-text'
+                    }`}
+                  >
+                    <span aria-hidden="true">⌁</span>
+                    <span className="whitespace-nowrap">{selectedPromptPrefix.shortLabel}</span>
+                  </button>
+                  {showPromptPrefixMenu && (
+                    <div
+                      role="menu"
+                      className="absolute bottom-full right-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] p-1 shadow-[var(--clowder-shadow-medium)]"
+                      data-testid="thread-prompt-prefix-menu"
+                    >
+                      {PROMPT_PREFIX_OPTIONS.map((option) => {
+                        const selected = option.id === selectedPromptPrefix.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              updatePromptPrefix(option.id);
+                              setShowPromptPrefixMenu(false);
+                              textareaRef.current?.focus();
+                            }}
+                            className={`flex w-full flex-col rounded-lg border-l-2 px-3 py-2 text-left transition-colors ${
+                              selected
+                                ? 'border-[var(--console-active-fg)] bg-[var(--console-active-bg)] text-[var(--console-active-fg)]'
+                                : 'border-transparent text-cafe-text hover:bg-[var(--console-hover-bg)]'
+                            }`}
+                          >
+                            <span className="text-xs font-semibold">{option.label}</span>
+                            <span
+                              className={`mt-0.5 text-[11px] leading-snug ${
+                                selected ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                              }`}
+                            >
+                              {option.description}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={
+                    (!input.trim() && images.length === 0 && attachments.length === 0) || sending || isPreparingImages
+                  }
+                  className="slock-tool-button slock-send-button flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--console-input-stroke)] text-[var(--cafe-surface)] transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--cafe-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={sending ? '发送中' : '发送 Thread 回复'}
+                  title={sending ? '发送中...' : '发送'}
                 >
-                  <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
-                </svg>
-              </button>
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 16 16"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  >
+                    <path d="M2.5 13.5 14 8 2.5 2.5l1.4 4.1L8 8l-4.1 1.4z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
           <div className="mt-2 flex items-center justify-end">
