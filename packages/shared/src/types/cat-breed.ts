@@ -35,6 +35,36 @@ export interface ContextBudget {
 }
 
 /**
+ * Batch 3-E item 1: CLI permission tri-level gate. Maps to provider-specific
+ * CLI flags (see providers/permission-profile-cli-args.ts in packages/api).
+ * HARD CONSTRAINT: field absent → 'trusted' → today's behavior unchanged
+ * (bypassPermissions / danger-full-access), zero impact on existing cats.
+ *   strict:   Claude `--permission-mode acceptEdits` (no extra allowedTools);
+ *             Codex `--sandbox workspace-write --config approval_policy="untrusted"`.
+ *   standard: Claude `--permission-mode acceptEdits --allowedTools Bash`;
+ *             Codex `--sandbox workspace-write --config approval_policy="on-failure"`.
+ *   trusted:  Claude `--permission-mode bypassPermissions` (current default);
+ *             Codex: no override, current env-driven defaults apply.
+ * Only Claude (anthropic) and Codex (openai) providers honor this field today;
+ * other clientIds ignore it and keep their current behavior at every tier.
+ */
+export type CatPermissionProfile = 'strict' | 'standard' | 'trusted';
+
+export const CAT_PERMISSION_PROFILES: readonly CatPermissionProfile[] = ['strict', 'standard', 'trusted'];
+
+/**
+ * Batch 3-E item 2: per-cat daily cost cap (env-gated, see CLOWDER_BUDGET_ENFORCE
+ * in packages/api/src/config/env-registry.ts — default OFF, zero impact until enabled).
+ * costUsd accounting is only reliable for Claude (anthropic) cats today; the
+ * pre-run gate conservatively skips enforcement (allow + log) for any other
+ * clientId rather than guess a token-based cap from unverified data.
+ */
+export interface CatCostBudget {
+  /** Daily USD cap for this cat's aggregated costUsd (all users, UTC calendar day). */
+  readonly perCatDailyUsd: number;
+}
+
+/**
  * CLI invocation config for a variant
  */
 import type { CliEffortValue } from '../cli-effort.js';
@@ -109,6 +139,11 @@ export interface CatVariant {
   readonly color?: CatColor;
   /** Per-cat context budget (optional, falls back to defaults) */
   readonly contextBudget?: ContextBudget;
+  /** Batch 3-E item 1: CLI permission tri-level gate. Falls back to breed.permissionProfile,
+   *  then undefined ('trusted' behavior). See CatPermissionProfile doc above. */
+  readonly permissionProfile?: CatPermissionProfile;
+  /** Batch 3-E item 2: per-cat daily cost cap (env-gated, see CatCostBudget doc above). */
+  readonly costBudget?: CatCostBudget;
   /**
    * 理智线 T2（task #384）：会话理智线死线（token 数）——超过即应换班，跟 contextBudget
    * 的投递口尺寸是不同的边界。落回顺序：variant 显式值 > breed 显式值 >
@@ -191,6 +226,8 @@ export interface CatBreed {
   readonly variants: readonly CatVariant[];
   /** Breed-level default toolbox level; variant can override. */
   readonly toolPolicy?: ToolPolicy;
+  /** Batch 3-E item 1: breed-level default permission profile; variant may override. */
+  readonly permissionProfile?: CatPermissionProfile;
   /** 理智线 T2（task #384）：breed-level sanityLine default; variant may override. */
   readonly sanityLine?: number;
   /** Per-cat feature flags (optional, all features enabled by default) */

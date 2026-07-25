@@ -34,7 +34,10 @@ export type TaskEventType =
   | 'fast_lane_decision'
   | 'fast_lane_started'
   | 'fast_lane_completed'
-  | 'fast_lane_failed';
+  | 'fast_lane_failed'
+  /** Batch 3-A item 2: bookkeeping-only marker — a linked run succeeded while the task
+   *  stayed in its current status (platform never auto-advances to in_review/done). */
+  | 'run_succeeded';
 
 /**
  * Task kind discriminator (#320).

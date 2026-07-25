@@ -3,7 +3,7 @@
  * 三只 AI 猫猫的类型定义和配置
  */
 
-import type { CatAssetCard, CliConfig, ContextBudget, ToolPolicy } from './cat-breed.js';
+import type { CatAssetCard, CatCostBudget, CatPermissionProfile, CliConfig, ContextBudget, ToolPolicy } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -76,6 +76,10 @@ export interface CatConfig {
   readonly cli?: CliConfig;
   readonly commandArgs?: readonly string[];
   readonly contextBudget?: ContextBudget;
+  /** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current behavior). */
+  readonly permissionProfile?: CatPermissionProfile;
+  /** Batch 3-E item 2: per-cat daily cost cap (env-gated, see CatCostBudget doc in cat-breed.ts). */
+  readonly costBudget?: CatCostBudget;
   /**
    * 理智线 T2（task #384）：会话理智线死线（token 数）。resolveSanityLine() 出的最终值总是
    * 一个数字（variant 显式值 > breed 显式值 > 模型先验表 > 120K 兜底）；类型标 optional 只是

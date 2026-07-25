@@ -182,7 +182,11 @@ export type {
   CatCafeConfig,
   CatCafeConfigV1,
   CatCafeConfigV2,
+  // Batch 3-E item 2: per-cat daily cost cap
+  CatCostBudget,
   CatFeatures,
+  // Batch 3-E item 1: CLI permission tri-level gate
+  CatPermissionProfile,
   CatVariant,
   CliConfig,
   // F067: Co-Creator config for @ mention routing
@@ -196,6 +200,7 @@ export type {
   RosterEntry,
   ToolPolicy,
 } from './cat-breed.js';
+export { CAT_PERMISSION_PROFILES } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export type { BuiltinAccountClient } from './client-routing.js';
@@ -542,6 +547,7 @@ export type {
   TaskEvent,
   TaskEventType,
   TaskEvidence,
+  TaskFailureClass,
   TaskItem,
   TaskKind,
   TaskStatus,
