@@ -79,6 +79,67 @@ export async function readUserProfileForPrompt(projectRoot = findMonorepoRoot())
 export interface ParsedUserProfile {
   readonly title: string;
   readonly sections: Map<UserProfileSection, string[]>;
+  /**
+   * 批次 3 F-E: lightweight Memobase topic/sub_topic analogue — derived,
+   * read-only breakdown of each section's lines. `sections` (the raw bullet
+   * array) stays the single source of truth for rendering/appending; this map
+   * is purely a parsed VIEW on top of it, rebuilt every call by
+   * `deriveUserProfileSubTopics`. Never required on write — a line with no
+   * `**子主题**:` prefix parses with `subTopic: null` and is 100% unaffected.
+   */
+  readonly subTopics: Map<UserProfileSection, UserProfileSubTopicEntry[]>;
+}
+
+/**
+ * One profile line, optionally broken into a Memobase-style sub_topic label +
+ * content. `**子主题**: 内容` is the lightweight markdown convention (bold-then-
+ * colon), matched after stripping an optional leading bullet marker (`- `) and
+ * an optional `[YYYY-MM-DD]` dated tag (the format `appendUserProfileLine`
+ * already writes) — so both cat-proposed and Owner-typed lines parse the same
+ * way. Lines without the prefix (100% of pre-batch-3 storage) parse with
+ * `subTopic: null, content: raw` — no forced migration, no data loss.
+ */
+export interface UserProfileSubTopicEntry {
+  readonly subTopic: string | null;
+  readonly content: string;
+  readonly raw: string;
+}
+
+const SUB_TOPIC_LINE_RE = /^(?:[-*+]\s*)?(?:\[\d{4}-\d{2}-\d{2}\]\s*)?\*\*([^*]+)\*\*\s*[:：]\s*(.*)$/;
+
+/**
+ * Parse the optional `**子主题**: 内容` prefix out of one already-trimmed
+ * profile line. Pure, exported for reuse (classifyUserProfileSection,
+ * routes/user-profile.ts) and direct unit testing.
+ */
+export function parseUserProfileSubTopicLine(rawLine: string): UserProfileSubTopicEntry {
+  const match = rawLine.match(SUB_TOPIC_LINE_RE);
+  if (!match) return { subTopic: null, content: rawLine, raw: rawLine };
+  const subTopic = (match[1] ?? '').trim();
+  const content = (match[2] ?? '').trim();
+  if (!subTopic) return { subTopic: null, content: rawLine, raw: rawLine };
+  return { subTopic, content, raw: rawLine };
+}
+
+/**
+ * Derive the sub_topic breakdown for all three sections from an already-split
+ * `sections` map. Pure — reused by both `parseUserProfile` and the Owner
+ * direct-edit route (`routes/user-profile.ts`), which rebuilds a
+ * `ParsedUserProfile` from three edited textareas and must produce the same
+ * `subTopics` shape without re-deriving this parsing rule.
+ */
+export function deriveUserProfileSubTopics(
+  sections: ReadonlyMap<UserProfileSection, readonly string[]>,
+): Map<UserProfileSection, UserProfileSubTopicEntry[]> {
+  const subTopics = new Map<UserProfileSection, UserProfileSubTopicEntry[]>();
+  for (const section of USER_PROFILE_SECTIONS) {
+    const lines = sections.get(section) ?? [];
+    subTopics.set(
+      section,
+      lines.map((line) => parseUserProfileSubTopicLine(line)),
+    );
+  }
+  return subTopics;
 }
 
 /**
@@ -89,7 +150,7 @@ export interface ParsedUserProfile {
 export function parseUserProfile(content: string): ParsedUserProfile {
   const sections = new Map<UserProfileSection, string[]>(USER_PROFILE_SECTIONS.map((s) => [s, []]));
   const trimmed = content.trim();
-  if (!trimmed) return { title: '# 铲屎官画像', sections };
+  if (!trimmed) return { title: '# 铲屎官画像', sections, subTopics: deriveUserProfileSubTopics(sections) };
 
   const lines = trimmed.split(/\r?\n/);
   const title = lines[0]?.startsWith('# ') ? lines[0] : '# 铲屎官画像';
@@ -107,7 +168,7 @@ export function parseUserProfile(content: string): ParsedUserProfile {
       sections.get(current)?.push(line.trim());
     }
   }
-  return { title, sections };
+  return { title, sections, subTopics: deriveUserProfileSubTopics(sections) };
 }
 
 /**
@@ -139,8 +200,22 @@ const PREFERENCE_RE = /偏好|喜欢|风格|简短|简洁|详细|格式|语气|�
  * Heuristic content → section classification, used only as a fallback when the
  * caller doesn't specify a target section explicitly. Same spirit as
  * AgentMemoryPromotionGate's classifyContent (deterministic, auditable).
+ *
+ * 批次 3 F-E: when the candidate text carries an explicit `**子主题**:` label,
+ * that label is checked FIRST (it's a deliberate structured signal — e.g.
+ * `**端口红线**: ...` should route to 硬约束 even if the body text alone
+ * wouldn't match). Falls through to the original whole-text scan unchanged
+ * when there's no sub_topic prefix (subTopic === null) or the label itself
+ * doesn't match either regex — so all pre-existing behavior (and the batch-1
+ * gold set, which exercises `evaluateMemoryPromotion`, not this function) is
+ * untouched.
  */
 export function classifyUserProfileSection(text: string): UserProfileSection {
+  const { subTopic } = parseUserProfileSubTopicLine(text.trim());
+  if (subTopic) {
+    if (HARD_CONSTRAINT_RE.test(subTopic)) return '硬约束';
+    if (PREFERENCE_RE.test(subTopic)) return '偏好';
+  }
   if (HARD_CONSTRAINT_RE.test(text)) return '硬约束';
   if (PREFERENCE_RE.test(text)) return '偏好';
   return '账号级事实';
@@ -150,17 +225,28 @@ export function classifyUserProfileSection(text: string): UserProfileSection {
  * Append one durable line to a section, deduping exact repeats. Pure function —
  * used by the promotion gate after a write is approved (fast-track or human
  * promotion), never called directly by a cat.
+ *
+ * 批次 3 F-E: `subTopic` is optional and additive — omitted (the only path
+ * before batch 3, and still the default for existing callers) produces the
+ * exact same `- [date] content` bullet as before. When provided, the line is
+ * written as `- [date] **subTopic**: content`, which `parseUserProfileSubTopicLine`
+ * round-trips back into `{ subTopic, content }` on the next read. No forced
+ * migration — this only changes what NEW entries look like.
  */
 export function appendUserProfileLine(
   existingContent: string,
   section: UserProfileSection,
   line: string,
   date: string,
+  subTopic?: string,
 ): string {
   const parsed = parseUserProfile(existingContent);
   const entries = parsed.sections.get(section) ?? [];
   const normalized = line.trim();
-  const bulletLine = `- [${date}] ${normalized}`;
+  const trimmedSubTopic = subTopic?.trim();
+  const bulletLine = trimmedSubTopic
+    ? `- [${date}] **${trimmedSubTopic}**: ${normalized}`
+    : `- [${date}] ${normalized}`;
   const already = entries.some((existing) => existing.includes(normalized));
   if (!already) entries.push(bulletLine);
   parsed.sections.set(section, entries);

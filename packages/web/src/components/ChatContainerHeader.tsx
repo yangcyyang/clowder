@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ExportButton } from './ExportButton';
 import { derivePresentThreadAgents, resolveThreadBranch } from './ThreadSidebar/thread-perceptibility';
 import { getThreadHref } from './ThreadSidebar/thread-navigation';
+import { UserProfileCandidatesEntry } from './UserProfileCandidatesPanel';
 
 interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
@@ -79,6 +80,8 @@ export function ChatContainerHeader({
           <ThreadIndicator threadId={threadId} showChannelStamp={threadKind === 'channel'} />
           <PresentAgentsIndicator threadId={threadId} />
         </div>
+        {/* 批次 3 F-E: 画像人审全局入口 — 铲屎官钦点位置，工具栏图标区最左侧 */}
+        <UserProfileCandidatesEntry />
         <ExportButton threadId={threadId} />
         <button
           type="button"
