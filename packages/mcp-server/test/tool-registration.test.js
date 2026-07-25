@@ -63,6 +63,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_bootcamp_env_check',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
+  // F-F（批次 3，PRD-memory-upgrade.md）: 猫主动写记忆——共享 evaluateMemoryPromotion
+  'cat_cafe_write_memory',
   // Direct evidence/reflect tools
   'cat_cafe_search_evidence',
   'cat_cafe_reflect',
@@ -161,6 +163,7 @@ const EXPECTED_COLLAB_TOOLS = [
 
 const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_retain_memory_callback',
+  'cat_cafe_write_memory',
   'cat_cafe_mark_generalizable',
   'cat_cafe_nominate_for_global',
   'cat_cafe_review_distillation',
@@ -396,6 +399,7 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_start_guide',
   'cat_cafe_guide_control',
   'cat_cafe_retain_memory_callback',
+  'cat_cafe_write_memory', // callbackPost → writes/queues memory via evaluateMemoryPromotion
   'cat_cafe_mark_generalizable',
   'cat_cafe_nominate_for_global',
   'cat_cafe_review_distillation', // POST approve/reject → writes global knowledge

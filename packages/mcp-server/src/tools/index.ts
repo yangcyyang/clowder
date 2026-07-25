@@ -4,6 +4,11 @@
  */
 
 export {
+  handleWriteMemory,
+  writeMemoryInputSchema,
+  writeMemoryTools,
+} from './callback-agent-memory-write-tools.js';
+export {
   callbackEvidenceSearchInputSchema,
   callbackMemoryTools,
   callbackReflectInputSchema,

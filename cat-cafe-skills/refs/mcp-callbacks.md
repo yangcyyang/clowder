@@ -164,6 +164,17 @@ curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/retain-memory \
   -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "结论" '{invocationId:$i,callbackToken:$t,content:$c,tags:["project:cat-cafe"]}')"
 ```
 
+### Write Memory (F-F, PRD-memory-upgrade.md)
+主动沉淀记忆——不等自动回写，发现偏好/教训/项目事实时立刻记。走与自动回写
+同一个晋级门：返回 `written`（已写入）/ `queued`|`held`（进候选队列，等人审）/
+`skipped`（丢弃，例如重复或临时内容）。`held`/`skipped` 不代表调用失败。
+```bash
+curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/write-memory \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "结论/偏好/事实一句话" --arg ty "reference" '{invocationId:$i,callbackToken:$t,content:$c,type:$ty}')"
+```
+`type` 可选：`user`|`feedback`|`project`|`reference`；`why` 可选（`type=feedback` 时建议填写）。
+
 ### Request Permission
 ```bash
 curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/request-permission \

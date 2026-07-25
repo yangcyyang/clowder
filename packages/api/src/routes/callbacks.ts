@@ -48,6 +48,7 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
+import { registerCallbackAgentMemoryWriteRoutes } from './callback-agent-memory-write-routes.js';
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
@@ -2928,6 +2929,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     reflectionService: opts.reflectionService,
     ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
   });
+
+  // F-F（批次 3，PRD-memory-upgrade.md）：猫主动写记忆 callback 路由
+  await registerCallbackAgentMemoryWriteRoutes(app, { registry });
 
   // F126: Limb node callback routes
   if (opts.limbRegistry) {

@@ -1,7 +1,12 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
+import {
+  isMemoryFrontmatterExpired,
+  parseMemoryFrontmatter,
+  type MemoryFrontmatterType,
+} from './AgentMemoryPromotionGate.js';
 
 /**
  * 批次 2-D：猫记忆两层化约定（docs/research/clowder-raft-thread-task-design.md §5B.1）。
@@ -91,4 +96,87 @@ export async function writeAgentMemory(
   await mkdir(getAgentMemoryDir(projectRoot), { recursive: true });
   await writeFile(path, content.endsWith('\n') ? content : `${content}\n`, 'utf-8');
   return readAgentMemory(catId, projectRoot);
+}
+
+// ---------------------------------------------------------------------------
+// F-D（批次 3，PRD-memory-upgrade.md）：notes/ 召回排序——最小版
+// ---------------------------------------------------------------------------
+
+/**
+ * 一条 notes/ 文件的摘要——文件名 + frontmatter 摘要，不是全文。
+ * 用于让猫知道"自己有哪些笔记可以用文件读取工具展开"，而不是把 notes/ 全量
+ * 注入 prompt（absorption doc 明确警告小语料别过度设计，见
+ * docs/research/memory-absorption.md §2 第 2 条）。
+ */
+export interface AgentMemoryNoteSummary {
+  /** File name only (relative to the notes/{catId}/ dir), e.g. "port-gotcha.md". */
+  readonly fileName: string;
+  readonly type?: MemoryFrontmatterType;
+  readonly why?: string;
+  /** File mtime (ms since epoch) — drives the "most-recently-modified first" order. */
+  readonly mtimeMs: number;
+}
+
+/** 清单上限（PRD F-D 原文："清单上限 10 条"）。 */
+export const AGENT_MEMORY_NOTES_LIST_MAX_ITEMS = 10;
+
+/**
+ * 列举某只猫 notes/ 目录下的文件名 + frontmatter 摘要（type/why/最近修改时
+ * 间），过滤已过期条目，按最近修改时间倒序，最多 AGENT_MEMORY_NOTES_LIST_MAX_ITEMS
+ * 条。**不做向量化/相似度排序**——本期明确不做（PRD F-D："本期只做...评测尺
+ * 显示需要时再说"）。
+ *
+ * 复用批次 2 已验证的 parseMemoryFrontmatter/isMemoryFrontmatterExpired
+ * （AgentMemoryPromotionGate.ts），不新写 frontmatter 解析或过期判定逻辑。
+ * 同步实现（readdirSync/statSync/readFileSync）：唯一的生产调用点
+ * （SystemPromptBuilder.buildAgentMemoryIndexLines）本身是同步函数，这里保持
+ * 一致，避免为了这一个轻量列举函数把 buildTurnMetaBlock 整条调用链改成异步。
+ *
+ * notes/ 目录不存在（当前生产现状——批次 2-D 之前从未有过写入机制）时返回
+ * `[]`，不抛错——这是本函数唯一的"零机制"降级路径。
+ */
+export function listAgentMemoryNotes(
+  catId: string,
+  projectRoot = findMonorepoRoot(),
+  referenceMs: number = Date.now(),
+): AgentMemoryNoteSummary[] {
+  const dir = getAgentMemoryNotesDir(catId, projectRoot);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+
+  const summaries: AgentMemoryNoteSummary[] = [];
+  for (const fileName of entries) {
+    const filePath = join(dir, fileName);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(filePath);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, 'utf-8');
+    } catch {
+      continue;
+    }
+
+    const { frontmatter } = parseMemoryFrontmatter(raw);
+    if (isMemoryFrontmatterExpired(frontmatter, referenceMs)) continue;
+
+    summaries.push({
+      fileName,
+      ...(frontmatter?.type ? { type: frontmatter.type } : {}),
+      ...(frontmatter?.why ? { why: frontmatter.why } : {}),
+      mtimeMs: stat.mtimeMs,
+    });
+  }
+
+  summaries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return summaries.slice(0, AGENT_MEMORY_NOTES_LIST_MAX_ITEMS);
 }

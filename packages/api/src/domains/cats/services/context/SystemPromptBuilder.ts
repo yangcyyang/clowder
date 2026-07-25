@@ -24,6 +24,10 @@ import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 // parser + expiry check the Memory-layer promotion gate exports for
 // notes/candidates documents (AgentMemoryPromotionGate.ts). No new algorithm.
 import { isMemoryFrontmatterExpired, parseMemoryFrontmatter } from '../agents/memory/AgentMemoryPromotionGate.js';
+// F-D（批次 3，PRD-memory-upgrade.md）: notes/ 目录清单——文件名+frontmatter 摘要
+// （过期过滤/倒序/10 条上限已在 AgentMemoryStore.listAgentMemoryNotes 里做好），
+// 这里只做 v2-only 渲染 + 预算截断，不重复实现列举逻辑。
+import { listAgentMemoryNotes } from '../agents/memory/AgentMemoryStore.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
@@ -733,7 +737,47 @@ const AGENT_MEMORY_INDEX_MAX_CHARS = AGENT_MEMORY_INDEX_MAX_TOKENS * 4;
  * parseMemoryFrontmatter 对它们返回 `frontmatter: null`，本变更对现状零字节
  * 影响；只有未来的索引/notes 文档显式带上过期的 `invalid_at` 时才会被跳过。
  */
-function buildAgentMemoryIndexLines(agentMemoryContext?: string | null): string[] {
+/**
+ * F-D（批次 3，PRD-memory-upgrade.md）: notes/ 目录清单渲染——文件名+一句摘要
+ * （type/why/最近修改时间），**不是全文**，让猫知道自己有哪些笔记可以用文件
+ * 读取工具展开。列举/过期过滤/倒序/10 条上限全部在
+ * AgentMemoryStore.listAgentMemoryNotes 完成（批次 2 已验证的
+ * parseMemoryFrontmatter/isMemoryFrontmatterExpired），这里只做渲染 + 预算截
+ * 断（PRD 原文："清单上限 10 条+预算截断"）。
+ *
+ * notes/ 目录不存在（当前生产现状——从未有过写入机制）时返回 `[]`，调用方
+ * （buildAgentMemoryIndexLines）在这种情况下拼接的数组与批次 2 之前完全一致，
+ * 字节不变。
+ *
+ * 导出（而非私有）是为了让测试可以在不触碰真实 `.cat-cafe/` 目录的前提下，用
+ * 显式 projectRoot 直接验证渲染格式——生产调用点（buildAgentMemoryIndexLines）
+ * 只传 catId，projectRoot 走默认的 findMonorepoRoot()。
+ */
+const AGENT_MEMORY_NOTES_INDEX_MAX_TOKENS = 300;
+const AGENT_MEMORY_NOTES_INDEX_MAX_CHARS = AGENT_MEMORY_NOTES_INDEX_MAX_TOKENS * 4;
+
+export function buildAgentMemoryNotesIndexLines(catId: string, projectRoot?: string): string[] {
+  const notes = listAgentMemoryNotes(catId, projectRoot ?? findMonorepoRoot());
+  if (notes.length === 0) return [];
+
+  const bulletLines = notes.map((note) => {
+    const typeLabel = note.type ? `[${note.type}]` : '[未分类]';
+    const whyPart = note.why ? `：${note.why}` : '';
+    return `- ${note.fileName} ${typeLabel}${whyPart}`;
+  });
+  let body = bulletLines.join('\n');
+  if (roughTokenEstimate(body) > AGENT_MEMORY_NOTES_INDEX_MAX_TOKENS) {
+    body = `${body.slice(0, AGENT_MEMORY_NOTES_INDEX_MAX_CHARS)}\n[notes/ 清单超出预算，已截断——按需直接读取 notes/ 目录文件。]`;
+  }
+
+  return [
+    '',
+    `notes/ 速查清单（\`.cat-cafe/memory/notes/${catId}/\`，仅文件名+摘要非全文，按最近修改倒序，最多 ${notes.length} 条）：需要细节时用文件读取工具展开对应文件。`,
+    body,
+  ];
+}
+
+function buildAgentMemoryIndexLines(agentMemoryContext?: string | null, catId?: string): string[] {
   const raw = (agentMemoryContext ?? '').trim();
   if (!raw) return [];
   const { frontmatter, body: parsedBody } = parseMemoryFrontmatter(raw);
@@ -743,6 +787,10 @@ function buildAgentMemoryIndexLines(agentMemoryContext?: string | null): string[
   const body = overBudget
     ? `${content.slice(0, AGENT_MEMORY_INDEX_MAX_CHARS)}\n\n[记忆索引超出 ${AGENT_MEMORY_INDEX_MAX_TOKENS} tokens 预算，已截断——建议整理为两层结构：本文件收窄为索引（Role / Key Knowledge 指针 / Active Context / Memories 链接），细节移到 \`.cat-cafe/memory/notes/{catId}/\` 按需读取。]`
     : content;
+  // F-D（批次 3）: 记忆索引区尾部追加 notes/ 清单——无 catId（理论上不会发生，
+  // v2 调用点恒传 context.catId）或 notes/ 目录不存在时返回 []，数组与批次 2
+  // 之前字节相同。
+  const notesLines = catId ? buildAgentMemoryNotesIndexLines(catId) : [];
   return [
     '',
     '## 跨 Session 记忆（持久化）',
@@ -750,6 +798,7 @@ function buildAgentMemoryIndexLines(agentMemoryContext?: string | null): string[
     '完成带验证的工作单元后，回写 `.cat-cafe/memory/{catId}.md` 索引（Role/Key Knowledge 指针/Active Context/Memories 链接）；专题细节沉淀到 `.cat-cafe/memory/notes/{catId}/`；若与当前指令/事实冲突，以当前为准。',
     '',
     body,
+    ...notesLines,
   ];
 }
 
@@ -788,9 +837,12 @@ function buildUserProfileLines(userProfileContext?: string | null): string[] {
  * only the v2 call site (buildTurnMetaBlock) opts into the two-layer full-text
  * index injection via `{ layout: 'v2' }`.
  */
-function buildAgentMemoryLines(agentMemoryContext?: string | null, opts?: { readonly layout?: 'v1' | 'v2' }): string[] {
+function buildAgentMemoryLines(
+  agentMemoryContext?: string | null,
+  opts?: { readonly layout?: 'v1' | 'v2'; readonly catId?: string },
+): string[] {
   if ((opts?.layout ?? 'v1') === 'v2') {
-    return buildAgentMemoryIndexLines(agentMemoryContext);
+    return buildAgentMemoryIndexLines(agentMemoryContext, opts?.catId);
   }
   const agentMemory = summarizeAgentMemoryForPrompt(agentMemoryContext ?? '');
   if (!agentMemory) return [];
@@ -1393,7 +1445,7 @@ export function buildTurnMetaBlock(context: InvocationContext, extras?: TurnMeta
   ];
   // D1: session-writable reference context relocated from buildStaticIdentity.
   // 批次 2-D: v2 meta 槽走两层索引全文注入（layout:'v2'），v1 静态前缀分支不变。
-  lines.push(...buildAgentMemoryLines(extras?.agentMemoryContext, { layout: 'v2' }));
+  lines.push(...buildAgentMemoryLines(extras?.agentMemoryContext, { layout: 'v2', catId: context.catId as string }));
   lines.push(...buildLessonsLines(extras?.lessonsContext, lines.join('\n'), extras?.maxPromptTokens));
   lines.push(...buildProjectContextLines(extras?.projectContext, lines.join('\n'), extras?.maxPromptTokens));
   // 批次 2-D: shared 铲屎官画像 — 全猫可见，只在 v2 meta 槽注入。

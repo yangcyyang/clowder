@@ -15,6 +15,7 @@ import {
   signalsTools,
   skillTools,
   taskLifecycleTools,
+  writeMemoryTools,
 } from './tools/index.js';
 
 type ToolDef = {
@@ -108,6 +109,10 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...reflectTools,
   ...sessionChainTools,
   ...skillTools,
+  // F-F（批次 3，PRD-memory-upgrade.md）：猫主动写记忆——invocation-scoped only
+  // (not added to READONLY_ALLOWED_TOOLS/AGENT_KEY_TOOLS, same posture as
+  // cat_cafe_retain_memory_callback above).
+  ...writeMemoryTools,
 ]);
 
 const signalTools: readonly ToolDef[] = applyReadonlyFilter([...signalsTools, ...signalStudyTools]);
