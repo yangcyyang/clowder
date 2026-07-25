@@ -1046,6 +1046,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
           };
         }
+        // Last-resort fail-open: TCC can deny the api process ALL reads of the target file
+        // (observed 2026-07-25: reads flipped to EPERM mid-process), which also defeats the
+        // read-only preflight above. The governance registry lives inside catCafeRoot (always
+        // readable) and records the human's one-time confirmation — that recorded consent, not
+        // a live file read, is the gate's real source of truth. The spawned cat CLI carries its
+        // own macOS permission grants, so dispatch can still succeed even when the api cannot
+        // touch the folder.
+        if (!preflight.ready && preflight.needsPermission) {
+          try {
+            const { GovernanceBootstrapService } = await import(
+              '../../../../../config/governance/governance-bootstrap.js'
+            );
+            const registryEntry = await new GovernanceBootstrapService(catCafeRoot).getRegistry().get(workingDirectory);
+            if (registryEntry?.confirmedByUser) {
+              log.warn(
+                { catId, workingDirectory },
+                'Governance file read denied by OS but project is registered+confirmed — proceeding (fail-open)',
+              );
+              preflight = { ready: true };
+            }
+          } catch {
+            // Registry unreadable too — keep the permission-denied block.
+          }
+        }
       }
       if (!preflight.ready) {
         const reasonKind = preflight.needsPermission
