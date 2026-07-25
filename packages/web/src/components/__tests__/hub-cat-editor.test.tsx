@@ -68,6 +68,19 @@ function queryField<T extends HTMLElement>(container: HTMLElement, selector: str
   return element as T;
 }
 
+// 3-G2: local CLI probe moved from its own top-level section into a secondary
+// "没有账号？扫描本地 CLI" accordion entry inside AccountSection. Tests that drive the
+// scan button must expand this accordion first — the untouched `LocalCliProbeSection`
+// (and its scan button) isn't mounted into the DOM until then.
+async function expandLocalCliAccordion(container: HTMLElement) {
+  const toggle = Array.from(container.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('扫描本地 CLI'),
+  );
+  await act(async () => {
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 function expectTextOrder(text: string, labels: string[]) {
   let previous = -1;
   let previousLabel = 'start';
@@ -658,6 +671,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await flushEffects();
 
+    await expandLocalCliAccordion(container);
     const scanButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === '扫描本机 CLI 与模型',
     );
@@ -699,6 +713,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     expect(container.textContent).toContain('模型候选加载失败：临时不可用');
 
+    await expandLocalCliAccordion(container);
     const scanButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === '扫描本机 CLI 与模型',
     );
@@ -831,6 +846,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/local-cli-probes');
 
+    await expandLocalCliAccordion(container);
     const scanButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === '扫描本机 CLI 与模型',
     );
@@ -937,6 +953,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
+    await expandLocalCliAccordion(container);
     const scanButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === '扫描本机 CLI 与模型',
     );
@@ -2523,6 +2540,9 @@ describe('HubCatEditor', () => {
       false,
     );
     expect(container.querySelector('h4')?.className).toContain('text-base');
+    // 3-G2: Background Color / 注意事项 / Strengths (and asset card binding) moved into
+    // a collapsed-by-default "更多设置" group — this cat has no asset card configured,
+    // so the group stays collapsed on first screen.
     expectTextOrder(container.textContent ?? '', [
       '名称',
       '昵称',
@@ -2531,12 +2551,22 @@ describe('HubCatEditor', () => {
       '擅长领域',
       '性格特征',
       'Avatar',
-      'Background Color',
-      '注意事项',
-      'Strengths',
       '▸ Voice Config',
+      '▸ 更多设置',
     ]);
+    expect(container.textContent).not.toContain('Background Color');
+    expect(container.textContent).not.toContain('注意事项');
     expect(container.textContent).toContain('运行时持久化');
+
+    const moreSettingsToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('更多设置'),
+    );
+    await act(async () => {
+      moreSettingsToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expectTextOrder(container.textContent ?? '', ['更多设置', 'Background Color', '注意事项', 'Strengths']);
   });
 
   it('lets users switch avatars from preset options', async () => {
@@ -2580,14 +2610,12 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const kimiPreset = queryField<HTMLButtonElement>(container, 'button[aria-label="选择预设头像 Slock Yellow Cat"]');
+    const kimiPreset = queryField<HTMLButtonElement>(container, 'button[aria-label="选择预设头像 Kimi"]');
     await act(async () => {
       kimiPreset.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Avatar"]').value).toBe(
-      '/avatars/slock/slock-yellow-cat.png',
-    );
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="Avatar"]').value).toBe('/avatars/kimi.png');
     expect(kimiPreset.getAttribute('aria-pressed')).toBe('true');
 
     const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
@@ -2600,7 +2628,278 @@ describe('HubCatEditor', () => {
       ([path, init]) => path === '/api/cats/codex' && init?.method === 'PATCH',
     );
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.avatar).toBe('/avatars/slock/slock-yellow-cat.png');
+    expect(payload.avatar).toBe('/avatars/kimi.png');
+  });
+
+  it('does not offer pixel-block presets, but keeps legacy pixel avatars renderable', async () => {
+    // clowder-ai batch-3G: the 16-entry "Slock" pixel-block preset group was removed from
+    // the picker per product ask (screenshots showed two rows of pixel faces above the cat
+    // illustrations). This only trims the *selectable* list — a cat already using a
+    // `/avatars/slock/*` URL (asset file untouched) must keep rendering that avatar.
+    const legacyPixelCat: CatData = {
+      id: 'legacy-pixel',
+      name: 'legacy-pixel',
+      displayName: '老猫',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@legacy-pixel'],
+      avatar: '/avatars/slock/slock-blue-cat.png',
+      roleDescription: 'legacy',
+      personality: 'steady',
+    };
+
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config') {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: legacyPixelCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    // Preset picker no longer offers any pixel-block option.
+    const presetButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button[aria-label^="选择预设头像 "]'),
+    );
+    expect(presetButtons.length).toBeGreaterThan(0);
+    for (const button of presetButtons) {
+      expect(button.getAttribute('aria-label')).not.toMatch(/Slock/i);
+    }
+    expect(container.querySelector('button[aria-label="选择预设头像 Slock Blue Cat"]')).toBeNull();
+
+    // But the cat's existing legacy pixel avatar still renders (not the fallback icon).
+    const avatarPreview = queryField<HTMLImageElement>(container, 'img[alt="Avatar preview"]');
+    expect(avatarPreview.src).toContain('/avatars/slock/slock-blue-cat.png');
+  });
+
+  it('3-G2: keeps "更多设置" (asset card + Background Color + 注意事项/Strengths) collapsed by default for a new cat, and toggles open/closed', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▸ 更多设置');
+    expect(container.textContent).not.toContain('Background Color');
+    expect(container.textContent).not.toContain('资产卡关联');
+
+    const toggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('更多设置'),
+    );
+    await act(async () => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▾ 更多设置');
+    expect(container.textContent).toContain('资产卡关联');
+    expect(container.textContent).toContain('Background Color');
+    expect(container.textContent).toContain('注意事项');
+    expect(container.textContent).toContain('Strengths');
+
+    await act(async () => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▸ 更多设置');
+    expect(container.textContent).not.toContain('Background Color');
+  });
+
+  it('3-G2: defaults "更多设置" open when editing an existing cat that already has an asset card configured', async () => {
+    const catWithAssetCard: CatData = {
+      id: 'codex',
+      name: 'codex',
+      displayName: '缅因猫',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+      assetCard: {
+        path: '/Users/x/01_需求梳理Agent.md',
+        source: 'local-md',
+        version: '1',
+        loadedAt: '2026-07-01T00:00:00.000Z',
+      },
+    };
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: catWithAssetCard, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▾ 更多设置');
+    expect(container.textContent).toContain('资产卡关联');
+    expect(container.textContent).toContain('Background Color');
+  });
+
+  it('3-G2: shows the Model red star only when the selected account is an API key (matches HubCatEditor create-time validation), not for oauth/builtin', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-oauth',
+            providers: [
+              {
+                id: 'claude-oauth',
+                provider: 'claude-oauth',
+                displayName: 'Claude (OAuth)',
+                name: 'Claude (OAuth)',
+                authType: 'oauth',
+                protocol: 'anthropic',
+                mode: 'subscription',
+                models: ['claude-opus-4-6'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    // Default Client is Claude (anthropic) → the only matching profile is the oauth one.
+    await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'claude-oauth', 'change');
+    await flushEffects();
+    const oauthModelLabel = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').closest('label');
+    expect(oauthModelLabel?.textContent).toBe('Model');
+    expect(oauthModelLabel?.textContent).not.toContain('*');
+
+    await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
+    await flushEffects();
+    await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'codex-sponsor', 'change');
+    await flushEffects();
+    const apiKeyModelLabel = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]').closest('label');
+    expect(apiKeyModelLabel?.textContent).toBe('Model*');
+  });
+
+  it('3-G2: collapses the callHint call-preview block behind a "调试详情" toggle', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                baseUrl: 'https://proxy.example',
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▸ 调试详情');
+    expect(container.textContent).not.toContain('实际调用');
+
+    const debugToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('调试详情'),
+    );
+    await act(async () => {
+      debugToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('▾ 调试详情');
+    expect(container.textContent).toContain('codex CLI 实际调用');
+    expect(container.textContent).toContain('proxy.example');
   });
 
   it('uses the designed add member template shell', async () => {
@@ -2781,6 +3080,16 @@ describe('HubCatEditor', () => {
 
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+    });
+    await flushEffects();
+
+    // 3-G2: 注意事项/Strengths now live inside the collapsed "更多设置" group — expand it
+    // so both the presence assertions below and the later Strengths edit can see the field.
+    const moreSettingsToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('更多设置'),
+    );
+    await act(async () => {
+      moreSettingsToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 

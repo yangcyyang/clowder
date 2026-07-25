@@ -1,6 +1,6 @@
 'use client';
 
-import type { HTMLAttributes, ReactNode } from 'react';
+import { type HTMLAttributes, type ReactNode, useState } from 'react';
 
 function FieldShell({
   label,
@@ -61,6 +61,42 @@ export function SectionCard({
       </div>
       <div className="mt-3 space-y-2.5">{children}</div>
     </section>
+  );
+}
+
+/**
+ * Shared collapsible variant used everywhere a group of fields should stay out of the
+ * first-screen view (e.g. Voice Config, "更多设置", "调试详情"). One implementation so
+ * every collapsed group opens/closes the same way instead of each caller hand-rolling
+ * its own `▸`/`▾` toggle button.
+ */
+export function CollapsibleSectionCard({
+  title,
+  summary,
+  defaultExpanded = false,
+  children,
+}: {
+  title: string;
+  summary?: string;
+  defaultExpanded?: boolean;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px] w-full text-left"
+      >
+        <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
+          {expanded ? '▾' : '▸'} {title}
+          {summary ? ` — ${summary}` : ''}
+        </p>
+      </button>
+      {expanded && <div className="space-y-2">{children}</div>}
+    </div>
   );
 }
 

@@ -27,7 +27,7 @@ import {
   toStrategyForm,
   withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
-import { AccountSection, AssetCardSection, IdentitySection, RoutingSection } from './hub-cat-editor.sections';
+import { AccountSection, IdentitySection, MoreSettingsSection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import {
@@ -38,7 +38,7 @@ import {
   parseModelOptionsResponse,
 } from './hub-cat-model-options';
 import type { CatStrategyEntry } from './hub-strategy-types';
-import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
+import type { LocalCliProbeResult } from './local-cli-probe-section';
 import { useConfirm } from './useConfirm';
 
 interface HubCatEditorProps {
@@ -836,7 +836,7 @@ export function HubCatEditor({
         onAvatarUpload={handleAvatarUpload}
         onRefAudioUpload={handleRefAudioUpload}
       />
-      <AssetCardSection
+      <MoreSettingsSection
         cat={cat}
         form={form}
         onChange={patchForm}
@@ -853,13 +853,11 @@ export function HubCatEditor({
         availableProfiles={availableProfiles}
         loadingProfiles={loadingProfiles}
         onChange={patchForm}
-      />
-      <LocalCliProbeSection
-        probes={localCliProbes}
-        scanning={scanningLocalClis}
-        error={localCliProbeError}
-        onScan={handleProbeLocalClis}
-        onAdopt={handleAdoptLocalCli}
+        localCliProbes={localCliProbes}
+        scanningLocalClis={scanningLocalClis}
+        localCliProbeError={localCliProbeError}
+        onScanLocalClis={handleProbeLocalClis}
+        onAdoptLocalCli={handleAdoptLocalCli}
       />
       <RoutingSection
         form={form}

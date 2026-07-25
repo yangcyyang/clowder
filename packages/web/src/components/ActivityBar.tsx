@@ -1,10 +1,17 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useChatStore } from '@/stores/chatStore';
+import {
+  ackActivityItem,
+  fetchActivityFeed,
+  type ActivityFeedFilter,
+  type ActivityFeedItem,
+  type ActivityFeedResponse,
+} from '@/utils/activity-feed-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { buildActivityInboxItems, countActivityUnread, type ActivityInboxItem } from './activity-inbox';
 import { HubIcon } from './hub-icons';
@@ -226,17 +233,71 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
   );
 }
 
-function activityKindLabel(kind: ActivityInboxItem['kind']): string {
+/**
+ * Unified render shape for the Activity popover — backed by the real
+ * GET /api/activity feed (batch 3-D) when reachable, and transparently
+ * falling back to the pre-existing client-derived activity-inbox.ts
+ * heuristic (unread threads already loaded into chatStore) when the API
+ * is unavailable (no Redis/follow-store configured, network error, etc.).
+ * This keeps today's behavior as a graceful degradation rather than a hard
+ * dependency on the new backend piece.
+ */
+interface ActivityPanelItem {
+  id: string;
+  kind: ActivityFeedItem['kind'] | ActivityInboxItem['kind'];
+  threadId: string;
+  threadTitle: string;
+  messageId?: string;
+  content: string;
+  timestamp: number;
+  read: boolean;
+}
+
+function toPanelItemFromFeed(item: ActivityFeedItem): ActivityPanelItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    threadId: item.threadId,
+    threadTitle: item.threadTitle,
+    messageId: item.messageId,
+    content: item.content,
+    timestamp: item.timestamp,
+    read: item.read,
+  };
+}
+
+function toPanelItemFromLocal(item: ActivityInboxItem): ActivityPanelItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    threadId: item.threadId,
+    threadTitle: item.threadTitle,
+    messageId: item.messageId,
+    content: item.content,
+    timestamp: item.timestamp,
+    read: false,
+  };
+}
+
+function activityKindLabel(kind: ActivityPanelItem['kind']): string {
   if (kind === 'mention') return '@你';
   if (kind === 'reply') return '回复';
+  if (kind === 'task_status') return '任务';
   return '更新';
 }
 
-function activityKindTone(kind: ActivityInboxItem['kind']): string {
+function activityKindTone(kind: ActivityPanelItem['kind']): string {
   if (kind === 'mention') return 'bg-[var(--console-rail-active)] text-[var(--console-rail-fg)]';
   if (kind === 'reply') return 'bg-conn-amber-bg text-conn-amber-text';
+  if (kind === 'task_status') return 'bg-conn-blue-bg text-conn-blue-text';
   return 'bg-[var(--console-hover-bg)] text-[var(--clowder-sidebar-row-muted)]';
 }
+
+const ACTIVITY_FILTER_TABS: { id: ActivityFeedFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'mentions', label: 'Mentions' },
+];
 
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
@@ -247,6 +308,9 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const [mounted, setMounted] = useState(false);
   const [visualTheme, setVisualTheme] = useState<VisualTheme>(DEFAULT_VISUAL_THEME);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [activityFilter, setActivityFilter] = useState<ActivityFeedFilter>('all');
+  const [backendFeed, setBackendFeed] = useState<ActivityFeedResponse | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     // Honor any stored valid theme; default-version bumps must never reset a user's explicit choice.
@@ -259,6 +323,31 @@ export function ActivityBar({ className }: ActivityBarProps) {
     window.localStorage.setItem(VISUAL_THEME_DEFAULT_MIGRATION_KEY, '1');
     setMounted(true);
   }, []);
+
+  // batch 3-D: poll the real Activity feed (badge + list). Best-effort — a
+  // failed/unavailable fetch resolves to null and the panel falls back to
+  // the local chatStore-derived heuristic below.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void fetchActivityFeed(activityFilter, { limit: 30 }).then((res) => {
+        if (!cancelled) setBackendFeed(res);
+      });
+    };
+    load();
+    const interval = window.setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activityFilter]);
+
+  // Refresh immediately on open too, in case the 30s poll hasn't ticked yet.
+  useEffect(() => {
+    if (!activityOpen) return;
+    void fetchActivityFeed(activityFilter, { limit: 30 }).then(setBackendFeed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to the open toggle, not filter changes (the other effect owns that)
+  }, [activityOpen]);
 
   const toggleVisualTheme = useCallback(() => {
     setVisualTheme((current) => {
@@ -298,8 +387,34 @@ export function ActivityBar({ className }: ActivityBarProps) {
       return { thread, state: getThreadState(threadId) };
     })
     .filter((value): value is NonNullable<typeof value> => value != null);
-  const activityItems = buildActivityInboxItems(activitySnapshots, { limit: 30 });
-  const activityUnread = countActivityUnread(activitySnapshots);
+
+  // batch 3-D: real feed when reachable, local heuristic as fallback (see
+  // ActivityPanelItem doc above). The local heuristic has no server-side
+  // filter support, so 'mentions' is approximated client-side and 'unread'
+  // is a no-op there — it only ever surfaces threads with an unread signal.
+  const displayItems: ActivityPanelItem[] = useMemo(() => {
+    if (backendFeed) return backendFeed.items.map(toPanelItemFromFeed);
+    const localItems = buildActivityInboxItems(activitySnapshots, { limit: 30 }).map(toPanelItemFromLocal);
+    return activityFilter === 'mentions' ? localItems.filter((item) => item.kind === 'mention') : localItems;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- activitySnapshots is a fresh array every render by construction
+  }, [backendFeed, activityFilter, threads, threadStates]);
+  const displayUnreadCount = backendFeed ? backendFeed.unreadCount : countActivityUnread(activitySnapshots);
+  const canLoadMore = backendFeed?.hasMore === true && !!backendFeed.nextCursor;
+
+  const handleLoadMore = useCallback(() => {
+    if (!backendFeed?.nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    void fetchActivityFeed(activityFilter, { cursor: backendFeed.nextCursor, limit: 30 })
+      .then((more) => {
+        if (!more) return;
+        setBackendFeed((current) =>
+          current
+            ? { ...more, items: [...current.items, ...more.items], unreadCount: current.unreadCount }
+            : more,
+        );
+      })
+      .finally(() => setLoadingMore(false));
+  }, [activityFilter, backendFeed?.nextCursor, loadingMore]);
 
   useEffect(() => {
     if (!activityOpen) return;
@@ -313,8 +428,9 @@ export function ActivityBar({ className }: ActivityBarProps) {
   }, [activityOpen]);
 
   const handleActivitySelect = useCallback(
-    (item: ActivityInboxItem) => {
+    (item: ActivityPanelItem) => {
       clearUnread(item.threadId);
+      if (item.messageId) void ackActivityItem(item.threadId, item.messageId);
       setActivityOpen(false);
 
       if (item.threadId === currentThreadId && item.messageId) {
@@ -360,58 +476,89 @@ export function ActivityBar({ className }: ActivityBarProps) {
         data-guide-id="nav.activity"
       >
         <ActivityIcon className="h-5 w-5" />
-        {activityUnread > 0 && (
+        {displayUnreadCount > 0 && (
           <span className="slock-unread-badge absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
-            {activityUnread > 99 ? '99+' : activityUnread}
+            {displayUnreadCount > 99 ? '99+' : displayUnreadCount}
           </span>
         )}
       </button>
 
       {activityOpen && (
-        <div className="absolute left-[calc(var(--slock-rail-width)+8px)] top-2 z-[80] w-[320px] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-sidebar-bg)] shadow-[4px_4px_0_var(--slock-border-color)]">
+        <div className="absolute left-[calc(var(--slock-rail-width)+8px)] top-2 z-[80] w-[340px] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-sidebar-bg)] shadow-[4px_4px_0_var(--slock-border-color)]">
           <div className="flex items-center justify-between border-b-2 border-[var(--slock-border-color)] px-3 py-2">
             <div>
               <div className="text-[13px] font-semibold text-[var(--clowder-sidebar-title)]">Activity</div>
-              <div className="text-[10px] text-[var(--clowder-sidebar-row-muted)]">跨频道 @你 / 回复 / Thread 更新</div>
+              <div className="text-[10px] text-[var(--clowder-sidebar-row-muted)]">跨频道 @你 / 回复 / 任务状态</div>
             </div>
-            {activityUnread > 0 && (
+            {displayUnreadCount > 0 && (
               <span className="rounded-full bg-conn-red-text px-2 py-0.5 text-[10px] font-semibold text-[var(--cafe-surface)]">
-                {activityUnread > 99 ? '99+' : activityUnread}
+                {displayUnreadCount > 99 ? '99+' : displayUnreadCount}
               </span>
             )}
           </div>
 
+          <div className="flex gap-1 border-b border-[var(--console-border-soft)] px-2 py-1.5">
+            {ACTIVITY_FILTER_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActivityFilter(tab.id)}
+                data-active={activityFilter === tab.id ? 'true' : 'false'}
+                className={`rounded-[7px] px-2 py-1 text-[11px] font-medium transition-colors ${
+                  activityFilter === tab.id
+                    ? 'bg-[var(--console-rail-active)] text-[var(--console-rail-fg)]'
+                    : 'text-[var(--clowder-sidebar-row-muted)] hover:bg-[var(--console-hover-bg)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <div className="max-h-[420px] overflow-y-auto py-1">
-            {activityItems.length === 0 ? (
+            {displayItems.length === 0 ? (
               <div className="px-3 py-5 text-center text-xs text-[var(--clowder-sidebar-row-muted)]">
                 暂无需要处理的 Activity
               </div>
             ) : (
-              activityItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleActivitySelect(item)}
-                  className="group flex w-full flex-col gap-1 border-b border-[var(--console-border-soft)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--console-hover-bg)]"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-semibold ${activityKindTone(item.kind)}`}>
-                      {activityKindLabel(item.kind)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--clowder-sidebar-row-text)]">
-                      {item.threadTitle}
-                    </span>
-                    {item.unreadCount > 1 && (
-                      <span className="text-[10px] text-[var(--clowder-sidebar-row-muted)]">
-                        {item.unreadCount} new
+              <>
+                {displayItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleActivitySelect(item)}
+                    className="group flex w-full flex-col gap-1 border-b border-[var(--console-border-soft)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--console-hover-bg)]"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      {!item.read && (
+                        <span
+                          aria-hidden="true"
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-conn-red-text"
+                        />
+                      )}
+                      <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-semibold ${activityKindTone(item.kind)}`}>
+                        {activityKindLabel(item.kind)}
                       </span>
-                    )}
-                  </div>
-                  <span className="line-clamp-2 text-[12px] leading-[1.45] text-[var(--clowder-sidebar-row-muted)] group-hover:text-[var(--clowder-sidebar-row-text)]">
-                    {item.content}
-                  </span>
-                </button>
-              ))
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--clowder-sidebar-row-text)]">
+                        {item.threadTitle}
+                      </span>
+                    </div>
+                    <span className="line-clamp-2 text-[12px] leading-[1.45] text-[var(--clowder-sidebar-row-muted)] group-hover:text-[var(--clowder-sidebar-row-text)]">
+                      {item.content}
+                    </span>
+                  </button>
+                ))}
+                {canLoadMore && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="w-full px-3 py-2 text-center text-[11px] text-[var(--clowder-sidebar-row-muted)] hover:text-cafe-accent disabled:opacity-40"
+                  >
+                    {loadingMore ? '加载中...' : '加载更多'}
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -20,12 +20,13 @@ import {
 import { CatAvatar } from '../CatAvatar';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, pushThreadRouteWithHistory } from './thread-navigation';
-import { buildChannelRowModels, type ChannelRowModel } from './thread-perceptibility';
+import { buildChannelRowModels, getThreadKind, type ChannelRowModel } from './thread-perceptibility';
 import {
   formatRelativeTime,
   getProjectPaths,
   mergeLiveActivityIntoThreads,
   sortAndGroupThreadsWithWorkspace,
+  sortByUnreadThenActive,
   type ThreadGroup,
 } from './thread-utils';
 import { useProjectPins } from './use-project-pins';
@@ -228,22 +229,29 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     }
   }, []);
 
-  const toggleSidebarSection = useCallback((section: 'channels' | 'direct-messages') => {
-    setCollapsedSections((current) => {
-      const next = new Set(current);
-      if (next.has(section)) {
-        next.delete(section);
-      } else {
-        next.add(section);
-      }
-      try {
-        localStorage.setItem(SIDEBAR_SECTION_COLLAPSE_KEY, JSON.stringify([...next]));
-      } catch {
-        // localStorage is best-effort only.
-      }
-      return next;
-    });
-  }, []);
+  // NOTE: 'task-discussions-expanded' uses inverted semantics from the other
+  // two keys — presence in the set means "user explicitly expanded it", so
+  // the section defaults to collapsed (per Raft-parity batch 3-C spec)
+  // without needing a separate default-collapsed-sections concept.
+  const toggleSidebarSection = useCallback(
+    (section: 'channels' | 'direct-messages' | 'task-discussions-expanded') => {
+      setCollapsedSections((current) => {
+        const next = new Set(current);
+        if (next.has(section)) {
+          next.delete(section);
+        } else {
+          next.add(section);
+        }
+        try {
+          localStorage.setItem(SIDEBAR_SECTION_COLLAPSE_KEY, JSON.stringify([...next]));
+        } catch {
+          // localStorage is best-effort only.
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleOnline = () => {
@@ -532,6 +540,29 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     });
   }, [sidebarThreads, normalizedQuery, showUnreadOnly, unreadIds]);
 
+  // F194 Raft-parity batch 3-C: pull task-discussion-kind threads out of the
+  // CHANNELS list into their own collapsible section. `channel` and `branch`
+  // stay together here (unchanged from before this batch) so buildChannelRowModels
+  // can keep nesting a `branch` thread under its channel parent with ↳.
+  const { channelEligibleThreads, taskDiscussionThreads } = useMemo(() => {
+    const channelEligibleThreads: Thread[] = [];
+    const taskDiscussionThreads: Thread[] = [];
+    for (const thread of filteredThreads) {
+      if (getThreadKind(thread) === 'task_discussion') {
+        taskDiscussionThreads.push(thread);
+      } else {
+        channelEligibleThreads.push(thread);
+      }
+    }
+    return { channelEligibleThreads, taskDiscussionThreads };
+  }, [filteredThreads]);
+
+  // Reuses the same unread-first/recency comparator as pinned/recent/favorites groups.
+  const sortedTaskDiscussionThreads = useMemo(
+    () => [...taskDiscussionThreads].sort((a, b) => sortByUnreadThenActive(a, b, unreadIds)),
+    [taskDiscussionThreads, unreadIds],
+  );
+
   // F072: Mark all threads as read
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const handleMarkAllRead = useCallback(async () => {
@@ -551,8 +582,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   // F095 Phase B: Active workspace grouping
   const { pinnedProjects } = useProjectPins();
   const threadGroups = useMemo(
-    () => sortAndGroupThreadsWithWorkspace(filteredThreads, unreadIds, pinnedProjects),
-    [filteredThreads, unreadIds, pinnedProjects],
+    () => sortAndGroupThreadsWithWorkspace(channelEligibleThreads, unreadIds, pinnedProjects),
+    [channelEligibleThreads, unreadIds, pinnedProjects],
   );
   const flatChannelThreads = useMemo(() => {
     const seen = new Set<string>();
@@ -688,6 +719,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
   const channelsCollapsed = normalizedQuery.length === 0 && collapsedSections.has('channels');
   const directMessagesCollapsed = collapsedSections.has('direct-messages');
+  // Defaults to collapsed: only expanded once the user opts in (see toggleSidebarSection note above).
+  const taskDiscussionsCollapsed =
+    normalizedQuery.length === 0 && !collapsedSections.has('task-discussions-expanded');
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, threadGroups);
@@ -928,6 +962,36 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             )}
           </div>
 
+          {/* F194 Raft-parity batch 3-C: task-discussion-kind threads (auto/anchored
+              branches created for task or @mention discussions) live here instead of
+              cluttering CHANNELS — default collapsed, count badge always visible. */}
+          <div className="slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
+            <div className="px-3 pb-1 pt-1">
+              <div className="flex items-center gap-1">
+                <SectionCollapseButton
+                  collapsed={taskDiscussionsCollapsed}
+                  onClick={() => toggleSidebarSection('task-discussions-expanded')}
+                  label={taskDiscussionsCollapsed ? '展开任务讨论' : '折叠任务讨论'}
+                />
+                <span
+                  className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]"
+                  data-testid="task-discussions-section-title"
+                >
+                  任务讨论
+                </span>
+                <span className="slock-sidebar-section-count">{sortedTaskDiscussionThreads.length}</span>
+              </div>
+            </div>
+            {!taskDiscussionsCollapsed &&
+              (sortedTaskDiscussionThreads.length > 0 ? (
+                sortedTaskDiscussionThreads.map((thread) =>
+                  renderChannelRow({ thread, depth: 0, branch: false, orphaned: false }),
+                )
+              ) : (
+                <div className="px-5 py-2 text-xs text-[var(--clowder-sidebar-row-muted)]">暂无任务讨论</div>
+              ))}
+          </div>
+
           {normalizedQuery.length > 0 && (
             <div className="slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
             <div className="px-3 pb-1 pt-1">
@@ -1011,6 +1075,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
           {(normalizedQuery.length > 0 || showUnreadOnly) &&
             threadGroups.length === 0 &&
+            sortedTaskDiscussionThreads.length === 0 &&
             !showDefaultThread && (
               <div className="px-3 py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">
                 {showUnreadOnly ? '暂无未读对话' : '没有匹配的对话'}

@@ -139,6 +139,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     ...assetCardPatch,
     sessionChain: form.sessionChain === 'true',
     toolPolicy: form.toolPolicy,
+    permissionProfile: form.permissionProfile ?? 'trusted',
     ...contextBudgetPatch,
     ...voiceConfigPatch,
   };

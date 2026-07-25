@@ -120,7 +120,7 @@ export function mergeLiveActivityIntoThreads(
 }
 
 /** Sort comparator: unread first, then by lastActiveAt descending. */
-function sortByUnreadThenActive(a: Thread, b: Thread, unreadIds?: Set<string>): number {
+export function sortByUnreadThenActive(a: Thread, b: Thread, unreadIds?: Set<string>): number {
   if (unreadIds) {
     const aUnread = unreadIds.has(a.id) ? 1 : 0;
     const bUnread = unreadIds.has(b.id) ? 1 : 0;

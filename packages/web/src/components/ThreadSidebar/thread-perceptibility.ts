@@ -1,6 +1,27 @@
-import type { ChatMessage, Thread, ThreadState } from '@/stores/chatStore';
+import type { ChatMessage, Thread, ThreadKind, ThreadState } from '@/stores/chatStore';
 
 export type ThreadViewer = { readonly type: 'user' } | { readonly type: 'cat'; readonly catId: string };
+
+const TASK_DISCUSSION_RELATION_KINDS: ReadonlySet<string> = new Set(['task_thread', 'message_thread']);
+
+/**
+ * F194 Raft-parity batch 3-C: sidebar-facing coarse classification. Prefers
+ * the server-computed `thread.kind` (see computeThreadKind on the API side)
+ * and falls back to deriving it locally — mirrors the backend derivation
+ * exactly so locally-synthesized thread stubs (the lobby row) and any
+ * pre-migration cached snapshot without `kind` still group correctly.
+ */
+export function getThreadKind(thread: Pick<Thread, 'id' | 'isDM' | 'relation' | 'kind' | 'kindOverride'>): ThreadKind {
+  if (thread.kind) return thread.kind;
+  if (thread.kindOverride) return thread.kindOverride;
+  if (thread.id === 'default') return 'lobby';
+  if (thread.isDM) return 'dm';
+  const relationKind = thread.relation?.kind;
+  if (relationKind) {
+    return TASK_DISCUSSION_RELATION_KINDS.has(relationKind) ? 'task_discussion' : 'branch';
+  }
+  return 'channel';
+}
 
 export interface ActualThreadParticipant {
   readonly catId: string;

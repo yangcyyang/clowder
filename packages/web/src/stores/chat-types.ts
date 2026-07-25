@@ -417,10 +417,25 @@ export type ChatMessagePatch = Omit<Partial<ChatMessage>, 'id' | 'type'>;
 
 export interface ThreadRelationV1 {
   readonly v: 1;
-  readonly kind: 'inline_reply' | 'edit_branch';
+  /**
+   * task_thread/message_thread: F194 thread-first auto/anchored discussion
+   * branches (see docs/research/clowder-raft-thread-task-design.md). Kept in
+   * sync with the backend union (ports/ThreadStore.ts) — batch 2 added these
+   * two kinds; batch 3-C's `computeThreadKind` groups them as `task_discussion`.
+   */
+  readonly kind: 'inline_reply' | 'edit_branch' | 'task_thread' | 'message_thread';
   readonly parentThreadId: string;
   readonly rootMessageId: string;
 }
+
+/**
+ * F194 Raft-parity batch 3-C: sidebar-facing coarse classification computed
+ * server-side (see computeThreadKind in api/.../ports/ThreadStore.ts). Kept
+ * optional here — locally-synthesized thread stubs (e.g. the lobby row) and
+ * pre-migration cached snapshots may not carry it; callers should derive a
+ * fallback (see thread-perceptibility.ts getThreadKind).
+ */
+export type ThreadKind = 'channel' | 'dm' | 'lobby' | 'branch' | 'task_discussion';
 
 export interface Thread {
   id: string;
@@ -432,6 +447,10 @@ export interface Thread {
   createdAt: number;
   /** Server-derived durable branch identity. Missing means root/legacy thread. */
   readonly relation?: ThreadRelationV1;
+  /** F194 Raft-parity batch 3-C: server-computed sidebar classification. See ThreadKind. */
+  kind?: ThreadKind;
+  /** F194 Raft-parity batch 3-C: manual override of computed kind (PATCH-settable). */
+  kindOverride?: ThreadKind;
   pinned?: boolean;
   pinnedAt?: number | null;
   favorited?: boolean;

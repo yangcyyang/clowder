@@ -25,6 +25,8 @@ export type ClientId =
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
 export type ToolPolicyValue = 'minimal' | 'standard' | 'full';
+/** Batch 3-E item 1: CLI permission tri-level gate. Absent/'trusted' = current behavior. */
+export type PermissionProfileValue = 'strict' | 'standard' | 'trusted';
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type CodexApprovalPolicy = 'untrusted' | 'on-failure' | 'on-request' | 'never';
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -49,6 +51,9 @@ export interface HubCatEditorFormState {
   accountRef: string;
   defaultModel: string;
   toolPolicy: ToolPolicyValue;
+  /** Batch 3-E item 1: optional so existing literal test fixtures keep compiling; runtime
+   *  initialState() always sets a concrete value (defaults to 'trusted'). */
+  permissionProfile?: PermissionProfileValue;
   commandArgs: string;
   cliConfigArgs: string[];
   cliEffort: CliEffortValue | '';
@@ -122,6 +127,13 @@ export const TOOL_POLICY_OPTIONS: Array<{ value: ToolPolicyValue; label: string 
   { value: 'minimal', label: '轻量工具箱 — 只保留当前消息' },
   { value: 'standard', label: '标准工具箱 — 工作区 + 历史摘要' },
   { value: 'full', label: '全量工具箱 — 重资料 + SOP + 引导上下文' },
+];
+
+/** Batch 3-E item 1: only Claude/Codex clients honor this; other clients ignore it at every tier. */
+export const PERMISSION_PROFILE_OPTIONS: Array<{ value: PermissionProfileValue; label: string }> = [
+  { value: 'strict', label: '严格 — 仅自动批准文件编辑，其余工具（含 Bash）需人工授权' },
+  { value: 'standard', label: '标准 — 自动批准文件编辑 + Bash，其余工具需人工授权' },
+  { value: 'trusted', label: '完全信任 — 跳过全部权限确认（现状默认）' },
 ];
 
 export const SESSION_STRATEGY_OPTIONS: Array<{ value: StrategyType; label: string }> = [
@@ -384,6 +396,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     toolPolicy: cat?.toolPolicy ?? 'standard',
+    permissionProfile: cat?.permissionProfile ?? 'trusted',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: isCliEffortValue(persistedCliEffort) ? persistedCliEffort : '',

@@ -45,6 +45,7 @@ export type {
   RichMediaGalleryBlock,
   TextContent,
   Thread,
+  ThreadKind,
   ThreadState,
   TokenUsage,
   ToolEvent,

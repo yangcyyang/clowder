@@ -30,6 +30,8 @@ export interface CatData {
   clientId: string;
   defaultModel: string;
   toolPolicy?: 'minimal' | 'standard' | 'full';
+  /** Batch 3-E item 1: CLI permission tri-level gate. Absent = 'trusted' (current behavior). */
+  permissionProfile?: 'strict' | 'standard' | 'trusted';
   cli?: {
     command?: string;
     outputFormat?: string;
@@ -140,6 +142,10 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       toolPolicy:
         cat.toolPolicy === 'minimal' || cat.toolPolicy === 'standard' || cat.toolPolicy === 'full'
           ? cat.toolPolicy
+          : undefined,
+      permissionProfile:
+        cat.permissionProfile === 'strict' || cat.permissionProfile === 'standard' || cat.permissionProfile === 'trusted'
+          ? cat.permissionProfile
           : undefined,
       cli: cat.cli,
       avatar: cat.avatar ?? '',

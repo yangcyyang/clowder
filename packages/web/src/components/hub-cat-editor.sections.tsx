@@ -13,12 +13,14 @@ import {
   type HubCatEditorFormState,
   joinTags,
   normalizeMentionPattern,
+  PERMISSION_PROFILE_OPTIONS,
   splitMentionPatterns,
   splitStrengthTags,
   TOOL_POLICY_OPTIONS,
 } from './hub-cat-editor.model';
-import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
+import { CollapsibleSectionCard, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { MODEL_SOURCE_LABELS, type ModelCandidateSource } from './hub-cat-model-options';
+import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
@@ -39,23 +41,12 @@ const CLI_EFFORT_LABELS: Record<string, string> = {
   xhigh: 'xhigh — 超深思考',
 };
 
-const AVATAR_PRESETS = [
-  { label: 'Slock Blue Cat', src: '/avatars/slock/slock-blue-cat.png' },
-  { label: 'Slock Yellow Cat', src: '/avatars/slock/slock-yellow-cat.png' },
-  { label: 'Slock Purple Bot', src: '/avatars/slock/slock-purple-bot.png' },
-  { label: 'Slock Skull', src: '/avatars/slock/slock-skull.png' },
-  { label: 'Slock Green Mask', src: '/avatars/slock/slock-green-mask.png' },
-  { label: 'Slock Pink Pig', src: '/avatars/slock/slock-pink-pig.png' },
-  { label: 'Slock Yellow Wizard', src: '/avatars/slock/slock-yellow-wizard.png' },
-  { label: 'Slock Fire', src: '/avatars/slock/slock-fire.png' },
-  { label: 'Slock Cyan Gem', src: '/avatars/slock/slock-cyan-gem.png' },
-  { label: 'Slock Pink Robot', src: '/avatars/slock/slock-pink-robot.png' },
-  { label: 'Slock Purple Eye', src: '/avatars/slock/slock-purple-eye.png' },
-  { label: 'Slock Yellow Crown', src: '/avatars/slock/slock-yellow-crown.png' },
-  { label: 'Slock Blue Mountain', src: '/avatars/slock/slock-blue-mountain.png' },
-  { label: 'Slock Coral Tile', src: '/avatars/slock/slock-coral-tile.png' },
-  { label: 'Slock Navy Dome', src: '/avatars/slock/slock-navy-dome.png' },
-  { label: 'Slock Green Blob', src: '/avatars/slock/slock-green-blob.png' },
+// clowder-ai batch-3G: pixel-block preset group (16 entries, formerly `/avatars/slock/*`)
+// removed from the selectable list per product ask — cat illustrations only from here on.
+// Existing cats whose `avatar` still points at a slock-* asset keep rendering fine:
+// the asset files are untouched and AvatarImageWithFallback renders whatever URL is
+// stored on the cat, independent of this preset list.
+export const AVATAR_PRESETS = [
   { label: 'Default', src: '/avatars/default.png' },
   { label: 'Opus', src: '/avatars/opus.png' },
   { label: 'Opus 45', src: '/avatars/opus-45.png' },
@@ -234,7 +225,6 @@ export function IdentitySection({
   onAvatarUpload: (file: File) => Promise<void>;
   onRefAudioUpload: (file: File) => Promise<void>;
 }) {
-  const strengthTags = splitStrengthTags(form.strengths);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const avatarSrc = safeAvatarSrc(form.avatar);
 
@@ -370,56 +360,6 @@ export function IdentitySection({
         </div>
       </div>
 
-      <div className="flex items-center gap-[14px]">
-        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Background Color</span>
-        <div className="flex items-center gap-2.5">
-          <label title="Primary">
-            <input
-              type="color"
-              aria-label="Background Color Primary"
-              value={form.colorPrimary}
-              onChange={(event) => onChange({ colorPrimary: event.target.value })}
-              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
-            />
-          </label>
-          <label title="Secondary">
-            <input
-              type="color"
-              aria-label="Background Color Secondary"
-              value={form.colorSecondary}
-              onChange={(event) => onChange({ colorSecondary: event.target.value })}
-              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
-            />
-          </label>
-        </div>
-      </div>
-      <TextField
-        label="注意事项"
-        ariaLabel="Caution"
-        value={form.caution}
-        onChange={(value) => onChange({ caution: value })}
-        placeholder="可选，留空表示无特殊注意"
-      />
-
-      <div className="flex items-start gap-3">
-        <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">Strengths</span>
-        <div className="min-w-0 flex-1">
-          <TagEditor
-            tags={strengthTags}
-            onChange={(tags) => onChange({ strengths: joinTags(tags) })}
-            addLabel="+ 选择"
-            placeholder="输入标签，例如 security"
-            emptyLabel="(无)"
-          />
-        </div>
-        <input
-          aria-label="Strengths"
-          value={form.strengths}
-          onChange={(event) => onChange({ strengths: event.target.value })}
-          className="sr-only"
-        />
-      </div>
-
       <VoiceConfigSection form={form} onChange={onChange} onRefAudioUpload={onRefAudioUpload} />
     </SectionCard>
   );
@@ -505,6 +445,90 @@ export function AssetCardSection({
   );
 }
 
+/**
+ * 3-G2 member-config trim: asset card binding + Background Color + 注意事项/Strengths are
+ * secondary, low-frequency fields — bundled into one collapsed-by-default "更多设置" group
+ * so the first screen of the editor stays short. Editing an existing cat that already has
+ * an asset card configured opens expanded (nothing to hide from a cat mid-setup); a brand
+ * new cat starts collapsed.
+ */
+export function MoreSettingsSection({
+  cat,
+  form,
+  onChange,
+  onReload,
+  reloading = false,
+}: {
+  cat?: CatData | null;
+  form: HubCatEditorFormState;
+  onChange: (patch: FormPatch) => void;
+  onReload?: (path: string) => Promise<void>;
+  reloading?: boolean;
+}) {
+  const strengthTags = splitStrengthTags(form.strengths);
+  const defaultExpanded = Boolean(cat) && Boolean(form.assetCardPath?.trim());
+
+  return (
+    <CollapsibleSectionCard title="更多设置" defaultExpanded={defaultExpanded}>
+      <AssetCardSection cat={cat} form={form} onChange={onChange} onReload={onReload} reloading={reloading} />
+
+      <div className="flex items-center gap-[14px]">
+        <span className="w-[150px] shrink-0 text-[12px] font-bold text-cafe-secondary">Background Color</span>
+        <div className="flex items-center gap-2.5">
+          <label title="Primary">
+            <input
+              type="color"
+              aria-label="Background Color Primary"
+              value={form.colorPrimary}
+              onChange={(event) => onChange({ colorPrimary: event.target.value })}
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+          </label>
+          <label title="Secondary">
+            <input
+              type="color"
+              aria-label="Background Color Secondary"
+              value={form.colorSecondary}
+              onChange={(event) => onChange({ colorSecondary: event.target.value })}
+              className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+          </label>
+        </div>
+      </div>
+      <p className="pl-[164px] text-[11px] leading-4 text-cafe-secondary">
+        用作该成员的标识色：@提及高亮文字、Session 卡片徽标底色/文字、头像流式描边等界面元素会用到，不是头像本身的底色。
+      </p>
+
+      <TextField
+        label="注意事项"
+        ariaLabel="Caution"
+        value={form.caution}
+        onChange={(value) => onChange({ caution: value })}
+        placeholder="可选，留空表示无特殊注意"
+      />
+
+      <div className="flex items-start gap-3">
+        <span className="w-[150px] shrink-0 pt-1 text-[12px] font-bold text-cafe-secondary">Strengths</span>
+        <div className="min-w-0 flex-1">
+          <TagEditor
+            tags={strengthTags}
+            onChange={(tags) => onChange({ strengths: joinTags(tags) })}
+            addLabel="+ 选择"
+            placeholder="输入标签，例如 security"
+            emptyLabel="(无)"
+          />
+        </div>
+        <input
+          aria-label="Strengths"
+          value={form.strengths}
+          onChange={(event) => onChange({ strengths: event.target.value })}
+          className="sr-only"
+        />
+      </div>
+    </CollapsibleSectionCard>
+  );
+}
+
 const VOICE_LANG_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: '未设置' },
   { value: 'z', label: '中文 (z)' },
@@ -568,64 +592,50 @@ function VoiceConfigSection({
   onRefAudioUpload: (file: File) => Promise<void>;
 }) {
   const hasVoiceConfig = !!(form.voiceVoice || form.voiceLangCode);
-  const [expanded, setExpanded] = useState(hasVoiceConfig);
   const summary = hasVoiceConfig ? `${form.voiceLangCode || '?'}` : '';
 
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex min-w-0 flex-1 items-center rounded-[10px] bg-[var(--console-field-bg)] px-3 h-[34px] w-full text-left"
-      >
-        <p className="text-[12px] font-bold text-[var(--console-voice-hint)]">
-          {expanded ? '▾' : '▸'} Voice Config{summary ? ` — ${summary}` : ''}
-        </p>
-      </button>
-      {expanded && (
-        <div className="space-y-2">
-          <SelectField
-            label="Lang Code"
-            value={form.voiceLangCode}
-            options={VOICE_LANG_OPTIONS}
-            onChange={(value) => {
-              const patch: Partial<HubCatEditorFormState> = { voiceLangCode: value };
-              if (value && !form.voiceVoice) patch.voiceVoice = 'zm_yunjian';
-              onChange(patch);
-            }}
-          />
-          <TextField
-            label="Speed"
-            ariaLabel="Voice Speed"
-            value={form.voiceSpeed}
-            onChange={(value) => onChange({ voiceSpeed: value })}
-            placeholder="1.0"
-          />
-          <RefAudioField value={form.voiceRefAudio} onUpload={onRefAudioUpload} />
-          <TextField
-            label="Ref Text"
-            ariaLabel="Reference Audio Text"
-            value={form.voiceRefText}
-            onChange={(value) => onChange({ voiceRefText: value })}
-            placeholder="参考音频对应的文本"
-          />
-          <TextField
-            label="Instruct"
-            ariaLabel="Voice Style Instruction"
-            value={form.voiceInstruct}
-            onChange={(value) => onChange({ voiceInstruct: value })}
-            placeholder="如：用一个调皮狡黠的少年语气说话"
-          />
-          <TextField
-            label="Temperature"
-            ariaLabel="Voice Temperature"
-            value={form.voiceTemperature}
-            onChange={(value) => onChange({ voiceTemperature: value })}
-            placeholder="0.3"
-          />
-        </div>
-      )}
-    </div>
+    <CollapsibleSectionCard title="Voice Config" summary={summary} defaultExpanded={hasVoiceConfig}>
+      <SelectField
+        label="Lang Code"
+        value={form.voiceLangCode}
+        options={VOICE_LANG_OPTIONS}
+        onChange={(value) => {
+          const patch: Partial<HubCatEditorFormState> = { voiceLangCode: value };
+          if (value && !form.voiceVoice) patch.voiceVoice = 'zm_yunjian';
+          onChange(patch);
+        }}
+      />
+      <TextField
+        label="Speed"
+        ariaLabel="Voice Speed"
+        value={form.voiceSpeed}
+        onChange={(value) => onChange({ voiceSpeed: value })}
+        placeholder="1.0"
+      />
+      <RefAudioField value={form.voiceRefAudio} onUpload={onRefAudioUpload} />
+      <TextField
+        label="Ref Text"
+        ariaLabel="Reference Audio Text"
+        value={form.voiceRefText}
+        onChange={(value) => onChange({ voiceRefText: value })}
+        placeholder="参考音频对应的文本"
+      />
+      <TextField
+        label="Instruct"
+        ariaLabel="Voice Style Instruction"
+        value={form.voiceInstruct}
+        onChange={(value) => onChange({ voiceInstruct: value })}
+        placeholder="如：用一个调皮狡黠的少年语气说话"
+      />
+      <TextField
+        label="Temperature"
+        ariaLabel="Voice Temperature"
+        value={form.voiceTemperature}
+        onChange={(value) => onChange({ voiceTemperature: value })}
+        placeholder="0.3"
+      />
+    </CollapsibleSectionCard>
   );
 }
 
@@ -795,6 +805,11 @@ export function AccountSection({
   availableProfiles,
   loadingProfiles,
   onChange,
+  localCliProbes,
+  scanningLocalClis,
+  localCliProbeError,
+  onScanLocalClis,
+  onAdoptLocalCli,
 }: {
   form: HubCatEditorFormState;
   hasError?: boolean;
@@ -805,12 +820,20 @@ export function AccountSection({
   availableProfiles: ProfileItem[];
   loadingProfiles: boolean;
   onChange: (patch: FormPatch) => void;
+  /** F3-G2: local CLI probe now lives as a secondary entry point inside 认证与模型, not its own top-level section. */
+  localCliProbes: LocalCliProbeResult[] | null;
+  scanningLocalClis: boolean;
+  localCliProbeError: string | null;
+  onScanLocalClis: () => void;
+  onAdoptLocalCli: (probe: LocalCliProbeResult) => void;
 }) {
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
+  const modelRequired = selectedProfile?.authType === 'api_key';
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const providerSuggestions = useMemo(() => buildProviderSuggestions(modelOptions), [modelOptions]);
   const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
+  const [localCliExpanded, setLocalCliExpanded] = useState(false);
 
   return (
     <SectionCard title="认证与模型" tone={hasError ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
@@ -872,7 +895,7 @@ export function AccountSection({
               value={form.defaultModel}
               onChange={(value) => onChange({ defaultModel: value })}
               suggestions={modelOptions}
-              required
+              required={modelRequired}
               placeholder={
                 form.clientId === 'opencode'
                   ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
@@ -933,6 +956,15 @@ export function AccountSection({
               options={TOOL_POLICY_OPTIONS}
               onChange={(value) => onChange({ toolPolicy: value as HubCatEditorFormState['toolPolicy'] })}
             />
+            <SelectField
+              label="权限档位"
+              value={form.permissionProfile ?? 'trusted'}
+              options={PERMISSION_PROFILE_OPTIONS}
+              onChange={(value) => onChange({ permissionProfile: value as HubCatEditorFormState['permissionProfile'] })}
+            />
+            <p className="text-[11px] leading-4 text-cafe-secondary">
+              仅 Claude / Codex 生效；其余 Client 忽略此项，始终按现状（完全信任）运行。
+            </p>
             {form.clientId === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <>
                 <ComboField
@@ -961,16 +993,37 @@ export function AccountSection({
               </div>
             ) : null}
             {callHint ? (
-              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
-                <p className="whitespace-pre-wrap text-[11px] leading-4 text-cafe-secondary">
-                  {callHint.label}
-                  <span className="font-semibold text-cafe">{callHint.url}</span>
-                  {callHint.warning}
-                </p>
-              </div>
+              <CollapsibleSectionCard title="调试详情" defaultExpanded={false}>
+                <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2">
+                  <p className="whitespace-pre-wrap text-[11px] leading-4 text-cafe-secondary">
+                    {callHint.label}
+                    <span className="font-semibold text-cafe">{callHint.url}</span>
+                    {callHint.warning}
+                  </p>
+                </div>
+              </CollapsibleSectionCard>
             ) : null}
           </>
         )}
+
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setLocalCliExpanded((value) => !value)}
+            className="text-[11px] font-bold text-cafe-accent hover:underline"
+          >
+            {localCliExpanded ? '▾' : '▸'} 没有账号？扫描本地 CLI
+          </button>
+          {localCliExpanded ? (
+            <LocalCliProbeSection
+              probes={localCliProbes}
+              scanning={scanningLocalClis}
+              error={localCliProbeError}
+              onScan={onScanLocalClis}
+              onAdopt={onAdoptLocalCli}
+            />
+          ) : null}
+        </div>
       </div>
     </SectionCard>
   );

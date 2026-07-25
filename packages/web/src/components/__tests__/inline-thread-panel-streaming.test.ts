@@ -61,7 +61,7 @@ describe('InlineThreadPanel reply boundary', () => {
       catId: null,
       content: 'same source',
       timestamp: 100,
-    } as ChatMessage;
+    } as unknown as ChatMessage;
     const firstCopy = { ...source, id: 'copy-1' };
     const betweenCopies = { ...source, id: 'context-between', content: 'not a reply', timestamp: 150 };
     const lastCopy = { ...source, id: 'copy-2' };
