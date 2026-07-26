@@ -5,7 +5,6 @@ export { agentMemoryRoutes } from './agent-memory.js';
 export { auditRoutes } from './audit.js';
 export { authorizationRoutes } from './authorization.js';
 export { backlogRoutes } from './backlog.js';
-export { bootcampRoutes } from './bootcamp.js';
 export { brakeRoutes } from './brake.js';
 export { callbackAuthRoutes } from './callback-auth.js';
 export { registerCallbackAuthDebugRoute } from './callback-auth-debug.js';

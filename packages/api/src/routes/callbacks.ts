@@ -56,7 +56,6 @@ import {
 } from './callback-auth-prehandler.js';
 import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
-import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
@@ -2634,16 +2633,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       workflowSopStore: opts.workflowSopStore,
       backlogStore: opts.backlogStore,
-      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
-    });
-  }
-
-  // F087: Bootcamp state transition callbacks
-  if (opts.threadStore) {
-    registerCallbackBootcampRoutes(app, {
-      registry,
-      threadStore: opts.threadStore,
-      socketManager,
       ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
     });
   }

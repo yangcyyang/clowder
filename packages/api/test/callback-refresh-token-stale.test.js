@@ -3,7 +3,7 @@
  *
  * Cloud Codex P1 (PR #1368): refresh-token currently slides TTL on stale
  * invocations because it doesn't run the isLatest() guard that other
- * stale-aware routes use (post_message:347, update_bootcamp etc). Refusing
+ * stale-aware routes use (post_message:347 etc). Refusing
  * with stale_invocation reason keeps stale invocation lifecycle aligned
  * across the system.
  *

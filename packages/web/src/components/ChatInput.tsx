@@ -899,7 +899,6 @@ export function ChatInput({
               ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus-within:ring-conn-amber-text'
               : 'border-[var(--console-input-stroke)] focus-within:ring-[var(--console-input-stroke)]'
           }`}
-          data-bootcamp-step="chat-input"
           data-guide-id="chat.input"
         >
           {showSlashCommands && (

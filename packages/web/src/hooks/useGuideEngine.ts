@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { syncLocalBootcampState } from '@/components/first-run-quest/syncLocalBootcampState';
-import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import type { OrchestrationFlow } from '@/stores/guideStore';
 import { useGuideStore } from '@/stores/guideStore';
@@ -13,15 +11,9 @@ import { apiFetch } from '@/utils/api-client';
  *
  * Subscribes to guideStore.pendingStart (set by Socket.io → reduceServerEvent).
  * Fetches flow definition from API, then calls startGuide().
- * On completion, notifies backend to transition guideState active → completed,
- * and auto-advances bootcamp phase when the guide is bootcamp-bound.
+ * On completion, notifies backend to transition guideState active → completed.
  */
 
-/** Maps bootcamp-bound guide IDs to the next bootcamp phase on completion. */
-const GUIDE_PHASE_ADVANCE: Record<string, string> = {
-  'bootcamp-add-teammate': 'phase-8-collab',
-  'bootcamp-farewell': 'phase-11-farewell',
-};
 export function useGuideEngine() {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const startGuide = useGuideStore((s) => s.startGuide);
@@ -123,11 +115,6 @@ export function useGuideEngine() {
         });
         if (res.ok) {
           markCompletionPersisted(sessionId);
-          // Auto-advance bootcamp phase when a bootcamp-bound guide completes
-          const nextPhase = GUIDE_PHASE_ADVANCE[guideId];
-          if (nextPhase) {
-            advanceBootcampPhase(threadId, nextPhase, guideId);
-          }
           return;
         }
         if (attempt < 3) {
@@ -159,46 +146,6 @@ export function useGuideEngine() {
     markCompletionPersisted,
     markCompletionFailed,
   ]);
-}
-
-/**
- * PATCH to advance bootcamp phase after guide completion.
- * On success: syncs local store. On failure: rolls back completedGuides
- * so the guide can be re-triggered (prevents dead-state lockout).
- */
-function advanceBootcampPhase(threadId: string, nextPhase: string, guideId: string): void {
-  void (async () => {
-    try {
-      const freshThreadRes = await apiFetch(`/api/threads/${threadId}`);
-      if (!freshThreadRes.ok) {
-        rollbackCompletedGuide(threadId, guideId);
-        return;
-      }
-
-      const freshThread = (await freshThreadRes.json()) as Pick<Thread, 'bootcampState'>;
-      const existing = freshThread.bootcampState;
-      if (!existing) {
-        rollbackCompletedGuide(threadId, guideId);
-        return;
-      }
-
-      const nextState = { ...existing, phase: nextPhase, guideStep: null };
-      const patchRes = await apiFetch(`/api/threads/${threadId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bootcampState: nextState }),
-      });
-      if (!patchRes.ok) {
-        rollbackCompletedGuide(threadId, guideId);
-        return;
-      }
-
-      const patchedThread = (await patchRes.json()) as Pick<Thread, 'bootcampState'>;
-      syncLocalBootcampState(threadId, patchedThread.bootcampState ?? (nextState as Thread['bootcampState']));
-    } catch {
-      rollbackCompletedGuide(threadId, guideId);
-    }
-  })();
 }
 
 /** Remove a completedGuides entry so the guide can be re-triggered on failure. */

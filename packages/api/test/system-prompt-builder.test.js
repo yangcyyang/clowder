@@ -2224,54 +2224,6 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.length < 5800, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 5800`);
   });
 
-  test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'independent',
-      teammates: [],
-      mcpAvailable: false,
-      bootcampState: {
-        v: 1,
-        phase: 'phase-2-env-check',
-        leadCat: 'opus',
-        startedAt: Date.now(),
-      },
-    });
-    assert.ok(ctx.includes('Bootcamp Mode'), 'Should include bootcamp header');
-    assert.ok(ctx.includes('phase-2-env-check'), 'Should include current phase');
-    assert.ok(ctx.includes('leadCat=opus'), 'Should include lead cat');
-    assert.ok(ctx.includes('bootcamp-guide'), 'Should reference skill');
-  });
-
-  test('buildInvocationContext injects threadId in bootcamp mode', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'independent',
-      teammates: [],
-      mcpAvailable: false,
-      threadId: 'thread_abc123',
-      bootcampState: {
-        v: 1,
-        phase: 'phase-1-intro',
-        startedAt: Date.now(),
-      },
-    });
-    assert.ok(ctx.includes('thread=thread_abc123'), 'Should include threadId in bootcamp line');
-  });
-
-  test('buildInvocationContext omits bootcamp when bootcampState absent', async () => {
-    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const ctx = buildInvocationContext({
-      catId: 'opus',
-      mode: 'independent',
-      teammates: [],
-      mcpAvailable: false,
-    });
-    assert.ok(!ctx.includes('Bootcamp Mode'), 'Should not include bootcamp header');
-  });
-
   // --- 回归测试：maine-coon prompt 必须包含 A2A 执行纪律 ---
 
   test('maine-coon prompt contains execution discipline keywords', async () => {

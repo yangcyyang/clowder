@@ -29,12 +29,6 @@ const FLOW_2: OrchestrationFlow = {
   ],
 };
 
-const BOOTCAMP_FLOW: OrchestrationFlow = {
-  id: 'bootcamp-add-teammate',
-  name: 'Bootcamp Add Teammate',
-  steps: [{ id: 'step-1', target: 'cats.add-member', tips: 'Add teammate', advance: 'click' }],
-};
-
 function Harness() {
   useGuideEngine();
   return null;
@@ -491,90 +485,5 @@ describe('useGuideEngine duplicate start protection', () => {
 
     expect(useGuideStore.getState().completionFailed).toBe(true);
     expect(useGuideStore.getState().completedGuides.has('thread-1::add-member')).toBe(false);
-  });
-
-  it('merges bootcamp phase advance against fresh server state before PATCH', async () => {
-    const staleState = {
-      v: 1 as const,
-      phase: 'phase-7.5-add-teammate',
-      startedAt: 1000,
-    };
-    const freshState = {
-      ...staleState,
-      selectedTaskId: 'Q1',
-      envCheck: { node: { ok: true } },
-      advancedFeatures: { tts: 'available' },
-    };
-    let patchBody: unknown;
-
-    apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/guide-flows/bootcamp-add-teammate') {
-        return Promise.resolve({ ok: true, json: async () => BOOTCAMP_FLOW });
-      }
-      if (url === '/api/guide-actions/start') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/guide-actions/complete') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/threads/thread-1' && !init?.method) {
-        return Promise.resolve({ ok: true, json: async () => ({ bootcampState: freshState }) });
-      }
-      if (url === '/api/threads/thread-1' && init?.method === 'PATCH') {
-        patchBody = init.body;
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            bootcampState: {
-              ...freshState,
-              phase: 'phase-8-collab',
-              guideStep: null,
-            },
-          }),
-        });
-      }
-      throw new Error(`Unexpected apiFetch call: ${url}`);
-    });
-
-    useChatStore.setState({
-      currentThreadId: 'thread-1',
-      threads: [
-        {
-          id: 'thread-1',
-          projectPath: 'default',
-          title: 'Bootcamp',
-          createdBy: 'user1',
-          participants: [],
-          lastActiveAt: 0,
-          createdAt: 0,
-          bootcampState: staleState,
-        },
-      ],
-    });
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    await act(async () => {
-      dispatchGuideStart('bootcamp-add-teammate');
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      dispatchGuideComplete({ guideId: 'bootcamp-add-teammate', threadId: 'thread-1' });
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(JSON.parse(String(patchBody))).toEqual({
-      bootcampState: {
-        ...freshState,
-        phase: 'phase-8-collab',
-        guideStep: null,
-      },
-    });
   });
 });

@@ -297,10 +297,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           body: JSON.stringify({
             ...(opts.projectPath ? { projectPath: opts.projectPath } : {}),
             ...(opts.preferredCats?.length ? { preferredCats: opts.preferredCats } : {}),
-            ...(opts.title || opts.bootcamp ? { title: opts.bootcamp ? '🎓 猫猫训练营' : opts.title } : {}),
+            ...(opts.title ? { title: opts.title } : {}),
             ...(opts.pinned ? { pinned: opts.pinned } : {}),
             ...(opts.backlogItemId ? { backlogItemId: opts.backlogItemId } : {}),
-            ...(opts.bootcamp ? { bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() } } : {}),
           }),
         });
         if (!res.ok) {

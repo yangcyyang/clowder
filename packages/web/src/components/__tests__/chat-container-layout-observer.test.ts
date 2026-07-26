@@ -212,10 +212,8 @@ vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
-vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
-vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
 vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
 describe('ChatContainer bottom chrome observer', () => {

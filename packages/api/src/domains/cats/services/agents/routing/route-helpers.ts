@@ -1807,15 +1807,6 @@ export function getService(services: Record<string, AgentService>, catId: CatId)
   return service;
 }
 
-export function getThreadBootcampMemberCount(thread: Thread | null | undefined): number | undefined {
-  if (!thread?.bootcampState) return undefined;
-  const members = new Set<string>(thread.participants);
-  if (thread.bootcampState.leadCat) {
-    members.add(thread.bootcampState.leadCat);
-  }
-  return members.size;
-}
-
 export function shouldHandleCompletedGuide(
   guideCompletionOwner: string | undefined,
   targetCatIds: ReadonlySet<string>,

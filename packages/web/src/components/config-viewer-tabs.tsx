@@ -147,7 +147,6 @@ export function CatOverviewTab({
           type="button"
           onClick={onAddMember}
           className="flex h-9 items-center gap-2 rounded-lg bg-[var(--cafe-accent)] px-3.5 text-[13px] font-semibold text-[var(--cafe-accent-foreground)] transition-opacity hover:opacity-90"
-          data-bootcamp-step="add-member-button"
           data-guide-id="cats.add-member"
         >
           <HubIcon name="plus" className="h-[15px] w-[15px]" />

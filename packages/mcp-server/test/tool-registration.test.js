@@ -55,9 +55,6 @@ const EXPECTED_TOOLS = [
   // Permission tools (this is the regression guard)
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
-  // Bootcamp tools (F087)
-  'cat_cafe_update_bootcamp_state',
-  'cat_cafe_bootcamp_env_check',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // F-F（批次 3，PRD-memory-upgrade.md）: 猫主动写记忆——共享 evaluateMemoryPromotion
@@ -131,8 +128,6 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
   'cat_cafe_multi_mention',
-  'cat_cafe_update_bootcamp_state',
-  'cat_cafe_bootcamp_env_check',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -368,8 +363,6 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_request_permission',
   'cat_cafe_update_workflow',
-  'cat_cafe_update_bootcamp_state',
-  'cat_cafe_bootcamp_env_check', // writes bootcampState.envCheck via callbackPost
   'cat_cafe_update_guide_state',
   'cat_cafe_guide_resolve',
   'cat_cafe_start_guide',

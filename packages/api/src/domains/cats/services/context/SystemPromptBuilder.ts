@@ -33,7 +33,6 @@ import { listAgentMemoryNotes } from '../agents/memory/AgentMemoryStore.js';
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
 import { buildGuidePromptLines } from '../../../guides/GuidePromptSection.js';
 import type {
-  BootcampStateV1,
   ThreadMentionRoutingFeedback,
   ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
@@ -170,7 +169,7 @@ export interface InvocationContext {
    */
   voiceMode?: boolean;
   /**
-   * Thread ID — injected for tools that need it (e.g. bootcamp state updates).
+   * Thread ID — injected for tools that need it.
    */
   threadId?: string;
   /**
@@ -194,11 +193,6 @@ export interface InvocationContext {
   a2aTriggerMessageId?: string;
   a2aTriggerContent?: string;
   /**
-   * F087: Bootcamp state for CVO onboarding threads.
-   * When present, cats inject bootcamp-guide behavior per phase.
-   */
-  bootcampState?: BootcampStateV1;
-  /**
    * F155: Matched guide candidate from routing-layer keyword match.
    * When present, cats load guide-interaction skill and offer the guide.
    */
@@ -212,11 +206,6 @@ export interface InvocationContext {
     /** When user clicked an interactive selection, carries the chosen label. */
     userSelection?: string;
   };
-  /**
-   * F087: Number of cats currently registered in this account.
-   * Injected alongside bootcampState so the model knows team size without querying /api/cats.
-   */
-  bootcampMemberCount?: number;
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -1208,18 +1197,6 @@ function buildTurnMetaLines(context: InvocationContext): string[] {
   } else {
     lines.push(
       'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在铲屎官明确要求语音时才发。',
-      '',
-    );
-  }
-
-  // F087: Bootcamp mode — inject phase context so cats know to guide the new CVO
-  if (context.bootcampState) {
-    const { phase, leadCat, selectedTaskId } = context.bootcampState;
-    const threadPart = context.threadId ? ` thread=${context.threadId}` : '';
-    const membersPart = context.bootcampMemberCount != null ? ` members=${context.bootcampMemberCount}` : '';
-    lines.push(
-      `🎓 Bootcamp Mode:${threadPart} phase=${phase}${leadCat ? ` leadCat=${leadCat}` : ''}${selectedTaskId ? ` task=${selectedTaskId}` : ''}${membersPart}`,
-      '→ Load bootcamp-guide skill and act per current phase.',
       '',
     );
   }

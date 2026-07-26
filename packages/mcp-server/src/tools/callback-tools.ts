@@ -1069,76 +1069,6 @@ export async function handleMultiMention(input: {
   });
 }
 
-// ============ Bootcamp (F087) ============
-
-export const updateBootcampStateInputSchema = {
-  threadId: z.string().min(1).describe('Thread ID of the bootcamp thread'),
-  phase: z
-    .enum([
-      'phase-1-intro',
-      'phase-2-env-check',
-      'phase-3-config-help',
-      'phase-4-task-select',
-      'phase-5-kickoff',
-      'phase-6-design',
-      'phase-7-dev',
-      'phase-7.5-add-teammate',
-      'phase-8-collab',
-      'phase-9-complete',
-      'phase-10-retro',
-      'phase-11-farewell',
-    ])
-    .optional()
-    .describe('New bootcamp phase to advance to'),
-  leadCat: z.string().optional().describe('Selected lead cat ID (a valid registered catId)'),
-  selectedTaskId: z.string().max(50).optional().describe('Selected task ID (e.g. "Q1", "Q7")'),
-  envCheck: z
-    .record(z.object({ ok: z.boolean(), version: z.string().optional(), note: z.string().optional() }))
-    .optional()
-    .describe('Environment check results (usually auto-set by bootcamp-env-check)'),
-  advancedFeatures: z
-    .record(z.enum(['available', 'unavailable', 'skipped']))
-    .optional()
-    .describe('Advanced feature status: TTS, ASR, Pencil'),
-  guideStep: z
-    .enum(['open-hub', 'click-add-member', 'fill-form', 'mention-teammate', 'return-to-chat', 'done'])
-    .nullable()
-    .optional()
-    .describe(
-      'Sub-step for the add-teammate guide overlay. Set to "open-hub" when advancing to phase-7.5-add-teammate. Set to null to clear.',
-    ),
-  completedAt: z.number().optional().describe('Timestamp when bootcamp was completed (Phase 11)'),
-};
-
-export async function handleUpdateBootcampState(input: {
-  threadId: string;
-  phase?: string | undefined;
-  leadCat?: string | undefined;
-  selectedTaskId?: string | undefined;
-  envCheck?: Record<string, { ok: boolean; version?: string; note?: string }> | undefined;
-  advancedFeatures?: Record<string, string> | undefined;
-  guideStep?: string | null | undefined;
-  completedAt?: number | undefined;
-}): Promise<ToolResult> {
-  const body: Record<string, unknown> = { threadId: input.threadId };
-  if (input.phase !== undefined) body['phase'] = input.phase;
-  if (input.leadCat !== undefined) body['leadCat'] = input.leadCat;
-  if (input.selectedTaskId !== undefined) body['selectedTaskId'] = input.selectedTaskId;
-  if (input.envCheck !== undefined) body['envCheck'] = input.envCheck;
-  if (input.advancedFeatures !== undefined) body['advancedFeatures'] = input.advancedFeatures;
-  if (input.guideStep !== undefined) body['guideStep'] = input.guideStep;
-  if (input.completedAt !== undefined) body['completedAt'] = input.completedAt;
-  return callbackPost('/api/callbacks/update-bootcamp-state', body);
-}
-
-export const bootcampEnvCheckInputSchema = {
-  threadId: z.string().min(1).describe('Thread ID — results are auto-stored in bootcampState.envCheck'),
-};
-
-export async function handleBootcampEnvCheck(input: { threadId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
-}
-
 // ============ Thread Cats Discovery ============
 
 export const getThreadCatsInputSchema = {};
@@ -1426,26 +1356,6 @@ export const callbackTools = [
       'GOTCHA: callbackTo is usually your own catId so responses come back to you.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
-  },
-  // ============ Bootcamp (F087) ============
-  {
-    name: 'cat_cafe_update_bootcamp_state',
-    description:
-      'Update the bootcamp training state for a thread. Use to advance phase, set lead cat, ' +
-      'record task selection, store env check results, or mark completion. ' +
-      'Fields are merged into existing state — only send what changed. ' +
-      'GOTCHA: Only use this during bootcamp threads. Phase values must follow the sequence.',
-    inputSchema: updateBootcampStateInputSchema,
-    handler: handleUpdateBootcampState,
-  },
-  {
-    name: 'cat_cafe_bootcamp_env_check',
-    description:
-      'Run environment check for bootcamp (Node.js, pnpm, Git, Claude CLI, MCP, TTS, ASR, Pencil). ' +
-      "Results are automatically stored in the thread's bootcampState.envCheck. " +
-      'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
-    inputSchema: bootcampEnvCheckInputSchema,
-    handler: handleBootcampEnvCheck,
   },
   // ============ F155: Guide Engine ============
   {

@@ -88,7 +88,6 @@ import {
   freshnessPersistenceEgress,
   getEffectiveRuntimeContextBudget,
   getService,
-  getThreadBootcampMemberCount,
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   parseCompactBoundarySystemInfo,
@@ -292,17 +291,14 @@ export async function* routeParallel(
   let sopStageHint: { stage: string; suggestedSkill: string | null; featureId: string } | undefined;
   // F092: Voice companion mode
   let voiceMode: boolean | undefined;
-  // F087: Bootcamp state for CVO onboarding
-  let bootcampState: InvocationContext['bootcampState'];
   const targetCatIds = new Set<string>(targetCats);
-  // Thread read: shared across routingPolicy, voiceMode, bootcamp, SOP, and guide interceptor
+  // Thread read: shared across routingPolicy, voiceMode, SOP, and guide interceptor
   let routeThread: Thread | null = null;
   if (deps.invocationDeps.threadStore) {
     try {
       routeThread = (await deps.invocationDeps.threadStore.get(threadId)) ?? null;
       routingPolicy = routeThread?.routingPolicy;
       voiceMode = routeThread?.voiceMode;
-      bootcampState = routeThread?.bootcampState;
       // F073 P4: Read workflow-sop if thread is linked to a backlog item
       if (routeThread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
         try {
@@ -322,7 +318,6 @@ export async function* routeParallel(
       /* best-effort */
     }
   }
-  const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
   const historyGovernanceObserveEnabled = isHistoryGovernanceObserveEnabled();
   const historyGovernanceHistory = historyGovernanceObserveEnabled
     ? await readHistoryForGovernanceObservation(deps, threadId, userId, history)
@@ -439,7 +434,6 @@ export async function* routeParallel(
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         threadId,
       };

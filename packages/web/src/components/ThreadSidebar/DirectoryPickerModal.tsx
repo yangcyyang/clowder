@@ -20,7 +20,6 @@ export interface NewThreadOptions {
   title?: string;
   pinned?: boolean;
   backlogItemId?: string;
-  bootcamp?: boolean;
   initProject?: boolean;
 }
 
@@ -53,8 +52,7 @@ export function DirectoryPickerModal({
 
   // F068-R7: Two-step flow — select project first, then confirm
   // 'lobby' sentinel means user explicitly chose "大厅 (无项目)"
-  // 'bootcamp' sentinel means user chose the bootcamp onboarding flow
-  const [selectedPath, setSelectedPath] = useState<string | 'lobby' | 'bootcamp' | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | 'lobby' | null>(null);
   // P2 fix: clear stale pathError whenever user selects a project
   const handleSelectPath = useCallback((path: string | 'lobby') => {
     setPathError(null);
@@ -87,7 +85,7 @@ export function DirectoryPickerModal({
   }, []);
 
   const selectWithOptions = useCallback(
-    (projectPath: string | undefined, bootcamp?: boolean) => {
+    (projectPath: string | undefined) => {
       const bindings: SessionBinding[] = [];
       for (const [catId, sid] of Object.entries(sessionInputs)) {
         const trimmed = sid.trim();
@@ -102,7 +100,6 @@ export function DirectoryPickerModal({
         title: threadTitle.trim() || undefined,
         pinned: pinOnCreate || undefined,
         backlogItemId: selectedBacklogItemId || undefined,
-        bootcamp: bootcamp || undefined,
         initProject: projectPath && initProjectOnCreate ? true : undefined,
       });
     },
@@ -114,10 +111,6 @@ export function DirectoryPickerModal({
     console.log('[DirectoryPicker] confirmCreate called, selectedPath=', selectedPath);
     if (selectedPath === null) {
       console.warn('[DirectoryPicker] selectedPath is null — button should be disabled');
-      return;
-    }
-    if (selectedPath === 'bootcamp') {
-      selectWithOptions(undefined, true);
       return;
     }
     selectWithOptions(selectedPath === 'lobby' ? undefined : selectedPath);
@@ -207,7 +200,7 @@ export function DirectoryPickerModal({
 
   const [catsExpanded, setCatsExpanded] = useState(false);
   const catSummary = selectedCats.length > 0 ? `已选 ${selectedCats.length} 只猫` : '';
-  const canInitProject = Boolean(selectedPath && selectedPath !== 'lobby' && selectedPath !== 'bootcamp');
+  const canInitProject = Boolean(selectedPath && selectedPath !== 'lobby');
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
@@ -270,7 +263,6 @@ export function DirectoryPickerModal({
           {/* Browsed path not in existing list — show as highlighted entry (pinned to top) */}
           {selectedPath &&
             selectedPath !== 'lobby' &&
-            selectedPath !== 'bootcamp' &&
             selectedPath !== cwdPath &&
             !existingProjects.includes(selectedPath) && (
               <button
@@ -315,18 +307,6 @@ export function DirectoryPickerModal({
           >
             <span className="text-base">🏠</span>
             <span>大厅 (无项目)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleSelectPath('bootcamp')}
-            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] ${
-              selectedPath === 'bootcamp' ? 'bg-[var(--console-active-bg)] shadow-[var(--console-shadow-soft)]' : ''
-            }`}
-            data-testid="picker-bootcamp"
-          >
-            <span className="text-base">🎓</span>
-            <span>猫猫训练营</span>
           </button>
         </div>
 

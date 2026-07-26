@@ -27,7 +27,6 @@ import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
-import { useGuideStore } from '@/stores/guideStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -43,7 +42,6 @@ import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AgentStatusIndicator } from './AgentStatusIndicator';
 import { AuthorizationCard } from './AuthorizationCard';
-import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
@@ -53,15 +51,10 @@ import { EditChannelModal } from './EditChannelModal';
 import { FilesPanel } from './FilesPanel';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { FreshnessHoldBar } from './FreshnessHoldBar';
-import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
-import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
-import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
-import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { InlineThreadPanel } from './InlineThreadPanel';
-import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import {
   applyInlineThreadReplyCountUpdate,
@@ -256,37 +249,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [isDeletingChannel, setIsDeletingChannel] = useState(false);
   const [channelSettingsError, setChannelSettingsError] = useState<string | null>(null);
   const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
-  const [showBootcampList, setShowBootcampList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
   const [savedMessagesViewOpen, setSavedMessagesViewOpenState] = useState(false);
-  // F106: fetch bootcamp count independently of sidebar lifecycle
-  // refreshKey increments only on modal close → avoids duplicate fetch on open
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_bootcampRefreshKey, setBootcampRefreshKey] = useState(0);
   const patchMessage = useChatStore((s) => s.patchMessage);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const addToast = useToastStore((s) => s.addToast);
-  const handleBootcampModalClose = useCallback(() => {
-    setShowBootcampList(false);
-    setBootcampRefreshKey((k) => k + 1);
-  }, []);
-  const [bootcampCount, setBootcampCount] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch('/api/bootcamp/threads')
-      .then(async (res) => {
-        if (cancelled || !res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setBootcampCount(data.threads?.length ?? 0);
-      })
-      .catch(() => {
-        if (!cancelled) setBootcampCount(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   // F063: resizable split pane — chatBasis as percentage (20-80), persisted
   const [chatBasis, setChatBasis, resetChatBasis] = usePersistedState('cat-cafe:chatBasis', 50);
   // clowder-ai#28: right status panel width in px, persisted
@@ -569,7 +537,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setShowFirstRunQuestPrompt(false);
     setShowQuestWizard(true);
   }, []);
-  const currentBootcampState = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
   const currentThread = storeThreads.find((thread) => thread.id === threadId);
   // [batch 2-E] Raft rule: threads never nest — a message already living inside
   // a relation-having thread (task/inline-reply branch) cannot be converted to
@@ -583,60 +550,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       isExport ? -1 : findUnreadDividerIndex(messages, currentThread?.lastReadMessageId, currentThread?.unreadCount),
     [isExport, messages, currentThread?.lastReadMessageId, currentThread?.unreadCount],
   );
-  const currentBootcampPhase = currentBootcampState?.phase;
-  const showFirstProjectMistakeTip = useFirstProjectMistakeTipGate({
-    threadId,
-    phase: currentBootcampPhase,
-    messageCount: messages.length,
-    hasActiveInvocation,
-  });
-  useFirstProjectPreviewAutoOpen({
-    threadId,
-    phase: currentBootcampPhase,
-    messageCount: messages.length,
-    hasActiveInvocation,
-    worktreeId: workspaceWorktreeId,
-  });
-  const mistakeTipAdvanceKeyRef = useRef<string | null>(null);
-  const handleMistakeTipVisible = useCallback(() => {
-    // Read threads fresh from store to keep callback ref stable (avoids resetting
-    // DelayedMistakeTip's 1500ms onVisible timer on every storeThreads change).
-    const currentThread = useChatStore.getState().threads.find((thread) => thread.id === threadId);
-    const raw = currentThread?.bootcampState;
-    if (!raw || raw.phase !== 'phase-7-dev') return;
-
-    const key = `${threadId}:${String(raw.startedAt ?? 'unknown')}:phase-4`;
-    if (mistakeTipAdvanceKeyRef.current === key) return;
-    const nextBootcampState: NonNullable<Thread['bootcampState']> = {
-      ...raw,
-      phase: 'phase-7.5-add-teammate',
-    };
-
-    void apiFetch(`/api/threads/${threadId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bootcampState: nextBootcampState,
-      }),
-    }).then((res) => {
-      if (res.ok) {
-        mistakeTipAdvanceKeyRef.current = key;
-        syncLocalBootcampState(threadId, nextBootcampState);
-      }
-      return res;
-    });
-  }, [threadId]);
-  // When gate fires (invocation ended with new Phase 4 output), advance immediately
-  useEffect(() => {
-    if (showFirstProjectMistakeTip) {
-      handleMistakeTipVisible();
-    }
-  }, [showFirstProjectMistakeTip, handleMistakeTipVisible]);
-  useEffect(() => {
-    if (currentBootcampPhase !== 'phase-7-dev') {
-      mistakeTipAdvanceKeyRef.current = null;
-    }
-  }, [currentBootcampPhase, threadId]);
   useEffect(() => {
     // Pure backend-driven: show prompt only when no cats AND no bootcamp thread
     const isCurrentBootcamp = Boolean(storeThreads.find((thread) => thread.id === threadId)?.bootcampState);
@@ -662,7 +575,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       .then((res) =>
         res.ok
           ? (res.json() as Promise<{
-              bootcampState?: Thread['bootcampState'];
               firstRunQuestState?: { phase: string; firstCatName?: string };
             }>)
           : null,
@@ -670,9 +582,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       .then((thread) => {
         if (!thread) return;
         const local = useChatStore.getState().threads.find((t) => t.id === threadId);
-        if (thread.bootcampState || local?.bootcampState) {
-          syncLocalBootcampState(threadId, thread.bootcampState);
-        }
         const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
         if (thread.firstRunQuestState || localQuest) {
           useChatStore.setState((state) => ({
@@ -698,73 +607,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   useEffect(() => {
     syncThreadState();
   }, [syncThreadState]);
-
-  // ── Bootcamp add-teammate: trigger guide engine when user interacts with input ──
-  // Subscribe reactively so the effect re-runs when guide exits (session cleared).
-  const activeGuideFlowId = useGuideStore((s) => s.session?.flow.id ?? null);
-  useEffect(() => {
-    if (currentBootcampPhase !== 'phase-7.5-add-teammate') return;
-    // Guide already running — don't re-register
-    if (activeGuideFlowId === 'bootcamp-add-teammate') return;
-    // Prevent re-triggering a guide that already completed for this thread
-    if (useGuideStore.getState().completedGuides.has(`${threadId}::bootcamp-add-teammate`)) return;
-
-    const startGuide = () => {
-      const { session: s, completedGuides: cg } = useGuideStore.getState();
-      if (s?.flow.id === 'bootcamp-add-teammate') return;
-      if (cg.has(`${threadId}::bootcamp-add-teammate`)) return;
-      useGuideStore.getState().reduceServerEvent({
-        action: 'start',
-        guideId: 'bootcamp-add-teammate',
-        threadId,
-      });
-    };
-
-    // Wait for user to type in chat input before starting guide
-    const handler = (e: Event) => {
-      if ((e.target as HTMLElement)?.closest('[data-guide-id="chat.input"]')) {
-        startGuide();
-        document.removeEventListener('input', handler, true);
-      }
-    };
-    document.addEventListener('input', handler, true);
-    return () => {
-      document.removeEventListener('input', handler, true);
-    };
-  }, [currentBootcampPhase, threadId, activeGuideFlowId]);
-
-  // ── Bootcamp farewell: auto-trigger guide after agent finishes at phase-10-retro ──
-  // Guard with both hasActiveInvocation AND chatIsLoading:
-  // - hasActiveInvocation tracks per-slot presence (can briefly go false during A2A handoff)
-  // - chatIsLoading stays true for the entire serial chain (cleared only on isFinal=true)
-  const farewellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (farewellTimerRef.current) {
-      clearTimeout(farewellTimerRef.current);
-      farewellTimerRef.current = null;
-    }
-    if (currentBootcampPhase !== 'phase-10-retro') return;
-    if (hasActiveInvocation || chatIsLoading) return;
-    if (activeGuideFlowId === 'bootcamp-farewell') return;
-    if (useGuideStore.getState().completedGuides.has(`${threadId}::bootcamp-farewell`)) return;
-
-    farewellTimerRef.current = setTimeout(() => {
-      farewellTimerRef.current = null;
-      const s = useChatStore.getState();
-      if (s.hasActiveInvocation || s.isLoading) return;
-      useGuideStore.getState().reduceServerEvent({
-        action: 'start',
-        guideId: 'bootcamp-farewell',
-        threadId,
-      });
-    }, 800);
-    return () => {
-      if (farewellTimerRef.current) {
-        clearTimeout(farewellTimerRef.current);
-        farewellTimerRef.current = null;
-      }
-    };
-  }, [currentBootcampPhase, threadId, activeGuideFlowId, hasActiveInvocation, chatIsLoading]);
 
   const prevThreadRef = useRef(threadId);
   useEffect(() => {
@@ -1346,8 +1188,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 ref={scrollContainerRef}
                 onScroll={handleScroll}
                 className="h-full overflow-y-auto p-4"
-                data-guide-id="bootcamp.preview-result"
-                data-bootcamp-host="chat-messages"
                 data-chat-container
               >
                 {isLoadingHistory && <div className="text-center py-3 text-sm text-cafe-muted">加载历史消息...</div>}
@@ -1428,34 +1268,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                           />
                         </div>
                       )}
-                    {(() => {
-                      const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
-                      if (isCurrentBootcamp) return null; // already in bootcamp thread
-                      if (bootcampCount > 0) {
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => setShowBootcampList(true)}
-                            className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
-                            data-testid="empty-state-bootcamp-list"
-                          >
-                            <BootcampIcon className="w-4 h-4" />
-                            我的训练营（{bootcampCount}）
-                          </button>
-                        );
-                      }
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => setShowBootcampList(true)}
-                          className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text hover:bg-conn-amber-bg transition-colors text-sm font-medium"
-                          data-testid="empty-state-bootcamp"
-                        >
-                          <BootcampIcon className="w-4 h-4" />
-                          第一次来？开始猫猫训练营
-                        </button>
-                      );
-                    })()}
                   </div>
                 ) : (
                   messages.map(renderSingleMessage)
@@ -1516,7 +1328,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     phase={questState.phase}
                     firstCatName={questState.firstCatName}
                     onAddSecondCat={() => setShowQuestWizard(true)}
-                    onStartBootcamp={() => setShowBootcampList(true)}
                     onComplete={() => router.push('/settings')}
                   />
                 );
@@ -1531,11 +1342,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               className={(() => {
                 if (showFirstRunQuestPrompt || showQuestWizard) return '';
                 const ct = storeThreads.find((t) => t.id === threadId);
-                // Bootcamp phase-1 with no messages: highlight + punch through overlay
-                const bs = ct?.bootcampState as { phase: string } | undefined;
-                if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
-                  return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
-                }
                 // Legacy quest support
                 const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
                   | { phase: string }
@@ -1647,7 +1453,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           onClose={() => setShowQuestWizard(false)}
           onCreated={handleQuestCreated}
         />
-        <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
         <EditChannelModal
           open={channelSettingsOpen}
           title={currentThreadTitle}
@@ -1671,22 +1476,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           onClose={() => setKnowledgeCaptureOpen(false)}
           onCreated={handleKnowledgeCreated}
         />
-        {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
-        {(() => {
-          if (showFirstRunQuestPrompt || showQuestWizard) return null;
-          const bt = storeThreads.find((t) => t.id === threadId);
-          const raw = bt?.bootcampState;
-          if (!raw) return null;
-          const phase = raw.phase;
-          // Guide engine handles phase-7.5 and phase-10 — no custom overlay needed
-          if (phase === 'phase-7.5-add-teammate' || phase === 'phase-10-retro') return null;
-          const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
-          if (!isLifecyclePhase && messages.length > 0) return null;
-          const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
-          const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
-          if (!catName) return null;
-          return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
-        })()}
       </div>
     </TaskThreadActionsContext.Provider>
   );

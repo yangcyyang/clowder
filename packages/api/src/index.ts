@@ -152,7 +152,6 @@ import {
   auditRoutes,
   authorizationRoutes,
   backlogRoutes,
-  bootcampRoutes,
   brakeRoutes,
   callbackAuthRoutes,
   callbacksRoutes,
@@ -1568,7 +1567,6 @@ async function main(): Promise<void> {
   const { promptCaptureRoutes } = await import('./routes/prompt-captures.js');
   await app.register(promptCaptureRoutes);
 
-  await app.register(bootcampRoutes, { threadStore });
   await app.register(firstRunQuestRoutes, { threadStore });
   const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore };
   await app.register(connectorHubRoutes, connectorHubOpts);
