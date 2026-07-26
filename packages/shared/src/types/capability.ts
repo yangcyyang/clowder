@@ -48,8 +48,8 @@ export interface CatCapabilityOverride {
 export interface CapabilityEntry {
   /** Unique capability ID (usually MCP server name) */
   id: string;
-  /** Type of capability (F126: 'limb' for device/hardware nodes) */
-  type: 'mcp' | 'skill' | 'limb';
+  /** Type of capability */
+  type: 'mcp' | 'skill';
   /** Global enabled state */
   enabled: boolean;
   /** Per-cat overrides (only stores differences from global) */
@@ -81,7 +81,7 @@ export interface CapabilitiesConfig {
 /** Capabilities board response — what the GET API returns */
 export interface CapabilityBoardItem {
   id: string;
-  type: 'mcp' | 'skill' | 'limb';
+  type: 'mcp' | 'skill';
   source: 'cat-cafe' | 'external';
   enabled: boolean;
   /** Per-cat effective state (global + overrides resolved) */
@@ -307,7 +307,7 @@ export interface CapabilityPatchRequest {
   /** Capability ID to modify */
   capabilityId: string;
   /** Capability type — required to disambiguate same-name MCP/skill entries */
-  capabilityType: 'mcp' | 'skill' | 'limb';
+  capabilityType: 'mcp' | 'skill';
   /** Scope: global toggle or per-cat override */
   scope: 'global' | 'cat';
   /** Required when scope is 'cat' */

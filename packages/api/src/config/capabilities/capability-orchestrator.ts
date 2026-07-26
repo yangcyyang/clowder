@@ -734,7 +734,7 @@ export function migrateResolverBackedCapabilities(config: CapabilitiesConfig): {
 }
 
 /**
- * F145 Phase C: Ensure the cat-cafe main server (index.js, hosts limb tools)
+ * F145 Phase C: Ensure the cat-cafe main server (index.js, hosts the full toolset)
  * exists alongside split servers. Handles upgrades from pre-AC-C3 installs
  * where only split servers were bootstrapped.
  */

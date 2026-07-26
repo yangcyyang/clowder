@@ -62,13 +62,6 @@ export {
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
-  handleLimbInvoke,
-  handleLimbListAvailable,
-  limbInvokeInputSchema,
-  limbListAvailableInputSchema,
-  limbTools,
-} from './limb-tools.js';
-export {
   handleReflect,
   reflectInputSchema,
   reflectTools,

@@ -75,7 +75,7 @@ const STATUS_STYLES: Record<TaskStatus, { text: string; border: string; pillBg: 
 
 interface CapabilityOption {
   id: string;
-  type: 'mcp' | 'skill' | 'limb';
+  type: 'mcp' | 'skill';
   description?: string;
   enabled: boolean;
 }

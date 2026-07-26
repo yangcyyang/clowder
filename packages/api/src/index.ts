@@ -1575,24 +1575,6 @@ async function main(): Promise<void> {
   await app.register(connectorHubRoutes, connectorHubOpts);
   await app.register(brakeRoutes, { activityTracker });
 
-  // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
-  const { LimbRegistry } = await import('./domains/limb/LimbRegistry.js');
-  const { LimbAccessPolicy } = await import('./domains/limb/LimbAccessPolicy.js');
-  const { LimbLeaseManager } = await import('./domains/limb/LimbLeaseManager.js');
-  const { LimbActionLog } = await import('./domains/limb/LimbActionLog.js');
-  const limbRegistry = new LimbRegistry();
-  limbRegistry.setDeps({
-    accessPolicy: new LimbAccessPolicy(),
-    leaseManager: new LimbLeaseManager(),
-    actionLog: new LimbActionLog(),
-  });
-
-  // F126 Phase C: Pairing store + limb node routes for remote devices
-  const { LimbPairingStore } = await import('./domains/limb/LimbPairingStore.js');
-  const { registerLimbNodeRoutes } = await import('./routes/limb-node-routes.js');
-  const limbPairingStore = new LimbPairingStore();
-  registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
-
   // F174 D2b-1 — single notifier instance shared between callback auth preHandler
   // (posts in-context surface on 401) and the hide-similar debug endpoint
   // (lets the user 24h-suppress a (reason, tool, catId) tuple).
@@ -1619,8 +1601,6 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
-    limbRegistry,
-    limbPairingStore,
     guideSessionStore,
     holdBallDeps: {
       registry,

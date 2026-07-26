@@ -86,11 +86,6 @@ const EXPECTED_TOOLS = [
   // Skill discovery tools
   'cat_cafe_list_skills',
   'cat_cafe_read_skill',
-  // Limb tools
-  'limb_list_available',
-  'limb_invoke',
-  'limb_pair_list',
-  'limb_pair_approve',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -395,8 +390,6 @@ const KNOWN_WRITE_TOOLS = [
   'signal_update_article',
   'signal_delete_article',
   'signal_link_thread',
-  'limb_invoke',
-  'limb_pair_approve',
 ];
 
 const EXPECTED_READONLY_TOOLS = [

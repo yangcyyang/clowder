@@ -160,7 +160,7 @@ const taskEventSchema = z.object({
   data: z.record(z.unknown()).optional(),
 });
 
-const capabilityTypeSchema = z.enum(['mcp', 'skill', 'limb']);
+const capabilityTypeSchema = z.enum(['mcp', 'skill']);
 
 const capabilityAuthorizationSchema = z.object({
   capabilityId: z.string().min(1).max(120),

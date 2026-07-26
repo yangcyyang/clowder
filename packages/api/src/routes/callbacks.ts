@@ -62,7 +62,6 @@ import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
-import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
@@ -182,10 +181,6 @@ export interface CallbackRoutesOptions {
   };
   /** F122B: InvocationQueue for agent-sourced A2A entries */
   invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
-  /** F126: Limb node registry for device/hardware capability management */
-  limbRegistry?: import('../domains/limb/LimbRegistry.js').LimbRegistry;
-  /** F126 Phase C: Limb pairing store for remote device approval */
-  limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
   /** F088: Outbound delivery hook for connector-bound threads (late-bound after gateway bootstrap). */
   outboundHook?: {
     deliver(
@@ -2687,16 +2682,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   // F-F（批次 3，PRD-memory-upgrade.md）：猫主动写记忆 callback 路由
   await registerCallbackAgentMemoryWriteRoutes(app, { registry });
-
-  // F126: Limb node callback routes
-  if (opts.limbRegistry) {
-    registerCallbackLimbRoutes(app, {
-      registry,
-      limbRegistry: opts.limbRegistry,
-      pairingStore: opts.limbPairingStore,
-      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
-    });
-  }
 
   // F086: Multi-mention orchestration routes
   if (router && invocationRecordStore) {

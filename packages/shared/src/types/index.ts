@@ -284,18 +284,6 @@ export type {
   TriageIntentCardInput,
   TriageResult,
 } from './intent-card.js';
-// Limb types (F126 四肢控制面)
-export type {
-  ILimbNode,
-  LimbAccessEntry,
-  LimbActionLogEntry,
-  LimbAuthLevel,
-  LimbCapability,
-  LimbInvokeResult,
-  LimbLease,
-  LimbNodeRecord,
-  LimbNodeStatus,
-} from './limb.js';
 // Marketplace types (F146 MCP Marketplace Control Plane)
 export type {
   InstallMode,
