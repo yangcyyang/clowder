@@ -18,7 +18,6 @@ interface ItemConfig {
 /**
  * Reads `?from=` URL param to determine the referrer thread.
  * Falls back to store's currentThreadId (last active thread).
- * Same pattern as MissionControlPage referrer-based back button.
  */
 function useReferrerThread(initialReferrerThread: string | null): string | null {
   const storeThreadId = useChatStore((s) => s.currentThreadId);
