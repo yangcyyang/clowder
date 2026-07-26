@@ -1194,6 +1194,12 @@ export class QueueProcessor {
    */
   private async isEntryCoolingDown(entry: QueueEntry): Promise<{ catId: string; until: number } | null> {
     if (!this.deps.cooldownStore) return null;
+    // 铲屎官拍板（2026-07-26）：配额冷却排队默认关闭——撞额度的 @ 应当场可见失败，
+    // 方便立即换猫；"消息排队三天等配额恢复"的体感是消息黑洞。置
+    // CLOWDER_QUOTA_COOLDOWN_QUEUE=1/true 恢复排队等恢复的旧行为（冷却记录本身
+    // 仍由 cooldown-sweep 维护，供状态展示与将来"失能转派"使用）。
+    const raw = (process.env.CLOWDER_QUOTA_COOLDOWN_QUEUE ?? '').trim().toLowerCase();
+    if (raw !== '1' && raw !== 'true') return null;
     const now = Date.now();
     for (const catId of entry.targetCats) {
       try {

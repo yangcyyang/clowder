@@ -71,9 +71,36 @@ describe('QueueProcessor cooldown gate', () => {
 
   beforeEach(() => {
     process.env.CAT_CAFE_AGENT_OUTPUT_GATE = '0';
+    // 2026-07-26 铲屎官拍板：排队闸默认关闭。本套件测的是"开启时"的排队行为，显式打开。
+    process.env.CLOWDER_QUOTA_COOLDOWN_QUEUE = '1';
     cooldownStore = new CooldownStore();
     deps = stubDeps({ cooldownStore });
     processor = new QueueProcessor(deps);
+  });
+
+  it('默认（env 未设）：冷却记录不阻断派单，消息照常派发由 provider 当场报错', async () => {
+    delete process.env.CLOWDER_QUOTA_COOLDOWN_QUEUE;
+    cooldownStore.set({
+      catId: 'opus',
+      until: Date.now() + 60_000,
+      reason: 'usage_limit',
+      source: 'anthropic',
+      originalError: 'x',
+    });
+    const entry = enqueueEntry(deps.queue, { targetCats: ['opus'] });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+    await processor.onInvocationComplete('t1', 'codex', 'succeeded');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(
+      deps.invocationTracker.startAll.mock.calls.length > 0 || deps.router.routeExecution.mock.calls.length > 0,
+      true,
+      '默认关闭时应照常派发',
+    );
+    assert.equal(
+      deps.messageStore.append.mock.calls.some((c) => String(c.arguments[0]?.content ?? '').includes('配额冷却中')),
+      false,
+      '默认关闭时不应出现排队通知',
+    );
   });
 
   it('a cooling target keeps its entry queued (not dispatched) on auto-dequeue', async () => {

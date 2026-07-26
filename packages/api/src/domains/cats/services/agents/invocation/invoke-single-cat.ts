@@ -1116,29 +1116,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               'Grant Full Disk Access to the app that runs Clowder, then restart Clowder.',
           };
         }
-        // Last-resort fail-open: TCC can deny the api process ALL reads of the target file
-        // (observed 2026-07-25: reads flipped to EPERM mid-process), which also defeats the
-        // read-only preflight above. The governance registry lives inside catCafeRoot (always
-        // readable) and records the human's one-time confirmation — that recorded consent, not
-        // a live file read, is the gate's real source of truth. The spawned cat CLI carries its
-        // own macOS permission grants, so dispatch can still succeed even when the api cannot
-        // touch the folder.
-        if (!preflight.ready && preflight.needsPermission) {
-          try {
-            const { GovernanceBootstrapService } = await import(
-              '../../../../../config/governance/governance-bootstrap.js'
+      }
+      // Last-resort fail-open — applies to BOTH computation paths (bootstrap threw, OR the
+      // read-only preflight returned needsPermission via its normal internal catch, e.g. only
+      // the skills-dir read is TCC-denied). The governance registry lives inside catCafeRoot
+      // (always readable) and records the human's one-time confirmation — that recorded
+      // consent, not a live file read, is the gate's real source of truth. The spawned cat
+      // CLI carries its own macOS permission grants, so dispatch can still succeed even when
+      // the api cannot touch the folder. (2026-07-26: previously this only covered the
+      // throw path — silent blocks recurred through the normal-return path.)
+      if (!preflight.ready && preflight.needsPermission) {
+        try {
+          const { GovernanceBootstrapService } = await import(
+            '../../../../../config/governance/governance-bootstrap.js'
+          );
+          const registryEntry = await new GovernanceBootstrapService(catCafeRoot).getRegistry().get(workingDirectory);
+          if (registryEntry?.confirmedByUser) {
+            log.warn(
+              { catId, workingDirectory },
+              'Governance blocked by OS permission but project is registered+confirmed — proceeding (fail-open)',
             );
-            const registryEntry = await new GovernanceBootstrapService(catCafeRoot).getRegistry().get(workingDirectory);
-            if (registryEntry?.confirmedByUser) {
-              log.warn(
-                { catId, workingDirectory },
-                'Governance file read denied by OS but project is registered+confirmed — proceeding (fail-open)',
-              );
-              preflight = { ready: true };
-            }
-          } catch {
-            // Registry unreadable too — keep the permission-denied block.
+            preflight = { ready: true };
           }
+        } catch {
+          // Registry unreadable too — keep the permission-denied block.
         }
       }
       if (!preflight.ready) {
@@ -1149,6 +1150,34 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             : preflight.needsConfirmation
               ? 'needs_confirmation'
               : 'files_missing';
+        // 2026-07-26: a governance block previously left ZERO trace — the yielded card is
+        // stream-only in practice and nothing logged. Two silent-death incidents later:
+        // always log, and best-effort persist a real thread message so the user sees it.
+        log.warn(
+          { catId, workingDirectory, reasonKind, reason: preflight.reason },
+          'Governance gate blocked dispatch',
+        );
+        if (deps.messageStore) {
+          try {
+            await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              threadId: params.threadId,
+              content: `🚫 @${catId} 的派单被治理门拦下（${reasonKind}）：${preflight.reason ?? '原因未知'}`,
+              mentions: [],
+              timestamp: Date.now(),
+              source: {
+                connector: 'governance-blocked',
+                label: '治理拦截',
+                icon: 'warning',
+                meta: { presentation: 'system_notice', noticeTone: 'warning', reasonKind, projectPath: workingDirectory },
+              },
+              idempotencyKey: `governance-blocked:${params.parentInvocationId ?? `${params.threadId}:${catId as string}`}`,
+            });
+          } catch {
+            /* best-effort — visibility must not break the block path itself */
+          }
+        }
         // F070: Structured governance_blocked event — frontend renders actionable card
         yield {
           type: 'system_info',

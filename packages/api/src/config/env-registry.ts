@@ -2106,6 +2106,15 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
+    name: 'CLOWDER_QUOTA_COOLDOWN_QUEUE',
+    defaultValue: '(未设置 → 关闭，撞配额立即失败)',
+    description:
+      '理智线 T6 配额冷却排队闸（2026-07-26 铲屎官拍板默认关闭）：开启（1/true）时，目标猫处于配额冷却期的消息会压在队列里并发"已排队，到点自动续跑"通知，配额恢复后自动派发；关闭（默认）时消息照常派发、由 provider 当场报配额错误，用户立即可见并可换猫。冷却记录本身仍由 cooldown-sweep 维护，不受此开关影响。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CLOWDER_CLAIMED_IDLE_WAKEUP',
     defaultValue: '(未设置 → 开启)',
     description:
