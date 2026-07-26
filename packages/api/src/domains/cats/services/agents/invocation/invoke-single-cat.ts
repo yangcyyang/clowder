@@ -1159,6 +1159,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           { catId, workingDirectory, reasonKind, reason: preflight.reason },
           'Governance gate blocked dispatch',
         );
+        // A2 (base spec): a permission_denied block means the OS just revoked access to
+        // something — trigger A1's self-check immediately instead of waiting for the
+        // next restart, so the lobby alert (and its later resolution notice) reflects
+        // reality as soon as possible. Fire-and-forget, best-effort: this must never
+        // slow down or fail the dispatch-block path itself.
+        if (reasonKind === 'permission_denied') {
+          void import('../../../../../services/StartupPermissionCheck.js')
+            .then(({ getActiveStartupPermissionCheck }) => getActiveStartupPermissionCheck()?.runCheck())
+            .catch((err) => log.warn({ err }, '[invoke-single-cat] A1 recheck trigger failed (best-effort)'));
+        }
         if (deps.messageStore) {
           try {
             await deps.messageStore.append({

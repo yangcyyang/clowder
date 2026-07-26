@@ -2069,6 +2069,26 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CLOWDER_STARTUP_PERMISSION_CHECK',
+    defaultValue: '(未设置 → 开启)',
+    description:
+      '批次4-A A1：api 启动时做一次性权限自检（不做常驻轮询）——对治理注册表中所有已确认项目目录做读探测（读 CLAUDE.md），对 Clowder 数据根 .cat-cafe 做写探测（写临时文件后删除）。失败时在大厅（DEFAULT_THREAD_ID）发一条零 token 系统告警卡（中文，含"在有完整磁盘访问权限的终端跑 pm2 update / 检查 系统设置→隐私与安全性→完整磁盘访问权限"修复指引）；恢复后发解除通报；同一目录状态未变不重发。唯一的复检触发点是 A2 检测到 permission_denied 派发失败时的即时复跑（见 invoke-single-cat.ts）。默认开启。置 "0"/"false" 关闭（关闭后不再做启动自检，也不再响应 A2 的复检触发）。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CLOWDER_FILE_INSTANCE_LOCK',
+    defaultValue: '(未设置 → 开启)',
+    description:
+      '批次4-A A4：属主锁最小版——api 启动时在 Clowder 数据根 .cat-cafe 下写一个 api-instance.lock 标记文件（含 pid + 数据根目录自身的 dev/ino 身份），校验后拒绝或接管。修复 07-24 真实事故：桌面 App 与 PM2 双开两个 api 实例互抢数据目录。是 services/ApiInstanceLease.ts（Redis 租约）之外的文件层兜底——ApiInstanceLease 只在 Redis 可用时才构造，Redis 不可用/未连接时该锁是唯一防线，两者互不冲突（各自独立生效）。持锁进程已死（kill -0 失败）或标记描述的是另一个物理数据根（dev/ino 不匹配，比如目录被删重建后的残留标记）→ 视为过期，自动接管；持锁进程仍存活 → 拒绝启动并输出中文提示（含 pid、可删除锁文件路径）。默认开启。置 "0"/"false" 关闭（关闭后不再做此项检查，仅剩 Redis 租约防线）。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
     name: 'CLOWDER_CODEX_SESSION_SIZE_WARNING_MB',
     defaultValue: '4',
     description:

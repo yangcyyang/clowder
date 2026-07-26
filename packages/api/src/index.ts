@@ -228,6 +228,17 @@ import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { notifyBranchThreadReply } from './routes/thread-reply-summary.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
+import {
+  FILE_INSTANCE_LOCK_FILENAME,
+  FileInstanceLock,
+  formatFileInstanceLockConflict,
+  isFileInstanceLockEnabled,
+} from './services/FileInstanceLock.js';
+import {
+  isStartupPermissionCheckEnabled,
+  setActiveStartupPermissionCheck,
+  StartupPermissionCheck,
+} from './services/StartupPermissionCheck.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
 import { getDefaultUploadDir } from './utils/upload-paths.js';
@@ -1998,6 +2009,26 @@ async function main(): Promise<void> {
   const connectorWebhookHandlers = new Map<string, import('./routes/connector-webhooks.js').ConnectorWebhookHandler>();
   await app.register(connectorWebhookRoutes, { handlers: connectorWebhookHandlers });
 
+  // A4 (batch 4-A): 属主锁最小版 — file-layer fallback for when Redis is unavailable
+  // (ApiInstanceLease below only ever guards `if (redis)`). Runs unconditionally,
+  // BEFORE the Redis lease and BEFORE app.listen(), so a conflicting second
+  // instance never binds its port or spawns any work. See FileInstanceLock.ts
+  // module doc for the 07-24 double-start incident this closes.
+  const catCafeDataRoot = join(findMonorepoRoot(process.cwd()), '.cat-cafe');
+  let fileInstanceLock: FileInstanceLock | undefined;
+  if (isFileInstanceLockEnabled()) {
+    fileInstanceLock = new FileInstanceLock({ dataRoot: catCafeDataRoot, apiPort: PORT, startedAt: PROCESS_START_AT });
+    const fileLockResult = await fileInstanceLock.acquire();
+    if (!fileLockResult.acquired) {
+      const conflictMessage = fileLockResult.conflict
+        ? formatFileInstanceLockConflict(fileLockResult.conflict, catCafeDataRoot)
+        : `另一个 Clowder API 正在使用此数据目录（${catCafeDataRoot}），但无法读取其详情。`;
+      app.log.error(`[api] ${conflictMessage}`);
+      throw new Error(`[api] File instance lock conflict — refusing to start.\n${conflictMessage}`);
+    }
+    app.log.info(`[api] File instance lock acquired at ${join(catCafeDataRoot, FILE_INSTANCE_LOCK_FILENAME)}`);
+  }
+
   let apiInstanceLease: ApiInstanceLease | undefined;
   let shutdownForLeaseLoss: ((signal: string) => Promise<void>) | null = null;
   let forcedLeaseLossExitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2059,6 +2090,7 @@ async function main(): Promise<void> {
     address = await app.listen({ port: PORT, host: HOST });
   } catch (err) {
     await apiInstanceLease?.release().catch(() => {});
+    await fileInstanceLock?.release().catch(() => {});
     throw err;
   }
   app.log.info(`[api] Server running on ${address}`);
@@ -2134,6 +2166,22 @@ async function main(): Promise<void> {
       queueProcessor,
     });
     claimedIdleScheduler.start();
+  }
+
+  // A1 (batch 4-A): 启动权限自检 — one-shot, NOT a recurring poller (see
+  // StartupPermissionCheck.ts module doc for why). Runs regardless of Redis
+  // availability (filesystem permissions are independent of Redis mode).
+  // Registered as the process-wide active instance so A2's permission_denied
+  // dispatch-block branch (invoke-single-cat.ts) can trigger an immediate
+  // recheck without waiting for the next restart.
+  if (isStartupPermissionCheckEnabled()) {
+    const startupPermissionCheck = new StartupPermissionCheck({ catCafeRoot: catCafeDataRoot, messageStore });
+    setActiveStartupPermissionCheck(startupPermissionCheck);
+    try {
+      await startupPermissionCheck.runCheck();
+    } catch (err) {
+      app.log.warn(`[api] Startup permission self-check failed (best-effort): ${String(err)}`);
+    }
   }
 
   // F145 P0: Kill orphan agent-browser headless Chrome processes from previous sessions.
@@ -2535,6 +2583,13 @@ async function main(): Promise<void> {
       } catch (err) {
         exitCode = 1;
         app.log.error(`[api] API namespace lease release failed: ${String(err)}`);
+      }
+
+      try {
+        await fileInstanceLock?.release();
+      } catch (err) {
+        exitCode = 1;
+        app.log.error(`[api] File instance lock release failed: ${String(err)}`);
       }
 
       app.log.info('[api] Shutdown complete');
