@@ -2,19 +2,21 @@
  * F163: Zero-behavior regression test
  * When all F163 flags are off, behavior must be identical to pre-F163:
  * - No f163_logs entries created (from search path)
- * - boostSource = ['legacy'] for all results
- * - variantId present but consistent across queries
  * - Search results order unchanged (no boost applied)
+ *
+ * Note: the F163 admin/audit API and the evidence-search route's experiment
+ * instrumentation (variantId/boostSource/injectionSources) were removed with
+ * the F163 module (prune-w2b). SqliteEvidenceStore's flag-gated internals
+ * (authority boost, compression backstop suppression, contradiction
+ * detection) remain — this file now only exercises those store-level paths.
  */
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
-import Fastify from 'fastify';
 import { computeVariantId, freezeFlags } from '../dist/domains/memory/f163-types.js';
 import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.js';
 import { applyMigrations } from '../dist/domains/memory/schema.js';
-import { evidenceRoutes } from '../dist/routes/evidence.js';
 
 describe('F163 Zero-behavior regression', () => {
   afterEach(() => {
@@ -95,47 +97,6 @@ describe('F163 Zero-behavior regression', () => {
     assert.match(v1, /^[0-9a-f]{12}$/);
   });
 
-  it('route returns legacy boostSource and variantId when flags off', async () => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('F163_')) delete process.env[key];
-    }
-
-    const app = Fastify();
-    const evidenceStore = {
-      search: async () => [
-        {
-          anchor: 'test-1',
-          kind: 'lesson',
-          status: 'active',
-          title: 'Test Lesson',
-          summary: 'A lesson',
-          updatedAt: '2026-01-01',
-        },
-      ],
-      health: async () => true,
-      initialize: async () => {},
-      upsert: async () => {},
-      deleteByAnchor: async () => {},
-      getByAnchor: async () => null,
-    };
-    await app.register(evidenceRoutes, { evidenceStore });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/evidence/search?q=test',
-    });
-
-    const body = res.json();
-    assert.equal(res.statusCode, 200);
-    assert.ok(body.variantId, 'should have variantId');
-    assert.equal(body.results.length, 1);
-    assert.deepEqual(body.results[0].boostSource, ['legacy']);
-    assert.equal(body.degraded, false);
-    // No injectionSources when flag is off
-    assert.equal(body.injectionSources, undefined);
-  });
-
   it('no f163_logs entries from search when flags off', async () => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];
@@ -176,56 +137,5 @@ describe('F163 Zero-behavior regression', () => {
     const results = await store.search('Backstop test');
     const found = results.some((r) => r.anchor === 'backstop-doc');
     assert.ok(found, 'backstop doc should be returned when compression=off');
-  });
-
-  it('compression scan API returns 403 when compression=off', async () => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('F163_')) delete process.env[key];
-    }
-
-    const store = new SqliteEvidenceStore(':memory:');
-    await store.initialize();
-
-    const { f163AdminRoutes } = await import('../dist/routes/f163-admin.js');
-    const app = Fastify();
-    await app.register(f163AdminRoutes, { evidenceStore: store });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
-    });
-    assert.equal(res.statusCode, 403, 'scan should be blocked when compression=off');
-  });
-
-  it('no summary docs can be created through normal upsert when compression=off', async () => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('F163_')) delete process.env[key];
-    }
-
-    const store = new SqliteEvidenceStore(':memory:');
-    await store.initialize();
-
-    // Upsert a doc with summaryOfAnchor should still work at store level
-    // (the flag gate is at API level, not store level — store is the internal tool)
-    // But the API level should block it
-    const { f163AdminRoutes } = await import('../dist/routes/f163-admin.js');
-    const app = Fastify();
-    await app.register(f163AdminRoutes, { evidenceStore: store });
-    await app.ready();
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
-      payload: {
-        sourceAnchors: ['nonexistent'],
-        summaryTitle: 'Test',
-        summarySummary: 'Test',
-        rationale: 'Test',
-      },
-    });
-    assert.equal(res.statusCode, 403, 'apply should be blocked when compression=off');
   });
 });

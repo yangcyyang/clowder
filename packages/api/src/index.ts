@@ -80,7 +80,6 @@ import {
   GrokAgentService,
   getEventAuditLog,
   KimiAgentService,
-  MemoryGovernanceStore,
   OpenCodeAgentService,
   PiAgentService,
 } from './domains/cats/services/index.js';
@@ -170,7 +169,6 @@ import {
   configRoutes,
   connectorHubRoutes,
   connectorMediaRoutes,
-  distillationRoutes,
   evidenceRoutes,
   executionDigestRoutes,
   exportRoutes,
@@ -184,12 +182,10 @@ import {
   knowledgeRoutes,
   libraryRoutes,
   localCliProbesRoutes,
-  memoryPublishRoutes,
   memoryRoutes,
   messageActionsRoutes,
   messagesRoutes,
   mkdirRoute,
-  packsRoutes,
   projectSetupRoute,
   projectsBootstrapRoutes,
   projectsRoutes,
@@ -1328,11 +1324,6 @@ async function main(): Promise<void> {
     }
   });
 
-  // F129: Pack store — shared between router (invocation) and routes (API)
-  const { PackStore } = await import('./domains/packs/PackStore.js');
-  const packStoreDir = join(findMonorepoRoot(process.cwd()), '.cat-cafe', 'packs');
-  const packStore = new PackStore(packStoreDir);
-
   // F150: Tool usage counter (fire-and-forget INCR on tool_use events)
   const toolUsageArchiver = redis
     ? new (await import('./domains/cats/services/tool-usage/ToolUsageArchiver.js')).ToolUsageArchiver(
@@ -1413,7 +1404,6 @@ async function main(): Promise<void> {
     ...(tmuxGateway ? { tmuxGateway } : {}),
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
-    packStore,
     evidenceStore: memoryServices.evidenceStore,
     threadHistorySummaryStore: memoryServices.threadHistorySummaryStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
@@ -1968,45 +1958,6 @@ async function main(): Promise<void> {
     knowledgeResolver: memoryServices.knowledgeResolver,
   });
 
-  // F163: Knowledge promotion admin API (localhost-only)
-  const { f163AdminRoutes } = await import('./routes/f163-admin.js');
-  await app.register(f163AdminRoutes, {
-    evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AdminRoutes>[1]['evidenceStore'],
-  });
-
-  // F163 Phase C: Knowledge audit routes (contradiction check, flag-review, review-queue, health-report)
-  const { f163AuditRoutes } = await import('./routes/f163-audit-routes.js');
-  await app.register(f163AuditRoutes, {
-    evidenceStore: memoryServices.evidenceStore as unknown as Parameters<typeof f163AuditRoutes>[1]['evidenceStore'],
-    knowledgeResolver: memoryServices.knowledgeResolver,
-  });
-
-  // F152 Phase C: Distillation routes (global lesson reflow)
-  if (memoryServices.globalStore) {
-    const { DistillationService } = await import('./domains/memory/distillation-service.js');
-    const distillationService = new DistillationService(memoryServices.store, memoryServices.globalStore);
-    await distillationService.initialize();
-    await app.register(distillationRoutes, {
-      evidenceStore: memoryServices.evidenceStore,
-      distillationService,
-    });
-  }
-
-  // F129: Pack system routes (reuse shared packStore from above)
-  {
-    const { PackSecurityGuard } = await import('./domains/packs/PackSecurityGuard.js');
-    const { PackLoader } = await import('./domains/packs/PackLoader.js');
-    const packGuard = new PackSecurityGuard();
-    const packLoader = new PackLoader(packStore, packGuard);
-    const root = findMonorepoRoot(process.cwd());
-    await app.register(packsRoutes, {
-      packLoader,
-      catTemplatePath: join(root, 'cat-template.json'),
-      sharedRulesPath: join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md'),
-      skillsManifestPath: join(root, 'cat-cafe-skills', 'manifest.yaml'),
-    });
-  }
-
   // Reflect (SQLite-backed reflection)
   await app.register(reflectRoutes, {
     reflectionService: memoryServices.reflectionService,
@@ -2033,10 +1984,6 @@ async function main(): Promise<void> {
       dataDir: memoryServices.dataDir,
     });
   }
-
-  // Memory governance (publish workflow)
-  const governanceStore = new MemoryGovernanceStore();
-  await app.register(memoryPublishRoutes, { governanceStore });
 
   // F142-B: Build unified command registry at startup (AC-B5)
   const commandRegistry = new CommandRegistry(CORE_COMMANDS);

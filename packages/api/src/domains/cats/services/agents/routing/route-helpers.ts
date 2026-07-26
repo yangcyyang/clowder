@@ -707,7 +707,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   includedHistoryCount?: number;
   loadStandardContext: boolean;
   loadFullContext: boolean;
-  hasPackBlocks: boolean;
   hasSessionBootstrap: boolean;
   hasSignalArticles: boolean;
   hasAlwaysOnDocs: boolean;
@@ -736,7 +735,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.hasProjectContext) loadedBlocks.push('project-progress');
   if (input.projectContextDeferred) loadedBlocks.push('project-progress:on-demand');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
-  if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
   if (input.hasSessionBootstrap) loadedBlocks.push('session-bootstrap');
   if (input.hasSignalArticles) loadedBlocks.push('signal-articles');
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
@@ -816,8 +814,6 @@ export interface RouteStrategyDeps {
   draftStore?: IDraftStore;
   /** Optional broadcaster for real-time delivery (thread updates, queue events, etc.) */
   socketManager?: RouteBroadcaster;
-  /** F129: Pack store for loading active packs at invocation time */
-  packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for context recall (optional, fail-open) */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** Phase 3B: read-only summary_segments source for shadow summary formatting. */

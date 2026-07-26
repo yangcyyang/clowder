@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import type { CatConfig, CatId, CompiledPackBlocks, ToolPolicy } from '@cat-cafe/shared';
+import type { CatConfig, CatId, ToolPolicy } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -217,11 +217,6 @@ export interface InvocationContext {
    * Injected alongside bootcampState so the model knows team size without querying /api/cats.
    */
   bootcampMemberCount?: number;
-  /**
-   * F129: Compiled pack blocks from active packs.
-   * Injected into static identity via buildStaticIdentity → packBlocks.
-   */
-  packBlocks?: CompiledPackBlocks | null;
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -671,12 +666,6 @@ export interface StaticIdentityOptions {
   /** Whether native MCP tools are available (Claude with --mcp-config). */
   mcpAvailable?: boolean;
   /**
-   * F129: Compiled pack blocks to inject.
-   * Dual-track priority (ADR-021):
-   *   Identity (core) > Pack Masks > Governance L0 > Pack Guardrails > Pack Defaults > Workflows
-   */
-  packBlocks?: CompiledPackBlocks | null;
-  /**
    * Slock-like governance loading tier.
    * minimal: inject only core rules; standard/full: inject operational digest.
    */
@@ -928,11 +917,6 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     lines.push(`你的硬限制：${config.restrictions.join('、')}。被 @ 做这类任务时请 push back 或退回给 @ 你的猫。`, '');
   }
 
-  // F129: Pack masks — role overlay (never changes core identity, see KD-3)
-  if (options?.packBlocks?.masksBlock) {
-    lines.push(options.packBlocks.masksBlock, '');
-  }
-
   // A2A collaboration format (always included — cats should know how to @ even in single-cat mode)
   const { mentions: callableMentions, hasDuplicateDisplayNames, uniqueHandleExample } = buildCallableMentions(catId);
   if (callableMentions.length > 0) {
@@ -986,12 +970,6 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   lines.push(PROGRESS_VISIBILITY_SECTION, '');
   lines.push(RULE_PRIORITY_SECTION, '');
 
-  // F129: Pack workflow blocks (after breed workflow triggers)
-  const packBlocks = options?.packBlocks;
-  if (packBlocks?.workflowsBlock) {
-    lines.push(packBlocks.workflowsBlock, '');
-  }
-
   // 铲屎官 reference (session-level, not per-message)
   // F067: Use co-creator config for name + mention handles
   // Note: "不冒充/不编造/身份契约" folded into GOVERNANCE_L0_DIGEST
@@ -1016,21 +994,6 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     lines.push(...buildAgentMemoryLines(options?.agentMemoryContext));
     lines.push(...buildLessonsLines(options?.lessonsContext, lines.join('\n'), options?.maxPromptTokens));
     lines.push(...buildProjectContextLines(options?.projectContext, lines.join('\n'), options?.maxPromptTokens));
-  }
-
-  // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
-  if (packBlocks?.guardrailBlock) {
-    lines.push('', packBlocks.guardrailBlock);
-  }
-
-  // F129: Pack defaults — user-overridable behavior track
-  if (packBlocks?.defaultsBlock) {
-    lines.push('', packBlocks.defaultsBlock);
-  }
-
-  // F129: World driver summary (read-only, informational)
-  if (packBlocks?.worldDriverSummary) {
-    lines.push('', packBlocks.worldDriverSummary);
   }
 
   return lines.join('\n');
@@ -1527,7 +1490,6 @@ export function buildReviewerSection(catId: CatId): string | null {
 export function buildSystemPrompt(context: InvocationContext): string {
   const staticPart = buildStaticIdentity(context.catId, {
     mcpAvailable: context.mcpAvailable,
-    packBlocks: context.packBlocks,
     toolPolicy: context.toolPolicy,
   });
   if (!staticPart) return '';

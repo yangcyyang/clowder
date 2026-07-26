@@ -38,10 +38,8 @@ export interface EvidenceResult {
   /** Collection/doc relative source path for citation and handoff. */
   sourcePath?: string;
   status?: EvidenceStatus;
-  /** F163 Phase E: document authority — orthogonal to confidence (which reflects rank) */
+  /** Document authority tag (constitutional/validated/candidate/observed), orthogonal to confidence (which reflects rank) */
   authority?: string;
-  /** F163: boost source attribution — what F163 mechanisms affected this result's ranking */
-  boostSource: BoostSource[];
   /** AC-I9: passage-level detail when depth=raw */
   passages?: Array<{
     passageId: string;
@@ -56,9 +54,6 @@ export interface EvidenceResult {
     }>;
   }>;
 }
-
-/** F163: Boost source attribution (search-path reranking, not injection) */
-export type BoostSource = 'authority_boost' | 'retrieval_rerank' | 'compression_summary' | 'legacy';
 
 export function normalizeTags(input: string | string[] | undefined, defaultOrigin = 'origin:git'): string[] {
   const defaults = ['project:cat-cafe', defaultOrigin];
@@ -181,7 +176,6 @@ export async function searchDocs(docsRoot: string, query: string, limit: number)
         snippet,
         confidence: 'low',
         sourceType: classifySource(relative('', relPath)),
-        boostSource: ['legacy'],
       });
     }
 

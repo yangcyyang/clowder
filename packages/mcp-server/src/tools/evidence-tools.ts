@@ -104,7 +104,6 @@ export async function handleSearchEvidence(input: {
         confidence: string;
         sourceType: string;
         authority?: string;
-        boostSource?: string[];
         passages?: Array<{
           passageId: string;
           content: string;
@@ -121,7 +120,6 @@ export async function handleSearchEvidence(input: {
       degraded: boolean;
       degradeReason?: string;
       effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
-      variantId?: string;
     };
 
     const degradedBanner = formatDegradedBanner(data.degraded, data.degradeReason, data.effectiveMode);
@@ -155,11 +153,7 @@ export async function handleSearchEvidence(input: {
       lines.push('');
     }
 
-    lines.push(
-      `${EVIDENCE_RESULT_MARKER} Found ${data.results.length} result(s) for ${queryLabel}${
-        data.variantId ? ` [variant=${data.variantId}]` : ''
-      }:`,
-    );
+    lines.push(`${EVIDENCE_RESULT_MARKER} Found ${data.results.length} result(s) for ${queryLabel}:`);
     lines.push('');
 
     for (const r of data.results) {
@@ -168,9 +162,6 @@ export async function handleSearchEvidence(input: {
       lines.push(`  type: ${r.sourceType}`);
       if (r.authority) {
         lines.push(`  authority: ${r.authority}`);
-      }
-      if (r.boostSource && r.boostSource.length > 0 && !r.boostSource.every((s) => s === 'legacy')) {
-        lines.push(`  boost: ${r.boostSource.join(', ')}`);
       }
       const snippet = r.snippet.length > 200 ? `${r.snippet.slice(0, 200)}...` : r.snippet;
       lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);

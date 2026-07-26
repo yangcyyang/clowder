@@ -195,8 +195,6 @@ export interface AgentRouterOptions {
       relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
     }[]
   >;
-  /** F129: Pack store for loading active packs at invocation time */
-  packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for hierarchical context recall */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** Phase 3B: read-only summary_segments source for history summary injection */
@@ -248,7 +246,6 @@ export class AgentRouter {
         }[]
       >)
     | undefined;
-  private packStore?: import('../../../../packs/PackStore.js').PackStore;
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   private threadHistorySummaryStore?: import('../../../../memory/index.js').IThreadHistorySummaryStore;
   /** F150 */
@@ -295,7 +292,6 @@ export class AgentRouter {
     this.tmuxGateway = options.tmuxGateway;
     this.agentPaneRegistry = options.agentPaneRegistry;
     this.signalArticleLookup = options.signalArticleLookup;
-    this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
     this.threadHistorySummaryStore = options.threadHistorySummaryStore;
     this.toolUsageCounter = options.toolUsageCounter;
@@ -764,7 +760,6 @@ export class AgentRouter {
       deliveryCursorStore: this.deliveryCursorStore,
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
-      ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
       ...(this.threadHistorySummaryStore ? { threadHistorySummaryStore: this.threadHistorySummaryStore } : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),

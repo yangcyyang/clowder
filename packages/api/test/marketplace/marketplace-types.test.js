@@ -26,9 +26,8 @@ describe('Marketplace Types', () => {
     assert.deepStrictEqual(INSTALL_MODES, ['direct_mcp', 'delegated_cli', 'manual_file', 'manual_ui']);
   });
 
-  it('MARKETPLACE_ARTIFACT_KINDS includes pack for F129', async () => {
+  it('MARKETPLACE_ARTIFACT_KINDS includes mcp_server', async () => {
     const { MARKETPLACE_ARTIFACT_KINDS } = await import('@cat-cafe/shared');
-    assert.ok(MARKETPLACE_ARTIFACT_KINDS.includes('pack'));
     assert.ok(MARKETPLACE_ARTIFACT_KINDS.includes('mcp_server'));
   });
 });

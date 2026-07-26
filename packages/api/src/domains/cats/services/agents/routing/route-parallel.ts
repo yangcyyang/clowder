@@ -374,12 +374,6 @@ export async function* routeParallel(
       // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
       const mcpAvailable =
         (catConfig?.mcpSupport ?? false) && !!mcpServerPath && hasRuntimeNativeMcpBridge(catConfig?.clientId);
-      // F129: Load active pack blocks (best-effort)
-      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
-      if (loadStandardContext && deps.packStore) {
-        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
-        packBlocks = await getActivePackBlocks(deps.packStore);
-      }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
       const userProfileContext = await readUserProfileForPrompt();
       const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
@@ -391,7 +385,6 @@ export async function* routeParallel(
       const projectContext = contextLayerPlan.l2ProjectContext ? await readProjectProgressForPrompt() : null;
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
-        packBlocks,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         agentMemoryContext,
         lessonsContext,
@@ -456,7 +449,7 @@ export async function* routeParallel(
       // the v1 prepend path.
       const cacheLayout = resolveContextCacheLayoutForCat(catId as string);
       const supportsSeam = supportsTransportSeam(catConfig?.clientId);
-      const v2StaticIdentityOptions = { mcpAvailable, packBlocks, toolPolicy: resolvedToolPolicy.toolPolicy };
+      const v2StaticIdentityOptions = { mcpAvailable, toolPolicy: resolvedToolPolicy.toolPolicy };
       let v2Dispatch: V2TransportDispatch | undefined;
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
@@ -736,7 +729,6 @@ export async function* routeParallel(
         includedHistoryCount,
         loadStandardContext,
         loadFullContext,
-        hasPackBlocks: Boolean(packBlocks),
         hasSessionBootstrap: Boolean(bootstrapCtx),
         hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,

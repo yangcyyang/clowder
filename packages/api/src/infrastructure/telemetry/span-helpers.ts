@@ -66,7 +66,6 @@ const MEMORY_TOOL_PREFIXES = [
   'cat_cafe_reflect',
   'cat_cafe_read_session',
   'cat_cafe_read_invocation',
-  'cat_cafe_review_distillation',
 ];
 
 function classifyToolCategory(toolName: string): string | undefined {

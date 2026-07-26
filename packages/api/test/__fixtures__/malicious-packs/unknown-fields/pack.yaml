@@ -1,7 +1,0 @@
-name: unknown-fields
-version: "1.0.0"
-description: This pack has extra fields
-packType: domain
-sneakyField: injection attempt
-hiddenConfig:
-  override: true

@@ -287,67 +287,6 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.results.length, 3);
   });
 
-  // ── F163: variantId + boostSource in response ─────────────────────
-  it('F163: response includes variantId (12-char hex)', async () => {
-    await setup({ search: async () => [] });
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/evidence/search?q=test',
-    });
-
-    const body = res.json();
-    assert.ok(body.variantId, 'variantId should be present');
-    assert.equal(body.variantId.length, 12);
-    assert.match(body.variantId, /^[0-9a-f]{12}$/);
-  });
-
-  it('F163: each result has boostSource array with legacy when flags off', async () => {
-    // Ensure all F163 flags are off
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('F163_')) delete process.env[key];
-    }
-
-    await setup({
-      search: async () => [
-        {
-          anchor: 'test-1',
-          kind: 'lesson',
-          status: 'active',
-          title: 'Test',
-          updatedAt: '2026-01-01T00:00:00Z',
-        },
-      ],
-    });
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/evidence/search?q=test',
-    });
-
-    const body = res.json();
-    assert.ok(body.results[0].boostSource);
-    assert.ok(Array.isArray(body.results[0].boostSource));
-    assert.deepEqual(body.results[0].boostSource, ['legacy']);
-  });
-
-  it('F163: degraded response also has variantId', async () => {
-    await setup({
-      search: async () => {
-        throw new Error('db error');
-      },
-    });
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/evidence/search?q=test',
-    });
-
-    const body = res.json();
-    assert.ok(body.variantId, 'degraded response should still have variantId');
-    assert.equal(body.variantId.length, 12);
-  });
-
   it('maps evidence kinds to source types correctly', async () => {
     await setup({
       search: async () => [

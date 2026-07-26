@@ -593,12 +593,6 @@ export async function* routeSerial(
       // MCP write callbacks remain per-message; static identity only carries a short pull-context guide.
       const mcpAvailable =
         (catConfig?.mcpSupport ?? false) && !!mcpServerPath && hasRuntimeNativeMcpBridge(catConfig?.clientId);
-      // F129: Load active pack blocks (best-effort, failure does not block invocation)
-      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
-      if (loadStandardContext && deps.packStore) {
-        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
-        packBlocks = await getActivePackBlocks(deps.packStore);
-      }
       const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
       const userProfileContext = await readUserProfileForPrompt();
       const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
@@ -610,7 +604,6 @@ export async function* routeSerial(
       const projectContext = contextLayerPlan.l2ProjectContext ? await readProjectProgressForPrompt() : null;
       const staticIdentity = buildStaticIdentity(catId, {
         mcpAvailable,
-        packBlocks,
         toolPolicy: resolvedToolPolicy.toolPolicy,
         agentMemoryContext,
         lessonsContext,
@@ -691,7 +684,7 @@ export async function* routeSerial(
       // the v1 prepend path. v1 leaves everything below untouched.
       const cacheLayout = resolveContextCacheLayoutForCat(catId as string);
       const supportsSeam = supportsTransportSeam(catConfig?.clientId);
-      const v2StaticIdentityOptions = { mcpAvailable, packBlocks, toolPolicy: resolvedToolPolicy.toolPolicy };
+      const v2StaticIdentityOptions = { mcpAvailable, toolPolicy: resolvedToolPolicy.toolPolicy };
       let v2Dispatch: V2TransportDispatch | undefined;
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
@@ -991,7 +984,6 @@ export async function* routeSerial(
         includedHistoryCount,
         loadStandardContext,
         loadFullContext,
-        hasPackBlocks: Boolean(packBlocks),
         hasSessionBootstrap: Boolean(bootstrapContext),
         hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,

@@ -1,18 +1,12 @@
 import type { McpInstallRequest, McpTransport } from './capability.js';
 
 export type MarketplaceEcosystem = 'claude' | 'codex' | 'openclaw' | 'antigravity';
-export type MarketplaceArtifactKind = 'mcp_server' | 'skill' | 'plugin' | 'bundle' | 'pack';
+export type MarketplaceArtifactKind = 'mcp_server' | 'skill' | 'plugin' | 'bundle';
 export type TrustLevel = 'official' | 'verified' | 'community';
 export type InstallMode = 'direct_mcp' | 'delegated_cli' | 'manual_file' | 'manual_ui';
 
 export const MARKETPLACE_ECOSYSTEMS: MarketplaceEcosystem[] = ['claude', 'codex', 'openclaw', 'antigravity'];
-export const MARKETPLACE_ARTIFACT_KINDS: MarketplaceArtifactKind[] = [
-  'mcp_server',
-  'skill',
-  'plugin',
-  'bundle',
-  'pack',
-];
+export const MARKETPLACE_ARTIFACT_KINDS: MarketplaceArtifactKind[] = ['mcp_server', 'skill', 'plugin', 'bundle'];
 export const TRUST_LEVELS: TrustLevel[] = ['official', 'verified', 'community'];
 export const INSTALL_MODES: InstallMode[] = ['direct_mcp', 'delegated_cli', 'manual_file', 'manual_ui'];
 

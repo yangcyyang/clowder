@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   callbackMemoryTools,
   callbackTools,
-  distillationTools,
   evidenceTools,
   limbTools,
   reflectTools,
@@ -102,7 +101,6 @@ const collabTools: readonly ToolDef[] = applyReadonlyFilter([
 
 const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackMemoryTools,
-  ...distillationTools,
   ...evidenceTools,
   ...reflectTools,
   ...sessionChainTools,
