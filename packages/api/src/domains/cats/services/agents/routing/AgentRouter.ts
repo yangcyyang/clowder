@@ -913,6 +913,8 @@ export class AgentRouter {
       replyToMessageId?: string;
       /** Scheduler bookkeeping presentation metadata; keeps the existing message type. */
       responsePresentation?: 'silent_receipt';
+      /** Do not resume the provider-native CLI history for this independent scheduled run. */
+      forceFreshCliSession?: true;
       /** Original human thread for explicit address-routing audit. */
       crossPostSourceThreadId?: string;
       /** F153: caller trace context for cross-route A2A propagation */
@@ -976,6 +978,7 @@ export class AgentRouter {
       currentUserMessageId: userMessageId,
       ...(options?.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
       ...(options?.responsePresentation ? { responsePresentation: options.responsePresentation } : {}),
+      ...(options?.forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
       ...(options?.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),

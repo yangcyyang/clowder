@@ -173,18 +173,18 @@ describe('ClaimedIdleScheduler', () => {
   });
 
   describe('resolveClaimedIdleThresholdMinutes', () => {
-    test('default 15 when unset', () => {
-      assert.equal(mod.resolveClaimedIdleThresholdMinutes({}), 15);
+    test('default 120 when unset', () => {
+      assert.equal(mod.resolveClaimedIdleThresholdMinutes({}), 120);
     });
     test('custom positive value', () => {
       assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: '30' }), 30);
     });
     test('non-numeric falls back to default', () => {
-      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: 'abc' }), 15);
+      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: 'abc' }), 120);
     });
     test('zero/negative falls back to default', () => {
-      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: '0' }), 15);
-      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: '-5' }), 15);
+      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: '0' }), 120);
+      assert.equal(mod.resolveClaimedIdleThresholdMinutes({ CLOWDER_CLAIMED_IDLE_MINUTES: '-5' }), 120);
     });
   });
 
@@ -205,7 +205,9 @@ describe('ClaimedIdleScheduler', () => {
         invocationQueue: overrides.invocationQueue ?? createFakeInvocationQueue(),
         invocationTracker: overrides.invocationTracker ?? createFakeInvocationTracker(),
         queueProcessor: overrides.queueProcessor ?? createFakeQueueProcessor(),
-        env: overrides.env ?? {},
+        // 其余调度决策案例只验证规则分支，固定旧的短阈值以免与默认值策略耦合；
+        // 默认值本身由上方 resolveClaimedIdleThresholdMinutes 专项测试覆盖。
+        env: overrides.env ?? { CLOWDER_CLAIMED_IDLE_MINUTES: '15' },
         now: overrides.now ?? (() => nowRef),
       });
     }
@@ -472,6 +474,7 @@ describe('ClaimedIdleScheduler', () => {
       assert.equal(entry.autoExecute, true);
       assert.ok(entry.expiresAt > nowRef);
       assert.match(entry.content, /已闲置 \d+ 分钟/);
+      assert.match(entry.content, /进度或阻塞说一句/);
       assert.match(entry.content, /cat_cafe_task_update/);
       assert.match(entry.content, /cat_cafe_task_unclaim/);
 

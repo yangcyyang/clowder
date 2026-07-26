@@ -16,6 +16,7 @@ import { join } from 'node:path';
 
 const DEFAULT_TAIL_BYTES = 256 * 1024;
 const DEFAULT_FILE_CACHE_MAX = 100;
+export const CODEX_SESSION_SIZE_WARNING_BYTES = 4 * 1024 * 1024;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -38,6 +39,8 @@ export interface CodexSessionContextSnapshot {
   totalInputTokens?: number;
   totalCachedInputTokens?: number;
   totalOutputTokens?: number;
+  /** Native rollout size observed after the invocation; informational only. */
+  sessionFileBytes?: number;
 }
 
 export type CodexSessionContextSnapshotResolver = (sessionId: string) => Promise<CodexSessionContextSnapshot | null>;
@@ -180,6 +183,13 @@ export function createCodexSessionContextSnapshotResolver(
     const file = await findSessionFile(sessionId);
     if (!file) return null;
 
+    let sessionFileBytes: number | undefined;
+    try {
+      sessionFileBytes = (await fs.stat(file)).size;
+    } catch {
+      // The rollout can rotate between discovery and observation; keep this best-effort.
+    }
+
     const tail = await readTailUtf8(file, tailBytes);
     if (!tail) return null;
 
@@ -203,8 +213,9 @@ export function createCodexSessionContextSnapshotResolver(
 
       const candidate = toCandidateSnapshot(payload);
       if (!candidate) continue;
-      if (candidate.hasNonZeroRateUsage) return candidate.snapshot;
-      if (!fallback) fallback = candidate.snapshot;
+      const snapshot = sessionFileBytes == null ? candidate.snapshot : { ...candidate.snapshot, sessionFileBytes };
+      if (candidate.hasNonZeroRateUsage) return snapshot;
+      if (!fallback) fallback = snapshot;
     }
 
     return fallback;

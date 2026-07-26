@@ -1,5 +1,5 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import type { TaskSpec_P1 } from '../types.js';
+import { isSchedulerFreshCliSessionEnabled, type TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
 /** Web digest template — periodically fetch a URL and summarize new content */
@@ -59,6 +59,7 @@ export const webDigestTemplate: TaskTemplate = {
               reason: 'scheduled_web_digest_browser_fetch',
               sourceCategory: 'scheduled',
               suggestedSkill: 'browser-automation',
+              ...(isSchedulerFreshCliSessionEnabled() ? { forceFreshCliSession: true as const } : {}),
             });
             return;
           }

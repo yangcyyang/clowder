@@ -1,5 +1,5 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import type { TaskSpec_P1 } from '../types.js';
+import { isSchedulerFreshCliSessionEnabled, type TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
 /** Reminder template — fires on schedule, wakes a cat to handle the reminder in-thread */
@@ -54,6 +54,7 @@ export const reminderTemplate: TaskTemplate = {
           if (ctx.invokeTrigger) {
             ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
               sourceCategory: 'scheduled',
+              ...(isSchedulerFreshCliSessionEnabled() ? { forceFreshCliSession: true as const } : {}),
               ...(isWindowPrimer ? { responsePresentation: 'silent_receipt' as const } : {}),
             });
           }

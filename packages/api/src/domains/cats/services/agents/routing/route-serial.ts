@@ -1131,6 +1131,7 @@ export async function* routeSerial(
               ? { systemPrompt: staticIdentity }
               : {}),
           ...(v2Dispatch && supportsSeam ? { transportPayload: v2Dispatch.transportPayload } : {}),
+          ...(options.forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
           ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
           continuityCapsule,

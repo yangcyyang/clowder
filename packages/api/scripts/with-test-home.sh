@@ -19,6 +19,10 @@ export CAT_CAFE_TEST_REAL_HOME="${CAT_CAFE_TEST_REAL_HOME:-$real_home}"
 # Test entrypoints must not inherit a production NODE_ENV from the outer shell.
 # Telemetry redaction tests rely on test-mode defaults instead of production secrets.
 export NODE_ENV="test"
+# Default-cat routing assertions must not inherit a developer's persisted choice
+# from the repo .env (for example DEFAULT_CAT_ID=gpt52). Tests that exercise a
+# different default still set process.env.DEFAULT_CAT_ID explicitly in-process.
+export DEFAULT_CAT_ID="opus"
 
 # Runtime-only envs leak from invocation env (set by the running cat-cafe-runtime
 # process when launching a cat). resolveBinaryRoot()/orchestrator code treats

@@ -40,12 +40,20 @@ import {
 } from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
+  CODEX_SESSION_SIZE_WARNING_BYTES,
   type CodexSessionContextSnapshotResolver,
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
 
 const log = createModuleLogger('codex-agent');
+
+function resolveCodexSessionSizeWarningBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const configuredMb = Number(env.CLOWDER_CODEX_SESSION_SIZE_WARNING_MB);
+  const defaultMb = CODEX_SESSION_SIZE_WARNING_BYTES / (1024 * 1024);
+  const mb = Number.isFinite(configuredMb) && configuredMb > 0 ? configuredMb : defaultMb;
+  return mb * 1024 * 1024;
+}
 
 /**
  * Options for constructing CodexAgentService (dependency injection)
@@ -828,6 +836,21 @@ export class CodexAgentService implements AgentService {
             }
             if (usage.outputTokens == null && snapshot.totalOutputTokens != null) {
               usage.outputTokens = snapshot.totalOutputTokens;
+            }
+            if (snapshot.sessionFileBytes != null) {
+              usage.sessionFileBytes = snapshot.sessionFileBytes;
+              const sizeMb = (snapshot.sessionFileBytes / (1024 * 1024)).toFixed(2);
+              if (snapshot.sessionFileBytes > resolveCodexSessionSizeWarningBytes()) {
+                log.warn(
+                  { sessionId: metadata.sessionId, sessionFileBytes: snapshot.sessionFileBytes },
+                  `[codex] native session file is ${sizeMb}MB (over configured observation threshold); no session action taken`,
+                );
+              } else {
+                log.info(
+                  { sessionId: metadata.sessionId, sessionFileBytes: snapshot.sessionFileBytes },
+                  '[codex] native session file size observed at invocation completion',
+                );
+              }
             }
 
             metadata.usage = usage;

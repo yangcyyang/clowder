@@ -2118,16 +2118,34 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CLOWDER_CLAIMED_IDLE_WAKEUP',
     defaultValue: '(未设置 → 开启)',
     description:
-      '认领闲置唤醒器（ClaimedIdleScheduler）：修复"猫认领任务后只发一句计划就挂机，队列空、无执行、平台永不叫醒"的漏洞——批次3-A 的自动认领唤醒只覆盖无主任务，不覆盖已认领但闲置的任务。每 60s 扫描 status=doing 且 owner 无 queued/processing 队列条目、无 active invocation 的任务，闲置超过 CLOWDER_CLAIMED_IDLE_MINUTES（默认 15 分钟，按 task.updatedAt 计算）后投递唤醒消息叫 owner 继续/blocked/unclaim。每个认领周期最多 2 次唤醒、间隔 ≥30 分钟；2 次无进展则不再唤醒，改为在主频道发一条零 token 的系统通知建议人工处理。默认开启（与批次3-A 的白名单式灰度不同：这是纯粹的兜底安全网，不会主动分派新工作，只在猫已认领却失联时叫醒同一只猫，风险面小）。置 "0"/"false" 关闭。',
+      '认领闲置唤醒器（ClaimedIdleScheduler）：修复"猫认领任务后只发一句计划就挂机，队列空、无执行、平台永不叫醒"的漏洞——批次3-A 的自动认领唤醒只覆盖无主任务，不覆盖已认领但闲置的任务。每 60s 扫描 status=doing 且 owner 无 queued/processing 队列条目、无 active invocation 的任务，闲置超过 CLOWDER_CLAIMED_IDLE_MINUTES（默认 120 分钟，按 task.updatedAt 计算）后投递唤醒消息叫 owner 继续/blocked/unclaim。每个认领周期最多 2 次唤醒、间隔 ≥30 分钟；2 次无进展则不再唤醒，改为在主频道发一条零 token 的系统通知建议人工处理。默认开启（与批次3-A 的白名单式灰度不同：这是纯粹的兜底安全网，不会主动分派新工作，只在猫已认领却失联时叫醒同一只猫，风险面小）。置 "0"/"false" 关闭。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: true,
   },
   {
     name: 'CLOWDER_CLAIMED_IDLE_MINUTES',
-    defaultValue: '15',
+    defaultValue: '120',
     description:
-      '配合 CLOWDER_CLAIMED_IDLE_WAKEUP 使用：任务判定"认领闲置"的分钟阈值——now 减 task.updatedAt 超过此值且无进行中执行才会触发唤醒。非正数或非法值一律回退默认 15。改值无需重启——每次扫描 tick 都会重新读取。',
+      '配合 CLOWDER_CLAIMED_IDLE_WAKEUP 使用：任务判定"认领闲置"的分钟阈值——now 减 task.updatedAt 超过此值且无进行中执行才会触发唤醒。非正数或非法值一律回退默认 120。改值无需重启——每次扫描 tick 都会重新读取。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_SCHEDULER_FRESH_CLI_SESSION',
+    defaultValue: '1',
+    description:
+      '批次4-C4：定时任务每次执行都新建 provider 原生 CLI 会话，避免把独立批次的原始历史无限累积；Clowder 的 session-chain 摘要和 ThreadMemory 仍照常提供上下文延续。置 "0"/"false"/"off" 可临时恢复旧的续接行为。默认开启。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_CODEX_SESSION_SIZE_WARNING_MB',
+    defaultValue: '4',
+    description:
+      '批次4-C5：Codex rollout 原生会话文件的纯观测告警阈值（MB）。单次调用完成时记录文件大小，超过阈值只告警、不轮转、不删除、不影响调用。非法或非正数回退 4MB。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: true,

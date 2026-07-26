@@ -2750,6 +2750,7 @@ export class QueueProcessor {
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),
           ...(silentScheduledReceipt ? { responsePresentation: 'silent_receipt' } : {}),
+          ...(entry.forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedUserMessagesForThread(tid),
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) => queue.hasActiveOrQueuedAgentForCat(tid, catId),
           enqueueA2ATargets: async (handoff: {

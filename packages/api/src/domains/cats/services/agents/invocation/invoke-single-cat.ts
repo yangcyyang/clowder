@@ -421,6 +421,8 @@ export interface InvocationParams {
   readonly isLastCat: boolean;
   /** Static identity prompt — prepended to prompt on new sessions (gated by F-BLOAT logic) */
   readonly systemPrompt?: string;
+  /** Scheduler isolation: start a new provider-native session while retaining Clowder summaries. */
+  readonly forceFreshCliSession?: true;
   /**
    * ADR-024 D2: structured four-slot payload (CONTEXT_CACHE_LAYOUT=v2, gated by the route
    * layer's `TRANSPORT_SEAM_CLIENT_IDS` allowlist — Claude-only in W1-B, extended to the
@@ -866,6 +868,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         contextResetBoundary &&
         (!authoritativeSessionCreatedAt || authoritativeSessionCreatedAt < contextResetBoundary.resetAt))
     ) {
+      sessionId = undefined;
+    }
+
+    // Batch 4-C4: a scheduler tick is an independent execution. Its durable
+    // context comes from the normal digest/memory path, not an ever-growing
+    // provider-native --resume transcript from an earlier tick.
+    if (params.forceFreshCliSession) {
       sessionId = undefined;
     }
 

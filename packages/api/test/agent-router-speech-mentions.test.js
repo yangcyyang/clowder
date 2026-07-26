@@ -81,6 +81,7 @@ test('resolveTargetsAndIntent supports 艾特 prefix', async () => {
 
 test('resolveTargetsAndIntent does not false-positive normal words like attack', async () => {
   const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+  const { getDefaultCatId } = await import('../dist/config/cat-config-loader.js');
   const router = new AgentRouter(
     await migrateRouterOpts({
       claudeService: createNoopService('opus'),
@@ -92,7 +93,8 @@ test('resolveTargetsAndIntent does not false-positive normal words like attack',
   );
 
   const result = await router.resolveTargetsAndIntent('这个 attack 测试先别动', 'thread-voice');
-  assert.deepEqual(result.targetCats, ['opus']);
+  assert.equal(result.hasMentions, false);
+  assert.deepEqual(result.targetCats, [getDefaultCatId()]);
 });
 
 test('resolveTargetsAndIntent keeps existing @mentions unchanged', async () => {

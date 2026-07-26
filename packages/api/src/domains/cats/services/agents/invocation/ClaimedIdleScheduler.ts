@@ -68,8 +68,8 @@ import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 
 const log = createModuleLogger('ClaimedIdleScheduler');
 
-/** Spec default: 15 minutes idle (since task.updatedAt) before the first nudge. */
-const DEFAULT_IDLE_MINUTES = 15;
+/** 批次 4 定稿：首次唤醒至少等待 120 分钟，避免短暂空档变成催促风暴。 */
+const DEFAULT_IDLE_MINUTES = 120;
 /** Spec: scan cadence. */
 const DEFAULT_SCAN_INTERVAL_MS = 60_000;
 /** Spec: minimum spacing between the two nudges. */
@@ -86,7 +86,7 @@ export function isClaimedIdleWakeupEnabled(env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * Parse CLOWDER_CLAIMED_IDLE_MINUTES. Unset/blank/non-numeric/non-positive → default 15
+ * Parse CLOWDER_CLAIMED_IDLE_MINUTES. Unset/blank/non-numeric/non-positive → default 120
  * (fail-open on operator typos, same convention as resolveLibraryRebuildHours).
  */
 export function resolveClaimedIdleThresholdMinutes(env: NodeJS.ProcessEnv = process.env): number {
@@ -109,7 +109,7 @@ function truncateTaskTitle(title: string): string {
 function buildClaimedIdleWakeContent(task: TaskItem, label: string, idleMinutes: number): string {
   return [
     `[系统] 你认领的任务 ${label}（${truncateTaskTitle(task.title)}）已闲置 ${idleMinutes} 分钟且无进行中的执行。`,
-    '请继续推进（本回合须有实质动作）；无法继续则用 cat_cafe_task_update 置 blocked 并写明卡点，或 cat_cafe_task_unclaim 放手。',
+    '请把进度或阻塞说一句；无法继续则用 cat_cafe_task_update 置 blocked 并写明卡点，或 cat_cafe_task_unclaim 放手。',
   ].join('\n');
 }
 

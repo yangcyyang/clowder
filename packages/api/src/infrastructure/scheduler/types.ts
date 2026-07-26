@@ -101,6 +101,17 @@ export interface ScheduleTriggerPolicy {
   readonly suggestedSkill?: string;
   /** Scheduler bookkeeping replies that should remain auditable but stay out of the dialogue timeline. */
   readonly responsePresentation?: 'silent_receipt';
+  /**
+   * 定时触发不续接交互式 CLI 历史，避免把多次独立运行累积到同一原生会话。
+   * 链路摘要仍由既有的 SessionChain/ThreadMemory 保持连续。
+   */
+  readonly forceFreshCliSession?: true;
+}
+
+/** Batch 4-C4: default-on, reversible scheduler isolation switch. */
+export function isSchedulerFreshCliSessionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env.CLOWDER_SCHEDULER_FRESH_CLI_SESSION?.trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off';
 }
 
 export interface ScheduleLifecycleNotice {

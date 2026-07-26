@@ -59,6 +59,8 @@ export interface ConnectorTriggerPolicy {
   readonly suggestedSkill?: string;
   /** Scheduler bookkeeping reply presentation; does not introduce a new message type. */
   readonly responsePresentation?: 'silent_receipt';
+  /** Scheduler runs start a new provider-native CLI session but preserve Clowder's digest chain. */
+  readonly forceFreshCliSession?: true;
 }
 
 /**
@@ -124,6 +126,7 @@ export class ConnectorInvokeTrigger {
         policy?.sourceCategory,
         policy?.suggestedSkill,
         policy?.responsePresentation,
+        policy?.forceFreshCliSession,
       );
     }
 
@@ -141,6 +144,7 @@ export class ConnectorInvokeTrigger {
         policy?.sourceCategory,
         policy?.suggestedSkill,
         policy?.responsePresentation,
+        policy?.forceFreshCliSession,
       );
     }
 
@@ -157,6 +161,7 @@ export class ConnectorInvokeTrigger {
       sender,
       controller,
       policy?.responsePresentation,
+      policy?.forceFreshCliSession,
     ).catch((err) => {
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -174,6 +179,7 @@ export class ConnectorInvokeTrigger {
     sourceCategory?: string,
     suggestedSkill?: string,
     responsePresentation?: 'silent_receipt',
+    forceFreshCliSession?: true,
   ): 'full' | 'enqueued' {
     const { invocationQueue, socketManager, log } = this.opts;
 
@@ -199,6 +205,7 @@ export class ConnectorInvokeTrigger {
       ...(sender ? { senderMeta: sender } : {}),
       ...(suggestedSkill ? { suggestedSkill } : {}),
       ...(responsePresentation ? { responsePresentation } : {}),
+      ...(forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
     });
 
     if (result.outcome === 'resetting') {
@@ -262,6 +269,7 @@ export class ConnectorInvokeTrigger {
     sender?: { id: string; name?: string },
     preAcquiredController?: AbortController,
     responsePresentation?: 'silent_receipt',
+    forceFreshCliSession?: true,
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
@@ -383,6 +391,7 @@ export class ConnectorInvokeTrigger {
         persistenceContext,
         parentInvocationId: createResult.invocationId,
         ...(responsePresentation ? { responsePresentation } : {}),
+        ...(forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

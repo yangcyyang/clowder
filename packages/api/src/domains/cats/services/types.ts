@@ -51,6 +51,8 @@ export interface TokenUsage {
   contextUsedTokens?: number;
   /** Codex session token_count: reset timestamp (epoch ms) for display-only hint. */
   contextResetsAtMs?: number;
+  /** Provider-native session file size observed at invocation completion; informational only. */
+  sessionFileBytes?: number;
   /** Estimated prompt-source composition. Display-only, not provider billing truth. */
   sourceBreakdown?: PromptSourceBreakdown;
   /** Phase 3 history governance mode. B1 shadow-summary still keeps full/recent history behavior. */
@@ -86,7 +88,12 @@ type NumericTokenUsageKey =
   | 'durationApiMs'
   | 'numTurns';
 
-type LatestTokenUsageKey = 'contextWindowSize' | 'lastTurnInputTokens' | 'contextUsedTokens' | 'contextResetsAtMs';
+type LatestTokenUsageKey =
+  | 'contextWindowSize'
+  | 'lastTurnInputTokens'
+  | 'contextUsedTokens'
+  | 'contextResetsAtMs'
+  | 'sessionFileBytes';
 
 /** F8: Accumulate token usage — adds numeric fields from `incoming` into `existing` */
 export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: TokenUsage): TokenUsage {
@@ -110,7 +117,13 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     }
   }
   // Non-aggregating contextual fields should keep the most recent snapshot.
-  const latestKeys: LatestTokenUsageKey[] = ['contextWindowSize', 'lastTurnInputTokens', 'contextUsedTokens', 'contextResetsAtMs'];
+  const latestKeys: LatestTokenUsageKey[] = [
+    'contextWindowSize',
+    'lastTurnInputTokens',
+    'contextUsedTokens',
+    'contextResetsAtMs',
+    'sessionFileBytes',
+  ];
   for (const key of latestKeys) {
     const val = incoming[key];
     if (val != null) {

@@ -103,6 +103,8 @@ export interface QueueEntry {
     | 'claimed_idle_nudge';
   /** Existing message type with scheduler-specific presentation metadata. */
   responsePresentation?: 'silent_receipt';
+  /** Scheduled work must not resume a provider-native CLI session from an earlier run. */
+  forceFreshCliSession?: true;
   /** Queue-internal dedup key for agent control-flow work. */
   continuationKey?: string;
   /** Bounded successor review for a Freshness Hold. */
@@ -360,6 +362,7 @@ export class InvocationQueue {
           : (input.priority ?? 'normal'),
       sourceCategory: input.sourceCategory,
       responsePresentation: input.responsePresentation,
+      forceFreshCliSession: input.forceFreshCliSession === true ? true : undefined,
       continuationKey: input.continuationKey,
       freshnessReview: input.freshnessReview ? structuredClone(input.freshnessReview) : undefined,
       suggestedSkill: input.suggestedSkill,

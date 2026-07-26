@@ -788,6 +788,7 @@ export async function* routeParallel(
             ? { systemPrompt: staticIdentity }
             : {}),
         ...(v2Dispatch && supportsSeam ? { transportPayload: v2Dispatch.transportPayload } : {}),
+        ...(options.forceFreshCliSession ? { forceFreshCliSession: true as const } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
         ...(options.crossPostSourceThreadId ? { crossPostSourceThreadId: options.crossPostSourceThreadId } : {}),
         continuityCapsule,
