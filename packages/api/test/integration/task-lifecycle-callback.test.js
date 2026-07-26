@@ -146,7 +146,7 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       method: 'POST',
       url: '/api/callbacks/task-claim',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { messageId: msg.id },
+      payload: { messageId: msg.id, title: '修复登录问题' },
     });
 
     assert.equal(res.statusCode, 201, res.body);
@@ -175,7 +175,7 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       method: 'POST',
       url: '/api/callbacks/task-claim',
       headers: { 'x-invocation-id': codex.invocationId, 'x-callback-token': codex.callbackToken },
-      payload: { messageId: msg.id },
+      payload: { messageId: msg.id, title: '修复登录问题' },
     });
     assert.equal(first.statusCode, 201);
     const firstTaskId = first.json().task.id;
@@ -186,7 +186,7 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       method: 'POST',
       url: '/api/callbacks/task-claim',
       headers: { 'x-invocation-id': codexAgain.invocationId, 'x-callback-token': codexAgain.callbackToken },
-      payload: { messageId: msg.id },
+      payload: { messageId: msg.id, title: '修复登录问题' },
     });
     assert.equal(second.statusCode, 200);
     assert.equal(second.json().task.id, firstTaskId);
@@ -197,7 +197,7 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       method: 'POST',
       url: '/api/callbacks/task-claim',
       headers: { 'x-invocation-id': opus.invocationId, 'x-callback-token': opus.callbackToken },
-      payload: { messageId: msg.id },
+      payload: { messageId: msg.id, title: '修复登录问题' },
     });
     assert.equal(third.statusCode, 409);
     assert.equal(third.json().ownerCatId, 'codex');
@@ -441,7 +441,7 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       method: 'POST',
       url: '/api/callbacks/task-claim',
       headers,
-      payload: { messageId: msg.id },
+      payload: { messageId: msg.id, title: '修复登录问题' },
     });
     assert.equal(claim.statusCode, 201);
     const taskThreadId = claim.json().task.taskThreadId;
@@ -569,6 +569,427 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       });
       assert.equal(unclaim.statusCode, 200, unclaim.body);
       assert.equal(unclaim.json().task.ownerCatId, null);
+    });
+  });
+
+  // ---- 批次4-B5 票面卫生四规则 (docs/research/raft-r9-ticket-hygiene.md) ----
+  describe('B5 ticket hygiene (message-id claim foolproofing)', () => {
+    function withEnv(overrides, fn) {
+      const previous = {};
+      for (const key of Object.keys(overrides)) previous[key] = process.env[key];
+      Object.assign(process.env, overrides);
+      return Promise.resolve()
+        .then(fn)
+        .finally(() => {
+          for (const key of Object.keys(overrides)) {
+            if (previous[key] === undefined) delete process.env[key];
+            else process.env[key] = previous[key];
+          }
+        });
+    }
+
+    // ---- B5.1 层级规则 (AC①) ----
+
+    test('B5.1: a message inside a branch/discussion thread is rejected with a Chinese hint', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const branch = await threadStore.create('user-1', 'Branch', undefined, {
+        relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+      });
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '这个方案我觉得可以',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: branch.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '不该被建的票' },
+      });
+
+      assert.equal(res.statusCode, 403, res.body);
+      const body = res.json();
+      assert.equal(body.code, 'TASK_CLAIM_THREAD_NOT_TOP_LEVEL');
+      assert.match(body.hint, /讨论上下文不入票/);
+      assert.match(body.hint, /task_create/);
+    });
+
+    test('B5.1: a top-level channel message (no relation) is unaffected', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '帮我修一下这个 bug',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '修复 bug' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+    });
+
+    test('B5.1: CLOWDER_TICKET_HYGIENE_THREAD_HIERARCHY=false restores the old (unguarded) behavior', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_THREAD_HIERARCHY: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const branch = await threadStore.create('user-1', 'Branch', undefined, {
+          relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+        });
+        const msg = await messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: '这个方案我觉得可以',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: branch.id,
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-claim',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { messageId: msg.id, title: '关闭开关后可以建票' },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+      });
+    });
+
+    // ---- B5.2 自噬禁止 (AC②) ----
+
+    test('B5.2: a cat-authored message is rejected with a Chinese hint', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '我认为这段实现没问题，可以合并',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '不该被建的票' },
+      });
+
+      assert.equal(res.statusCode, 403, res.body);
+      const body = res.json();
+      assert.equal(body.code, 'TASK_CLAIM_CAT_AUTHORED_MESSAGE');
+      assert.match(body.hint, /猫发的消息不入票/);
+      assert.match(body.hint, /task_create/);
+    });
+
+    test('B5.2: CLOWDER_TICKET_HYGIENE_CAT_AUTHOR_BLOCK=false restores the old (unguarded) behavior', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_CAT_AUTHOR_BLOCK: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const msg = await messageStore.append({
+          userId: 'user-1',
+          catId: 'opus',
+          content: '我认为这段实现没问题，可以合并',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: main.id,
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-claim',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { messageId: msg.id, title: '关闭开关后可以建票' },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+      });
+    });
+
+    // ---- B5.4 标题强制 (AC④) ----
+
+    test('B5.4: missing title is rejected', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '帮我修一下这个 bug',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id },
+      });
+
+      assert.equal(res.statusCode, 400, res.body);
+      assert.equal(res.json().code, 'TASK_CLAIM_TITLE_REQUIRED');
+    });
+
+    test('B5.4: a 61-char title is rejected', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '帮我修一下这个 bug',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: 'x'.repeat(61) },
+      });
+
+      assert.equal(res.statusCode, 400, res.body);
+      assert.equal(res.json().code, 'TASK_CLAIM_TITLE_TOO_LONG');
+    });
+
+    test('B5.4: a valid title becomes the task title; the original message text lands as the discussion thread first post', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const originalContent = '登录页面点了按钮之后卡住转圈圈，等了三分钟也没反应，麻烦看下';
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: originalContent,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '修复登录卡死' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      const task = res.json().task;
+      assert.equal(task.title, '修复登录卡死');
+      assert.notEqual(task.title, originalContent);
+
+      const threadMessages = await messageStore.getByThread(task.taskThreadId, 10);
+      assert.ok(
+        threadMessages.some((m) => m.content === originalContent),
+        'original message text must be preserved as the discussion thread first post',
+      );
+    });
+
+    test('B5.4: CLOWDER_TICKET_HYGIENE_REQUIRE_TITLE=false restores the old (content-derived title) behavior', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_REQUIRE_TITLE: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const msg = await messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: '帮我修一下这个 bug',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: main.id,
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-claim',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { messageId: msg.id },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+        assert.equal(res.json().task.title, '帮我修一下这个 bug');
+      });
+    });
+
+    // ---- B5.3 活跃票降级 (AC③) ----
+
+    test('B5.3: an owned active task in the same thread downgrades the claim to a progress note (no duplicate ticket)', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const activeTask = taskStore.create({
+        threadId: main.id,
+        title: '正在修复登录问题',
+        why: '',
+        createdBy: 'user',
+        ownerCatId: 'codex',
+        status: 'doing',
+      });
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '对了，顺便看看首页加载也有点慢',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '首页加载慢' },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      const body = res.json();
+      assert.equal(body.status, 'ok');
+      assert.equal(body.created, false);
+      assert.equal(body.downgraded, true);
+      assert.equal(body.task.id, activeTask.id, 'must attach to the existing active task, not mint a new one');
+      assert.match(body.hint, /已挂到/);
+      assert.match(body.hint, /task_create/);
+
+      // No duplicate ticket was created.
+      const allTasks = await taskStore.listByThread(main.id);
+      assert.equal(allTasks.length, 1);
+
+      // The message content landed as a progress note in the active task's own discussion thread.
+      const updatedTask = await taskStore.get(activeTask.id);
+      assert.ok(updatedTask.taskThreadId, 'downgrade must ensure a discussion thread exists');
+      const discussionMessages = await messageStore.getByThread(updatedTask.taskThreadId, 20);
+      assert.ok(
+        discussionMessages.some((m) => m.content === '对了，顺便看看首页加载也有点慢' && m.origin === 'progress'),
+        'source message content must be attached as a progress-origin message',
+      );
+      assert.ok(
+        updatedTask.events.some((e) => e.type === 'progress_note' && e.data?.sourceMessageId === msg.id),
+        'a progress_note TaskEvent pointer must be recorded on the task',
+      );
+
+      // A visible notice card landed in the origin channel.
+      const channelMessages = await messageStore.getByThread(main.id, 20);
+      const notice = channelMessages.find((m) => m.extra?.systemKind === 'task_progress_attached');
+      assert.ok(notice, 'a visible notice card must be posted to the channel');
+      assert.match(notice.content, /已挂到/);
+      assert.match(notice.content, /task_create/);
+    });
+
+    test('B5.3: explicit task_create still creates a new task even when the cat has an active task', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      taskStore.create({
+        threadId: main.id,
+        title: '正在修复登录问题',
+        why: '',
+        createdBy: 'user',
+        ownerCatId: 'codex',
+        status: 'doing',
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-create',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: '这是真正独立的新工作' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      assert.equal(res.json().task.title, '这是真正独立的新工作');
+      const allTasks = await taskStore.listByThread(main.id);
+      assert.equal(allTasks.length, 2, 'explicit task_create is an escape hatch and must not be downgraded');
+    });
+
+    test('B5.3: a DIFFERENT active task owner is unaffected (downgrade is scoped to the claiming cat)', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      taskStore.create({
+        threadId: main.id,
+        title: 'opus 在忙的票',
+        why: '',
+        createdBy: 'user',
+        ownerCatId: 'opus',
+        status: 'doing',
+      });
+      const msg = await messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: '帮我修一下这个 bug',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: main.id,
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-claim',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { messageId: msg.id, title: '修复 bug' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body, 'codex has no active task of its own, so a new ticket is created');
+      assert.equal(res.json().created, true);
+    });
+
+    test('B5.3: CLOWDER_TICKET_HYGIENE_ACTIVE_TASK_DOWNGRADE=false restores the old (always new/reuse-by-message) behavior', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_ACTIVE_TASK_DOWNGRADE: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        taskStore.create({
+          threadId: main.id,
+          title: '正在修复登录问题',
+          why: '',
+          createdBy: 'user',
+          ownerCatId: 'codex',
+          status: 'doing',
+        });
+        const msg = await messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: '对了，顺便看看首页加载也有点慢',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: main.id,
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-claim',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { messageId: msg.id, title: '首页加载慢' },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+        assert.equal(res.json().created, true);
+        const allTasks = await taskStore.listByThread(main.id);
+        assert.equal(allTasks.length, 2, 'with the gate off, a second ticket is created instead of downgrading');
+      });
     });
   });
 });

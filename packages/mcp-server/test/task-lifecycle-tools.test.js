@@ -60,6 +60,46 @@ describe('Task lifecycle MCP tools', () => {
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.messageId, 'msg-1');
     assert.equal(body.taskId, undefined);
+    assert.equal(body.title, undefined);
+  });
+
+  // 批次4-B5 票面卫生 B5.4: title is forwarded when provided, and the server's
+  // rejection (missing/too-long title, thread-hierarchy, cat-author) surfaces as a
+  // normal tool error with the Chinese hint intact for the cat to read.
+  test('handleTaskClaim forwards title alongside messageId (B5.4)', async () => {
+    const { handleTaskClaim } = await import('../dist/tools/task-lifecycle-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok', task: { id: 't2', title: '修复登录问题' }, created: true }) };
+    };
+
+    const result = await handleTaskClaim({ messageId: 'msg-1', title: '修复登录问题' });
+
+    assert.equal(result.isError, undefined);
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.messageId, 'msg-1');
+    assert.equal(body.title, '修复登录问题');
+  });
+
+  test('handleTaskClaim surfaces the B5 ticket-hygiene rejection hint from the server', async () => {
+    const { handleTaskClaim } = await import('../dist/tools/task-lifecycle-tools.js');
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error: 'title is required (1-60 chars, trimmed) when claiming by messageId',
+          code: 'TASK_CLAIM_TITLE_REQUIRED',
+          hint: '请自拟一个 1-60 字的标题（不要留空）；原文会自动整理进票的讨论 thread 首条，标题不用照抄原文',
+        }),
+    });
+
+    const result = await handleTaskClaim({ messageId: 'msg-1' });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /TASK_CLAIM_TITLE_REQUIRED/);
+    assert.match(result.content[0].text, /请自拟一个 1-60 字的标题/);
   });
 
   test('handleTaskCreate forwards subjectKey for dedup', async () => {
