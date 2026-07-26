@@ -127,6 +127,14 @@ topics: [task, thread, raft-replication, sop, memory, search]
 
 **工具**：项目目录写 `progress.md`（Files 面板人类可直接打开）；更新节拍挂在收工检查上；关键裁定发生时当场补记，别攒。
 
+## 纪律 14：分支收官必回写——结论不能埋在 thread 里
+
+在分支/讨论 thread 里经过多轮讨论得出**结论、裁定或交付**后，收官的猫必须用 `cat_cafe_cross_post_message` 往主频道回写一条**结论卡**（≤5 行：结论一句话 / 关键证据指针（msg-id 或 commit）/ 下一步归谁），并引用来源分支。判断口诀：只在分支里说过的结论，等于没对频道说过。**分支=过程层，主频道=结论层**——与建票上浮（B5.5）同构：任务归位父级，结论也归位父级。
+
+**为什么**：Raft 第十轮自曝这是它的结构缺口——"thread 里的结论默认留在 thread 里，主时间线只有一条不会更新的原始消息"，靠人肉收官报告代偿，并点名这是 Clowder 可反超的点。我方 thread-first 默认开，痛点同构且更结构化：铲屎官在主频道看不到任何分支结论，只能逐个点进去考古。管道已存在（cross_post 工具），缺的就是这条纪律。
+
+**工具**：`cat_cafe_cross_post_message`（回写）+ 引用来源分支；长任务同时更新台账（纪律 13）的"关键裁定"节。
+
 ## 速查表
 
 | # | 纪律 | 违反的后果 | 主要工具 |
@@ -144,3 +152,4 @@ topics: [task, thread, raft-replication, sop, memory, search]
 | 11 | 票面卫生：一流一票、短标题 | 任务板变对话镜像，in_review 堆死 | `task_create(subjectKey)` 查重 + `post_progress` |
 | 12 | 根因必须落名 | 根因人人看见、无人处置，返工循环 | `task_create` 指派 / @ 到人得到接手确认 |
 | 13 | 长任务挂台账（progress.md 六节） | 状态散落，人要看进度只能爬楼考古 | 项目目录 `progress.md`，收工前更新 |
+| 14 | 分支收官必回写结论卡 | 结论埋在 thread，主频道只剩不会更新的源消息 | `cross_post_message` 回写主频道+引用分支 |
