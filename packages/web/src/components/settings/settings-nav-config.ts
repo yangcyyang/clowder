@@ -67,14 +67,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: 'advanced',
   },
   {
-    id: 'voice',
-    label: '语音管理',
-    icon: 'mic',
-    color: 'var(--color-gemini-primary)',
-    description: '语音输入输出、术语表和 TTS 服务状态。',
-    group: 'basic',
-  },
-  {
     id: 'system',
     label: '系统配置',
     icon: 'settings',

@@ -47,7 +47,8 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(isConnectorSecret('TELEGRAM_BOT_TOKEN_EXTRA'), false);
   });
 
-  it('allowlist has exactly 28 entries', () => {
-    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 28);
+  it('allowlist has exactly 27 entries', () => {
+    // W5: GITHUB_MCP_PAT removed — its sole consumer (signals' GitHub fetcher) was deleted.
+    assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 27);
   });
 });

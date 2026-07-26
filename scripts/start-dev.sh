@@ -15,16 +15,16 @@
 #   ./scripts/start-dev.sh --daemon   — 后台运行 (日志输出到 cat-cafe-daemon.log)
 #   ./scripts/start-dev.sh --stop     — 停止后台 daemon
 #   ./scripts/start-dev.sh --status   — 查看 daemon 状态
-#   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON, sidecar ON)
-#   ./scripts/start-dev.sh --profile=production   — 日常生产 (proxy OFF, sidecar OFF, TTL=永久)
-#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, sidecar OFF, TTL=永久)
+#   ./scripts/start-dev.sh --profile=dev          — 家里开发默认值 (proxy ON)
+#   ./scripts/start-dev.sh --profile=production   — 日常生产 (proxy OFF, TTL=永久)
+#   ./scripts/start-dev.sh --profile=opensource   — 开源演示 (proxy OFF, TTL=永久)
 #   ./scripts/start-dev.sh -- --npm-registry=URL --pip-index-url=URL --hf-endpoint=URL
 #                                               — 显式指定安装/模型下载镜像（仅手动 override）
 #
 # Profile 说明:
-#   dev        — proxy ON, ASR/TTS/LLM ON, TTL=永久, redis-dev
-#   production — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (日常生产)
-#   opensource — proxy OFF, ASR/TTS/LLM OFF, TTL=永久, redis-opensource (开源演示)
+#   dev        — proxy ON, TTL=永久, redis-dev
+#   production — proxy OFF, TTL=永久, redis-opensource (日常生产)
+#   opensource — proxy OFF, TTL=永久, redis-opensource (开源演示)
 #   (无)       — 保持原有行为（各项 ENABLED 默认 0）
 #
 # .env 中的显式值覆盖 profile 默认值。启动摘要标注每个值的来源。
@@ -103,8 +103,6 @@ CLI_NEXT_PUBLIC_API_URL_OVERRIDE="${NEXT_PUBLIC_API_URL-}"
 CLI_PREVIEW_GATEWAY_PORT_OVERRIDE="${PREVIEW_GATEWAY_PORT-}"
 CLI_ANTHROPIC_PROXY_PORT_OVERRIDE="${ANTHROPIC_PROXY_PORT-}"
 CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
-CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
-CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
 
 clear_inherited_profile_env() {
     [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
@@ -112,7 +110,7 @@ clear_inherited_profile_env() {
 
     # Public direct-launch wrappers should honor the requested profile rather
     # than ambient Cat Cafe shell exports leaked from another checkout.
-    unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED
+    unset ANTHROPIC_PROXY_ENABLED EMBED_ENABLED
     unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
     unset REDIS_PROFILE
 }
@@ -150,8 +148,6 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "PREVIEW_GATEWAY_PORT" "$CLI_PREVIEW_GATEWAY_PORT_OVERRIDE"
     restore_cli_override "ANTHROPIC_PROXY_PORT" "$CLI_ANTHROPIC_PROXY_PORT_OVERRIDE"
     restore_cli_override "WHISPER_PORT" "$CLI_WHISPER_PORT_OVERRIDE"
-    restore_cli_override "TTS_PORT" "$CLI_TTS_PORT_OVERRIDE"
-    restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
 fi
 
 # === F182 大赛 / 多 worktree 并发：WORKTREE_PORT_OFFSET 派生 + 主动覆盖 ===
@@ -203,9 +199,6 @@ apply_worktree_port_offset() {
     # 主动 export 0 → resolve_config 看到非空 env_val → 保留 0，不被 profile=dev 重置回 1
     # EMBED_ENABLED + EMBED_MODE 双保险（derive_embed_enabled line 333 的两条派生路径）
     export ANTHROPIC_PROXY_ENABLED=0
-    export ASR_ENABLED=0
-    export TTS_ENABLED=0
-    export LLM_POSTPROCESS_ENABLED=0
     export EMBED_ENABLED=0
     export EMBED_MODE=off
     # PREVIEW_GATEWAY_PORT=0 让 kill_managed_ports (line 619) 不去碰 4100 端口
@@ -252,16 +245,13 @@ normalize_raw_dev_redis_defaults() {
 apply_profile_defaults() {
     local profile="$1"
     # Clear previous profile state
-    unset _PROF_ANTHROPIC_PROXY_ENABLED _PROF_ASR_ENABLED _PROF_TTS_ENABLED
-    unset _PROF_LLM_POSTPROCESS_ENABLED _PROF_REDIS_PROFILE
+    unset _PROF_ANTHROPIC_PROXY_ENABLED
+    unset _PROF_REDIS_PROFILE
     unset _PROF_MESSAGE_TTL_SECONDS _PROF_THREAD_TTL_SECONDS
     unset _PROF_TASK_TTL_SECONDS _PROF_SUMMARY_TTL_SECONDS
     case "$profile" in
         dev)
             _PROF_ANTHROPIC_PROXY_ENABLED=1
-            _PROF_ASR_ENABLED=1
-            _PROF_TTS_ENABLED=1
-            _PROF_LLM_POSTPROCESS_ENABLED=1
             _PROF_MESSAGE_TTL_SECONDS=0
             _PROF_THREAD_TTL_SECONDS=0
             _PROF_TASK_TTL_SECONDS=0
@@ -270,9 +260,6 @@ apply_profile_defaults() {
             ;;
         production)
             _PROF_ANTHROPIC_PROXY_ENABLED=0
-            _PROF_ASR_ENABLED=0
-            _PROF_TTS_ENABLED=0
-            _PROF_LLM_POSTPROCESS_ENABLED=0
             _PROF_MESSAGE_TTL_SECONDS=0
             _PROF_THREAD_TTL_SECONDS=0
             _PROF_TASK_TTL_SECONDS=0
@@ -281,9 +268,6 @@ apply_profile_defaults() {
             ;;
         opensource)
             _PROF_ANTHROPIC_PROXY_ENABLED=0
-            _PROF_ASR_ENABLED=0
-            _PROF_TTS_ENABLED=0
-            _PROF_LLM_POSTPROCESS_ENABLED=0
             _PROF_MESSAGE_TTL_SECONDS=0
             _PROF_THREAD_TTL_SECONDS=0
             _PROF_TASK_TTL_SECONDS=0
@@ -323,7 +307,7 @@ resolve_config() {
 print_config_summary() {
     echo "  配置来源："
     local key src_var val source
-    for key in ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED \
+    for key in ANTHROPIC_PROXY_ENABLED \
                EMBED_ENABLED \
                MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS \
                REDIS_PROFILE; do
@@ -342,9 +326,6 @@ normalize_raw_dev_redis_defaults
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
-resolve_config "ASR_ENABLED"
-resolve_config "TTS_ENABLED"
-resolve_config "LLM_POSTPROCESS_ENABLED"
 resolve_config "MESSAGE_TTL_SECONDS"
 resolve_config "THREAD_TTL_SECONDS"
 resolve_config "TASK_TTL_SECONDS"
@@ -353,9 +334,6 @@ resolve_config "REDIS_PROFILE"
 
 # Apply built-in fallbacks for vars with no profile and no env
 : "${ANTHROPIC_PROXY_ENABLED:=0}"
-: "${ASR_ENABLED:=0}"
-: "${TTS_ENABLED:=0}"
-: "${LLM_POSTPROCESS_ENABLED:=0}"
 : "${MESSAGE_TTL_SECONDS:=0}"
 : "${THREAD_TTL_SECONDS:=0}"
 : "${TASK_TTL_SECONDS:=0}"
@@ -670,15 +648,6 @@ kill_managed_ports() {
     if [ "${ANTHROPIC_PROXY_ENABLED:-0}" = "1" ]; then
         [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && [ "${ANTHROPIC_PROXY_ENABLED:-1}" != "0" ] && kill_port ${ANTHROPIC_PROXY_PORT:-9877} "Proxy"
     fi
-    if [ "${ASR_ENABLED:-0}" = "1" ]; then
-        kill_port ${WHISPER_PORT:-9876} "ASR"
-    fi
-    if [ "${TTS_ENABLED:-0}" = "1" ]; then
-        kill_port ${TTS_PORT:-9879} "TTS"
-    fi
-    if [ "${LLM_POSTPROCESS_ENABLED:-0}" = "1" ]; then
-        kill_port ${LLM_POSTPROCESS_PORT:-9878} "LLM后修"
-    fi
     return 0
 }
 
@@ -757,7 +726,7 @@ background_eval_with_null_stdin() {
 
 api_node_env() {
     # NODE_ENV is driven by launch mode (--prod-web), not by profile.
-    # Profile controls data isolation (Redis, TTLs, sidecar features);
+    # Profile controls data isolation (Redis, TTLs) and the proxy toggle;
     # --prod-web controls whether the API runs in production or dev mode.
     # dev:direct may carry --profile=opensource but is still development.
     if [ "$PROD_WEB" = true ]; then
@@ -794,7 +763,7 @@ web_production_build_ready() {
 # Sidecar summary: ready → 地址, failed → 报告, disabled → 静默
 print_sidecar_summary_all() {
     local name state_var port state
-    for entry in "ASR:_STATE_ASR:${ASR_PORT:-9876}" "TTS:_STATE_TTS:${TTS_PORT_VAL:-9879}" "LLM后修:_STATE_LLM_PP:${LLM_PP_PORT:-9878}" "Embedding:_STATE_EMBED:${EMBED_PORT:-9880}"; do
+    for entry in "Embedding:_STATE_EMBED:${EMBED_PORT:-9880}"; do
         name="${entry%%:*}"
         local rest="${entry#*:}"
         state_var="${rest%%:*}"
@@ -1414,11 +1383,8 @@ main() {
         echo -e "${YELLOW}  ⚠ Anthropic Proxy 已禁用 (ANTHROPIC_PROXY_ENABLED=0)${NC}"
     fi
 
-    # ML 服务（ASR/TTS/LLM后修/Embedding）由 service-manifest 管理
+    # ML 服务（Whisper STT / Embedding）由 service-manifest 管理
     # API 启动后通过 autoStartEnabledServices 自动拉起已启用的服务
-    _STATE_ASR=disabled
-    _STATE_TTS=disabled
-    _STATE_LLM_PP=disabled
     _STATE_EMBED=disabled
 
     API_LAUNCH_CMD="$(api_launch_command)"

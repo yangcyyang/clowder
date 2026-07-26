@@ -28,7 +28,7 @@ export type EnvCategory =
   | 'gemini'
   | 'kimi'
   | 'grok'
-  | 'tts'
+  | 'stt'
   | 'frontend'
   | 'push'
   | 'evidence'
@@ -79,7 +79,7 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   gemini: '暹罗猫 (Gemini)',
   kimi: 'Kimi',
   grok: 'Grok',
-  tts: '语音合成 (TTS)',
+  stt: '语音转写 (STT)',
   frontend: '前端',
   push: '推送通知',
   evidence: 'F102 记忆系统',
@@ -1383,44 +1383,12 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
 
-  // --- tts ---
-  {
-    name: 'TTS_URL',
-    defaultValue: 'http://localhost:9879',
-    description: 'TTS 服务地址（由 Service Manifest 管理）',
-    category: 'tts',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'TTS_CACHE_DIR',
-    defaultValue: './data/tts-cache',
-    description: 'TTS 音频缓存目录',
-    category: 'tts',
-    sensitive: false,
-  },
-  {
-    name: 'GENSHIN_VOICE_DIR',
-    defaultValue: '~/projects/.../genshin',
-    description: 'GPT-SoVITS 角色模型目录',
-    category: 'tts',
-    sensitive: false,
-    deprecated: '使用 CHARACTER_VOICE_DIR 替代（优先级更高，支持多角色目录）',
-  },
-  {
-    name: 'CHARACTER_VOICE_DIR',
-    defaultValue: '(未设置 → dirname(GENSHIN_VOICE_DIR))',
-    description: '角色语音模型根目录（优先级高于 GENSHIN_VOICE_DIR）',
-    category: 'tts',
-    sensitive: false,
-  },
-
-  // --- stt (managed by Service Manifest) ---
+  // --- stt (managed by Service Manifest; shared with IM connector inbound voice-message transcription) ---
   {
     name: 'WHISPER_URL',
     defaultValue: 'http://localhost:9876',
     description: 'Whisper STT 服务地址（由 Service Manifest 管理）',
-    category: 'tts',
+    category: 'stt',
     sensitive: false,
     hubVisible: false,
   },

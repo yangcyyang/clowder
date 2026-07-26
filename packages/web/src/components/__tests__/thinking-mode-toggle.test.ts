@@ -19,9 +19,6 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ cats: [], isLoading: false, getCatById: () => undefined, getCatsByBreed: () => new Map() }),
   formatCatName: () => '布偶猫',
 }));
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
-}));
 
 // ── Stub heavy sub-components ──
 vi.mock('@/components/CatAvatar', () => ({

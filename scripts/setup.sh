@@ -94,7 +94,7 @@ if command -v python3 &>/dev/null; then
     echo -e "  ${GREEN}✓${NC} Python3 $(python3 --version 2>&1 | awk '{print $2}')"
     HAS_PYTHON=true
 else
-    echo -e "  ${YELLOW}○${NC} Python3 not found (optional — needed for voice features)"
+    echo -e "  ${YELLOW}○${NC} Python3 not found (optional — needed for semantic retrieval)"
 fi
 
 HAS_REDIS=false
@@ -140,99 +140,10 @@ echo "The following features are optional. Choose what you want:"
 echo "以下功能均为可选，选择你需要的："
 echo ""
 
-# --- Voice Input (ASR) ---
-ENABLE_ASR=false
-echo -e "${BOLD}  [A] Voice Input / 语音输入 (ASR)${NC}"
-echo "      Talk to cats with your voice instead of typing."
-echo "      用语音和猫猫对话，免打字。"
-echo ""
-if [ "$HAS_PYTHON" = true ]; then
-    echo "      Engine: Qwen3-ASR (primary) / Whisper (fallback)"
-    echo "      Requirements / 要求:"
-    echo "        - ~2GB disk for model download / 需要约 2GB 磁盘下载模型"
-    echo "        - 4GB+ RAM recommended / 建议 4GB+ 内存"
-    echo "        - GPU optional but faster / GPU 可选但更快"
-    echo ""
-    if [ "$INSTALL_MISSING" = true ]; then
-        ENABLE_ASR=true
-        echo -e "      ${GREEN}✓${NC} Voice input enabled (--install-missing)"
-    else
-        read -p "      Enable voice input? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            ENABLE_ASR=true
-            echo -e "      ${GREEN}✓${NC} Voice input enabled"
-        fi
-    fi
-else
-    echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
-fi
-echo ""
-
-# --- Voice Output (TTS) ---
-ENABLE_TTS=false
-echo -e "${BOLD}  [B] Voice Output / 语音输出 (TTS)${NC}"
-echo "      Hear cats speak! Multiple engines available."
-echo "      听猫猫说话！支持多种引擎。"
-echo ""
-if [ "$HAS_PYTHON" = true ]; then
-    echo "      Engines: Kokoro (best quality) / edge-tts (no download) / Qwen3-TTS"
-    echo "      Requirements / 要求:"
-    echo "        - Kokoro: ~500MB model download / Kokoro 需约 500MB 下载"
-    echo "        - edge-tts: no download, uses Microsoft online API / 无需下载"
-    echo "        - 2GB+ RAM for Kokoro, minimal for edge-tts"
-    echo ""
-    if [ "$INSTALL_MISSING" = true ]; then
-        ENABLE_TTS=true
-        echo -e "      ${GREEN}✓${NC} Voice output enabled (--install-missing)"
-    else
-        read -p "      Enable voice output? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            ENABLE_TTS=true
-            echo -e "      ${GREEN}✓${NC} Voice output enabled"
-        fi
-    fi
-else
-    echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
-fi
-echo ""
-
-# --- LLM Post-processing ---
-ENABLE_LLM_PP=false
-echo -e "${BOLD}  [C] Speech Correction / 语音纠正 (LLM Post-processing)${NC}"
-echo "      Improves ASR accuracy using a small language model."
-echo "      用小语言模型提升语音识别准确率。"
-echo ""
-if [ "$HAS_PYTHON" = true ] && [ "$ENABLE_ASR" = true ]; then
-    echo "      Engine: Qwen3-4B"
-    echo "      Requirements / 要求:"
-    echo "        - ~4GB disk for model / 约 4GB 磁盘"
-    echo "        - 8GB+ RAM / 8GB+ 内存"
-    echo "        - GPU strongly recommended / 强烈建议 GPU"
-    echo ""
-    if [ "$INSTALL_MISSING" = true ]; then
-        ENABLE_LLM_PP=true
-        echo -e "      ${GREEN}✓${NC} Speech correction enabled (--install-missing)"
-    else
-        read -p "      Enable speech correction? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            ENABLE_LLM_PP=true
-            echo -e "      ${GREEN}✓${NC} Speech correction enabled"
-        fi
-    fi
-elif [ "$ENABLE_ASR" = false ]; then
-    echo -e "      ${YELLOW}○ Skipped (requires Voice Input above)${NC}"
-else
-    echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
-fi
-echo ""
-
-# --- API Gateway Proxy ---
+# --- Semantic Retrieval (Embedding) ---
 ENABLE_PROXY=false
 ENABLE_EMBED=false
-echo -e "${BOLD}  [D] Semantic Retrieval / 语义检索 (Embedding)${NC}"
+echo -e "${BOLD}  [A] Semantic Retrieval / 语义检索 (Embedding)${NC}"
 echo "      Enable local vector rerank for the memory system."
 echo "      为记忆系统启用本地向量 rerank。"
 echo ""
@@ -261,7 +172,7 @@ echo ""
 
 # --- API Gateway Proxy ---
 ENABLE_PROXY=false
-echo -e "${BOLD}  [E] API Gateway Proxy / API 网关代理${NC}"
+echo -e "${BOLD}  [B] API Gateway Proxy / API 网关代理${NC}"
 echo "      Route Claude API calls through a custom gateway."
 echo "      通过自定义网关路由 Claude API 调用。"
 echo ""
@@ -311,53 +222,6 @@ ANTHROPIC_PROXY_ENABLED=$([ "$ENABLE_PROXY" = true ] && echo "1" || echo "0")
 # ANTHROPIC_PROXY_PORT=9877
 ENVEOF
 
-if [ "$ENABLE_ASR" = true ]; then
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Voice Input (ASR) 语音输入 ───────────────────────────────
-ASR_ENABLED=1
-WHISPER_URL=http://localhost:9876
-NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
-ENVEOF
-else
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Voice Input (ASR) 语音输入 ───────────────────────────────
-ASR_ENABLED=0
-ENVEOF
-fi
-
-if [ "$ENABLE_TTS" = true ]; then
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Voice Output (TTS) 语音输出 ──────────────────────────────
-TTS_ENABLED=1
-TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
-ENVEOF
-else
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Voice Output (TTS) 语音输出 ──────────────────────────────
-TTS_ENABLED=0
-ENVEOF
-fi
-
-if [ "$ENABLE_LLM_PP" = true ]; then
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Speech Correction 语音纠正 ───────────────────────────────
-LLM_POSTPROCESS_ENABLED=1
-NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
-ENVEOF
-else
-    cat >> "$ENV_FILE" <<ENVEOF
-
-# ── Speech Correction 语音纠正 ───────────────────────────────
-LLM_POSTPROCESS_ENABLED=0
-ENVEOF
-fi
-
 if [ "$ENABLE_EMBED" = true ]; then
     cat >> "$ENV_FILE" <<ENVEOF
 
@@ -385,39 +249,6 @@ echo -e "  ${GREEN}✓${NC} $ENV_FILE generated"
 install_sidecar_venvs() {
     local venv_base="${HOME}/.cat-cafe"
 
-    # ASR venv
-    local asr_venv="$venv_base/asr-venv"
-    if [ ! -d "$asr_venv" ]; then
-        echo "  Creating ASR venv: $asr_venv ..."
-        python3 -m venv "$asr_venv"
-    else
-        echo "  Updating ASR venv: $asr_venv ..."
-    fi
-    "$asr_venv/bin/pip" install --quiet -U pip
-    "$asr_venv/bin/pip" install --quiet mlx-audio fastapi uvicorn python-multipart
-
-    # TTS venv
-    local tts_venv="$venv_base/tts-venv"
-    if [ ! -d "$tts_venv" ]; then
-        echo "  Creating TTS venv: $tts_venv ..."
-        python3 -m venv "$tts_venv"
-    else
-        echo "  Updating TTS venv: $tts_venv ..."
-    fi
-    "$tts_venv/bin/pip" install --quiet -U pip
-    "$tts_venv/bin/pip" install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
-
-    # LLM post-processing venv
-    local llm_venv="$venv_base/llm-venv"
-    if [ ! -d "$llm_venv" ]; then
-        echo "  Creating LLM venv: $llm_venv ..."
-        python3 -m venv "$llm_venv"
-    else
-        echo "  Updating LLM venv: $llm_venv ..."
-    fi
-    "$llm_venv/bin/pip" install --quiet -U pip
-    "$llm_venv/bin/pip" install --quiet mlx-vlm "httpx[socks]" torchvision fastapi uvicorn pydantic
-
     # Embedding venv
     local embed_venv="$venv_base/embed-venv"
     if [ ! -d "$embed_venv" ]; then
@@ -436,7 +267,7 @@ install_sidecar_venvs() {
 
 if [ "$INSTALL_MISSING" = true ] && [ "$HAS_PYTHON" = true ]; then
     echo ""
-    echo -e "${CYAN}[4b/6] Installing sidecar venvs / 安装语音服务依赖...${NC}"
+    echo -e "${CYAN}[4b/6] Installing sidecar venvs / 安装 Sidecar 服务依赖...${NC}"
     echo ""
     install_sidecar_venvs
     echo -e "  ${GREEN}✓${NC} Sidecar venvs installed"
@@ -476,9 +307,6 @@ echo -e "${GREEN}🎉 Cat Cafe is ready!${NC}"
 echo ""
 echo "  Enabled features / 已启用功能:"
 echo "    ✓ Core (API + Frontend + Redis)"
-[ "$ENABLE_ASR" = true ] && echo "    ✓ Voice Input (ASR)"
-[ "$ENABLE_TTS" = true ] && echo "    ✓ Voice Output (TTS)"
-[ "$ENABLE_LLM_PP" = true ] && echo "    ✓ Speech Correction (LLM)"
 [ "$ENABLE_EMBED" = true ] && echo "    ✓ Semantic Retrieval (Embedding)"
 [ "$ENABLE_PROXY" = true ] && echo "    ✓ API Gateway Proxy"
 echo ""
@@ -498,7 +326,7 @@ echo "    3. Open http://localhost:3003"
 echo "       打开 http://localhost:3003"
 echo ""
 
-if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = true ] || [ "$ENABLE_EMBED" = true ]; then
+if [ "$ENABLE_EMBED" = true ]; then
     if [ "$INSTALL_MISSING" = true ]; then
         echo -e "  ${GREEN}✓${NC} Sidecar venvs pre-installed. Models download on first use."
         echo "  Sidecar venv 已预装。模型将在首次使用时下载。"

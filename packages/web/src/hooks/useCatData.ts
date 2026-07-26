@@ -9,7 +9,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { refreshMentionData } from '@/lib/mention-highlight';
 import { sortCatsByOrder } from '@/lib/sort-cats-by-order';
 import { apiFetch } from '@/utils/api-client';
-import { refreshSpeechAliases } from '@/utils/transcription-corrector';
 
 export interface CatData {
   id: string;
@@ -174,7 +173,6 @@ async function refreshCatsNow(): Promise<FetchResult> {
   }
   const effective = result.fromApi ? result.cats : (_cached ?? []);
   refreshMentionData(effective);
-  refreshSpeechAliases(effective);
   notifyListeners(effective);
   return { cats: effective, fromApi: result.fromApi };
 }
@@ -222,7 +220,6 @@ export function useCatData() {
         }
       }
       refreshMentionData(result);
-      refreshSpeechAliases(result);
       notifyListeners(result);
       if (!cancelled) {
         setCats(result);

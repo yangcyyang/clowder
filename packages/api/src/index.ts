@@ -109,11 +109,6 @@ import { createThreadStore } from './domains/cats/services/stores/factories/Thre
 import { createWorkflowSopStore } from './domains/cats/services/stores/factories/WorkflowSopStoreFactory.js';
 import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
-import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
-import { initStreamingTtsRegistry } from './domains/cats/services/tts/StreamingTtsChunker.js';
-import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
-import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-cleaner.js';
-import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { AgentService } from './domains/cats/services/types.js';
 import { ActivityTracker } from './domains/health/ActivityTracker.js';
 import { shouldTrackApiActivity } from './domains/health/activity-route-filter.js';
@@ -204,7 +199,6 @@ import {
   threadCatsRoutes,
   threadsRoutes,
   toolUsageRoutes,
-  ttsRoutes,
   uploadsRoutes,
   usageRoutes,
   userProfileRoutes,
@@ -1864,15 +1858,6 @@ async function main(): Promise<void> {
   // F088: Serve downloaded connector media files
   const connectorMediaDir = process.env.CONNECTOR_MEDIA_DIR ?? './data/connector-media';
   await app.register(connectorMediaRoutes, { mediaDir: connectorMediaDir });
-
-  // F34: TTS Provider (mlx-audio → Python TTS server)
-  const ttsRegistry = new TtsRegistry();
-  ttsRegistry.register(new MlxAudioTtsProvider());
-  const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
-  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, messageStore });
-  initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
-  initStreamingTtsRegistry(ttsRegistry);
-  startTtsCacheCleaner(ttsCacheDir);
 
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
   const vapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? '';

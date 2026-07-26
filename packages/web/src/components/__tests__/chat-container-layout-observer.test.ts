@@ -180,10 +180,6 @@ vi.mock('@/hooks/useIndexState', () => ({
     handleSocketEvent: vi.fn(),
   }),
 }));
-vi.mock('@/hooks/useVadInterrupt', () => ({ useVadInterrupt: vi.fn() }));
-vi.mock('@/hooks/useVoiceAutoPlay', () => ({ useVoiceAutoPlay: vi.fn() }));
-vi.mock('@/hooks/useVoiceStream', () => ({ useVoiceStream: vi.fn() }));
-
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
 vi.mock('../ChatInput', () => ({
   ChatInput: () => React.createElement('div', { 'data-testid': 'chat-input' }),

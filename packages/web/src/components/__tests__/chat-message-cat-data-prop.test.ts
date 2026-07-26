@@ -25,11 +25,6 @@ vi.mock('@/hooks/useCatData', () => ({
     cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
 }));
 
-// ── Stub TTS hook (ChatMessage uses it) ──
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
-}));
-
 // ── Stub heavy sub-components to keep the test fast ──
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: () => React.createElement('span', null, 'avatar'),

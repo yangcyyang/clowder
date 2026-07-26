@@ -15,9 +15,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
-}));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ cats: [], isLoading: false, getCatById: () => undefined, getCatsByBreed: () => new Map() }),
 }));

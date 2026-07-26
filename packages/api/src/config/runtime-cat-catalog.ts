@@ -26,7 +26,6 @@ import {
   normalizeVariantLabelForModel,
   toAllCatConfigs,
 } from './cat-config-loader.js';
-import { clearVoiceCache } from './cat-voices.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
 export interface RuntimeCatInput {
@@ -162,7 +161,6 @@ function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
 function invalidateRuntimeCatalogCaches(): void {
   _resetCachedConfig();
   clearBudgetCache();
-  clearVoiceCache();
 }
 
 function validatePersistedCatalog(projectRoot: string): CatCafeConfig {

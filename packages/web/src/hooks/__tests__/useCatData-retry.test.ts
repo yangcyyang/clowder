@@ -16,7 +16,6 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 vi.mock('@/lib/mention-highlight', () => ({ refreshMentionData: vi.fn() }));
-vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn() }));
 
 import type { CatData } from '@/hooks/useCatData';
 import { _resetCatDataCache, useCatData } from '@/hooks/useCatData';

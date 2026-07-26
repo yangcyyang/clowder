@@ -29,7 +29,7 @@ function createSandbox(envFile = '') {
 function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
   const command = [
     `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
-    'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
+    'printf "PROFILE=%s\\nPROXY=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ANTHROPIC_PROXY_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
   ].join('; ');
 
   return spawnSync('bash', ['-lc', command], {
@@ -71,9 +71,6 @@ describe('start-dev strict profile isolation', () => {
         env: {
           CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
           ANTHROPIC_PROXY_ENABLED: '1',
-          ASR_ENABLED: '1',
-          TTS_ENABLED: '1',
-          LLM_POSTPROCESS_ENABLED: '1',
           EMBED_ENABLED: '1',
           MESSAGE_TTL_SECONDS: '0',
           THREAD_TTL_SECONDS: '0',
@@ -86,10 +83,7 @@ describe('start-dev strict profile isolation', () => {
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=opensource/);
-      assert.match(result.stdout, /ASR=0/);
       assert.match(result.stdout, /PROXY=0/);
-      assert.match(result.stdout, /TTS=0/);
-      assert.match(result.stdout, /LLM=0/);
       assert.match(result.stdout, /EMBED=0/);
       assert.match(result.stdout, /TTL=0/);
       assert.match(result.stdout, /REDIS_PROFILE=opensource/);
@@ -111,7 +105,6 @@ describe('start-dev strict profile isolation', () => {
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=production/);
-      assert.match(result.stdout, /ASR=0/);
       assert.match(result.stdout, /PROXY=0/);
       assert.match(result.stdout, /TTL=0/);
       assert.match(result.stdout, /REDIS_PROFILE=opensource/);
@@ -121,14 +114,13 @@ describe('start-dev strict profile isolation', () => {
   });
 
   it('still allows .env overrides after strict sanitize', () => {
-    const sandboxDir = createSandbox('ASR_ENABLED=1\nMESSAGE_TTL_SECONDS=123\nREDIS_PROFILE=custom\n');
+    const sandboxDir = createSandbox('MESSAGE_TTL_SECONDS=123\nREDIS_PROFILE=custom\n');
     try {
       const result = runSourceOnly({
         sandboxDir,
         env: {
           CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
           ANTHROPIC_PROXY_ENABLED: '1',
-          ASR_ENABLED: '1',
           EMBED_ENABLED: '1',
           MESSAGE_TTL_SECONDS: '0',
           REDIS_PROFILE: 'dev',
@@ -138,7 +130,6 @@ describe('start-dev strict profile isolation', () => {
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /PROFILE=opensource/);
-      assert.match(result.stdout, /ASR=1/);
       assert.match(result.stdout, /EMBED=0/);
       assert.match(result.stdout, /TTL=123/);
       assert.match(result.stdout, /REDIS_PROFILE=custom/);
@@ -372,13 +363,7 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       'start-windows.ps1 must check CAT_CAFE_STRICT_PROFILE_DEFAULTS for strict mode',
     );
 
-    for (const v of [
-      'ANTHROPIC_PROXY_ENABLED',
-      'ASR_ENABLED',
-      'TTS_ENABLED',
-      'LLM_POSTPROCESS_ENABLED',
-      'REDIS_PROFILE',
-    ]) {
+    for (const v of ['ANTHROPIC_PROXY_ENABLED', 'EMBED_ENABLED', 'REDIS_PROFILE']) {
       assert.ok(ps1.includes(v), `start-windows.ps1 must reference profile var ${v}`);
     }
   });

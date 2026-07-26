@@ -10,20 +10,11 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text', 
   const holdStore = new FreshnessHoldStore({ maxReviews: 2 });
   const freshnessGate = new FreshnessEgressGate({ messageStore, holdStore });
   const richBlock = {
-    ...(outputMode === 'audio'
-      ? {
-          id: 'freshness-audio-1',
-          kind: 'audio',
-          v: 1,
-          text: '这段旧稿语音不得在 verdict 前合成',
-        }
-      : {
-          id: 'freshness-card-1',
-          kind: 'card',
-          v: 1,
-          title: '旧上下文卡片',
-          bodyMarkdown: '这个卡片必须经过 Freshness Gate',
-        }),
+    id: 'freshness-card-1',
+    kind: 'card',
+    v: 1,
+    title: '旧上下文卡片',
+    bodyMarkdown: '这个卡片必须经过 Freshness Gate',
   };
   const privateToolSentinel = 'SERIAL-PRIVATE-TOOL-INPUT';
   const socketBroadcasts = [];
@@ -55,16 +46,13 @@ async function createHarness({ injectNewMessage, threadId, outputMode = 'text', 
       }
       if (outputMode === 'error-tool') {
         yield { type: 'error', catId: 'opus', error: 'provider failed after tool use', timestamp: Date.now() };
-      } else if (outputMode === 'rich' || outputMode === 'audio') {
+      } else if (outputMode === 'rich') {
         yield {
           type: 'system_info',
           catId: 'opus',
           content: JSON.stringify({ type: 'rich_block', block: richBlock }),
           timestamp: Date.now(),
         };
-        if (outputMode === 'audio') {
-          yield { type: 'text', catId: 'opus', content: '携带语音块的旧回答', timestamp: Date.now() };
-        }
       } else {
         yield {
           type: 'text',
@@ -406,51 +394,5 @@ describe('routeSerial Freshness Hold', () => {
       new RegExp(richBlock.bodyMarkdown),
       'discarded rich payload must not enter the socket-consumable route stream',
     );
-  });
-
-  test('does not synthesize stale audio blocks before the freshness verdict', async () => {
-    const { mkdtemp, rm } = await import('node:fs/promises');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const { initVoiceBlockSynthesizer } = await import('../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js');
-    const cacheDir = await mkdtemp(join(tmpdir(), 'freshness-held-tts-'));
-    let synthesizeCalls = 0;
-    initVoiceBlockSynthesizer(
-      {
-        getDefault() {
-          return {
-            id: 'freshness-test',
-            model: 'test',
-            async synthesize() {
-              synthesizeCalls += 1;
-              return {
-                audio: Buffer.from('must-not-be-created'),
-                format: 'wav',
-                metadata: { provider: 'test', model: 'test', voice: 'test' },
-              };
-            },
-          };
-        },
-      },
-      cacheDir,
-    );
-    try {
-      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-      const threadId = 'thread-freshness-audio-stale';
-      const { deps } = await createHarness({ injectNewMessage: true, threadId, outputMode: 'audio' });
-      const persistenceContext = { failed: false, errors: [], egressByCat: {} };
-
-      for await (const _message of routeSerial(deps, ['opus'], '生成语音', 'user-1', threadId, {
-        persistenceContext,
-        parentInvocationId: 'parent-audio-stale',
-      })) {
-        // drain
-      }
-
-      assert.equal(persistenceContext.egressByCat.opus.disposition, 'held');
-      assert.equal(synthesizeCalls, 0, 'stale audio must not leave the gate through TTS');
-    } finally {
-      await rm(cacheDir, { recursive: true, force: true });
-    }
   });
 });

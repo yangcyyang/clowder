@@ -52,50 +52,16 @@ describe('resolvePluginStatuses', () => {
     }
   });
 
-  it('service plugins show active when their features are running', () => {
-    const services = [
-      {
-        manifest: { id: 'whisper-stt', enablesFeatures: ['voice-input', 'connector-stt'] },
-        status: 'running' as const,
-      },
-      {
-        manifest: { id: 'mlx-tts', enablesFeatures: ['voice-output', 'voice-companion'] },
-        status: 'running' as const,
-      },
-    ];
-    const result = resolvePluginStatuses(services, true);
-    const voice = result.find((p) => p.id === 'voice-companion');
-
-    expect(voice?.status).toBe('active');
-    expect(voice?.statusLabel).toBe('已连接');
-  });
-
-  it('service plugins show configured when features known but not running', () => {
-    const services = [
-      {
-        manifest: { id: 'whisper-stt', enablesFeatures: ['voice-input', 'connector-stt'] },
-        status: 'stopped' as const,
-      },
-    ];
-    const result = resolvePluginStatuses(services, true);
-    const voice = result.find((p) => p.id === 'voice-companion');
-
-    expect(voice?.status).toBe('configured');
-    expect(voice?.statusLabel).toBe('已配置');
-  });
-
-  it('service plugins show available when no matching features exist', () => {
-    const result = resolvePluginStatuses([], true);
-    const voice = result.find((p) => p.id === 'voice-companion');
-
-    expect(voice?.status).toBe('available');
-    expect(voice?.statusLabel).toBe('未连接');
-  });
+  // W5d: the voice chain (mlx-tts / voice-output / voice-companion) was
+  // removed and PLUGIN_CATALOG has no remaining 'service'-sourced entries,
+  // so there is no live example left to exercise that branch of
+  // resolvePluginStatuses against. Coverage below is limited to the
+  // 'platform' (github) entry that still exists.
 
   it('platform status is independent of service registry contents', () => {
     const services = [
       {
-        manifest: { id: 'whisper-stt', enablesFeatures: ['voice-input'] },
+        manifest: { id: 'whisper-stt', enablesFeatures: ['connector-stt'] },
         status: 'running' as const,
       },
     ];

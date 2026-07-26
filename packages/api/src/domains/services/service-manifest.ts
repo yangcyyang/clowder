@@ -40,9 +40,7 @@ export interface ServiceConfig {
 
 export const MODEL_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_MODEL',
-  'mlx-tts': 'TTS_MODEL',
   'embedding-model': 'EMBED_MODEL',
-  'llm-postprocess': 'LLM_POSTPROCESS_MODEL',
 };
 
 export interface ServiceState {

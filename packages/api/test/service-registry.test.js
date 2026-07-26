@@ -5,12 +5,16 @@ import { getKnownServices, getServiceById, resolveHealthUrl } from '../dist/doma
 describe('service-registry', () => {
   it('returns all known services', () => {
     const services = getKnownServices();
-    assert.ok(services.length >= 4);
+    // W5: mlx-tts and llm-postprocess were retired along with the voice
+    // full chain (TTS + STT-only-for-chat + speech correction). whisper-stt
+    // stays registered — it's shared with IM connector inbound voice-message
+    // transcription. embedding-model is unrelated to voice and stays too.
+    assert.ok(services.length >= 2);
     const ids = services.map((s) => s.id);
     assert.ok(ids.includes('whisper-stt'));
-    assert.ok(ids.includes('mlx-tts'));
     assert.ok(ids.includes('embedding-model'));
-    assert.ok(ids.includes('llm-postprocess'));
+    assert.ok(!ids.includes('mlx-tts'));
+    assert.ok(!ids.includes('llm-postprocess'));
   });
 
   it('finds a service by id', () => {
@@ -18,7 +22,10 @@ describe('service-registry', () => {
     assert.ok(svc);
     assert.equal(svc.port, 9876);
     assert.equal(svc.type, 'python');
-    assert.ok(svc.enablesFeatures.includes('voice-input'));
+    // W5: whisper-stt now only backs connector-side inbound voice-message
+    // transcription — the chat voice-input feature it used to also power is gone.
+    assert.ok(svc.enablesFeatures.includes('connector-stt'));
+    assert.ok(!svc.enablesFeatures.includes('voice-input'));
   });
 
   it('returns undefined for unknown id', () => {

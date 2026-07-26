@@ -19,7 +19,6 @@
   --console-rail-active: #1164a3;
   --console-rail-fg: #d1d5db;
   --console-input-stroke: #cc6743;
-  --console-voice-companion: #8e72b8;
   --console-stop: #f26767;
   --console-runtime-bg: #eef8f0;
   --console-runtime-field-bg: #e4f3e6;
@@ -144,7 +143,6 @@
   --console-skill-pill-bg: color-mix(in srgb, var(--cafe-accent) 20%, var(--console-card-bg) 80%);
   --console-inspector-bg: color-mix(in srgb, var(--console-panel-bg) 92%, black 8%);
   --console-inspector-gradient: linear-gradient(180deg, #1e1915 0%, #1a1512 50%, #14110f 100%);
-  --console-voice-companion: #b89ee0;
   --console-input-stroke: #36c5f0;
   --console-button-emphasis: #a08977;
   --console-button-emphasis-hover: #b8a495;

@@ -39,7 +39,6 @@ import {
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
-import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -961,16 +960,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // For route-serial agents, the buffer is already consumed before post_message — this is a no-op.
     const bufferedBlocks = getRichBlockBuffer().consume(effectiveThreadId, actor.catId as string, invocationId);
 
-    // F34-b: Resolve voice blocks (audio with text, no url) before storing
-    const synthesizer = getVoiceBlockSynthesizer();
-    let richBlocks = [...extractedBlocks, ...bufferedBlocks];
-    if (!freshnessProtected && synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-      try {
-        richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
-      } catch (err) {
-        app.log.error({ err }, '[callbacks/post-message] Voice block synthesis failed');
-      }
-    }
+    const richBlocks = [...extractedBlocks, ...bufferedBlocks];
 
     // F52/F194: Detect both model-selected cross-thread posts and server-bound
     // explicit-address routes. In the latter case the callback writes natively to
@@ -1182,19 +1172,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         };
       }
       storedMsg = freshnessResult.message;
-      // Protected voice blocks are synthesized only after the atomic publication verdict.
-      if (synthesizer && richBlocks.some((block) => block.kind === 'audio' && 'text' in block)) {
-        try {
-          richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, actor.catId as string);
-          const updated = await messageStore.updateExtra(storedMsg.id, {
-            ...(storedMsg.extra ?? {}),
-            rich: { v: 1, blocks: richBlocks },
-          });
-          if (updated) storedMsg = updated;
-        } catch (err) {
-          app.log.error({ err }, '[callbacks/post-message] Published voice block synthesis failed');
-        }
-      }
     } else {
       storedMsg = await messageStore.append(outboundDraft);
     }
@@ -1471,21 +1448,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       };
     }
 
-    let storedMsg = result.message;
-    const reviewSynthesizer = getVoiceBlockSynthesizer();
-    let reviewedRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? [])] as RichBlock[];
-    if (reviewSynthesizer && reviewedRichBlocks.some((block) => block.kind === 'audio' && 'text' in block)) {
-      try {
-        reviewedRichBlocks = await reviewSynthesizer.resolveVoiceBlocks(reviewedRichBlocks, actor.catId as string);
-        const updated = await messageStore.updateExtra(storedMsg.id, {
-          ...(storedMsg.extra ?? {}),
-          rich: { v: 1, blocks: reviewedRichBlocks },
-        });
-        if (updated) storedMsg = updated;
-      } catch (err) {
-        app.log.error({ err, holdId }, '[freshness-review] Published voice block synthesis failed');
-      }
-    }
+    const storedMsg = result.message;
+    const reviewedRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? [])] as RichBlock[];
     const senderCatId = createCatId(actor.catId);
     const hasA2AMentions = Boolean(
       storedMsg.mentions.length > 0 && router && invocationRecordStore && storedMsg.threadId,
@@ -2575,15 +2539,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const freshnessProtected = Boolean(opts.freshnessGate && record.freshnessBaseline);
-
-    // Legacy callbacks keep eager synthesis. Protected blocks remain private and
-    // are synthesized only after the final message publication verdict.
-    let resolvedBlock: RichBlock = block as unknown as RichBlock;
-    const synthesizer = getVoiceBlockSynthesizer();
-    if (!freshnessProtected && synthesizer && block.kind === 'audio' && 'text' in block) {
-      const resolved = await synthesizer.resolveVoiceBlocks([block as unknown as RichBlock], record.catId as string);
-      if (resolved.length > 0) resolvedBlock = resolved[0]!;
-    }
+    const resolvedBlock: RichBlock = block as unknown as RichBlock;
 
     // Buffer the block — consumed at append time in route-serial/route-parallel
     const isNew = getRichBlockBuffer().add(record.threadId, record.catId as string, resolvedBlock, invocationId);

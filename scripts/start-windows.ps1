@@ -55,8 +55,7 @@ if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 # When strict mode is on, clear ambient profile-controlled vars before loading .env,
 # so only .env overrides and profile defaults take effect -- not leaked shell exports.
 $profileControlledVars = @(
-    'ANTHROPIC_PROXY_ENABLED', 'ASR_ENABLED', 'TTS_ENABLED',
-    'LLM_POSTPROCESS_ENABLED', 'EMBED_ENABLED',
+    'ANTHROPIC_PROXY_ENABLED', 'EMBED_ENABLED',
     'MESSAGE_TTL_SECONDS', 'THREAD_TTL_SECONDS',
     'TASK_TTL_SECONDS', 'SUMMARY_TTL_SECONDS',
     'REDIS_PROFILE'
@@ -92,8 +91,7 @@ $profileDefaults = @{}
 switch ($Profile_) {
     'opensource' {
         $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
+            ANTHROPIC_PROXY_ENABLED = '0'
             MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
             TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'opensource'
@@ -101,8 +99,7 @@ switch ($Profile_) {
     }
     'production' {
         $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '0'; ASR_ENABLED = '0'
-            TTS_ENABLED = '0'; LLM_POSTPROCESS_ENABLED = '0'
+            ANTHROPIC_PROXY_ENABLED = '0'
             MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
             TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'opensource'
@@ -110,8 +107,7 @@ switch ($Profile_) {
     }
     'dev' {
         $profileDefaults = @{
-            ANTHROPIC_PROXY_ENABLED = '1'; ASR_ENABLED = '1'
-            TTS_ENABLED = '1'; LLM_POSTPROCESS_ENABLED = '1'
+            ANTHROPIC_PROXY_ENABLED = '1'
             MESSAGE_TTL_SECONDS = '0'; THREAD_TTL_SECONDS = '0'
             TASK_TTL_SECONDS = '0'; SUMMARY_TTL_SECONDS = '0'
             REDIS_PROFILE = 'dev'

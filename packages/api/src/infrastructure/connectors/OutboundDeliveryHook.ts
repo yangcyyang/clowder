@@ -85,8 +85,6 @@ export interface OutboundDeliveryHookOptions {
   readonly messageLookup?:
     | ((messageId: string) => Promise<{ source?: { sender?: { id: string; name?: string } } } | null>)
     | undefined;
-  /** Resolve audio blocks with text but no url (voiceMode frontend-only blocks) by synthesizing TTS. */
-  readonly resolveVoiceBlocks?: ((blocks: RichBlock[], catId: string) => Promise<RichBlock[]>) | undefined;
 }
 
 export class OutboundDeliveryHook {
@@ -159,21 +157,11 @@ export class OutboundDeliveryHook {
     const textPrefix = catDisplayName ? `【${catDisplayName}🐱】\n` : '';
     const finalContent = `${textPrefix}${content}`;
 
-    // Resolve audio blocks that have text but no url (voiceMode frontend-only blocks).
-    // Without resolution, these would be silently dropped by Phase 6's url check.
+    // W5d: the voice chain (TTS/StreamingTts/VoiceBlockSynthesizer) was removed —
+    // audio blocks with text but no url (formerly voiceMode frontend-only blocks)
+    // can no longer be synthesized. Degrade them straight to a plaintext-renderable
+    // card so they are NOT silently dropped by Phase 6's url filter below.
     let resolvedBlocks = richBlocks;
-    const hasUnresolvedAudio = resolvedBlocks?.some(
-      (b) => b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url),
-    );
-    if (hasUnresolvedAudio && this.opts.resolveVoiceBlocks && catId) {
-      try {
-        resolvedBlocks = await this.opts.resolveVoiceBlocks(resolvedBlocks!, catId);
-      } catch (err) {
-        this.opts.log.warn({ err }, '[OutboundDeliveryHook] resolveVoiceBlocks failed — degrading to text');
-      }
-    }
-    // Fallback: convert any remaining audio-without-url to plaintext-renderable blocks
-    // so they are NOT silently dropped by Phase 6's url filter.
     if (resolvedBlocks?.some((b) => b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url))) {
       resolvedBlocks = resolvedBlocks.map((b) => {
         if (b.kind === 'audio' && 'text' in b && (!('url' in b) || !b.url)) {
@@ -182,7 +170,7 @@ export class OutboundDeliveryHook {
         return b;
       });
     }
-    // After resolve + fallback, normalize to a concrete array so TS narrows downstream.
+    // Normalize to a concrete array so TS narrows downstream.
     const finalBlocks = resolvedBlocks ?? [];
     const hasRichBlocks = finalBlocks.length > 0;
     const outMeta = replyToSender ? { replyToSender } : undefined;

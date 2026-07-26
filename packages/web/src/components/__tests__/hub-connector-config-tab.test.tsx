@@ -62,33 +62,44 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
   });
 
   it('renders FeishuQrPanel inside expanded Feishu card and refreshes status after confirm', async () => {
-    mockApiFetch
-      .mockResolvedValueOnce(
-        jsonResponse({
-          platforms: [
-            {
-              id: 'feishu',
-              name: '飞书',
-              nameEn: 'Feishu / Lark',
-              configured: false,
-              docsUrl: 'https://open.feishu.cn',
-              steps: [{ text: 'step-1' }, { text: 'step-2' }],
-              fields: [
-                { envName: 'FEISHU_APP_ID', label: 'App ID', sensitive: false, currentValue: null },
-                { envName: 'FEISHU_APP_SECRET', label: 'App Secret', sensitive: true, currentValue: null },
-                { envName: 'FEISHU_CONNECTION_MODE', label: '连接模式', sensitive: false, currentValue: 'webhook' },
-                {
-                  envName: 'FEISHU_VERIFICATION_TOKEN',
-                  label: 'Verification Token',
-                  sensitive: true,
-                  currentValue: null,
-                },
-              ],
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
+    let statusCallCount = 0;
+    // biome-ignore lint/suspicious/noExplicitAny: matches apiFetch's loose test-time signature
+    mockApiFetch.mockImplementation(((url: string) => {
+      // The connector tab also mounts a ServiceStatusPanel (connector-stt / whisper),
+      // which fetches independently — keyed by URL so ordering vs. the platform-status
+      // fetches below doesn't matter.
+      if (url === '/api/services') {
+        return Promise.resolve(jsonResponse({ services: [] }));
+      }
+      statusCallCount += 1;
+      if (statusCallCount === 1) {
+        return Promise.resolve(
+          jsonResponse({
+            platforms: [
+              {
+                id: 'feishu',
+                name: '飞书',
+                nameEn: 'Feishu / Lark',
+                configured: false,
+                docsUrl: 'https://open.feishu.cn',
+                steps: [{ text: 'step-1' }, { text: 'step-2' }],
+                fields: [
+                  { envName: 'FEISHU_APP_ID', label: 'App ID', sensitive: false, currentValue: null },
+                  { envName: 'FEISHU_APP_SECRET', label: 'App Secret', sensitive: true, currentValue: null },
+                  { envName: 'FEISHU_CONNECTION_MODE', label: '连接模式', sensitive: false, currentValue: 'webhook' },
+                  {
+                    envName: 'FEISHU_VERIFICATION_TOKEN',
+                    label: 'Verification Token',
+                    sensitive: true,
+                    currentValue: null,
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(
         jsonResponse({
           platforms: [
             {
@@ -103,6 +114,8 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
           ],
         }),
       );
+      // biome-ignore lint/suspicious/noExplicitAny: matches apiFetch's loose test-time signature
+    }) as any);
 
     await act(async () => {
       root.render(React.createElement(HubConnectorConfigTab));
@@ -125,6 +138,6 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     });
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(statusCallCount).toBe(2);
   });
 });

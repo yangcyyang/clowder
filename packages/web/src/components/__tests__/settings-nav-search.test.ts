@@ -73,12 +73,12 @@ describe('SettingsNav search filtering', () => {
   it('filters sections by label match', () => {
     act(() => {
       root.render(
-        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '语音' }),
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '账户' }),
       );
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toContain('语音管理');
+    expect(buttons[0].textContent).toContain('账户与密钥');
   });
 
   it('filters by keyword match (e.g. telegram matches IM 对接)', () => {
@@ -125,11 +125,11 @@ describe('SettingsNav search filtering', () => {
 
   it('marks the active item with font-medium class for visual distinction', () => {
     act(() => {
-      root.render(React.createElement(SettingsNav, { activeSection: 'voice', onSelect: vi.fn() }));
+      root.render(React.createElement(SettingsNav, { activeSection: 'system', onSelect: vi.fn() }));
     });
 
     const navButtons = Array.from(container.querySelectorAll('[data-active]'));
-    const active = navButtons.find((b) => b.textContent?.includes('语音管理'));
+    const active = navButtons.find((b) => b.textContent?.includes('系统配置'));
     expect(active).toBeTruthy();
     expect(active?.className).toContain('font-medium');
   });

@@ -604,7 +604,7 @@ export function toFlatConfigs(config: CatCafeConfig): Record<string, CatConfig> 
 
 /**
  * F032 P2 cleanup: Get all cat IDs from config (replaces hardcoded fallbacks).
- * Used by cat-voices.ts, cat-budgets.ts, TaskExtractor.ts.
+ * Used by cat-budgets.ts, TaskExtractor.ts.
  */
 export function getAllCatIdsFromConfig(): readonly string[] {
   try {

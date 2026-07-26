@@ -20,10 +20,7 @@ import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
-import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
-import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
-import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
@@ -919,10 +916,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // queue hydration or a missed intent_mode event). In that case we still need
   // the top cancel affordance — otherwise the thread looks active in the
   // execution bar but offers no single-cat cancel control.
-
-  useVoiceAutoPlay();
-  useVoiceStream();
-  useVadInterrupt();
 
   useSplitPaneKeys();
   const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);

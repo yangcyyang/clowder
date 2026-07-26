@@ -6,10 +6,6 @@ vi.mock('@/hooks/useIMEGuard', () => ({
   useIMEGuard: () => ({ onCompositionStart: () => {}, onCompositionEnd: () => {}, isComposing: () => false }),
 }));
 
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ synthesize: vi.fn(), state: 'idle' }),
-}));
-
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: ({ catId, size }: { catId: string; size: number }) =>
     React.createElement('div', { 'data-testid': `avatar-${catId}`, style: { width: size } }),

@@ -15,7 +15,6 @@ import { catRegistry } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
-import { getCatVoice } from '../../../../../config/cat-voices.js';
 import {
   type ResolvedToolPolicy,
   resolveEffectiveToolPolicy,
@@ -71,8 +70,6 @@ import {
 } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { resolveTaskSurfaceBinding, taskSurfacePromptContext } from '../../tasks/task-surface-resolver.js';
-import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
-import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { finalizeHistoryCriticalPublication } from '../invocation/HistoryCriticalSeal.js';
@@ -163,26 +160,6 @@ export function resolveSerialChainToolPolicy(
   return resolvedToolPolicy;
 }
 
-async function synthesizePublishedVoiceBlocks(
-  deps: RouteStrategyDeps,
-  message: StoredMessage,
-  blocks: RichBlock[],
-  catId: CatId,
-): Promise<RichBlock[]> {
-  const voiceSynth = getVoiceBlockSynthesizer();
-  if (!voiceSynth || !blocks.some((block) => block.kind === 'audio' && 'text' in block)) return blocks;
-  try {
-    const resolved = await voiceSynth.resolveVoiceBlocks(blocks, catId as string);
-    await deps.messageStore.updateExtra(message.id, {
-      ...(message.extra ?? {}),
-      rich: { v: 1, blocks: resolved },
-    });
-    return resolved;
-  } catch (err) {
-    log.error({ catId: catId as string, err }, 'Published voice block synthesis failed');
-    return blocks;
-  }
-}
 const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 
 function collectStructuredTargetCatsFromInput(input: unknown): string[] {
@@ -1008,8 +985,6 @@ export async function* routeSerial(
       const compactBoundarySignals: Array<{ timestamp?: number; preTokens?: number }> = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
-      // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
-      let voiceChunker: StreamingTtsChunker | undefined;
 
       // #80: Draft flush state — periodic persistence for F5 recovery
       let lastFlushTime = Date.now();
@@ -1100,21 +1075,6 @@ export async function* routeSerial(
                 const parsed = JSON.parse(effectiveMsg.content);
                 if (parsed.type === 'invocation_created') {
                   ownInvocationId = parsed.invocationId;
-                  // F111 Phase B: Start streaming TTS when we have an invocationId
-                  if (voiceMode && deps.socketManager && !deps.freshnessGate) {
-                    const ttsRegistry = getStreamingTtsRegistry();
-                    if (ttsRegistry) {
-                      voiceChunker = new StreamingTtsChunker({
-                        catId: catId as string,
-                        invocationId: ownInvocationId!,
-                        threadId,
-                        voiceConfig: getCatVoice(catId as string),
-                        broadcaster: deps.socketManager,
-                        ttsRegistry,
-                        signal,
-                      });
-                    }
-                  }
                   // Issue #83: Start keepalive timer once we have an invocationId.
                   // This ensures draft TTL is renewed even during long silent tool calls.
                   if (deps.draftStore && !keepaliveTimer) {
@@ -1135,7 +1095,6 @@ export async function* routeSerial(
                 effectiveMsg.content,
                 (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
               );
-              voiceChunker?.feed(effectiveMsg.content);
             }
             // F045: Accumulate thinking blocks for persistence (F5 recovery)
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
@@ -1370,27 +1329,6 @@ export async function* routeSerial(
         }
       }
 
-      // F111 Phase B: Flush remaining buffered text and send voice_stream_end
-      let voiceTotalChunks = 0;
-      if (voiceChunker) {
-        try {
-          voiceTotalChunks = await voiceChunker.flush();
-        } catch (err) {
-          log.error({ err }, 'Voice chunker flush failed');
-        }
-        if (deps.socketManager && voiceChunker.hasStarted()) {
-          const aborted = signal?.aborted ?? false;
-          deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
-            type: 'voice_stream_end',
-            catId: catId as string,
-            invocationId: ownInvocationId ?? '',
-            threadId,
-            totalChunks: aborted ? -1 : voiceTotalChunks,
-          });
-        }
-        voiceChunker = undefined;
-      }
-
       let a2aMentions: CatId[] = [];
       let freshnessEgressDisposition: 'published' | 'held' | 'discarded' | undefined;
       let freshnessEgressHoldId: string | undefined;
@@ -1464,23 +1402,7 @@ export async function* routeSerial(
         // F22: Extract cc_rich blocks from text (Route B fallback for non-MCP cats)
         const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
         const storedContent = sanitizeAgentVisibleOutput(cleanText);
-        let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
-
-        // F34-b: Resolve voice blocks (audio with text, no url) — Route B path.
-        // Route A blocks were already resolved in the callback handler.
-        // F111: When voiceMode is active, skip full synthesis so audio blocks
-        // arrive at the frontend with text but no url — the frontend will use
-        // /api/tts/stream for chunked streaming playback (<2s first-audio).
-        if (!voiceMode && !deps.freshnessGate) {
-          const voiceSynth = getVoiceBlockSynthesizer();
-          if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-            try {
-              allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, catId as string);
-            } catch (err) {
-              log.error({ catId: catId as string, err }, 'Voice block synthesis failed');
-            }
-          }
-        }
+        const allRichBlocks = [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable in legacy mode.
@@ -1687,9 +1609,6 @@ export async function* routeSerial(
                 freshnessEgressReplayed = result.replayed === true;
                 releaseBufferedText = !freshnessEgressReplayed;
                 if (freshnessEgressReplayed) a2aMentions = [];
-                if (!freshnessEgressReplayed && !voiceMode) {
-                  allRichBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, allRichBlocks, catId);
-                }
                 if (options.persistenceContext) {
                   options.persistenceContext.egressByCat ??= {};
                   options.persistenceContext.egressByCat[catId as string] = egressRecord;
@@ -2180,7 +2099,7 @@ export async function* routeSerial(
         // No text content and no error.
         // Persist assistant bubbles only when there is visible rich payload.
         // Tool-only/thinking-only/empty turns get a system notice instead of a blank bubble.
-        let noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
+        const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
         const shouldPersistNoTextMessage = hasRichBlocks;
         const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
@@ -2251,9 +2170,6 @@ export async function* routeSerial(
                 storedRichMessageId = result.message.id;
                 freshnessEgressDisposition = 'published';
                 freshnessEgressReplayed = result.replayed === true;
-                if (!freshnessEgressReplayed && !voiceMode) {
-                  noTextBlocks = await synthesizePublishedVoiceBlocks(deps, result.message, noTextBlocks, catId);
-                }
                 if (options.persistenceContext) {
                   options.persistenceContext.egressByCat ??= {};
                   options.persistenceContext.egressByCat[catId as string] = egressRecord;

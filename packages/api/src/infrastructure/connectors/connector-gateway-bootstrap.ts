@@ -898,7 +898,6 @@ export async function startConnectorGateway(
 
   // R3-P1: Resolve route URLs to local file paths for real media delivery
   const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
-  const ttsCacheDir = resolve(process.env.TTS_CACHE_DIR ?? './data/tts-cache');
   const resolvedMediaDir = resolve(mediaDir);
   const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');
   const mediaPathResolver = (url: string): string | undefined => {
@@ -909,7 +908,6 @@ export async function startConnectorGateway(
       return existsSync(resolved) ? resolved : undefined;
     };
     if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
-    if (url.startsWith('/api/tts/audio/')) return safeResolve(ttsCacheDir, url.slice('/api/tts/audio/'.length));
     if (url.startsWith('/api/connector-media/'))
       return safeResolve(resolvedMediaDir, url.slice('/api/connector-media/'.length));
     if (url.startsWith('/avatars/')) return safeResolve(webPublicDir, url.slice(1));
@@ -926,12 +924,6 @@ export async function startConnectorGateway(
     log,
     mediaPathResolver,
     messageLookup,
-    resolveVoiceBlocks: async (blocks, catId) => {
-      const { getVoiceBlockSynthesizer } = await import('../../domains/cats/services/tts/VoiceBlockSynthesizer.js');
-      const synth = getVoiceBlockSynthesizer();
-      if (!synth) throw new Error('VoiceBlockSynthesizer not initialized');
-      return synth.resolveVoiceBlocks(blocks, catId);
-    },
   });
 
   // Build streamable adapters map (only adapters with sendPlaceholder + editMessage)

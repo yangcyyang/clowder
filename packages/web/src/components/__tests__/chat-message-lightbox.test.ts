@@ -4,10 +4,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
-}));
-
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
     selector: (s: { uiThinkingExpandedByDefault: boolean; threads: never[]; currentThreadId: string }) => unknown,

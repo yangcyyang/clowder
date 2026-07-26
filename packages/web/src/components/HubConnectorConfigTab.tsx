@@ -5,6 +5,7 @@ import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
 import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
 import type { HubPermissionsTabHandle } from './HubPermissionsTab';
+import { ServiceStatusPanel } from './settings/ServiceStatusPanel';
 import { SettingsPageHeader } from './settings/SettingsPageHeader';
 import type { WeComBotSetupPanelHandle } from './WeComBotSetupPanel';
 import { WeComBotSetupPanel } from './WeComBotSetupPanel';
@@ -179,6 +180,9 @@ export function HubConnectorConfigTab() {
   return (
     <div className="space-y-5">
       <SettingsPageHeader title="IM 对接" subtitle="连接状态与回调配置" />
+
+      {/* Shared by all connectors below: transcribes inbound voice messages (Telegram/飞书/钉钉/企微). */}
+      <ServiceStatusPanel filterFeatures={['connector-stt']} title="语音消息转写服务" />
 
       {platforms.map((platform) => {
         const isExpanded = expandedId === platform.id;

@@ -2,7 +2,7 @@
 // Replaces in-process ONNX (LL-034: must not run model inference in API process)
 //
 // The actual model runs in scripts/embed-api.py (independent Python process on GPU).
-// This service is just an HTTP client, like MlxAudioTtsProvider / WhisperSttProvider.
+// This service is just an HTTP client, like WhisperSttProvider.
 
 import { resolveServiceEndpoint } from '../services/service-registry.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';

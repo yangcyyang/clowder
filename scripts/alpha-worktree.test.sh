@@ -37,9 +37,6 @@ test_print_alpha_env_exports() {
   assert_contains "$output" "export FRONTEND_PORT=3011" "should pin frontend port to 3011"
   assert_contains "$output" "export PREVIEW_GATEWAY_PORT=4111" "should pin preview gateway port to 4111"
   assert_contains "$output" "export ANTHROPIC_PROXY_ENABLED=0" "should disable proxy sidecar"
-  assert_contains "$output" "export ASR_ENABLED=0" "should disable ASR sidecar"
-  assert_contains "$output" "export TTS_ENABLED=0" "should disable TTS sidecar"
-  assert_contains "$output" "export LLM_POSTPROCESS_ENABLED=0" "should disable LLM postprocess sidecar"
   echo "PASS: alpha env exports are fixed to isolated defaults"
 }
 

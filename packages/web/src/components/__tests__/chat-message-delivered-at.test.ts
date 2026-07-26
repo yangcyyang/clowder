@@ -21,10 +21,6 @@ vi.mock('@/stores/chatStore', () => ({
     }),
 }));
 
-vi.mock('@/hooks/useTts', () => ({
-  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
-}));
-
 vi.mock('@/components/CatAvatar', () => ({
   CatAvatar: () => React.createElement('span', null, 'avatar'),
 }));

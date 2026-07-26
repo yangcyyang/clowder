@@ -22,7 +22,6 @@ import { getUserId } from '@/utils/userId';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
-import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
 type InvocationPhase =
   | 'queued'
@@ -1011,11 +1010,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('index:failed', (data: Record<string, unknown>) => {
       callbacksRef.current.onIndexEvent?.('index:failed', data);
     });
-
-    // F111 Phase B + F112 Phase A: Real-time voice stream events
-    socket.on('voice_stream_start', handleVoiceStreamStart);
-    socket.on('voice_chunk', handleVoiceChunk);
-    socket.on('voice_stream_end', handleVoiceStreamEnd);
 
     socket.on('connect_error', (error: Error & { description?: unknown; context?: unknown }) => {
       setSocketConnected(false);

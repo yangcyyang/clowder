@@ -41,7 +41,6 @@ import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredMessage, StoredToolEvent, ThreadAppendWatermark } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { resolveTaskSurfaceBinding, taskSurfacePromptContext } from '../../tasks/task-surface-resolver.js';
-import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { finalizeHistoryCriticalPublication } from '../invocation/HistoryCriticalSeal.js';
@@ -189,27 +188,6 @@ function inferToolResultName(message: AgentMessage): string | undefined {
 
 function callbackToolNamesMatch(left: string, right: string): boolean {
   return left === right || (isCallbackDeliveryToolName(left) && isCallbackDeliveryToolName(right));
-}
-
-async function synthesizePublishedVoiceBlocks(
-  deps: RouteStrategyDeps,
-  message: StoredMessage,
-  blocks: RichBlock[],
-  catId: CatId,
-): Promise<RichBlock[]> {
-  const voiceSynth = getVoiceBlockSynthesizer();
-  if (!voiceSynth || !blocks.some((block) => block.kind === 'audio' && 'text' in block)) return blocks;
-  try {
-    const resolved = await voiceSynth.resolveVoiceBlocks(blocks, catId as string);
-    await deps.messageStore.updateExtra(message.id, {
-      ...(message.extra ?? {}),
-      rich: { v: 1, blocks: resolved },
-    });
-    return resolved;
-  } catch (err) {
-    log.error({ catId: catId as string, err }, 'Published voice block synthesis failed');
-    return blocks;
-  }
 }
 
 export async function* routeParallel(
@@ -1290,19 +1268,7 @@ export async function* routeParallel(
           // F22: Extract cc_rich blocks from text + merge with buffered
           const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
           const storedContent = sanitizeAgentVisibleOutput(cleanText);
-          let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
-          // F34-b: synthesize text-only audio blocks (voice messages)
-          // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
-          if (!voiceMode && !deps.freshnessGate) {
-            const voiceSynth = getVoiceBlockSynthesizer();
-            if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
-              try {
-                allRichBlocks = await voiceSynth.resolveVoiceBlocks(allRichBlocks, msg.catId as string);
-              } catch (err) {
-                log.error({ catId: msg.catId, err }, 'Voice block synthesis failed');
-              }
-            }
-          }
+          const allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
           const catTools = catToolEvents.get(msg.catId);
           // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
           // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
@@ -1360,9 +1326,6 @@ export async function* routeParallel(
               options.persistenceContext.egressByCat ??= {};
               if (egress.outcome === 'published') {
                 options.persistenceContext.egressByCat[msg.catId] = egressRecord;
-                if (!egress.replayed && !voiceMode) {
-                  allRichBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, allRichBlocks, catId);
-                }
                 // Sibling messages from this parallel parent are known outputs,
                 // not new inbound intent. Advancing sibling baselines exactly to
                 // this committed revision ignores only this publication; any
@@ -1487,7 +1450,7 @@ export async function* routeParallel(
           const meta = catMeta.get(msg.catId);
           const catTools = catToolEvents.get(msg.catId);
           const thinking = catThinking.get(msg.catId);
-          let noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+          const noTextBlocks = [...bufferedBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
           const hasRichBlocks = noTextBlocks.length > 0;
           const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
           const shouldPersistNoTextMessage = hasRichBlocks;
@@ -1545,9 +1508,6 @@ export async function* routeParallel(
                 options.persistenceContext.egressByCat ??= {};
                 if (egress.outcome === 'published') {
                   options.persistenceContext.egressByCat[msg.catId] = egressRecord;
-                  if (!egress.replayed && !voiceMode) {
-                    noTextBlocks = await synthesizePublishedVoiceBlocks(deps, egress.message, noTextBlocks, catId);
-                  }
                   if (!egress.replayed && egress.message.appendWatermark) {
                     for (const sibling of targetCats)
                       freshnessBaselineByCat.set(sibling, egress.message.appendWatermark);

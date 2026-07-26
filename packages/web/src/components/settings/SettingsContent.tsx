@@ -11,13 +11,11 @@ import { HubConnectorConfigTab } from '../HubConnectorConfigTab';
 import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
-import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
 import { PluginsContent } from './PluginsContent';
 import { RulesPromptsContent } from './RulesPromptsContent';
-import { ServiceStatusPanel } from './ServiceStatusPanel';
 import { SettingsPageHeader } from './SettingsPageHeader';
 import { SettingsPlaceholder } from './SettingsPlaceholder';
 import { SkillsContent } from './SkillsContent';
@@ -148,16 +146,6 @@ export function SettingsContent({ section }: SettingsContentProps) {
         return <HubAccountsTab />;
       case 'plugins':
         return <PluginsContent />;
-      case 'voice':
-        return (
-          <div className="space-y-6">
-            <ServiceStatusPanel
-              filterFeatures={['voice-input', 'voice-output', 'voice-companion', 'voice-postprocess']}
-              title="语音服务"
-            />
-            <VoiceSettingsPanel />
-          </div>
-        );
       case 'system':
         if (fetchError) return <p className="text-sm text-[var(--semantic-error-text)]">{fetchError}</p>;
         return <HubEnvFilesTab excludeCategories={['connector']} />;

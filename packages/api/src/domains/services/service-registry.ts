@@ -44,37 +44,8 @@ const KNOWN_SERVICES: ServiceManifest[] = [
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
     },
-    enablesFeatures: ['voice-input', 'connector-stt'],
-    configVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
-  },
-  {
-    id: 'mlx-tts',
-    name: 'MLX-Audio 语音合成',
-    type: 'python',
-    port: 9879,
-    healthEndpoint: '/health',
-    prerequisites: {
-      runtime: 'python3.10+',
-      venvPath: '~/.cat-cafe/tts-venv',
-      packages: ['mlx-audio', 'fastapi', 'uvicorn'],
-      models: [
-        {
-          name: 'mlx-community/Kokoro-82M-bf16',
-          size: '~160MB',
-          autoDownload: true,
-          isDefault: true,
-          description: '轻量高质量语音合成',
-        },
-      ],
-      estimatedMinutes: 3,
-    },
-    scripts: {
-      install: 'scripts/services/tts-install.sh',
-      start: 'scripts/services/tts-server.sh',
-      uninstall: 'scripts/services/tts-uninstall.sh',
-    },
-    enablesFeatures: ['voice-output', 'voice-companion'],
-    configVars: ['TTS_URL'],
+    enablesFeatures: ['connector-stt'],
+    configVars: ['WHISPER_URL'],
   },
   {
     id: 'embedding-model',
@@ -104,47 +75,6 @@ const KNOWN_SERVICES: ServiceManifest[] = [
     },
     enablesFeatures: ['memory-semantic-search'],
     configVars: ['EMBED_URL', 'EMBED_PORT'],
-  },
-  {
-    id: 'llm-postprocess',
-    name: 'LLM 转写纠正',
-    type: 'python',
-    port: 9878,
-    healthEndpoint: '/health',
-    prerequisites: {
-      runtime: 'python3.10+',
-      venvPath: '~/.cat-cafe/llm-venv',
-      packages: ['mlx-vlm', 'fastapi', 'uvicorn', 'pydantic'],
-      models: [
-        {
-          name: 'mlx-community/Qwen3.5-35B-A3B-4bit',
-          size: '~20GB',
-          autoDownload: true,
-          isDefault: true,
-          description: '高质量纠错，需大内存(48GB+)',
-        },
-        {
-          name: 'mlx-community/Qwen2.5-7B-Instruct-4bit',
-          size: '~4GB',
-          autoDownload: true,
-          description: '轻量版，16GB内存可用',
-        },
-        {
-          name: 'mlx-community/Qwen2.5-14B-Instruct-4bit',
-          size: '~8GB',
-          autoDownload: true,
-          description: '中等质量，32GB内存推荐',
-        },
-      ],
-      estimatedMinutes: 30,
-    },
-    scripts: {
-      install: 'scripts/services/llm-postprocess-install.sh',
-      start: 'scripts/services/llm-postprocess-server.sh',
-      uninstall: 'scripts/services/llm-postprocess-uninstall.sh',
-    },
-    enablesFeatures: ['voice-postprocess'],
-    configVars: ['NEXT_PUBLIC_LLM_POSTPROCESS_URL'],
   },
 ];
 

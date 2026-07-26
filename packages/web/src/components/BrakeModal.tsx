@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
-import { useTts } from '@/hooks/useTts';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { CatAvatar } from './CatAvatar';
 
@@ -42,10 +41,8 @@ const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
 
 export function BrakeModal() {
   const { visible, level, activeMinutes, nightMode, submitting, checkin, bypassDisabled } = useBrakeStore();
-  const { synthesize, state: ttsState } = useTts();
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState('');
-  const lastTriggerRef = useRef<number>(0);
   const ime = useIMEGuard();
 
   // Reset local state when modal opens
@@ -55,22 +52,6 @@ export function BrakeModal() {
       setReason('');
     }
   }, [visible]);
-
-  // AC29: Auto-play TTS on modal show
-  useEffect(() => {
-    if (!visible || !level) return;
-    const triggerId = Date.now();
-    // Dedup: skip if triggered within 2 seconds (same event)
-    if (triggerId - lastTriggerRef.current < 2000) return;
-    lastTriggerRef.current = triggerId;
-
-    // Play a random cat's message (rotate all three voices)
-    const msgs = MESSAGES[level];
-    const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
-    if (msg) {
-      synthesize(`brake-${triggerId}`, msg.text, msg.catId);
-    }
-  }, [visible, level, synthesize]);
 
   // Escape to dismiss (only rest — safest option)
   useEffect(() => {
@@ -91,14 +72,6 @@ export function BrakeModal() {
       checkin('continue', reason.trim());
     }
   }, [showReason, reason, checkin]);
-
-  const handleTtsRetry = useCallback(() => {
-    const msgs = MESSAGES[level];
-    const msg = msgs?.[Math.floor(Math.random() * msgs.length)];
-    if (msg) {
-      synthesize(`brake-retry-${Date.now()}`, msg.text, msg.catId);
-    }
-  }, [level, synthesize]);
 
   if (!visible) return null;
 
@@ -140,17 +113,6 @@ export function BrakeModal() {
             </div>
           ))}
         </div>
-
-        {/* AC29: TTS autoplay fallback */}
-        {ttsState === 'error' && (
-          <button
-            type="button"
-            onClick={handleTtsRetry}
-            className="w-full text-xs text-cafe-secondary hover:text-cafe-secondary underline py-1"
-          >
-            点击播放猫猫语音
-          </button>
-        )}
 
         {/* Continue reason input */}
         {showReason && (
