@@ -2267,6 +2267,23 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CLOWDER_ASSIGNEE_INCAPACITATION_TAGGING',
+    defaultValue: '(未设置 → 开启)',
+    description:
+      '批次4-B3 失能打标(AssigneeIncapacitationScheduler)：每 60s 扫描 status∈{todo,doing} 的任务，按 ownerCatId 分组；某只猫在 assignee-incapacitation-tracker.ts(挂在批次4-A 的 provider-error-classification 分类结果上——额度耗尽/permission_denied/进程崩溃或卡死)持续处于失能信号且已超过 CLOWDER_ASSIGNEE_INCAPACITATION_MINUTES(默认 30 分钟，防闪断)时，其名下未打标的票自动打上"assignee 失能"标(双通知：owner 的 task_attention socket 事件 + 票所在频道可见通知，不 DM 轰炸)；该猫恢复(观测到一次成功调用)后自动清标，但留一条 assignee_recovered 事件记录失能起止时间供验收时查真空期。绝不自动转派 ownerCatId——转派永远是人工/gate 的决定。信号追踪器纯内存(进程重启后需要该猫再产生一次新结果才会重新判定，不会凭空误判"已恢复"而错误清标——见 assignee-incapacitation-tracker.ts 模块文档)。默认开启。置 "0"/"false" 关闭。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_ASSIGNEE_INCAPACITATION_MINUTES',
+    defaultValue: '30',
+    description: '配合 CLOWDER_ASSIGNEE_INCAPACITATION_TAGGING 使用：判定"持续失能"(而非短暂闪断)的分钟阈值。非正数或非法值回退默认 30。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CLOWDER_CLI_IDLE_TIMEOUT_SEC',
     defaultValue: '0（未设置/0 → 完全关闭，零行为变化）',
     description:

@@ -10,6 +10,10 @@ const { classifyRunFailureForTask, applyTaskRunOutcome } = await import(
 );
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { _resetTaskLifecycleNoticeDedupeForTests } = await import('../dist/routes/task-event-notices.js');
+const {
+  AssigneeIncapacitationTracker,
+  setActiveAssigneeIncapacitationTracker,
+} = await import('../dist/domains/cats/services/tasks/assignee-incapacitation-tracker.js');
 
 function messageStoreStub() {
   const messages = [];
@@ -245,5 +249,94 @@ describe('applyTaskRunOutcome', () => {
     });
 
     assert.doesNotMatch(updated.failureReason ?? '', /sk-secretvalue123456/);
+  });
+
+  test('批次4-B3: a failed run classified as an incapacitating kind feeds the active tracker', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = messageStoreStub();
+    const socketManager = socketManagerStub();
+    const tracker = new AssigneeIncapacitationTracker();
+    setActiveAssigneeIncapacitationTracker(tracker);
+    try {
+      const created = taskStore.create({
+        threadId: 't1', title: '额度耗尽任务', why: '', createdBy: 'user', ownerCatId: 'opus', status: 'doing',
+      });
+      await applyTaskRunOutcome({
+        task: created,
+        invocationId: 'inv-7',
+        finalStatus: 'failed',
+        errorText: 'quota exceeded, insufficient_quota',
+        deps: { taskStore, messageStore, socketManager },
+      });
+      const signal = tracker.getSignal('opus');
+      assert.equal(signal.kind, 'incapacitated');
+      assert.equal(signal.classification, 'quota_exhausted');
+    } finally {
+      setActiveAssigneeIncapacitationTracker(undefined);
+    }
+  });
+
+  test('批次4-B3: a non-incapacitating failure (plain agent_error) does NOT open a tracker streak', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = messageStoreStub();
+    const socketManager = socketManagerStub();
+    const tracker = new AssigneeIncapacitationTracker();
+    setActiveAssigneeIncapacitationTracker(tracker);
+    try {
+      const created = taskStore.create({
+        threadId: 't1', title: '普通失败任务', why: '', createdBy: 'user', ownerCatId: 'opus', status: 'doing',
+      });
+      await applyTaskRunOutcome({
+        task: created,
+        invocationId: 'inv-8',
+        finalStatus: 'failed',
+        errorText: 'assistant produced invalid JSON',
+        deps: { taskStore, messageStore, socketManager },
+      });
+      assert.equal(tracker.getSignal('opus'), undefined);
+    } finally {
+      setActiveAssigneeIncapacitationTracker(undefined);
+    }
+  });
+
+  test('批次4-B3: a succeeded run marks the owner explicitly healthy', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = messageStoreStub();
+    const socketManager = socketManagerStub();
+    const tracker = new AssigneeIncapacitationTracker();
+    tracker.recordFailure('opus', 'quota_exhausted', Date.now() - 60_000);
+    setActiveAssigneeIncapacitationTracker(tracker);
+    try {
+      const created = taskStore.create({
+        threadId: 't1', title: '恢复任务', why: '', createdBy: 'user', ownerCatId: 'opus', status: 'doing',
+      });
+      await applyTaskRunOutcome({
+        task: created,
+        invocationId: 'inv-9',
+        finalStatus: 'succeeded',
+        deps: { taskStore, messageStore, socketManager },
+      });
+      assert.deepEqual(tracker.getSignal('opus'), { kind: 'healthy' });
+    } finally {
+      setActiveAssigneeIncapacitationTracker(undefined);
+    }
+  });
+
+  test('批次4-B3: no active tracker registered → applyTaskRunOutcome still works normally (best-effort no-op)', async () => {
+    setActiveAssigneeIncapacitationTracker(undefined);
+    const taskStore = new TaskStore();
+    const messageStore = messageStoreStub();
+    const socketManager = socketManagerStub();
+    const created = taskStore.create({
+      threadId: 't1', title: '无追踪器任务', why: '', createdBy: 'user', ownerCatId: 'opus', status: 'doing',
+    });
+    const updated = await applyTaskRunOutcome({
+      task: created,
+      invocationId: 'inv-10',
+      finalStatus: 'failed',
+      errorText: 'budget_exhausted: quota reached',
+      deps: { taskStore, messageStore, socketManager },
+    });
+    assert.equal(updated.failureClass, 'budget_exhausted');
   });
 });

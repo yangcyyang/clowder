@@ -2110,6 +2110,19 @@ async function main(): Promise<void> {
     );
   }
 
+  // 批次4-B3 失能打标: the tracker is registered UNCONDITIONALLY (not gated to Redis mode) —
+  // task-run-linkage.ts's applyTaskRunOutcome hook is best-effort and storage-mode-agnostic,
+  // so the in-memory signal should be live as soon as invocations can complete, regardless of
+  // which TaskStore backend is active. Only the SCANNER that acts on these signals
+  // (AssigneeIncapacitationScheduler, below) is gated to Redis mode, matching its siblings
+  // ClaimedIdleScheduler/ReviewReminderScheduler (a single live API instance per Redis
+  // namespace is what makes cross-task coordination safe).
+  const { AssigneeIncapacitationTracker, setActiveAssigneeIncapacitationTracker } = await import(
+    './domains/cats/services/tasks/assignee-incapacitation-tracker.js'
+  );
+  const assigneeIncapacitationTracker = new AssigneeIncapacitationTracker();
+  setActiveAssigneeIncapacitationTracker(assigneeIncapacitationTracker);
+
   // F048 Phase A: Sweep orphaned invocations from previous process crash.
   // Runs only after the API has both:
   // 1) acquired the Redis namespace lease, and
@@ -2178,6 +2191,19 @@ async function main(): Promise<void> {
       queueProcessor,
     });
     reviewReminderScheduler.start();
+
+    // 批次4-B3 失能打标 (env CLOWDER_ASSIGNEE_INCAPACITATION_TAGGING, default ON — see
+    // env-registry.ts). Same Redis-mode-only rationale as its siblings above.
+    const { AssigneeIncapacitationScheduler } = await import(
+      './domains/cats/services/agents/invocation/AssigneeIncapacitationScheduler.js'
+    );
+    const assigneeIncapacitationScheduler = new AssigneeIncapacitationScheduler({
+      taskStore,
+      messageStore,
+      socketManager,
+      tracker: assigneeIncapacitationTracker,
+    });
+    assigneeIncapacitationScheduler.start();
   }
 
   // A1 (batch 4-A): 启动权限自检 — one-shot, NOT a recurring poller (see

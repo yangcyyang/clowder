@@ -27,10 +27,12 @@
  */
 import type { TaskFailureClass, TaskItem, TaskStatus } from '@cat-cafe/shared';
 import { redactSecretsInText } from '../../../../utils/env-var-secret-guard.js';
+import { classifyProviderErrorText } from '../agents/invocation/provider-error-classification.js';
 import type { SocketManager } from '../../../../infrastructure/websocket/index.js';
 import { appendTaskLifecycleNotice, TASK_STATUS_LABEL_ZH, taskLifecycleLabel } from '../../../../routes/task-event-notices.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
+import { getActiveAssigneeIncapacitationTracker, toIncapacitationClassification } from './assignee-incapacitation-tracker.js';
 import { isLegalTaskStatusTransition } from './task-status-transitions.js';
 
 /** failureClass values that indicate the *platform/runtime* stalled rather than the cat's own work being wrong. */
@@ -117,6 +119,24 @@ export interface TaskRunOutcomeParams {
  */
 export async function applyTaskRunOutcome(params: TaskRunOutcomeParams): Promise<TaskItem | null> {
   const { task, deps } = params;
+
+  // 批次4-B3 失能打标: feed the incapacitation streak tracker (best-effort, never throws —
+  // a tracker failure must never break the primary task↔run linkage). See
+  // assignee-incapacitation-tracker.ts for why this is the chosen hook point.
+  try {
+    const tracker = getActiveAssigneeIncapacitationTracker();
+    if (tracker && task.ownerCatId) {
+      if (params.finalStatus === 'succeeded') {
+        tracker.recordSuccess(task.ownerCatId);
+      } else {
+        const kind = classifyProviderErrorText(params.errorText ?? '').kind;
+        const classification = toIncapacitationClassification(kind);
+        if (classification) tracker.recordFailure(task.ownerCatId, classification, Date.now());
+      }
+    }
+  } catch {
+    // best-effort — see comment above
+  }
 
   if (params.finalStatus === 'succeeded') {
     const updated = await deps.taskStore.update(task.id, {
