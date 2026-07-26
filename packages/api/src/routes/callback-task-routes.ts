@@ -97,7 +97,7 @@ const listTasksQuerySchema = z.object({
   threadId: z.string().min(1).optional(),
   catId: z.string().min(1).optional(),
   status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
-  kind: z.enum(['work', 'pr_tracking']).optional(),
+  kind: z.enum(['work']).optional(),
 });
 
 export function registerCallbackTaskRoutes(
@@ -120,7 +120,6 @@ export function registerCallbackTaskRoutes(
     previousStatus: string | undefined,
     task: { kind?: string; status: string; userId?: string },
   ): void {
-    if (task.kind === 'pr_tracking') return;
     if (!task.userId) return;
     if (previousStatus === task.status) return;
     if (task.status !== 'in_review' && task.status !== 'blocked' && task.status !== 'failed') return;
@@ -532,7 +531,7 @@ export function registerCallbackTaskRoutes(
   const taskListQuerySchema = z.object({
     threadId: z.string().min(1).optional(),
     status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done', 'failed']).optional(),
-    kind: z.enum(['work', 'pr_tracking']).optional(),
+    kind: z.enum(['work']).optional(),
   });
 
   const resolveMessageThreadQuerySchema = z.object({

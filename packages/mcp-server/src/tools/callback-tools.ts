@@ -466,10 +466,7 @@ export const listTasksInputSchema = {
   threadId: z.string().min(1).optional().describe('Optional thread ID filter'),
   catId: z.string().min(1).optional().describe('Optional owner catId filter'),
   status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional().describe('Optional task status filter'),
-  kind: z
-    .enum(['work', 'pr_tracking'])
-    .optional()
-    .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
+  kind: z.enum(['work']).optional().describe('Optional task kind filter'),
 };
 
 export async function handlePostMessage(input: {
@@ -778,7 +775,7 @@ export async function handleListTasks(input: {
   threadId?: string | undefined;
   catId?: string | undefined;
   status?: 'todo' | 'doing' | 'in_review' | 'blocked' | 'done' | undefined;
-  kind?: 'work' | 'pr_tracking' | undefined;
+  kind?: 'work' | undefined;
 }): Promise<ToolResult> {
   return callbackGet('/api/callbacks/list-tasks', {
     ...(input.threadId ? { threadId: input.threadId } : {}),

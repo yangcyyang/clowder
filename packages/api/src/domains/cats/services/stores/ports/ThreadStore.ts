@@ -244,8 +244,6 @@ export interface Thread {
   firstRunQuestState?: FirstRunQuestStateV1;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
-  /** F168: Auto-switch workspace panel when this thread is opened. */
-  preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
   /** F224: Per-cat/user pending continuation capsule, consumed at next invocation start. */
   pendingContinuation?: Record<string, PendingContinuationEntry>;
   /** F224: Per-cat session strategy. Default is resume. */
@@ -407,10 +405,6 @@ export interface IThreadStore {
   updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
-  updatePreferredWorkspaceMode(
-    threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
-  ): void | Promise<void>;
   /** F194 Raft-parity batch 3-C: manual override hook for computed sidebar kind. `null` clears back to derived value. */
   updateKindOverride(threadId: string, kind: ThreadKind | null): void | Promise<void>;
   updateMemberSessionStrategy(
@@ -796,19 +790,6 @@ export class ThreadStore implements IThreadStore {
       delete thread.connectorHubState;
     } else {
       thread.connectorHubState = state;
-    }
-  }
-
-  updatePreferredWorkspaceMode(
-    threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
-  ): void {
-    const thread = this.get(threadId);
-    if (!thread) return;
-    if (mode === null) {
-      delete thread.preferredWorkspaceMode;
-    } else {
-      thread.preferredWorkspaceMode = mode;
     }
   }
 

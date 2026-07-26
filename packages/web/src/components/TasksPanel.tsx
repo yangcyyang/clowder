@@ -132,25 +132,25 @@ function getOwnerLabel(task: TaskItem): string {
 
 /**
  * [thread-task-design item 4 root cause] The card "编号" must match the backend's
- * getTaskLabel algorithm (packages/api/src/routes/tasks.ts:252-255): 1-based
- * position among non-pr_tracking tasks in creation order — NOT any slice of the
- * task's own id. This component previously rendered `#{task.id.slice(0, 6)}`.
- * Task ids come from generateSortableId() (packages/api/.../ports/MessageStore.ts
- * :461-466): a 16-digit zero-padded epoch-ms timestamp, then a 6-digit sequence,
- * then a uuid suffix. The first 6 characters of that are therefore just "000" +
- * the leading 3 digits of the millisecond timestamp, which only change roughly
- * every ~115 days (10^10 ms) — every task created within the same ~4-month
- * window collapses onto the same 1-2 label strings. That is exactly the
- * reported bug: 79 cards, 2 distinct numbers (#000178 / #000177 everywhere).
+ * getTaskLabel algorithm (packages/api/src/routes/tasks.ts): 1-based position in
+ * creation order — NOT any slice of the task's own id. This component previously
+ * rendered `#{task.id.slice(0, 6)}`. Task ids come from generateSortableId()
+ * (packages/api/.../ports/MessageStore.ts): a 16-digit zero-padded epoch-ms
+ * timestamp, then a 6-digit sequence, then a uuid suffix. The first 6 characters
+ * of that are therefore just "000" + the leading 3 digits of the millisecond
+ * timestamp, which only change roughly every ~115 days (10^10 ms) — every task
+ * created within the same ~4-month window collapses onto the same 1-2 label
+ * strings. That is exactly the reported bug: 79 cards, 2 distinct numbers
+ * (#000178 / #000177 everywhere).
  *
- * `tasks` here is already thread + kind=work scoped (GET /api/tasks?threadId=
- * &kind=work uses the same taskStore.listByThread() ascending-createdAt order
- * the backend label algorithm reads), so sorting ascending by id (lexicographic
- * order matches creation order for sortable ids) and taking the 1-based index
- * reproduces the backend's numbering exactly.
+ * `tasks` here is already thread-scoped (GET /api/tasks?threadId= uses the same
+ * taskStore.listByThread() ascending-createdAt order the backend label algorithm
+ * reads), so sorting ascending by id (lexicographic order matches creation order
+ * for sortable ids) and taking the 1-based index reproduces the backend's
+ * numbering exactly.
  */
 export function computeTaskLabels(tasks: readonly TaskItem[]): Map<string, number> {
-  const ordered = [...tasks].filter((task) => task.kind !== 'pr_tracking').sort((a, b) => a.id.localeCompare(b.id));
+  const ordered = [...tasks].sort((a, b) => a.id.localeCompare(b.id));
   const labels = new Map<string, number>();
   ordered.forEach((task, index) => labels.set(task.id, index + 1));
   return labels;

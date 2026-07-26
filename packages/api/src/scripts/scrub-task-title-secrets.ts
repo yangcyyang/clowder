@@ -14,7 +14,7 @@ import { createTaskStore } from '../domains/cats/services/stores/factories/TaskS
 import { redactSecretsInText, textContainsSecretValue } from '../utils/env-var-secret-guard.js';
 
 const APPLY = process.argv.includes('--apply');
-const KINDS = ['work', 'pr_tracking'] as const;
+const KINDS = ['work'] as const;
 
 async function main(): Promise<void> {
   const redisUrl = process.env.REDIS_URL;

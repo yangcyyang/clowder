@@ -35,24 +35,6 @@ describe('extractRecentArtifacts', () => {
     assert.equal(readOnly, undefined, 'read-only files should be excluded');
   });
 
-  it('extracts PR artifacts from pr_tracking tasks', () => {
-    const prTasks = [
-      {
-        id: 't1',
-        kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#1292',
-        title: 'PR tracking: zts212653/cat-cafe#1292',
-        ownerCatId: 'opus',
-        status: 'todo',
-        updatedAt: Date.now(),
-      },
-    ];
-    const result = extractRecentArtifacts({ filesTouched: [], prTasks, catId: 'opus' });
-    assert.equal(result.length, 1);
-    assert.equal(result[0].type, 'pr');
-    assert.ok(result[0].ref.includes('#1292'));
-  });
-
   it('deduplicates and caps at 5 artifacts', () => {
     const filesTouched = Array.from({ length: 10 }, (_, i) => ({
       path: `packages/api/src/file-${i}.ts`,
@@ -65,65 +47,6 @@ describe('extractRecentArtifacts', () => {
   it('returns empty array when no artifacts', () => {
     const result = extractRecentArtifacts({ filesTouched: [], prTasks: [], catId: 'opus' });
     assert.deepEqual(result, []);
-  });
-
-  it('prioritizes PRs over files when PR is most recent', () => {
-    const filesTouched = Array.from({ length: 5 }, (_, i) => ({
-      path: `packages/api/src/file-${i}.ts`,
-      ops: ['edit'],
-    }));
-    const prTasks = [
-      {
-        id: 't1',
-        kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#1292',
-        title: 'PR #1292',
-        ownerCatId: 'opus',
-        status: 'todo',
-        updatedAt: Date.now() + 60_000,
-      },
-    ];
-    const result = extractRecentArtifacts({ filesTouched, prTasks, catId: 'opus' });
-    assert.equal(result[0].type, 'pr', 'PR should be first when most recent');
-  });
-
-  it('sorts results by updatedAt DESC (P2-1: recency semantics)', () => {
-    const now = Date.now();
-    const prTasks = [
-      {
-        id: 't1',
-        kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#100',
-        title: 'PR #100',
-        ownerCatId: 'opus',
-        status: 'todo',
-        updatedAt: now - 30_000, // oldest
-      },
-      {
-        id: 't2',
-        kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#200',
-        title: 'PR #200',
-        ownerCatId: 'opus',
-        status: 'todo',
-        updatedAt: now, // newest
-      },
-      {
-        id: 't3',
-        kind: 'pr_tracking',
-        subjectKey: 'pr:zts212653/cat-cafe#150',
-        title: 'PR #150',
-        ownerCatId: 'opus',
-        status: 'todo',
-        updatedAt: now - 10_000, // middle
-      },
-    ];
-    const result = extractRecentArtifacts({ filesTouched: [], prTasks, catId: 'opus' });
-    assert.equal(result.length, 3);
-    assert.ok(result[0].updatedAt >= result[1].updatedAt, 'first should be newest');
-    assert.ok(result[1].updatedAt >= result[2].updatedAt, 'second should be newer than third');
-    assert.ok(result[0].ref.includes('#200'), 'newest PR should be first');
-    assert.ok(result[2].ref.includes('#100'), 'oldest PR should be last');
   });
 
   it('classifies feature docs and plans by path', () => {

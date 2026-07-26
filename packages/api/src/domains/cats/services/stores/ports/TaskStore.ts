@@ -148,7 +148,7 @@ export interface ITaskStore {
   /** Create or update task by subject key (idempotent). */
   upsertBySubject(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
 
-  /** List tasks filtered by kind (e.g. 'pr_tracking'). */
+  /** List tasks filtered by kind. */
   listByKind(kind: TaskKind): TaskItem[] | Promise<TaskItem[]>;
 
   /** Patch automationState without touching other fields. */
@@ -246,7 +246,7 @@ export class TaskStore implements ITaskStore {
           threadId: input.threadId,
           title: input.title,
           ownerCatId: input.ownerCatId ?? existing.ownerCatId,
-          status: existing.kind === 'pr_tracking' && existing.status === 'done' ? 'todo' : existing.status,
+          status: existing.status,
           failureClass: input.failureClass ?? existing.failureClass,
           failureReason: input.failureReason ?? existing.failureReason,
           why: input.why,
@@ -410,7 +410,6 @@ export class TaskStore implements ITaskStore {
     if (this.tasks.size < this.maxTasks) return;
 
     if (this.evictOldestTask((task) => task.status === 'done')) return;
-    if (this.evictOldestTask((task) => !this.isProtectedFromFallbackEviction(task))) return;
     this.evictOldestTask(() => true);
   }
 
@@ -428,7 +427,4 @@ export class TaskStore implements ITaskStore {
     return false;
   }
 
-  private isProtectedFromFallbackEviction(task: TaskItem): boolean {
-    return task.kind === 'pr_tracking' && task.status !== 'done';
-  }
 }

@@ -75,7 +75,7 @@ export async function taskLifecycleLabel(
   taskStore: Pick<ITaskStore, 'listByThread'>,
   task: Pick<TaskItem, 'id' | 'threadId'>,
 ): Promise<string> {
-  const tasks = (await taskStore.listByThread(task.threadId)).filter((item) => item.kind !== 'pr_tracking');
+  const tasks = await taskStore.listByThread(task.threadId);
   const index = tasks.findIndex((item) => item.id === task.id);
   return index >= 0 ? `#${index + 1}` : `#${task.id}`;
 }

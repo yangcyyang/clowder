@@ -193,30 +193,6 @@ export type {
   ParsedCommand,
   SlashCommandDefinition,
 } from './command.js';
-export type {
-  CommunityIssueItem,
-  ConsensusResult,
-  ConsensusState,
-  CreateCommunityIssueInput,
-  DirectionCardPayload,
-  GuardianAssignment,
-  IntakeChecklistItem,
-  IssueState,
-  IssueType,
-  PrBoardGroup,
-  QuestionGrade,
-  QuestionId,
-  QuestionResult,
-  ReplyState,
-  TriageEntry,
-  UpdateCommunityIssueInput,
-  Verdict,
-} from './community-issue.js';
-// Community Issue types (F168 社区事务编排引擎)
-export {
-  DEFAULT_INTAKE_CHECKLIST,
-  validateIntakeChecklist,
-} from './community-issue.js';
 // Connector types (F97 外部信息源抽象)
 export type {
   ConnectorDefinition,

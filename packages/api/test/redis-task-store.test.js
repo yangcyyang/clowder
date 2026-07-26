@@ -370,62 +370,6 @@ describe('RedisTaskStore unit behavior', () => {
     assert.equal((await store.get(task.id))?.sourceMessageId, 'message-source');
   });
 
-  it('re-registering a done pr_tracking task resets it back to todo', async () => {
-    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
-    const redis = new FakeRedisForTaskStore();
-    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
-
-    const original = await store.upsertBySubject({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#42',
-      threadId: 'thread-1',
-      title: 'PR tracking: owner/repo#42',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-    await store.update(original.id, { status: 'done' });
-
-    const reopened = await store.upsertBySubject({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#42',
-      threadId: 'thread-2',
-      title: 'PR tracking: owner/repo#42',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-
-    assert.equal(reopened.id, original.id);
-    assert.equal(reopened.threadId, 'thread-2');
-    assert.equal(reopened.status, 'todo');
-  });
-
-  it('does not leave a TTL on the shared thread index when active PR tracking exists', async () => {
-    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
-    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
-    const redis = new FakeRedisForTaskStore();
-    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
-
-    await store.create({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#42',
-      threadId: 'thread-1',
-      title: 'PR tracking: owner/repo#42',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-    const work = await store.create({
-      threadId: 'thread-1',
-      title: 'follow-up task',
-      why: 'mixed thread',
-      createdBy: 'opus',
-    });
-
-    await store.update(work.id, { status: 'done' });
-
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-1')), undefined);
-    const tasks = await store.listByThread('thread-1');
-    assert.ok(tasks.some((task) => task.kind === 'pr_tracking'));
-  });
 
   it('persists task events and lineage fields in Redis hashes', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
@@ -560,42 +504,6 @@ describe('RedisTaskStore unit behavior', () => {
     assert.equal(redis.strings.get(TaskKeys.subject('pr:owner/repo#88')), freshTaskId);
   });
 
-  it('recomputes TTL for the previous thread index when a tracked PR moves threads', async () => {
-    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
-    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
-    const redis = new FakeRedisForTaskStore();
-    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
-
-    await store.upsertBySubject({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#99',
-      threadId: 'thread-old',
-      title: 'PR tracking: owner/repo#99',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-    const oldThreadWork = await store.create({
-      threadId: 'thread-old',
-      title: 'old thread follow-up',
-      why: 'cleanup',
-      createdBy: 'opus',
-    });
-    await store.update(oldThreadWork.id, { status: 'done' });
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-old')), undefined);
-
-    await store.upsertBySubject({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#99',
-      threadId: 'thread-new',
-      title: 'PR tracking: owner/repo#99',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-old')), 60);
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-new')), undefined);
-  });
-
   it('retries atomic upsert instead of blindly creating when subject GET races to null', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
@@ -688,34 +596,6 @@ describe('RedisTaskStore unit behavior', () => {
     assert.equal(subjectGetCalls, 4);
     const kindIds = await redis.zrange(TaskKeys.kind('pr_tracking'), 0, -1);
     assert.deepEqual(kindIds, []);
-  });
-
-  it('recomputes thread TTL after deleting the last active pr_tracking task', async () => {
-    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
-    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
-    const redis = new FakeRedisForTaskStore();
-    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
-
-    const prTask = await store.create({
-      kind: 'pr_tracking',
-      subjectKey: 'pr:owner/repo#321',
-      threadId: 'thread-delete',
-      title: 'PR tracking: owner/repo#321',
-      why: 'track pr',
-      createdBy: 'opus',
-    });
-    const doneWork = await store.create({
-      threadId: 'thread-delete',
-      title: 'done work',
-      why: 'mixed thread',
-      createdBy: 'opus',
-    });
-    await store.update(doneWork.id, { status: 'done' });
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-delete')), undefined);
-
-    const deleted = await store.delete(prTask.id);
-    assert.equal(deleted, true);
-    assert.equal(redis.ttls.get(TaskKeys.thread('thread-delete')), 60);
   });
 
   it('does not delete a repaired subject mapping when deleting a task', async () => {

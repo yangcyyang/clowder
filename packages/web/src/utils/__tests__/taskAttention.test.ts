@@ -29,14 +29,14 @@ describe('taskAttention', () => {
     expect(isTaskAttentionStatus('done')).toBe(false);
   });
 
-  it('counts attention tasks but excludes PR tracking automation', () => {
+  it('counts attention tasks', () => {
     const tasks = [
       task({ id: 'review', status: 'in_review' }),
       task({ id: 'blocked', status: 'blocked' }),
-      task({ id: 'pr', kind: 'pr_tracking', status: 'failed' }),
+      task({ id: 'failed', status: 'failed' }),
       task({ id: 'done', status: 'done' }),
     ];
-    expect(countAttentionTasks(tasks)).toBe(2);
+    expect(countAttentionTasks(tasks)).toBe(3);
   });
 
   it('formats toast for review, blocked, and failed tasks', () => {

@@ -3,6 +3,7 @@
  * Redis-backed task storage with same interface as in-memory TaskStore.
  *
  * #320: Unified model — PR tracking merged into Task system.
+ * W5: pr_tracking retired (kind is now always 'work'); TTL is unconditional default now.
  *
  * Redis 数据结构:
  *   cat-cafe:task:{taskId}              → Hash (任务详情)
@@ -10,7 +11,7 @@
  *   cat-cafe:tasks:kind:{kind}          → Sorted Set (按类型索引, score=createdAt)
  *   cat-cafe:tasks:subject:{subjectKey} → String (subject→taskId 唯一映射)
  *
- * TTL: 30 days default. pr_tracking tasks with status!=done have no TTL.
+ * TTL: 30 days default.
  */
 
 import type { AutomationState, CatId, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
@@ -255,7 +256,7 @@ export class RedisTaskStore implements ITaskStore {
       threadId: input.threadId,
       title: input.title,
       ownerCatId: input.ownerCatId ?? existing.ownerCatId,
-      status: existing.kind === 'pr_tracking' && existing.status === 'done' ? 'todo' : existing.status,
+      status: existing.status,
       failureClass: input.failureClass ?? existing.failureClass,
       failureReason: input.failureReason ?? existing.failureReason,
       why: input.why,
@@ -511,33 +512,17 @@ export class RedisTaskStore implements ITaskStore {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  /** pr_tracking tasks with status!=done never expire; others get default TTL. */
   private async applyTtl(task: TaskItem): Promise<void> {
     if (this.ttlSeconds === null) return;
     const key = TaskKeys.detail(task.id);
-
-    if (task.kind === 'pr_tracking' && task.status !== 'done') {
-      // Active PR tracking tasks don't expire
-      await this.redis.persist(key);
-    } else {
-      await this.redis.expire(key, this.ttlSeconds);
-    }
-
+    await this.redis.expire(key, this.ttlSeconds);
     await this.applyThreadTtl(task.threadId);
   }
 
   private async applyThreadTtl(threadId: string): Promise<void> {
     if (this.ttlSeconds === null) return;
     const threadKey = TaskKeys.thread(threadId);
-
-    // A thread index shared with any active PR-tracking task must remain durable.
-    const threadTasks = await this.listByThread(threadId);
-    const hasActivePrTracking = threadTasks.some((item) => item.kind === 'pr_tracking' && item.status !== 'done');
-    if (hasActivePrTracking) {
-      await this.redis.persist(threadKey);
-    } else {
-      await this.redis.expire(threadKey, this.ttlSeconds);
-    }
+    await this.redis.expire(threadKey, this.ttlSeconds);
   }
 
   private async compareAndDeleteSubject(subjectKey: string, staleTaskId: string): Promise<void> {

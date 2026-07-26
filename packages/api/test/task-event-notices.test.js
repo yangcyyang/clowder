@@ -146,11 +146,10 @@ describe('F194 task-event-notices (shared module)', () => {
     assert.equal(b.posted, true);
   });
 
-  test('taskLifecycleLabel uses the same "#N" (1-based, pr_tracking excluded) convention', async () => {
+  test('taskLifecycleLabel uses the same "#N" (1-based) convention', async () => {
     const taskStore = new TaskStore();
     const t1 = await taskStore.create({ threadId: 'thread-x', title: 'A', createdBy: 'user' });
     const t2 = await taskStore.create({ threadId: 'thread-x', title: 'B', createdBy: 'user' });
-    await taskStore.create({ threadId: 'thread-x', title: 'PR check', createdBy: 'user', kind: 'pr_tracking' });
 
     assert.equal(await taskLifecycleLabel(taskStore, t1), '#1');
     assert.equal(await taskLifecycleLabel(taskStore, t2), '#2');

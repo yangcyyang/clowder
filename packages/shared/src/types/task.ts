@@ -106,9 +106,13 @@ export type TaskEventType =
 /**
  * Task kind discriminator (#320).
  * - work: manual tasks created by cats/humans
- * - pr_tracking: automated PR tasks (review-feedback, cicd-check, conflict-check)
+ *
+ * W5: pr_tracking (automated PR tasks) retired — its production routers (CiCdRouter/
+ * ConflictRouter/ReviewFeedbackRouter) were already removed by prune-w3a; F168's community
+ * board was its last consumer and is now gone too. Kept as a single-member union (not a
+ * bare string alias) so call sites that still say `kind: TaskKind` don't need touching.
  */
-export type TaskKind = 'work' | 'pr_tracking';
+export type TaskKind = 'work';
 
 /** CI/CD automation state for pr_tracking tasks */
 export interface CiAutomationState {
@@ -165,7 +169,7 @@ export interface TaskEvent {
 
 export interface TaskItem {
   readonly id: string;
-  /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
+  /** Task kind (#320). Always 'work' since W5 (pr_tracking retired). */
   readonly kind: TaskKind;
   readonly threadId: string;
   /**

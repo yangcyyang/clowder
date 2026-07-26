@@ -401,7 +401,7 @@ function TaskReferenceLink({ seq, label }: { seq: number; label: string }) {
   const tasks = useTaskStore((state) => state.tasks);
   const addToast = useToastStore((state) => state.addToast);
   const taskThreadActions = useTaskThreadActions();
-  const task = tasks.filter((item) => item.kind !== 'pr_tracking')[seq - 1];
+  const task = tasks[seq - 1];
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {

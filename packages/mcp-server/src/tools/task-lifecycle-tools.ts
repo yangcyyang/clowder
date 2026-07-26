@@ -105,7 +105,7 @@ export const taskUnclaimInputSchema = {
 export const taskListInputSchema = {
   threadId: z.string().min(1).optional().describe('Optional thread ID filter'),
   status: taskStatusEnum.optional().describe('Optional task status filter'),
-  kind: z.enum(['work', 'pr_tracking']).optional().describe('Optional task kind filter'),
+  kind: z.enum(['work']).optional().describe('Optional task kind filter'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -220,7 +220,7 @@ export async function handleTaskUnclaim(input: {
 export async function handleTaskList(input: {
   threadId?: string | undefined;
   status?: string | undefined;
-  kind?: 'work' | 'pr_tracking' | undefined;
+  kind?: 'work' | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return callbackGet(

@@ -540,18 +540,6 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async updatePreferredWorkspaceMode(
-    threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
-  ): Promise<void> {
-    const key = ThreadKeys.detail(threadId);
-    if (mode === null) {
-      await this.deleteDetailFields(key, 'preferredWorkspaceMode');
-    } else {
-      await this.setDetailFields(key, 'preferredWorkspaceMode', mode);
-    }
-  }
-
   /** F194 Raft-parity batch 3-C: manual override hook for computed sidebar kind. */
   async updateKindOverride(threadId: string, kind: ThreadKind | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
@@ -1115,9 +1103,6 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
     }
-    if (thread.preferredWorkspaceMode) {
-      result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
-    }
     if (thread.kindOverride) {
       result.kindOverride = thread.kindOverride;
     }
@@ -1233,10 +1218,6 @@ export class RedisThreadStore implements IThreadStore {
       } catch {
         /* ignore malformed JSON */
       }
-    }
-    const validModes = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
-    if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
-      result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
     }
     const validKindOverrides: ReadonlySet<string> = new Set([
       'channel',

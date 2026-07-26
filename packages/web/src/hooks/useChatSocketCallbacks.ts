@@ -74,7 +74,7 @@ export function useChatSocketCallbacks({
       },
       onTaskCreated: (task) => {
         const t = task as Record<string, unknown>;
-        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        if (t.threadId !== threadId) return;
         addTask(task as unknown as TaskItem);
         // [thread-task-design §3 step 1.2] Give the source message an immediate,
         // prominent "已建任务 …" inline notice the moment task_created lands live —
@@ -91,7 +91,7 @@ export function useChatSocketCallbacks({
       },
       onTaskUpdated: (task) => {
         const t = task as Record<string, unknown>;
-        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        if (t.threadId !== threadId) return;
         updateTask(task as unknown as TaskItem);
       },
       // onThreadSummary removed (clowder-ai#343): summaries no longer injected into chat flow.

@@ -38,18 +38,10 @@ export interface ArtifactExtractionInput {
 export function extractRecentArtifacts(input: ArtifactExtractionInput): RecentArtifact[] {
   const artifacts: RecentArtifact[] = [];
 
-  for (const task of input.prTasks) {
-    if (task.kind !== 'pr_tracking' || task.status === 'done' || !task.subjectKey) continue;
-    const prRef = task.subjectKey.replace(/^pr:/, '');
-    const prNumber = prRef.match(/#(\d+)/)?.[0] ?? prRef;
-    artifacts.push({
-      type: 'pr',
-      ref: prRef,
-      label: `PR ${prNumber}`,
-      updatedAt: task.updatedAt,
-      updatedBy: task.ownerCatId ?? 'unknown',
-    });
-  }
+  // W5: pr_tracking retired (kind is now always 'work') — input.prTasks can never contribute
+  // a 'pr' artifact anymore. Kept as an accepted-but-unused input rather than a signature
+  // change: source-ranking.ts's tier2 boost and historical ledger entries with type:'pr'
+  // (persisted before this change) still need the 'pr' RecentArtifact variant to exist.
 
   for (const file of input.filesTouched) {
     if (!file.ops.some((op) => WRITE_OPS.has(op))) continue;

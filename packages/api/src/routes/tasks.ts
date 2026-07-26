@@ -190,7 +190,6 @@ const taskThreadSchema = z.object({
 });
 
 function shouldEmitTaskAttention(previous: TaskItem | null, current: TaskItem): boolean {
-  if (current.kind === 'pr_tracking') return false;
   if (!current.userId) return false;
   if (previous?.status === current.status) return false;
   return current.status === 'in_review' || current.status === 'blocked' || current.status === 'failed';
@@ -256,7 +255,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   }
 
   async function getTaskLabel(task: TaskItem): Promise<string> {
-    const tasks = (await taskStore.listByThread(task.threadId)).filter((item) => item.kind !== 'pr_tracking');
+    const tasks = await taskStore.listByThread(task.threadId);
     const index = tasks.findIndex((item) => item.id === task.id);
     return index >= 0 ? `task #${index + 1}` : 'task';
   }
@@ -399,8 +398,8 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return task;
   });
 
-  // GET /api/tasks?threadId=xxx[&kind=work|pr_tracking]
-  // GET /api/tasks?scope=all[&kind=work|pr_tracking][&status=in_review]
+  // GET /api/tasks?threadId=xxx[&kind=work]
+  // GET /api/tasks?scope=all[&status=in_review]
   app.get('/api/tasks', async (request, reply) => {
     const { threadId, kind, scope, status } = request.query as {
       threadId?: string;
@@ -413,8 +412,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       // caller can access (previously leaked every task to anyone).
       const userId = requireUserId(request, reply);
       if (!userId) return { error: 'Identity required' };
-      const taskKind = kind === 'pr_tracking' ? 'pr_tracking' : 'work';
-      let tasks = await taskStore.listByKind(taskKind);
+      let tasks = await taskStore.listByKind('work');
       tasks = (
         await Promise.all(tasks.map(async (task) => ((await taskAccessibleToUser(task, userId)) ? task : null)))
       ).filter((task): task is TaskItem => task !== null);

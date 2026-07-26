@@ -1,7 +1,6 @@
 /**
- * Regression test: TaskPanel must only receive work tasks for the active thread.
- * Bug: #320 intake caused pr_tracking tasks to leak into 毛线球 (TaskPanel).
- * Guard: socket callbacks filter by both threadId and kind.
+ * Regression test: TaskPanel must only receive task events for the active thread.
+ * Guard: socket callbacks filter by threadId.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -70,7 +69,7 @@ function HookHost({ threadId }: { threadId: string }) {
 let root: Root;
 let container: HTMLDivElement;
 
-describe('TaskPanel socket filter: kind + threadId guard', () => {
+describe('TaskPanel socket filter: threadId guard', () => {
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
@@ -98,18 +97,6 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
 
   afterAll(() => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
-  });
-
-  // --- kind filter ---
-
-  it('blocks pr_tracking task_created from entering taskStore', () => {
-    captured!.onTaskCreated!({ id: 't1', threadId: 'thread-1', kind: 'pr_tracking', title: 'PR #42' });
-    expect(addTaskMock).not.toHaveBeenCalled();
-  });
-
-  it('blocks pr_tracking task_updated from entering taskStore', () => {
-    captured!.onTaskUpdated!({ id: 't1', threadId: 'thread-1', kind: 'pr_tracking', status: 'done' });
-    expect(updateTaskMock).not.toHaveBeenCalled();
   });
 
   // --- threadId filter ---

@@ -7,7 +7,7 @@ export function isTaskAttentionStatus(status: TaskStatus): boolean {
 }
 
 export function countAttentionTasks(tasks: readonly TaskItem[]): number {
-  return tasks.filter((task) => task.kind !== 'pr_tracking' && isTaskAttentionStatus(task.status)).length;
+  return tasks.filter((task) => isTaskAttentionStatus(task.status)).length;
 }
 
 export function getTaskAttentionToast(task: TaskItem): {
@@ -15,7 +15,7 @@ export function getTaskAttentionToast(task: TaskItem): {
   title: string;
   message: string;
 } | null {
-  if (task.kind === 'pr_tracking' || !isTaskAttentionStatus(task.status)) return null;
+  if (!isTaskAttentionStatus(task.status)) return null;
   const title = task.title.trim() || '未命名任务';
   if (task.status === 'in_review') {
     return { type: 'success', title: '任务待验收', message: title };

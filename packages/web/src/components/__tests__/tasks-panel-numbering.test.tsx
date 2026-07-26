@@ -10,10 +10,9 @@
  * (#000178 / #000177 everywhere).
  *
  * Fix: labels must be computed the same way the backend's getTaskLabel does
- * (packages/api/src/routes/tasks.ts:252-255) — 1-based position among
- * non-pr_tracking tasks in creation (ascending id) order — via
- * TasksPanel.computeTaskLabels, independent of the updatedAt-based display
- * sort used for column grouping.
+ * (packages/api/src/routes/tasks.ts) — 1-based position in creation (ascending
+ * id) order — via TasksPanel.computeTaskLabels, independent of the
+ * updatedAt-based display sort used for column grouping.
  */
 import type { TaskItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
@@ -76,14 +75,6 @@ describe('computeTaskLabels (pure)', () => {
     expect(labels.get(TASK_1.id)).toBe(1);
     expect(labels.get(TASK_2.id)).toBe(2);
     expect(labels.get(TASK_3.id)).toBe(3);
-  });
-
-  it('excludes pr_tracking tasks from the numbering, matching backend getTaskLabel', () => {
-    const prTask = makeTask({ id: '0001784800000000-000000-zzzzzzzz', kind: 'pr_tracking', createdAt: 50 });
-    const labels = computeTaskLabels([prTask, TASK_1, TASK_2]);
-    expect(labels.has(prTask.id)).toBe(false);
-    expect(labels.get(TASK_1.id)).toBe(1);
-    expect(labels.get(TASK_2.id)).toBe(2);
   });
 
   it('red-test proof: the old `task.id.slice(0, 6)` scheme collapses all three onto one label', () => {

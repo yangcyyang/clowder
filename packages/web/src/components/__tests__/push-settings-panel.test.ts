@@ -232,6 +232,5 @@ describe('PushSettingsPanel test push feedback', () => {
     expect(container.textContent).toContain('权限请求');
     expect(container.textContent).toContain('@提及');
     expect(container.textContent).toContain('定时任务');
-    expect(container.textContent).toContain('信号更新');
   });
 });

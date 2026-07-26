@@ -214,8 +214,6 @@ const updateThreadSchema = z
     bubbleThinking: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** Bubble display overrides: CLI output block expand/collapse. */
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
-    /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
-    preferredWorkspaceMode: z.enum(['dev', 'recall', 'schedule', 'tasks', 'community']).nullable().optional(),
     /** F194 Raft-parity batch 3-C: manual override for computed sidebar kind. null clears back to derived value. */
     kindOverride: threadKindSchema.nullable().optional(),
   })
@@ -233,7 +231,6 @@ const updateThreadSchema = z
       data.bootcampState !== undefined ||
       data.bubbleThinking !== undefined ||
       data.bubbleCli !== undefined ||
-      data.preferredWorkspaceMode !== undefined ||
       data.kindOverride !== undefined,
     {
       message: 'At least one field must be provided',
@@ -540,7 +537,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       bootcampState,
       bubbleThinking,
       bubbleCli,
-      preferredWorkspaceMode,
       kindOverride,
     } = parseResult.data;
     if (title !== undefined) await threadStore.updateTitle(id, title);
@@ -560,9 +556,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
     if (bubbleThinking !== undefined) await threadStore.updateBubbleDisplay(id, 'bubbleThinking', bubbleThinking);
     if (bubbleCli !== undefined) await threadStore.updateBubbleDisplay(id, 'bubbleCli', bubbleCli);
-    if (preferredWorkspaceMode !== undefined) {
-      await threadStore.updatePreferredWorkspaceMode(id, preferredWorkspaceMode);
-    }
     if (kindOverride !== undefined) {
       await threadStore.updateKindOverride(id, kindOverride);
     }

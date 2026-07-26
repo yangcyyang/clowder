@@ -353,10 +353,8 @@ export class RunLedgerAssembler {
       if (isTaskAssociated(task, record, messageIds)) candidates.set(task.id, task);
     }
 
-    for (const kind of ['work', 'pr_tracking'] as const) {
-      for (const task of await this.taskStore.listByKind(kind)) {
-        if (isTaskAssociated(task, record, messageIds)) candidates.set(task.id, task);
-      }
+    for (const task of await this.taskStore.listByKind('work')) {
+      if (isTaskAssociated(task, record, messageIds)) candidates.set(task.id, task);
     }
 
     return [...candidates.values()];

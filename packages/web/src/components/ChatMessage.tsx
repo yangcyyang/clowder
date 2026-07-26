@@ -489,7 +489,6 @@ export function ChatMessage({
   const visibleContent = getAgentVisibleContent(message);
   const hasTextContent = visibleContent.trim().length > 0;
   const taskEntry = tasks
-    .filter((task) => task.kind !== 'pr_tracking')
     .map((task, index) => ({ task, seq: index + 1 }))
     .find(({ task }) => task.sourceMessageId === message.id);
   const taskAssignee = taskEntry?.task.ownerCatId ? getCatById(taskEntry.task.ownerCatId) : undefined;
