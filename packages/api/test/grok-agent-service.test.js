@@ -275,6 +275,8 @@ test('injects an isolated native MCP config without persisting callback or accou
 });
 
 test('subscription native MCP mode reuses the existing Grok auth and session store', async () => {
+  const originalGrokAuthPath = process.env.GROK_AUTH_PATH;
+  delete process.env.GROK_AUTH_PATH;
   const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-subscription-home-'));
   const sourceSessions = join(sourceGrokHome, 'sessions');
   const sourceAuth = join(sourceGrokHome, 'auth.json');
@@ -322,6 +324,11 @@ test('subscription native MCP mode reuses the existing Grok auth and session sto
     assert.equal(runtimeSessions, realpathSync(sourceSessions));
     assert.equal(runtimeModelCache, readFileSync(sourceModelCache, 'utf8'));
   } finally {
+    if (originalGrokAuthPath === undefined) {
+      delete process.env.GROK_AUTH_PATH;
+    } else {
+      process.env.GROK_AUTH_PATH = originalGrokAuthPath;
+    }
     rmSync(sourceGrokHome, { recursive: true, force: true });
   }
 });
