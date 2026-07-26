@@ -36,7 +36,7 @@ import {
   type StoredMessage,
   type ThreadAppendWatermark,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
+import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -153,8 +153,6 @@ export interface CallbackRoutesOptions {
   invocationTracker?: InvocationTracker;
   /** For mention ack cursor tracking (#77) */
   deliveryCursorStore?: DeliveryCursorStore;
-  /** Phase D: validates GitHub repo exists before PR tracking registration */
-  validateRepo?: (repoFullName: string) => Promise<boolean>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -468,7 +466,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     invocationRecordStore,
     invocationTracker,
     deliveryCursorStore,
-    validateRepo,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -2447,86 +2444,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadIds: threadIdsByFeatId.get(normalizeFeatId(item.featId)) ?? [],
       })),
     };
-  });
-
-  // TD091: PR tracking registration via MCP callback
-  // Cats call this after `gh pr create` to register the PR for Layer 1 routing.
-  // Server resolves threadId from invocation record — cat doesn't need to know it.
-  const registerPrTrackingSchema = z.object({
-    repoFullName: z
-      .string()
-      .min(1)
-      .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-    prNumber: z.number().int().positive(),
-    catId: z.string().min(1).optional(), // ignored — server uses record.catId
-  });
-
-  app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
-    // #320: Unified model — write to TaskStore instead of PrTrackingStore
-    if (!taskStore) {
-      reply.status(503);
-      return { error: 'Task store not configured' };
-    }
-
-    const parsed = registerPrTrackingSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-
-    const { repoFullName, prNumber } = parsed.data;
-
-    // Use authoritative catId from invocation record, not caller payload.
-    const catId = record.catId;
-
-    // Phase D: validate repo exists and is accessible (AC-D1)
-    if (validateRepo) {
-      let repoOk: boolean;
-      try {
-        repoOk = await validateRepo(repoFullName);
-      } catch {
-        reply.status(503);
-        return { error: 'Repository validation unavailable — try again later' };
-      }
-      if (!repoOk) {
-        reply.status(422);
-        return { error: `Repository ${repoFullName} does not exist or is not accessible` };
-      }
-    }
-
-    const freshness = await claimCallbackSideEffect({
-      freshnessGate: opts.freshnessGate,
-      registry,
-      record,
-      route: 'register-pr-tracking',
-      requestBody: parsed.data,
-    });
-    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
-
-    const subjectKey = `pr:${repoFullName}#${prNumber}`;
-    try {
-      const task = await taskStore.upsertBySubject({
-        kind: 'pr_tracking',
-        subjectKey,
-        threadId: record.threadId,
-        title: `PR tracking: ${repoFullName}#${prNumber}`,
-        ownerCatId: catId,
-        why: `Tracking PR ${repoFullName}#${prNumber} for review feedback, CI/CD, and conflict detection`,
-        createdBy: catId,
-        userId: record.userId,
-      });
-
-      return { status: 'ok', threadId: record.threadId, task };
-    } catch (error) {
-      if (isSubjectOwnershipConflictError(error)) {
-        reply.status(409);
-        return { error: `PR ${repoFullName}#${prNumber} already registered by another user` };
-      }
-      throw error;
-    }
   });
 
   // F174 Phase C: refresh-token endpoint — keep tokens alive in long sessions

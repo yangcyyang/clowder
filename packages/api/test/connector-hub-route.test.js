@@ -565,7 +565,7 @@ describe('GET /api/connector/status — WeCom Bot live health', () => {
       assert.equal(github.category, 'plugin', 'github must have category=plugin');
       assert.deepEqual(
         github.fields.map((field) => field.envName),
-        ['GITHUB_TOKEN', 'GITHUB_SETUP_NOISE_BOT_LOGINS', 'GITHUB_MCP_PAT'],
+        ['GITHUB_TOKEN', 'GITHUB_MCP_PAT'],
       );
     } finally {
       await app.close();

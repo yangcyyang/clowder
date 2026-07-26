@@ -22,7 +22,6 @@ describe('protected callback side effects', () => {
   let threadStore;
   let broadcasts;
   let uploadDir;
-  let validateRepo;
 
   beforeEach(async () => {
     registry = new InvocationRegistry();
@@ -32,7 +31,6 @@ describe('protected callback side effects', () => {
     broadcasts = [];
     uploadDir = await mkdtemp(join(tmpdir(), 'clowder-freshness-doc-'));
     process.env.UPLOAD_DIR = uploadDir;
-    validateRepo = undefined;
 
     const freshnessGate = new FreshnessEgressGate({
       messageStore,
@@ -55,7 +53,6 @@ describe('protected callback side effects', () => {
       threadStore,
       socketManager,
       freshnessGate,
-      ...(validateRepo ? { validateRepo } : {}),
     });
   });
 
@@ -203,64 +200,4 @@ describe('protected callback side effects', () => {
     assert.equal(broadcasts.filter((entry) => entry.event === 'agent_message').length, messagesAfterFirst);
   });
 
-  test('shared callback boundary protects the remaining write-route family', async () => {
-    const payload = { repoFullName: 'cat-cafe/clowder', prNumber: 193 };
-    const staleAuth = await createProtectedInvocation('pr-stale');
-    await appendNewerUserInput('pr-stale');
-    const stale = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
-      payload,
-    });
-    assert.equal(stale.json().status, 'freshness_retry_required');
-    assert.equal(taskStore.listByThread('pr-stale').length, 0);
-
-    const currentAuth = await createProtectedInvocation('pr-current');
-    const request = {
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers: { 'x-invocation-id': currentAuth.invocationId, 'x-callback-token': currentAuth.callbackToken },
-      payload,
-    };
-    assert.equal((await app.inject(request)).json().status, 'ok');
-    assert.equal((await app.inject(request)).json().status, 'duplicate');
-    assert.equal(taskStore.listByThread('pr-current').length, 1);
-  });
-
-  test('a failed business precondition does not consume the side-effect claim', async () => {
-    let repoAccessible = false;
-    validateRepo = async () => repoAccessible;
-    await app.close();
-    const freshnessGate = new FreshnessEgressGate({
-      messageStore,
-      holdStore: new FreshnessHoldStore({ maxReviews: 2 }),
-    });
-    app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      taskStore,
-      threadStore,
-      socketManager: {
-        broadcastAgentMessage() {},
-        broadcastToRoom() {},
-        emitToUser() {},
-      },
-      freshnessGate,
-      validateRepo,
-    });
-
-    const auth = await createProtectedInvocation('pr-retry');
-    const request = {
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
-      payload: { repoFullName: 'cat-cafe/clowder', prNumber: 194 },
-    };
-    assert.equal((await app.inject(request)).statusCode, 422);
-    repoAccessible = true;
-    assert.equal((await app.inject(request)).json().status, 'ok');
-    assert.equal(taskStore.listByThread('pr-retry').length, 1);
-  });
 });

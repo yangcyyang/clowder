@@ -212,21 +212,13 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     category: 'plugin',
     fields: [
       { envName: 'GITHUB_TOKEN', label: 'Personal Access Token', sensitive: true },
-      {
-        envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-        label: 'Noise 过滤 Bot 列表',
-        sensitive: false,
-        optional: true,
-        defaultValue: 'chatgpt-codex-connector[bot]',
-      },
       { envName: 'GITHUB_MCP_PAT', label: 'MCP 专用 Token', sensitive: true, optional: true },
     ],
     docsUrl:
       'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens',
     steps: [
       { text: '创建 GitHub Personal Access Token（需 repo + notifications 权限）' },
-      { text: '填写 Token 后自动启用 PR Tracking、Review Router、CI/CD Monitor' },
-      { text: '可选：配置 Noise 过滤 Bot 列表以减少 setup-only 评论噪音' },
+      { text: '填写 Token 后用于 Scheduler 仓库活跃度模板鉴权；MCP 专用 Token 供 Signals GitHub 抓取器使用' },
     ],
   },
 ];

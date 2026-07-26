@@ -134,12 +134,7 @@ import {
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import { restartConnectorGateway } from './infrastructure/connectors/connector-gateway-lifecycle.js';
 import { createConnectorReloadSubscriber } from './infrastructure/connectors/connector-reload-subscriber.js';
-import {
-  CiCdRouter,
-  ConflictRouter,
-  ConnectorInvokeTrigger,
-  ReviewFeedbackRouter,
-} from './infrastructure/email/index.js';
+import { ConnectorInvokeTrigger } from './infrastructure/email/index.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { apiBearerAuthPlugin, sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
@@ -580,15 +575,6 @@ async function main(): Promise<void> {
   const dismissTracker = new InMemoryGuideDismissTracker();
   const taskStore = createTaskStore(redis);
   const communityIssueStore = createCommunityIssueStore(redis);
-  if (redis) {
-    const { RedisPrTrackingStore } = await import('./infrastructure/email/RedisPrTrackingStore.js');
-    const { backfillLegacyPrTracking } = await import('./infrastructure/email/backfill-legacy-pr-tracking.js');
-    await backfillLegacyPrTracking({
-      legacyStore: new RedisPrTrackingStore(redis),
-      taskStore,
-      log: app.log,
-    });
-  }
 
   // F153 Phase F AC-F4: Hydrate trace store from Redis messages on cold start
   if (telemetryHandle.traceStore && redis) {
@@ -1589,26 +1575,6 @@ async function main(): Promise<void> {
   await app.register(connectorHubRoutes, connectorHubOpts);
   await app.register(brakeRoutes, { activityTracker });
 
-  // Phase D (AC-D1): validate repo exists via `gh repo view` before PR tracking registration.
-  // Generic — works for any GitHub repo the caller has access to, not hardcoded to ours.
-  // Cloud P1: distinguish "repo not found" (return false) from infra failure (throw).
-  const validateRepo = async (repoFullName: string): Promise<boolean> => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    try {
-      await execFileAsync('gh', ['repo', 'view', repoFullName, '--json', 'name'], { timeout: 10_000 });
-      return true;
-    } catch (err: unknown) {
-      // gh ran but repo not found/no access → process exit code is a number
-      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
-        return false;
-      }
-      // Infrastructure failure (gh not found, timeout, auth broken) → propagate
-      throw err;
-    }
-  };
-
   // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
   const { LimbRegistry } = await import('./domains/limb/LimbRegistry.js');
   const { LimbAccessPolicy } = await import('./domains/limb/LimbAccessPolicy.js');
@@ -1647,7 +1613,6 @@ async function main(): Promise<void> {
     invocationRecordStore,
     invocationTracker,
     deliveryCursorStore,
-    validateRepo,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
@@ -2326,183 +2291,8 @@ async function main(): Promise<void> {
     log: app.log,
   });
 
-  // F140: Feedback filter (Rule A self-authored only post-E.2 cutover)
-  const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
-  const { createSetupNoiseFilter } = await import('./infrastructure/email/setup-noise-filter.js');
-  let selfGitHubLogin: string | undefined;
-  try {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const { stdout } = await promisify(execFile)('gh', ['api', '/user', '--jq', '.login'], { timeout: 10_000 });
-    selfGitHubLogin = stdout.trim() || undefined;
-    app.log.info(`[api] F140: feedback filter self=${selfGitHubLogin}`);
-  } catch {
-    app.log.warn('[api] F140: could not resolve GitHub login — self-filter disabled');
-  }
-  const feedbackFilter = createGitHubFeedbackFilter({ selfGitHubLogin });
-
-  // F140 Phase E.2 cutover: setup-noise bot allowlist env name切换
-  // GITHUB_SETUP_NOISE_BOT_LOGINS (new, post-E.2 semantics) takes precedence;
-  // GITHUB_AUTHORITATIVE_REVIEW_LOGINS (legacy E.1 借壳) falls back for
-  // backward compat — will be removed in a follow-up release.
-  const setupNoiseBotLogins = (
-    process.env.GITHUB_SETUP_NOISE_BOT_LOGINS ||
-    process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS ||
-    'chatgpt-codex-connector[bot]'
-  )
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-  app.log.info(`[api] F140: setup-noise bot logins=${setupNoiseBotLogins.join(', ')}`);
-
-  const setupNoiseFilter = createSetupNoiseFilter(setupNoiseBotLogins);
-
-  // F140 Phase E.3 cleanup (2026-04-25): email/IMAP watcher source files removed.
-  // Polling (ReviewFeedbackTaskSpec) is the sole truth source for review feedback.
-
   // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
   taskRunnerV2.setInvokeTrigger(invokeTrigger);
-
-  // F139: Register PR-related TaskSpecs into unified scheduler
-  {
-    const { createCiCdCheckTaskSpec } = await import('./infrastructure/email/CiCdCheckTaskSpec.js');
-    const { createConflictCheckTaskSpec } = await import('./infrastructure/email/ConflictCheckTaskSpec.js');
-    const { createReviewFeedbackTaskSpec } = await import('./infrastructure/email/ReviewFeedbackTaskSpec.js');
-
-    const deliveryDeps = { messageStore, socketManager };
-
-    const cicdRouter = new CiCdRouter({
-      taskStore,
-      deliveryDeps,
-      log: app.log,
-      notifySkip: (threadId, reason) => {
-        socketManager?.broadcastAgentMessage(
-          {
-            type: 'system_info',
-            catId: getDefaultCatId(),
-            content: JSON.stringify({ type: 'connector_skip', reason, threadId }),
-            timestamp: Date.now(),
-          },
-          threadId,
-        );
-      },
-    });
-
-    // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)
-    const conflictRouter = new ConflictRouter({
-      taskStore,
-      deliveryDeps,
-      log: app.log,
-    });
-
-    // F140: ReviewFeedbackRouter (three-section aggregated messages)
-    const reviewFeedbackRouter = new ReviewFeedbackRouter({
-      deliveryDeps,
-      log: app.log,
-    });
-
-    taskRunnerV2.register(createCiCdCheckTaskSpec({ taskStore, cicdRouter, invokeTrigger, log: app.log }));
-
-    // F140: conflict-check with ConflictRouter + urgent trigger
-    const checkMergeable = async (repo: string, pr: number) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync(
-        'gh',
-        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,headRefOid'],
-        { timeout: 15_000 },
-      );
-      const data = JSON.parse(stdout);
-      // Use `mergeable` (CONFLICTING/MERGEABLE/UNKNOWN) — not `mergeStateStatus` (DIRTY/CLEAN/...)
-      // ConflictRouter checks for exact string 'CONFLICTING'
-      return { mergeState: data.mergeable ?? 'UNKNOWN', headSha: data.headRefOid ?? '' };
-    };
-
-    const { ConflictAutoExecutor } = await import('./infrastructure/email/ConflictAutoExecutor.js');
-    const autoExecutor = new ConflictAutoExecutor({ log: app.log });
-
-    taskRunnerV2.register(
-      createConflictCheckTaskSpec({
-        taskStore,
-        checkMergeable,
-        conflictRouter,
-        invokeTrigger,
-        autoExecutor,
-        log: app.log,
-      }),
-    );
-
-    // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
-    // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
-
-    const fetchPaginated = async (endpoint: string) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
-        timeout: 30_000,
-      });
-      if (!stdout.trim()) return [];
-      return stdout
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
-    };
-
-    taskRunnerV2.register(
-      createReviewFeedbackTaskSpec({
-        taskStore,
-        fetchComments: async (repo, pr) => {
-          const [reviewComments, issueComments] = await Promise.all([
-            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
-            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`),
-          ]);
-          return [...reviewComments, ...issueComments].map(
-            (c: {
-              id: number;
-              body: string;
-              created_at: string;
-              user?: { login: string };
-              path?: string;
-              line?: number;
-              pull_request_review_id?: number;
-            }) => ({
-              id: c.id,
-              author: c.user?.login ?? 'unknown',
-              body: c.body,
-              createdAt: c.created_at,
-              commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
-              ...(c.path ? { filePath: c.path } : {}),
-              ...(c.line ? { line: c.line } : {}),
-            }),
-          );
-        },
-        fetchReviews: async (repo, pr) => {
-          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
-          return reviews.map(
-            (r: { id: number; user?: { login: string }; state: string; body: string; submitted_at: string }) => ({
-              id: r.id,
-              author: r.user?.login ?? 'unknown',
-              state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
-              body: r.body,
-              submittedAt: r.submitted_at,
-            }),
-          );
-        },
-        reviewFeedbackRouter,
-        invokeTrigger,
-        log: app.log,
-        // F140 Phase E.2 cutover: Rule A only (self-authored skip). Authoritative bot
-        // review feedback is now delivered through this polling channel — Rule B dropped.
-        isEchoComment: (c) => feedbackFilter.shouldSkipComment(c),
-        isEchoReview: (r) => feedbackFilter.shouldSkipReview(r),
-        // F140 Phase E.1: bot setup-only conversation noise (polling-side)
-        isNoiseComment: setupNoiseFilter,
-      }),
-    );
-    app.log.info('[api] F139/F140: cicd-check, conflict-check, review-feedback specs registered');
-  }
 
   // F141 Phase B: Reconciliation scan —补偿 webhook 漏掉的 open PRs/Issues
   {

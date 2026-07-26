@@ -1256,24 +1256,6 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
-    name: 'GITHUB_AUTHORITATIVE_REVIEW_LOGINS',
-    defaultValue: 'chatgpt-codex-connector[bot]',
-    description:
-      '[DEPRECATED] F140 Phase E.2 cutover (2026-04-24): Rule B authoritative-source skip removed; this var now only serves as backward-compat fallback for GITHUB_SETUP_NOISE_BOT_LOGINS. Will be removed in a follow-up release.',
-    category: 'connector',
-    sensitive: false,
-    restartRequired: true,
-  },
-  {
-    name: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-    defaultValue: 'chatgpt-codex-connector[bot]',
-    description:
-      'Comma-separated GitHub bot logins whose conversation comments may contain Codex setup-only guidance. F140 polling-side setup-noise filter skips those (bot + conversation + setup-only body, no codex review content). Falls back to GITHUB_AUTHORITATIVE_REVIEW_LOGINS for backward compat.',
-    category: 'connector',
-    sensitive: false,
-    restartRequired: true,
-  },
-  {
     name: 'GITHUB_TOKEN',
     defaultValue: '(未设置)',
     description: 'GitHub Personal Access Token（Scheduler 仓库活跃度模板 HTTP 请求鉴权）',
@@ -1532,42 +1514,7 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
 
-  // --- github_review ---
-  {
-    name: 'GITHUB_REVIEW_IMAP_USER',
-    defaultValue: '(未设置 → 监控不启用)',
-    description: 'QQ 邮箱地址 (xxx@qq.com)',
-    category: 'github_review',
-    sensitive: false,
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PASS',
-    defaultValue: '(未设置)',
-    description: 'QQ 邮箱授权码 (非登录密码)',
-    category: 'github_review',
-    sensitive: true,
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_HOST',
-    defaultValue: 'imap.qq.com',
-    description: 'IMAP 服务器地址',
-    category: 'github_review',
-    sensitive: false,
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PORT',
-    defaultValue: '993',
-    description: 'IMAP 端口 (SSL)',
-    category: 'github_review',
-    sensitive: false,
-  },
-  {
-    name: 'GITHUB_REVIEW_POLL_INTERVAL_MS',
-    defaultValue: '120000',
-    description: '邮件轮询间隔 (毫秒)',
-    category: 'github_review',
-    sensitive: false,
-  },
+  // --- github_review (W3 prune-w3a 后仅剩 MCP PAT，供 Signals GitHub 抓取器使用) ---
   {
     name: 'GITHUB_MCP_PAT',
     defaultValue: '(未设置)',
@@ -1575,13 +1522,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: true,
     runtimeEditable: true,
-  },
-  {
-    name: 'GITHUB_REVIEW_IMAP_PROXY',
-    defaultValue: '(未设置)',
-    description: 'IMAP 连接代理地址（如 socks5://127.0.0.1:1080）',
-    category: 'github_review',
-    sensitive: false,
   },
 
   // --- evidence (F102 记忆系统) ---

@@ -919,35 +919,6 @@ export async function handleCheckPermissionStatus(input: { requestId: string }):
   });
 }
 
-// TD091: PR tracking registration — server resolves threadId from invocation record
-export const registerPrTrackingInputSchema = {
-  repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
-  prNumber: z.number().int().positive().describe('PR number'),
-  catId: z
-    .string()
-    .optional()
-    .describe('Deprecated — server auto-resolves from invocation identity. Ignored if provided.'),
-};
-
-export async function handleRegisterPrTracking(input: {
-  repoFullName: string;
-  prNumber: number;
-  catId?: string;
-}): Promise<ToolResult> {
-  // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
-  // registration, no useful local fallback. Surface `[degrade]` hint.
-  return withDegradation({
-    toolName: 'register_pr_tracking',
-    primary: () =>
-      callbackPost('/api/callbacks/register-pr-tracking', {
-        repoFullName: input.repoFullName,
-        prNumber: input.prNumber,
-        ...(input.catId ? { catId: input.catId } : {}),
-      }),
-    policy: { kind: 'none' },
-  });
-}
-
 export const updateWorkflowInputSchema = {
   backlogItemId: z.string().min(1).describe('The backlog item ID to update workflow SOP for'),
   featureId: z.string().min(1).describe('Feature ID (e.g. "F073")'),
@@ -1432,16 +1403,6 @@ export const callbackTools = [
       'Use the requestId returned from request_permission. Returns granted/denied/pending.',
     inputSchema: checkPermissionStatusInputSchema,
     handler: handleCheckPermissionStatus,
-  },
-  {
-    name: 'cat_cafe_register_pr_tracking',
-    description:
-      'Register a PR for email review notification routing. Call right after `gh pr create` ' +
-      'so that cloud Codex review emails are automatically routed to your current thread. ' +
-      'The server resolves threadId and catId from your invocation identity — you only need repoFullName and prNumber. ' +
-      'GOTCHA: Must be called in the same session that created the PR, while callback credentials are still valid.',
-    inputSchema: registerPrTrackingInputSchema,
-    handler: handleRegisterPrTracking,
   },
   {
     name: 'cat_cafe_update_workflow',

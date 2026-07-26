@@ -42,7 +42,6 @@ const EXPECTED_TOOLS = [
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
   'cat_cafe_get_rich_block_rules',
-  'cat_cafe_register_pr_tracking',
   // Guide tools
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
@@ -131,7 +130,6 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
-  'cat_cafe_register_pr_tracking',
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
   'cat_cafe_guide_resolve',
@@ -376,7 +374,6 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
   'cat_cafe_request_permission',
-  'cat_cafe_register_pr_tracking',
   'cat_cafe_update_workflow',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check', // writes bootcampState.envCheck via callbackPost

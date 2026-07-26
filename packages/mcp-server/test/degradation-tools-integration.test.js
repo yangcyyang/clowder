@@ -56,15 +56,6 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
     });
   });
 
-  test('register_pr_tracking with kind:none surfaces failure', async () => {
-    await withMockedCallbackPost(async ({ handleRegisterPrTracking }) => {
-      const result = await handleRegisterPrTracking({ repoFullName: 'a/b', prNumber: 1 });
-      assert.ok(result.isError);
-      const text = result.content[0].text;
-      assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
-    });
-  });
-
   test('retain_memory_callback with kind:none surfaces failure', async () => {
     const memMod = await import('../dist/tools/callback-memory-tools.js');
     await withMockedCallbackPost(async () => {
