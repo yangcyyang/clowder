@@ -64,6 +64,6 @@ created: 2026-02-26
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
 | F187 | Thread Labels — 用户自定义标签 + Sidebar 筛选 + 猫猫辅助分类 | spec | Ragdoll | internal | [F187](features/F187-thread-labels.md) |
 | F190 | Console Settings Shell — 全局导航 + 设置面板 + 设计体系迁移 | in-progress | Ragdoll | internal [#662](https://github.com/zts212653/clowder-ai/pull/662) [#669](https://github.com/zts212653/clowder-ai/pull/669) | [F190](features/F190-console-settings-shell.md) |
-| F191 | Local CLI Model Radar — 本地 CLI 真实模型扫描雷达 | in-progress | Maine Coon / Codex | internal | [F191](features/F191-local-cli-model-radar.md) |
+| F191 | Local CLI Model Radar — 本地 CLI 真实模型扫描雷达 | implemented | Maine Coon / Codex | internal | [F191](features/F191-local-cli-model-radar.md) |
 | F193 | 输出提交协议与 Freshness Hold | in-progress | Maine Coon / Codex | internal | [F193](features/F193-output-publication-freshness-hold.md) |
 | F194 | Channel Task Thread Routing — 频道任务线程路由协议 | in-progress | Maine Coon / Codex | internal | [F194](features/F194-channel-task-thread-routing.md) |

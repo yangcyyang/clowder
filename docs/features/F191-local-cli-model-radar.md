@@ -8,7 +8,7 @@ created: 2026-07-10
 
 # F191: Local CLI Model Radar — 本地 CLI 真实模型扫描雷达
 
-> **Status**: in-progress | **Owner**: Maine Coon / Codex | **Priority**: P1
+> **Status**: implemented | **Owner**: Maine Coon / Codex | **Priority**: P1
 
 ## Why
 
@@ -31,31 +31,31 @@ Model 候选显示 `实测`、`配置`、`内置(可能过期)` 来源徽章；�
 ## Acceptance Criteria
 
 ### Phase A（三层模型探测链）
-- [ ] AC-A1: 七个 CLI 都有经过真机核实的 L1/L2/L3 探测定义与注释，交互式 TUI 不作为 L1。
-- [ ] AC-A2: L1 成功、L1→L2、L2→L3、全失败、凭证路径拒绝和输出脱敏均有红绿测试。
-- [ ] AC-A3: 单文件不超过 350 行，探测实现按职责拆分。
+- [x] AC-A1: 七个 CLI 都有经过真机核实的 L1/L2/L3 探测定义与注释，交互式 TUI 不作为 L1。
+- [x] AC-A2: L1 成功、L1→L2、L2→L3、全失败、凭证路径拒绝和输出脱敏均有红绿测试。
+- [x] AC-A3: 单文件不超过 350 行，探测实现按职责拆分。
 
 ### Phase B（扫描快照与候选路由）
-- [ ] AC-B1: 手动扫描只更新当前用户的模型快照；没有扫描时不执行后台探测。
-- [ ] AC-B2: 模型候选路由优先扫描快照、无快照回退 static，并返回正确 `modelsSource`。
-- [ ] AC-B3: 模型候选接口未认证返回 401；不同用户之间不能读取彼此的扫描快照。
+- [x] AC-B1: 手动扫描只更新当前用户的模型快照；没有扫描时不执行后台探测。
+- [x] AC-B2: 模型候选路由优先扫描快照、无快照回退 static，并返回正确 `modelsSource`。
+- [x] AC-B3: 模型候选接口未认证返回 401；不同用户之间不能读取彼此的扫描快照。
 
 ### Phase C（前端来源与漂移可见性）
-- [ ] AC-C1: 扫描卡片和 Model 候选显示来源徽章，按钮文案准确。
-- [ ] AC-C2: 当前成员 model 不在最近扫描清单时显示现场警告，且表单值保持不变。
-- [ ] AC-C3: 运行时 curl/UI 证明 Codex、OpenCode 和至少一个 static fallback 的来源正确。
+- [x] AC-C1: 扫描卡片和 Model 候选显示来源徽章，按钮文案准确。
+- [x] AC-C2: 当前成员 model 不在最近扫描清单时显示现场警告，且表单值保持不变。
+- [x] AC-C3: 运行时路由/UI 证明 Codex、OpenCode 和至少一个 static fallback 的来源正确。
 
 ## 需求点 Checklist
 
 | ID | 需求点（铲屎官原话/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | “每个 CLI 一条三层探测链，按顺序取第一个成功的” | AC-A1, AC-A2 | CLI 能力矩阵 + unit tests | [ ] |
-| R2 | “配置文件读取硬红线” | AC-A2 | credential-path rejection test | [ ] |
-| R3 | “优先读最近一次扫描结果，没扫过用 L3 static” | AC-B1, AC-B2, AC-B3 | route tests | [ ] |
-| R4 | “按 modelsSource 显示徽章” | AC-C1 | component test + screenshot | [ ] |
-| R5 | “漂移只提示，不要自动改成员配置” | AC-C2 | component regression test | [ ] |
-| R6 | “扫描仍然手动触发，不加后台定时” | AC-B1, AC-C1 | route/UI inspection | [ ] |
-| R7 | “重启后真机验证 Codex/OpenCode/static fallback” | AC-C3 | curl + screenshot | [ ] |
+| R1 | “每个 CLI 一条三层探测链，按顺序取第一个成功的” | AC-A1, AC-A2 | CLI 能力矩阵 + unit tests | [x] |
+| R2 | “配置文件读取硬红线” | AC-A2 | credential-path rejection test | [x] |
+| R3 | “优先读最近一次扫描结果，没扫过用 L3 static” | AC-B1, AC-B2, AC-B3 | route tests | [x] |
+| R4 | “按 modelsSource 显示徽章” | AC-C1 | component test | [x] |
+| R5 | “漂移只提示，不要自动改成员配置” | AC-C2 | component regression test | [x] |
+| R6 | “扫描仍然手动触发，不加后台定时” | AC-B1, AC-C1 | route/UI inspection | [x] |
+| R7 | “真机验证 Codex/OpenCode/static fallback” | AC-C3 | Fastify route injection + UI test | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -106,3 +106,16 @@ in_context_observability:
 |------|------|
 | 2026-07-10 | 铲屎官给出完整规格并立项 |
 | 2026-07-11 | 收尾审计补齐身份校验、用户隔离、static fallback 语义和 HOME 隔离测试 |
+| 2026-07-11 | `aa1cdc8e` 落地 F191；后续迭代补充 Grok、Kimi 新配置目录、远程清单与云目录 |
+| 2026-07-26 | 复核实现与真机来源，完成任务 #55 收口 |
+
+## Verification Evidence
+
+- API 定向回归：`local-cli-probe.test.js`、`local-cli-probes-routes.test.js`、
+  `cats-routes-runtime-catalog.test.js`，共 41 项通过。
+- Web 定向回归：`hub-cat-editor.test.tsx`，56 项通过。
+- 真机安全扫描（Fastify route injection，不访问凭证文件）：
+  - Codex `0.144.0`：`config_only`，发现 `gpt-5.6-sol`、
+    `gpt-5.6-terra`、`gpt-5.6-luna` 等 7 个模型。
+  - OpenCode `1.14.39`：`config_only`，发现 3 个配置模型。
+  - Gemini `0.49.0`：`static_only`，正确标记为内置兜底而非实测结果。

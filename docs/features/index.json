@@ -1161,7 +1161,7 @@
     {
       "id": "F191",
       "name": "Local CLI Model Radar — 本地 CLI 真实模型扫描雷达",
-      "status": "in-progress | **Owner**: Maine Coon / Codex | **Priority**: P1",
+      "status": "implemented | **Owner**: Maine Coon / Codex | **Priority**: P1",
       "file": "F191-local-cli-model-radar.md"
     },
     {
