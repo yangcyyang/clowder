@@ -20,7 +20,6 @@ const ALLOWLISTED_PATHS = [
   'console-shell.css',
   'theme-tokens.css',
   'color-utils.ts',
-  'pixel-brawl/',
   'types.ts',
   'story-export/story-data.ts',
 ];

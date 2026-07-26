@@ -273,35 +273,6 @@ export type {
   CreateExternalProjectInput,
   ExternalProject,
 } from './external-project.js';
-// Game engine types (F101)
-export type {
-  ActionDefinition,
-  ActionStatus,
-  ActorType,
-  Ballot,
-  EventScope,
-  GameAction,
-  GameConfig,
-  GameDefinition,
-  GameEvent,
-  GameResultStats,
-  GameRuntime,
-  GameView,
-  PendingAction,
-  PhaseDefinition,
-  Resolution,
-  RoleDefinition,
-  Seat,
-  SeatId,
-  SeatView,
-  WinCondition,
-} from './game.js';
-export {
-  isGameEvent,
-  isSeatId,
-  isValidActionStatus,
-  isValidScope,
-} from './game.js';
 // ID types
 export type {
   CatId,

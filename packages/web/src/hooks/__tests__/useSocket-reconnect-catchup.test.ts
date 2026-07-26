@@ -121,11 +121,6 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-// Mock game reconnect
-vi.mock('../useGameReconnect', () => ({
-  reconnectGame: vi.fn(() => Promise.resolve()),
-}));
-
 import { configureDebug } from '@/debug/invocationEventDebug';
 import { type SocketCallbacks, useSocket } from '../useSocket';
 

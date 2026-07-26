@@ -4,7 +4,6 @@ import {
   callbackTools,
   distillationTools,
   evidenceTools,
-  gameActionTools,
   limbTools,
   reflectTools,
   richBlockRulesTools,
@@ -97,7 +96,6 @@ const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
   ...taskLifecycleTools,
   ...richBlockRulesTools,
-  ...gameActionTools,
   ...scheduleTools,
   ...shellTools,
 ]);

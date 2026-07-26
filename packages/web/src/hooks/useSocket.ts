@@ -20,7 +20,6 @@ import { getTaskAttentionToast } from '@/utils/taskAttention';
 import { getUserId } from '@/utils/userId';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
-import { reconnectGame } from './useGameReconnect';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
@@ -186,15 +185,6 @@ export interface SocketCallbacks {
     createdAt: number;
   }) => void;
   onAuthorizationResponse?: (data: { requestId: string; status: string; scope?: string; reason?: string }) => void;
-  /** F101: Game state update */
-  onGameStateUpdate?: (data: { gameId: string; view: unknown; timestamp: number }) => void;
-  /** F101 Phase D: Independent game thread created */
-  onGameThreadCreated?: (data: {
-    gameThreadId: string;
-    gameTitle: string;
-    initiatorUserId: string;
-    timestamp: number;
-  }) => void;
   /** #80 fix-C: Clear the done-timeout guard (called when background thread completes) */
   clearDoneTimeout?: (threadId?: string) => void;
   /** F39: Queue updated */
@@ -558,11 +548,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         threadId: tid ?? undefined,
         queueLength: rejoinedRooms.length,
       });
-
-      // F101: Recover game state on reconnect
-      if (tid) {
-        reconnectGame(tid).catch(() => {});
-      }
 
       // Reconnect reconciliation: verify invocation state against server truth.
       // Socket disconnect can lose done(isFinal) events, leaving stale "replying" UI.
@@ -1022,33 +1007,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       'brake:trigger',
       (data: { level: 1 | 2 | 3; activeMinutes: number; nightMode: boolean; timestamp: number }) => {
         useBrakeStore.getState().show(data);
-      },
-    );
-
-    // F101: Game state updates (per-seat scoped views)
-    socket.on('game:state_update', (data: { gameId: string; view: unknown; timestamp: number }) => {
-      callbacksRef.current.onGameStateUpdate?.(data);
-    });
-
-    // F101 Phase I: Narrator narrative messages (e.g. "🐺 狼人请睁眼")
-    socket.on(
-      'game:narrative',
-      (data: { threadId: string; message: { id: string; type: string; content: string; timestamp: number } }) => {
-        if (!data?.threadId || !data?.message?.id) return;
-        useChatStore.getState().addMessageToThread(data.threadId, {
-          id: data.message.id,
-          type: 'system',
-          content: data.message.content,
-          timestamp: data.message.timestamp,
-        });
-      },
-    );
-
-    // F101 Phase D: Independent game thread created
-    socket.on(
-      'game:thread_created',
-      (data: { gameThreadId: string; gameTitle: string; initiatorUserId: string; timestamp: number }) => {
-        callbacksRef.current.onGameThreadCreated?.(data);
       },
     );
 

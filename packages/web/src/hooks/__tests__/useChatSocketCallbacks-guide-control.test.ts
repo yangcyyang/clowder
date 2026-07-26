@@ -16,10 +16,6 @@ vi.mock('@/stores/chatStore', () => ({
   }),
 }));
 
-vi.mock('@/stores/gameStore', () => ({
-  useGameStore: { getState: () => ({ setGameView: vi.fn() }) },
-}));
-
 vi.mock('@/stores/taskStore', () => ({
   useTaskStore: () => ({
     addTask: vi.fn(),
@@ -36,7 +32,6 @@ let captured: SocketCallbacks | null = null;
 function HookHost({ threadId }: { threadId: string }) {
   captured = useChatSocketCallbacks({
     threadId,
-    userId: 'user-1',
     handleAgentMessage: vi.fn(() => true) as unknown as SocketCallbacks['onMessage'],
     resetTimeout: vi.fn(),
     clearDoneTimeout: vi.fn(),

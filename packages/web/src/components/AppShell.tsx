@@ -8,7 +8,7 @@ import { QuickSwitchPalette } from './QuickSwitchPalette';
 import { ThreadSidebar } from './ThreadSidebar';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const CHROMELESS_ROUTES = ['/story-export', '/pixel-brawl', '/showcase'];
+const CHROMELESS_ROUTES = ['/story-export', '/showcase'];
 
 interface AppShellProps {
   children: React.ReactNode;

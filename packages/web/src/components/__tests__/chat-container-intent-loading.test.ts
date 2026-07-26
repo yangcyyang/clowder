@@ -122,7 +122,6 @@ vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('../game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));

@@ -28,20 +28,6 @@ export type { Intent, IntentResult } from './context/IntentParser.js';
 export { parseIntent, stripIntentTags } from './context/IntentParser.js';
 export type { InvocationContext } from './context/SystemPromptBuilder.js';
 export { buildInvocationContext, buildStaticIdentity, buildSystemPrompt } from './context/SystemPromptBuilder.js';
-// Game engine (F101)
-export { GameEngine } from './game/GameEngine.js';
-export type { GameOrchestratorDeps, StartGameInput } from './game/GameOrchestrator.js';
-export { GameOrchestrator } from './game/GameOrchestrator.js';
-export type { GameStats, PlayerStats } from './game/GameStatsRecorder.js';
-export { GameStatsRecorder } from './game/GameStatsRecorder.js';
-export { GameViewBuilder } from './game/GameViewBuilder.js';
-export type { AIProvider } from './game/werewolf/WerewolfAIPlayer.js';
-export { WerewolfAIPlayer } from './game/werewolf/WerewolfAIPlayer.js';
-export { createWerewolfDefinition, WEREWOLF_PRESETS } from './game/werewolf/WerewolfDefinition.js';
-// Werewolf (F101 Phase B)
-export { WerewolfEngine } from './game/werewolf/WerewolfEngine.js';
-export { WerewolfLobby } from './game/werewolf/WerewolfLobby.js';
-export { buildWerewolfPrompt } from './game/werewolf/werewolf-prompts.js';
 export type { AuditEvent, AuditEventInput } from './orchestration/EventAuditLog.js';
 export { AuditEventTypes, EventAuditLog, getEventAuditLog } from './orchestration/EventAuditLog.js';
 export { createAuthorizationAuditStore } from './stores/factories/AuthorizationAuditStoreFactory.js';
@@ -75,7 +61,6 @@ export type {
   ReleaseFreshnessHoldInput,
 } from './stores/ports/FreshnessHoldStore.js';
 export { FreshnessHoldStore } from './stores/ports/FreshnessHoldStore.js';
-export type { IGameStore } from './stores/ports/GameStore.js';
 export type {
   CreateInvocationInput,
   CreateResult,
@@ -116,7 +101,6 @@ export { RedisAuthorizationAuditStore } from './stores/redis/RedisAuthorizationA
 export { RedisAuthorizationRuleStore } from './stores/redis/RedisAuthorizationRuleStore.js';
 export { RedisDraftStore } from './stores/redis/RedisDraftStore.js';
 export { RedisFreshnessHoldStore } from './stores/redis/RedisFreshnessHoldStore.js';
-export { RedisGameStore } from './stores/redis/RedisGameStore.js';
 export { RedisInvocationRecordStore } from './stores/redis/RedisInvocationRecordStore.js';
 export { RedisMessageStore } from './stores/redis/RedisMessageStore.js';
 export { RedisPendingRequestStore } from './stores/redis/RedisPendingRequestStore.js';

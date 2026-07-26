@@ -150,7 +150,6 @@ import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system
 import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { freshnessHoldsRoutes } from './routes/freshness-holds.js';
-import { gameRoutes } from './routes/games.js';
 import {
   accountsRoutes,
   activityRoutes,
@@ -735,24 +734,14 @@ async function main(): Promise<void> {
     // Phase E-1: thread summary indexing — provide a callback that lists all threads
     threadListFn: async () => {
       const threads = await threadStore.list('default-user');
-      return threads
-        .filter((t) => !t.projectPath.startsWith('games/'))
-        .map((t) => ({
-          id: t.id,
-          title: t.title,
-          participants: t.participants as string[],
-          threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
-          lastActiveAt: t.lastActiveAt,
-          featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
-        }));
-    },
-    excludeThreadIdsFn: async () => {
-      const allThreads = await threadStore.list('default-user');
-      const excluded = new Set<string>();
-      for (const t of allThreads) {
-        if (t.projectPath.startsWith('games/')) excluded.add(t.id);
-      }
-      return excluded;
+      return threads.map((t) => ({
+        id: t.id,
+        title: t.title,
+        participants: t.participants as string[],
+        threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
+        lastActiveAt: t.lastActiveAt,
+        featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
+      }));
     },
   });
   // F152: Wire evidence store into /ready probe
@@ -1517,50 +1506,6 @@ async function main(): Promise<void> {
     stopReminderScheduler();
   });
 
-  // F101: Game engine store (created early so messages route can intercept /game commands)
-  const { RedisGameStore } = await import('./domains/cats/services/stores/redis/RedisGameStore.js');
-  const f101GameStore = redis ? new RedisGameStore(redis) : undefined;
-
-  // F101 Phase I: Shared ActionNotifier + game driver (narrator or legacy).
-  // Created early so both messagesRoutes and gameRoutes use the same driver instance.
-  const { EventEmitterActionNotifier } = await import('./domains/cats/services/game/EventEmitterActionNotifier.js');
-  const sharedActionNotifier = new EventEmitterActionNotifier();
-  let f101SharedDriver: import('./domains/cats/services/game/GameDriver.js').GameDriver | undefined;
-  if (f101GameStore) {
-    const gameNarratorEnabled = process.env.GAME_NARRATOR_ENABLED === 'true';
-    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
-    const sharedOrchestrator = new GameOrchestrator({ gameStore: f101GameStore, socketManager, messageStore });
-    const { createGameDriver } = await import('./domains/cats/services/game/createGameDriver.js');
-    if (gameNarratorEnabled) {
-      const { createWakeCatFn } = await import('./domains/cats/services/game/wakeCatImpl.js');
-      const wakeCat = createWakeCatFn({
-        threadStore,
-        invocationQueue,
-        queueProcessor,
-        log: app.log,
-      });
-      f101SharedDriver = createGameDriver({
-        gameNarratorEnabled: true,
-        legacyDeps: { gameStore: f101GameStore, orchestrator: sharedOrchestrator, messageStore },
-        narratorDeps: {
-          gameStore: f101GameStore,
-          wakeCat,
-          actionNotifier: sharedActionNotifier,
-          orchestrator: sharedOrchestrator,
-          messageStore,
-          socketManager,
-        },
-      });
-      app.log.info('[api] F101 game driver: GameNarratorDriver (agent-driven)');
-    } else {
-      f101SharedDriver = createGameDriver({
-        gameNarratorEnabled: false,
-        legacyDeps: { gameStore: f101GameStore, orchestrator: sharedOrchestrator, messageStore },
-      });
-      app.log.info('[api] F101 game driver: LegacyAutoDriver');
-    }
-  }
-
   // Register routes (socketManager injected, no circular import)
   const messagesOpts = {
     registry,
@@ -1579,8 +1524,6 @@ async function main(): Promise<void> {
     queueProcessor,
     catSupervisor,
     sessionContinuationCoordinator,
-    ...(f101GameStore ? { gameStore: f101GameStore } : {}),
-    ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
   };
   await app.register(messagesRoutes, messagesOpts);
@@ -1679,34 +1622,6 @@ async function main(): Promise<void> {
   const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore };
   await app.register(connectorHubRoutes, connectorHubOpts);
   await app.register(brakeRoutes, { activityTracker });
-
-  // F101: Game routes (store created earlier for /game command interception)
-  if (f101GameStore) {
-    await app.register(gameRoutes, {
-      gameStore: f101GameStore,
-      socketManager,
-      threadStore,
-      messageStore,
-      ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
-    });
-
-    const { gameActionRoutes, clearGameNonces } = await import('./routes/game-actions.js');
-    const { GameOrchestrator } = await import('./domains/cats/services/game/GameOrchestrator.js');
-    const actionOrchestrator = new GameOrchestrator({
-      gameStore: f101GameStore,
-      socketManager,
-      messageStore,
-      onGameEnd: (gameId) => clearGameNonces(gameId),
-    });
-    await app.register(gameActionRoutes, {
-      gameStore: f101GameStore,
-      orchestrator: actionOrchestrator,
-      threadStore,
-      actionNotifier: sharedActionNotifier,
-    });
-
-    app.log.info('[api] F101 game routes registered');
-  }
 
   // Phase D (AC-D1): validate repo exists via `gh repo view` before PR tracking registration.
   // Generic — works for any GitHub repo the caller has access to, not hardcoded to ours.
@@ -2303,13 +2218,6 @@ async function main(): Promise<void> {
     acpPoolRegistry.clear();
   });
 
-  // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
-  // The actual recovery player is assigned post-listen; stopAllLoops is a no-op if null.
-  let f101RecoveryPlayer: { stopAllLoops(): void } | null = null;
-  app.addHook('onClose', async () => {
-    f101RecoveryPlayer?.stopAllLoops();
-  });
-
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
   let address: string;
@@ -2478,19 +2386,6 @@ async function main(): Promise<void> {
     const { accountStartupHook } = await import('./config/account-startup.js');
     const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
     app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
-  }
-
-  // F101 Phase G: Recover auto-play loops for active games after restart.
-  if (f101GameStore && socketManager && f101SharedDriver) {
-    f101RecoveryPlayer = f101SharedDriver;
-    try {
-      const recovered = await f101SharedDriver.recoverActiveGames();
-      if (recovered > 0) {
-        app.log.info(`[api] F101 auto-play recovery: restored ${recovered} active game loop(s)`);
-      }
-    } catch (err) {
-      app.log.warn(`[api] F101 auto-play recovery failed (best-effort): ${String(err)}`);
-    }
   }
 
   // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)

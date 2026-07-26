@@ -26,7 +26,7 @@ export interface HistoryCriticalSealInput {
 async function forceCriticalMemoryWriteback(input: HistoryCriticalSealInput): Promise<void> {
   const { intent, catId, threadId } = input;
   let projectRoot: string | null = null;
-  if (input.projectPath && input.projectPath !== 'default' && !input.projectPath.startsWith('games/')) {
+  if (input.projectPath && input.projectPath !== 'default') {
     try {
       projectRoot = await validateProjectPath(input.projectPath);
     } catch (err) {

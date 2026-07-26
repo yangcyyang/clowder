@@ -6559,45 +6559,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('F101: game thread projectPath (games/*) does not trigger governance gate', async () => {
-    const optionsSeen = [];
-    const service = {
-      async *invoke(_prompt, options) {
-        optionsSeen.push(options ?? {});
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-      },
-    };
-
-    const deps = {
-      ...makeDeps(),
-      threadStore: {
-        get: async () => ({ projectPath: 'games/werewolf', createdBy: 'user1' }),
-        updateParticipantActivity: async () => {},
-      },
-    };
-
-    const msgs = await collect(
-      invokeSingleCat(deps, {
-        catId: 'opus',
-        service,
-        prompt: 'test game briefing',
-        userId: 'user1',
-        threadId: 'thread-game-werewolf',
-        isLastCat: true,
-      }),
-    );
-
-    assert.ok(
-      !msgs.some((m) => m.type === 'system_info' && m.content?.includes('governance_blocked')),
-      'game thread must NOT trigger governance_blocked',
-    );
-    assert.ok(
-      msgs.some((m) => m.type === 'done'),
-      'should reach done (service was invoked)',
-    );
-    assert.equal(optionsSeen[0]?.workingDirectory, undefined, 'workingDirectory must be undefined for game threads');
-  });
-
   it('bug-fix: account resolution uses runtime root (process.cwd()), not thread.projectPath', async () => {
     // Regression: thread.projectPath points to dev worktree which lacks runtime-only accounts.
     // Account resolution must always use process.cwd() (the runtime root).

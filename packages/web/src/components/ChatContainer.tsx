@@ -13,8 +13,6 @@ import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { primeCoCreatorConfigCache, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
-import { godAction, submitAction } from '@/hooks/useGameApi';
-import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -29,7 +27,6 @@ import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
-import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -61,7 +58,6 @@ import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
-import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { InlineThreadPanel } from './InlineThreadPanel';
@@ -235,25 +231,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, []);
   const uiThinkingExpandedByDefault = useChatStore((s) => s.uiThinkingExpandedByDefault);
   const isOfflineSnapshot = useChatStore((s) => s.isOfflineSnapshot);
-
-  // F101: Game state from Zustand store
-  const gameView = useGameStore((s) => s.gameView);
-  const isGameActive = useGameStore((s) => s.isGameActive);
-  const isNight = useGameStore((s) => s.isNight);
-  const selectedTarget = useGameStore((s) => s.selectedTarget);
-  const godScopeFilter = useGameStore((s) => s.godScopeFilter);
-  const myRole = useGameStore((s) => s.myRole);
-  const myRoleIcon = useGameStore((s) => s.myRoleIcon);
-  const myActionLabel = useGameStore((s) => s.myActionLabel);
-  const myActionHint = useGameStore((s) => s.myActionHint);
-  const isGodView = useGameStore((s) => s.isGodView);
-  const isDetective = useGameStore((s) => s.isDetective);
-  const detectiveBoundName = useGameStore((s) => s.detectiveBoundName);
-  const godSeats = useGameStore((s) => s.godSeats);
-  const godNightSteps = useGameStore((s) => s.godNightSteps);
-  const hasTargetedAction = useGameStore((s) => s.hasTargetedAction);
-  const altActionName = useGameStore((s) => s.altActionName);
-  const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isExport = searchParams?.get('export') === 'true';
@@ -849,8 +826,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
     // First mount — sync threadId to store without save/restore
     setCurrentThread(threadId);
-    // F101: Recover game state for the new thread (or clear stale game from previous thread)
-    reconnectGame(threadId).catch(() => {});
   }, [
     threadId,
     clearTasks, // Clean up non-thread-scoped refs
@@ -913,13 +888,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   const socketCallbacks = useChatSocketCallbacks({
     threadId,
-    userId: getUserId(),
     handleAgentMessage,
     resetTimeout,
     clearDoneTimeout,
     handleAuthRequest,
     handleAuthResponse,
-    onNavigateToThread: navigateToThread,
     onIndexEvent: handleIndexSocketEvent,
   });
 
@@ -1631,72 +1604,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 uploadError={uploadError}
               />
             </div>
-
-            {/* F101: "Return to game" banner when overlay is minimized */}
-            {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
-              <button
-                onClick={() => useGameStore.getState().restoreOverlay()}
-                className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg bg-[var(--console-active-bg)] px-3 py-2 text-sm text-cafe hover:bg-[var(--console-hover-bg)] transition-colors"
-              >
-                🎮 返回游戏
-              </button>
-            )}
           </div>
-
-          {/* F101: Game overlay — renders when a game is active */}
-          <GameOverlayConnector
-            gameView={gameView}
-            isGameActive={isGameActive}
-            overlayMinimized={overlayMinimized}
-            currentThreadId={threadId}
-            isNight={isNight}
-            selectedTarget={selectedTarget}
-            godScopeFilter={godScopeFilter}
-            isGodView={isGodView}
-            isDetective={isDetective}
-            detectiveBoundName={detectiveBoundName ?? undefined}
-            godSeats={godSeats}
-            godNightSteps={godNightSteps}
-            hasTargetedAction={hasTargetedAction}
-            myRole={myRole ?? undefined}
-            myRoleIcon={myRoleIcon ?? undefined}
-            myActionLabel={myActionLabel ?? undefined}
-            myActionHint={myActionHint ?? undefined}
-            altActionName={altActionName ?? undefined}
-            onClose={() => {
-              useGameStore.getState().minimizeOverlay();
-            }}
-            onSelectTarget={(seatId) => useGameStore.getState().setSelectedTarget(seatId)}
-            onGodScopeChange={(scope) => useGameStore.getState().setGodScopeFilter(scope)}
-            onGodAction={(action) => godAction(threadId, action)}
-            onVote={() => {
-              const state = useGameStore.getState();
-              if (state.selectedTarget && state.mySeatId) {
-                submitAction(threadId, state.mySeatId, 'vote', state.selectedTarget);
-                state.setSelectedTarget(null);
-              }
-            }}
-            onSpeak={(content) => {
-              const state = useGameStore.getState();
-              if (state.mySeatId) {
-                submitAction(threadId, state.mySeatId, 'speak', undefined, { content });
-              }
-            }}
-            onConfirmAction={() => {
-              const state = useGameStore.getState();
-              if (state.selectedTarget && state.mySeatId && state.currentActionName) {
-                submitAction(threadId, state.mySeatId, state.currentActionName, state.selectedTarget);
-                state.setSelectedTarget(null);
-              }
-            }}
-            onConfirmAltAction={() => {
-              const state = useGameStore.getState();
-              if (state.selectedTarget && state.mySeatId && state.altActionName) {
-                submitAction(threadId, state.mySeatId, state.altActionName, state.selectedTarget);
-                state.setSelectedTarget(null);
-              }
-            }}
-          />
         </div>
 
         {statusPanelOpen && rightPanelMode === 'status' && (

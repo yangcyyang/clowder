@@ -98,8 +98,6 @@ const EXPECTED_TOOLS = [
   'limb_invoke',
   'limb_pair_list',
   'limb_pair_approve',
-  // F101 Phase I: Game action tool
-  'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -150,7 +148,6 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
-  'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
@@ -403,7 +400,6 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_mark_generalizable',
   'cat_cafe_nominate_for_global',
   'cat_cafe_review_distillation', // POST approve/reject → writes global knowledge
-  'cat_cafe_submit_game_action',
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_hold_ball', // callbackPost → writes scheduled task

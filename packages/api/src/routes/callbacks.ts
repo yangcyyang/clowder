@@ -60,7 +60,6 @@ import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
-import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
@@ -2977,12 +2976,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   // F162 Phase B: Lark/Feishu enterprise action callback routes
   registerCallbackLarkActionRoutes(app, {
-    registry,
-    ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
-  });
-
-  // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
-  registerCallbackGameRoutes(app, {
     registry,
     ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
   });

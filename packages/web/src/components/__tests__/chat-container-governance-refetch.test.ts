@@ -143,31 +143,6 @@ vi.mock('@/stores/chatStore', () => {
   return { useChatStore: hook };
 });
 
-vi.mock('@/stores/gameStore', () => {
-  const gameState = {
-    gameView: null,
-    isGameActive: false,
-    isNight: false,
-    selectedTarget: null,
-    godScopeFilter: null,
-    myRole: null,
-    myRoleIcon: null,
-    myActionLabel: null,
-    myActionHint: null,
-    isGodView: false,
-    isDetective: false,
-    detectiveBoundName: null,
-    godSeats: [],
-    godNightSteps: [],
-    hasTargetedAction: false,
-    altActionName: null,
-    overlayMinimized: false,
-  };
-  const hook = (selector?: (s: typeof gameState) => unknown) => (selector ? selector(gameState) : gameState);
-  hook.getState = () => ({ restoreOverlay: vi.fn() });
-  return { useGameStore: hook };
-});
-
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ threads: [] }) })),
 }));
@@ -281,7 +256,6 @@ vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
-vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
 vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
