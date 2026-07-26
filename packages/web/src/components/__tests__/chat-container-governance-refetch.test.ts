@@ -33,8 +33,6 @@ type StoreState = {
   splitPaneThreadIds: string[];
   setSplitPaneThreadIds: ReturnType<typeof vi.fn>;
   setSplitPaneTarget: ReturnType<typeof vi.fn>;
-  showVoteModal: boolean;
-  setShowVoteModal: ReturnType<typeof vi.fn>;
   rightPanelMode: null;
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
@@ -101,8 +99,6 @@ const makeStoreState = (): StoreState => ({
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
-  showVoteModal: false,
-  setShowVoteModal: vi.fn(),
   rightPanelMode: null,
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
@@ -247,7 +243,6 @@ vi.mock('../MessageActions', () => ({
 vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
-vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
 vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));

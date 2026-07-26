@@ -419,16 +419,6 @@ test('F153: InvocationQueue entry construction includes callerTraceContext from 
   );
 });
 
-test('F153: start_vote callback passes callerTraceContext to enqueueA2ATargets', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/routes/callbacks.ts'), 'utf8');
-  const voteIdx = src.indexOf('start-vote');
-  const a2aOptsIdx = src.indexOf('callerTraceContext: record.traceContext', voteIdx);
-  assert.ok(
-    voteIdx > 0 && a2aOptsIdx > voteIdx,
-    'start_vote callback should pass record.traceContext as callerTraceContext',
-  );
-});
-
 test('F153: invoke-single-cat stores traceFlags in traceContext', () => {
   const src = readFileSync(
     resolve(__dirname, '../../src/domains/cats/services/agents/invocation/invoke-single-cat.ts'),

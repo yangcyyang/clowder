@@ -35,9 +35,6 @@ vi.mock('../HubToolUsageTab', () => ({
 vi.mock('../HubObservabilityTab', () => ({
   HubObservabilityTab: () => React.createElement('div', null, 'HubObservabilityTab'),
 }));
-vi.mock('../HubLeaderboardTab', () => ({
-  HubLeaderboardTab: () => React.createElement('div', null, 'HubLeaderboardTab'),
-}));
 vi.mock('../settings/DangerousActionAuditPanel', () => ({
   DangerousActionAuditPanel: () => React.createElement('div', null, 'DangerousActionAuditPanel'),
 }));
@@ -79,7 +76,9 @@ describe('OpsContent sub-tabs', () => {
     expect(tabLabels).toContain('命令速查');
     expect(tabLabels).toContain('紧急救援');
     expect(container.textContent).toContain('高级');
-    expect(container.textContent).toContain('实验区');
+    // F075 排行榜 was the only 'experimental' group entry; with it removed the
+    // group has zero subsections and OpsContent filters empty groups (no header renders).
+    expect(container.textContent).not.toContain('实验区');
     expect(tabLabels).not.toContain('用量/配额');
     expect(tabLabels).not.toContain('排行榜');
   });

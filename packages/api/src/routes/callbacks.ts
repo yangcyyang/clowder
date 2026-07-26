@@ -37,11 +37,10 @@ import {
   type ThreadAppendWatermark,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
-import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
-import { buildVoteNotification } from '../domains/votes/vote-utils.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -79,7 +78,6 @@ import { registerCallbackWeComActionRoutes } from './callback-wecom-action-route
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
 import { detectUserMention } from './user-mention.js';
-import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
 const log = createModuleLogger('routes/callbacks');
 
@@ -2706,165 +2704,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F182 AC-C1: A class — routing_warnings + KD-7 message (rich blocks have no routing targets)
     return { status: 'ok', routing_warnings: [], message: '富文本块已创建。' };
-  });
-
-  // F079 Gap 4: Cat-initiated vote via MCP callback
-  const startVoteCallbackSchema = z.object({
-    question: z.string().min(1).max(500),
-    options: z.array(z.string().min(1).max(100)).min(2).max(20),
-    anonymous: z.boolean().optional().default(false),
-    timeoutSec: z.number().int().min(10).max(600).optional().default(120),
-    voters: z.array(z.string().min(1).max(50)).min(1).max(20),
-  });
-
-  app.post('/api/callbacks/start-vote', async (request, reply) => {
-    if (!threadStore) {
-      reply.status(503);
-      return { error: 'Thread store not configured' };
-    }
-
-    const parsed = startVoteCallbackSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
-    }
-
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return;
-
-    const { question, options, anonymous, timeoutSec, voters } = parsed.data;
-
-    // P2 fix: verify thread exists
-    const thread = await threadStore.get(record.threadId);
-    if (!thread) {
-      reply.status(404);
-      return { error: '对话不存在', code: 'THREAD_NOT_FOUND' };
-    }
-
-    // F182 AC-C2: B class — validate all voters are available, collect resolved canonical catIds
-    const resolvedVoters: CatId[] = [];
-    for (const voter of voters) {
-      const resolved = resolveCatTarget(voter);
-      if ('error' in resolved) {
-        reply.status(400);
-        return resolved.error;
-      }
-      resolvedVoters.push(createCatId(resolved.ok));
-    }
-
-    const freshness = await claimCallbackSideEffect({
-      freshnessGate: opts.freshnessGate,
-      registry,
-      record,
-      route: 'start-vote',
-      requestBody: parsed.data,
-    });
-    if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
-
-    // Legacy invocations keep the pre-F193 latest-invocation behavior.
-    if (freshness.outcome === 'legacy' && !(await registry.isLatest(record.invocationId))) {
-      return { status: 'stale_ignored' };
-    }
-
-    // Check for existing active vote
-    const existing = await threadStore.getVotingState(record.threadId);
-    if (existing && existing.status === 'active') {
-      if (freshness.outcome === 'authorized') await freshness.abort();
-      reply.status(409);
-      return { error: '已有活跃投票', code: 'VOTE_ALREADY_ACTIVE' };
-    }
-
-    // P1-1 fix: createdBy must be userId (closeVoteInternal uses it as message userId).
-    // initiatedByCat tracks which cat started the vote (for display purposes).
-    const votingState: VotingStateV1 = {
-      v: 1,
-      question,
-      options,
-      votes: {},
-      anonymous,
-      deadline: Date.now() + timeoutSec * 1000,
-      createdBy: record.userId,
-      status: 'active',
-      voters: resolvedVoters,
-      initiatedByCat: record.catId as string,
-    };
-
-    await threadStore.updateVotingState(record.threadId, votingState);
-
-    // Register timeout auto-close (shared timer map with votes.ts)
-    clearVoteTimer(record.threadId);
-    const timer = setTimeout(() => {
-      closeVoteInternal(record.threadId, threadStore, socketManager, messageStore).catch((err) => {
-        log.error({ threadId: record.threadId, err }, 'Timeout auto-close failed');
-      });
-    }, timeoutSec * 1000);
-    if (typeof timer === 'object' && 'unref' in timer) timer.unref();
-    voteTimers.set(record.threadId, timer);
-
-    socketManager.broadcastToRoom(`thread:${record.threadId}`, 'vote_started', {
-      threadId: record.threadId,
-      votingState,
-    });
-
-    // Send notification message to each voter (so they see the vote request in chat)
-    const notificationContent = buildVoteNotification(question, options);
-    const mentionCatIds = resolvedVoters;
-    let notificationMsg: Awaited<ReturnType<typeof messageStore.append>> | undefined;
-    try {
-      notificationMsg = await messageStore.append({
-        userId: record.userId,
-        catId: record.catId,
-        content: notificationContent,
-        mentions: mentionCatIds,
-        origin: 'callback',
-        timestamp: Date.now(),
-        threadId: record.threadId,
-      });
-    } catch (err) {
-      log.warn({ err }, 'Failed to persist vote notification');
-    }
-
-    // Dispatch voter cats so they receive the notification and can vote.
-    // Uses enqueueA2ATargets (standard A2A dispatch, NOT multi_mention depth guard).
-    // If queue overflows (>MAX_QUEUE_DEPTH), falls back to direct dispatch for remaining voters.
-    if (notificationMsg && router && invocationRecordStore) {
-      const a2aDeps = {
-        router,
-        invocationRecordStore,
-        socketManager,
-        messageStore,
-        invocationTracker,
-        deliveryCursorStore,
-        queueProcessor,
-        invocationQueue: opts.invocationQueue,
-        log: app.log,
-      };
-      const a2aOpts = {
-        targetCats: mentionCatIds,
-        content: notificationContent,
-        userId: record.userId,
-        threadId: record.threadId,
-        triggerMessage: notificationMsg,
-        callerCatId: record.catId as CatId,
-        callerTraceContext: record.traceContext,
-      };
-      try {
-        const { enqueued } = await enqueueA2ATargets(a2aDeps, a2aOpts);
-        // Fallback: voters that hit queue capacity limit → direct dispatch
-        const missed = mentionCatIds.filter((c) => !enqueued.includes(c));
-        if (missed.length > 0) {
-          app.log.info(
-            { threadId: record.threadId, missed, enqueued },
-            '[callbacks/start-vote] Queue overflow: falling back to direct dispatch for remaining voters',
-          );
-          await triggerA2AInvocation(a2aDeps, { ...a2aOpts, targetCats: missed });
-        }
-      } catch (err) {
-        app.log.warn(`[callbacks/start-vote] Failed to dispatch voter invocations: ${String(err)}`);
-      }
-    }
-
-    return { status: 'ok', threadId: record.threadId, votingState };
   });
 
   if (taskStore) {

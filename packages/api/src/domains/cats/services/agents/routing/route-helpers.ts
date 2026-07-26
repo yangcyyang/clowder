@@ -708,7 +708,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   loadStandardContext: boolean;
   loadFullContext: boolean;
   hasPackBlocks: boolean;
-  hasWorldContext: boolean;
   hasSessionBootstrap: boolean;
   hasSignalArticles: boolean;
   hasAlwaysOnDocs: boolean;
@@ -738,7 +737,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.projectContextDeferred) loadedBlocks.push('project-progress:on-demand');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasPackBlocks) loadedBlocks.push('pack-blocks');
-  if (input.hasWorldContext) loadedBlocks.push('world-context');
   if (input.hasSessionBootstrap) loadedBlocks.push('session-bootstrap');
   if (input.hasSignalArticles) loadedBlocks.push('signal-articles');
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
@@ -816,7 +814,7 @@ export interface RouteStrategyDeps {
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */
   draftStore?: IDraftStore;
-  /** F079 Bug 2: Optional broadcaster for real-time vote result delivery */
+  /** Optional broadcaster for real-time delivery (thread updates, queue events, etc.) */
   socketManager?: RouteBroadcaster;
   /** F129: Pack store for loading active packs at invocation time */
   packStore?: import('../../../../packs/PackStore.js').PackStore;
@@ -828,10 +826,6 @@ export interface RouteStrategyDeps {
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
-  /** F093: World context provider for world-building mode (optional, fail-open) */
-  worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
-  /** F093: World store for thread→world lookup (optional, fail-open) */
-  worldStore?: import('../../../../world/interfaces.js').IWorldStore;
 }
 
 export interface HistoryGovernanceHistorySnapshot {

@@ -109,7 +109,7 @@ describe('FreshnessEgressGate', () => {
     assert.equal(retryAfterProvenNoop.replayed, false);
 
     await appendQueuedUserMessage(messageStore, 'new input before another side effect', NOW + 1);
-    const stale = await gate.claimSideEffect({ ...input, submissionKey: 'start-vote:vote-1' });
+    const stale = await gate.claimSideEffect({ ...input, submissionKey: 'create-task:task-2' });
     assert.equal(stale.outcome, 'stale');
     assert.ok(BigInt(stale.observedWatermark) > BigInt(baseline));
   });

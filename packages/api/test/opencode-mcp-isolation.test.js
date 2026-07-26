@@ -166,7 +166,6 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
       'cat_cafe_search_evidence',
       'cat_cafe_reflect',
       'cat_cafe_multi_mention',
-      'cat_cafe_start_vote',
       'cat_cafe_update_workflow',
       'cat_cafe_register_pr_tracking',
     ];

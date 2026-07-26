@@ -33,8 +33,6 @@ type StoreState = {
   splitPaneThreadIds: string[];
   setSplitPaneThreadIds: ReturnType<typeof vi.fn>;
   setSplitPaneTarget: ReturnType<typeof vi.fn>;
-  showVoteModal: boolean;
-  setShowVoteModal: ReturnType<typeof vi.fn>;
   rightPanelMode: null;
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
@@ -76,8 +74,6 @@ const makeStoreState = (): StoreState => ({
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
-  showVoteModal: false,
-  setShowVoteModal: vi.fn(),
   rightPanelMode: null,
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
@@ -207,9 +203,6 @@ vi.mock('../QueuePanel', () => ({
 }));
 vi.mock('../ThreadExecutionBar', () => ({
   ThreadExecutionBar: () => React.createElement('div', { 'data-testid': 'execution-bar' }),
-}));
-vi.mock('../VoteActiveBar', () => ({
-  VoteActiveBar: () => React.createElement('div', { 'data-testid': 'vote-bar' }),
 }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({

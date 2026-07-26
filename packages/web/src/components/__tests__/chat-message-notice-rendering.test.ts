@@ -151,14 +151,14 @@ describe('ChatMessage notice rendering', () => {
         React.createElement(ChatMessage, {
           getCatById: (() => undefined) as never,
           message: {
-            id: 'connector-vote',
+            id: 'connector-multi-mention',
             type: 'connector',
-            content: '投票结果：2 票',
+            content: 'Multi-Mention 结果：2 条回复',
             timestamp: Date.now(),
             source: {
-              connector: 'vote-result',
-              label: '投票结果',
-              icon: 'ballot',
+              connector: 'multi-mention-result',
+              label: 'Multi-Mention 结果',
+              icon: 'users',
             },
           },
         }),

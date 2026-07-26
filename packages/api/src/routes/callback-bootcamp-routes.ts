@@ -11,7 +11,6 @@ import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshn
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { runEnvironmentCheck } from '../domains/cats/services/bootcamp/env-check.js';
 import type { BootcampStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { BOOTCAMP_PHASE_ACHIEVEMENTS } from '../domains/leaderboard/achievement-defs.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
@@ -130,7 +129,7 @@ export function registerCallbackBootcampRoutes(
     const { threadId, ...updates } = parsed.data;
 
     // Normalize legacy phase names before any downstream logic (PHASE_INDEX lookup,
-    // persistence, achievements). Without this, legacy names pass schema validation
+    // persistence). Without this, legacy names pass schema validation
     // but get rejected by the forward-only transition check or persist stale names.
     // Track whether normalization occurred — legacy-originated transitions inherently
     // span multiple phases (e.g. phase-4-first-project → phase-7-dev) so the gap
@@ -166,7 +165,6 @@ export function registerCallbackBootcampRoutes(
     };
 
     // P1 fix: Phase transition must be forward-only (no skipping)
-    let validTransition = false;
     if (updates.phase !== undefined) {
       const rawPhase = existing.phase as string;
       const currentPhase = (LEGACY_PHASE_MAP[rawPhase] ?? rawPhase) as (typeof PHASE_ORDER)[number];
@@ -178,7 +176,6 @@ export function registerCallbackBootcampRoutes(
           { threadId, rawPhase, targetPhase: updates.phase },
           '[bootcamp] unmapped legacy phase — allowing transition',
         );
-        validTransition = true;
       } else {
         request.log.info(
           { threadId, currentPhase, targetPhase: updates.phase, currentIdx, targetIdx, catId: record.catId },
@@ -208,7 +205,6 @@ export function registerCallbackBootcampRoutes(
           reply.status(400);
           return { error: `Phase skip not allowed: ${existing.phase} → ${updates.phase} (max 1 step forward)` };
         }
-        validTransition = true;
       }
     }
 
@@ -244,37 +240,9 @@ export function registerCallbackBootcampRoutes(
       await threadStore.updatePin(threadId, true);
     }
 
-    // F087 Phase D: Emit achievements via F075 event pipeline (P2 fix: unified contract)
-    let unlockedAchievement: string | undefined;
-    if (validTransition && updates.phase) {
-      const achievementId = BOOTCAMP_PHASE_ACHIEVEMENTS.get(updates.phase);
-      if (achievementId) {
-        const nonce = Math.random().toString(36).slice(2, 10);
-        const eventId = `bootcamp:${actor.userId}:achievement_unlocked:${Date.now()}:${nonce}`;
-        const eventRes = await app.inject({
-          method: 'POST',
-          url: '/api/leaderboard/events',
-          headers: { 'x-cat-cafe-user': actor.userId },
-          payload: {
-            eventId,
-            source: 'bootcamp',
-            catId: actor.catId ?? 'system',
-            eventType: 'achievement_unlocked',
-            payload: { achievementId },
-            timestamp: new Date().toISOString(),
-          },
-        });
-        const eventBody = JSON.parse(eventRes.body) as { status?: string };
-        if (eventRes.statusCode === 200 && (eventBody.status === 'ok' || eventBody.status === 'duplicate')) {
-          unlockedAchievement = achievementId;
-        }
-      }
-    }
-
     const updated = await threadStore.get(threadId);
     return {
       bootcampState: updated?.bootcampState,
-      ...(unlockedAchievement ? { unlockedAchievement } : {}),
     };
   });
 

@@ -278,96 +278,6 @@ describe('F182 C2 - B class: create_task disabled ownerCatId → 400', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B class: start_vote voter validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('F182 C2 - B class: start_vote disabled voter → 400', () => {
-  let registry;
-  let messageStore;
-  let threadStore;
-  let socketManager;
-  let app;
-
-  beforeEach(async () => {
-    const { InvocationRegistry } = await import(
-      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
-    );
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-
-    registry = new InvocationRegistry();
-    messageStore = new MessageStore();
-    threadStore = new ThreadStore();
-    socketManager = createMockSocketManager();
-
-    app = Fastify({ logger: false });
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      evidenceStore: {
-        search: async () => [],
-        health: async () => true,
-        initialize: async () => {},
-        upsert: async () => {},
-        deleteByAnchor: async () => {},
-        getByAnchor: async () => null,
-      },
-      reflectionService: { reflect: async () => '' },
-      markerQueue: { submit: async () => ({}), list: async () => [], transition: async () => {} },
-    });
-    await app.ready();
-  });
-
-  afterEach(async () => {
-    await app.close();
-  });
-
-  test('C2-c: disabled voter returns 400 cat_disabled', async () => {
-    const thread = threadStore.create('u1', 'test');
-    const { invocationId, callbackToken } = await registry.create('u1', 'opus', thread.id);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        question: 'Test vote?',
-        options: ['Yes', 'No'],
-        voters: ['antigravity'],
-      },
-    });
-
-    assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}: ${res.body}`);
-    const body = JSON.parse(res.body);
-    assert.equal(body.kind, 'cat_disabled', `expected cat_disabled, got: ${JSON.stringify(body)}`);
-    assert.equal(body.catId, 'antigravity');
-  });
-
-  test('C2-d: unknown voter returns 400 cat_not_found', async () => {
-    const thread = threadStore.create('u1', 'test');
-    const { invocationId, callbackToken } = await registry.create('u1', 'opus', thread.id);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        question: 'Test vote?',
-        options: ['Yes', 'No'],
-        voters: ['xyzunknown9999'],
-      },
-    });
-
-    assert.equal(res.statusCode, 400);
-    const body = JSON.parse(res.body);
-    assert.equal(body.kind, 'cat_not_found');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // A' class: multi_mention disabled target
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -561,22 +471,5 @@ describe('F182 P2-1 — store resolved catId not raw @mention', () => {
     assert.equal(res.statusCode, 201, `expected 201, got ${res.statusCode}: ${res.body}`);
     const body = JSON.parse(res.body);
     assert.equal(body.task.ownerCatId, 'codex', 'ownerCatId must be canonical catId (no @-prefix)');
-  });
-
-  test('P2-1b: start_vote voters stores canonical catIds when @mention format sent', async () => {
-    const thread = threadStore.create('u1', 'test');
-    const { invocationId, callbackToken } = await registry.create('u1', 'opus', thread.id);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { question: 'Test?', options: ['A', 'B'], voters: ['@codex'] },
-    });
-
-    assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
-    const body = JSON.parse(res.body);
-    assert.ok(body.votingState.voters.includes('codex'), 'voters must include canonical catId');
-    assert.ok(!body.votingState.voters.some((v) => v.startsWith('@')), 'voters must NOT have @-prefix');
   });
 });

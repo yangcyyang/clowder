@@ -1098,39 +1098,6 @@ export async function handleMultiMention(input: {
   });
 }
 
-// F079 Gap 4: Cat-initiated voting
-export const startVoteInputSchema = {
-  question: z.string().min(1).max(500).describe('The voting question'),
-  options: z.array(z.string().min(1).max(100)).min(2).max(20).describe('Voting options (at least 2)'),
-  voters: z
-    .array(z.string().min(1).max(50))
-    .min(1)
-    .max(20)
-    .describe(
-      'CatIds of voters. Use get_thread_cats to discover valid catIds. ' +
-        'F182: if any voter is disabled, returns 400 {kind:"cat_disabled", catId, alternatives[]}. ' +
-        'Replace the disabled voter with an available cat from alternatives[].',
-    ),
-  anonymous: z.boolean().optional().describe('Anonymous voting (default: false)'),
-  timeoutSec: z.number().int().min(10).max(600).optional().describe('Timeout in seconds (default: 120)'),
-};
-
-export async function handleStartVote(input: {
-  question: string;
-  options: string[];
-  voters: string[];
-  anonymous?: boolean | undefined;
-  timeoutSec?: number | undefined;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/start-vote', {
-    question: input.question,
-    options: input.options,
-    voters: input.voters,
-    ...(input.anonymous !== undefined ? { anonymous: input.anonymous } : {}),
-    ...(input.timeoutSec !== undefined ? { timeoutSec: input.timeoutSec } : {}),
-  });
-}
-
 // ============ Bootcamp (F087) ============
 
 export const updateBootcampStateInputSchema = {
@@ -1348,7 +1315,7 @@ export const callbackTools = [
     name: 'cat_cafe_get_thread_cats',
     description:
       'Discover which cats are in the current thread: participants (with activity stats), routable cats, and availability. ' +
-      'Use BEFORE multi_mention / start_vote / @mentions to find valid catIds — do NOT guess catIds from memory. ' +
+      'Use BEFORE multi_mention / @mentions to find valid catIds — do NOT guess catIds from memory. ' +
       'Returns: participants (catId, displayName, lastMessageAt, messageCount), routableNow, routableNotJoined, notRoutable.',
     inputSchema: getThreadCatsInputSchema,
     handler: handleGetThreadCats,
@@ -1498,16 +1465,6 @@ export const callbackTools = [
       'GOTCHA: callbackTo is usually your own catId so responses come back to you.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
-  },
-  {
-    name: 'cat_cafe_start_vote',
-    description:
-      'Start a voting session in the current thread for collective decision-making ' +
-      '(e.g. "REST vs GraphQL?"). Voters receive notification and reply with [VOTE:option]. ' +
-      'Auto-closes when all voters have voted or timeout expires (default 120s). ' +
-      'GOTCHA: voters must be valid registered catIds (use get_thread_cats to discover them). Options need at least 2 choices.',
-    inputSchema: startVoteInputSchema,
-    handler: handleStartVote,
   },
   // ============ Bootcamp (F087) ============
   {

@@ -55,9 +55,6 @@ describe('F155 Guide State Callbacks', () => {
 
   async function createApp() {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const { leaderboardEventsRoutes } = await import('../dist/routes/leaderboard-events.js');
-    const { GameStore } = await import('../dist/domains/leaderboard/game-store.js');
-    const { AchievementStore } = await import('../dist/domains/leaderboard/achievement-store.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -66,10 +63,6 @@ describe('F155 Guide State Callbacks', () => {
       threadStore,
       guideSessionStore,
       sharedBank: 'cat-cafe-shared',
-    });
-    await app.register(leaderboardEventsRoutes, {
-      gameStore: new GameStore(),
-      achievementStore: new AchievementStore(),
     });
     return app;
   }

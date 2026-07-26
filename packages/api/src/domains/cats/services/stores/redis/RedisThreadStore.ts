@@ -29,7 +29,6 @@ import type {
   ThreadParticipantActivity,
   ThreadRelationV1,
   ThreadRoutingPolicyV1,
-  VotingStateV1,
 } from '../ports/ThreadStore.js';
 import { copyThreadRelation, DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
@@ -509,26 +508,6 @@ export class RedisThreadStore implements IThreadStore {
   async updateThreadMemory(threadId: string, memory: ThreadMemoryV1): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'threadMemory', JSON.stringify(memory));
-  }
-
-  async getVotingState(threadId: string): Promise<VotingStateV1 | null> {
-    const key = ThreadKeys.detail(threadId);
-    const raw = await this.redis.hget(key, 'votingState');
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as VotingStateV1;
-    } catch {
-      return null;
-    }
-  }
-
-  async updateVotingState(threadId: string, state: VotingStateV1 | null): Promise<void> {
-    const key = ThreadKeys.detail(threadId);
-    if (state === null) {
-      await this.deleteDetailFields(key, 'votingState');
-    } else {
-      await this.setDetailFields(key, 'votingState', JSON.stringify(state));
-    }
   }
 
   async updateBootcampState(threadId: string, state: BootcampStateV1 | null): Promise<void> {

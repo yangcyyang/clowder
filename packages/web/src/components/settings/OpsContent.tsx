@@ -6,7 +6,6 @@ import { BrakeSettingsPanel } from '../BrakeSettingsPanel';
 import { HubClaudeRescueSection } from '../HubClaudeRescueSection';
 import { HubCommandsTab } from '../HubCommandsTab';
 import { HubGovernanceTab } from '../HubGovernanceTab';
-import { HubLeaderboardTab } from '../HubLeaderboardTab';
 import { HubObservabilityTab } from '../HubObservabilityTab';
 import { HubRoutingPolicyTab } from '../HubRoutingPolicyTab';
 import { HubToolUsageTab } from '../HubToolUsageTab';
@@ -89,8 +88,6 @@ function OpsSubsectionContent({ subsection }: { subsection: string }) {
           <HubToolUsageTab />
         </div>
       );
-    case 'leaderboard':
-      return <HubLeaderboardTab />;
     case 'observability':
       return <HubObservabilityTab />;
     case 'system-events':

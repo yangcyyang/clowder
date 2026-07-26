@@ -37,9 +37,6 @@ describe('Bootcamp Flow Integration', () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { bootcampRoutes } = await import('../dist/routes/bootcamp.js');
     const { threadsRoutes } = await import('../dist/routes/threads.js');
-    const { leaderboardEventsRoutes } = await import('../dist/routes/leaderboard-events.js');
-    const { AchievementStore } = await import('../dist/domains/leaderboard/achievement-store.js');
-    const { GameStore } = await import('../dist/domains/leaderboard/game-store.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -50,10 +47,6 @@ describe('Bootcamp Flow Integration', () => {
     });
     await app.register(bootcampRoutes, { threadStore });
     await app.register(threadsRoutes, { threadStore });
-    await app.register(leaderboardEventsRoutes, {
-      gameStore: new GameStore(),
-      achievementStore: new AchievementStore(),
-    });
     return app;
   }
 

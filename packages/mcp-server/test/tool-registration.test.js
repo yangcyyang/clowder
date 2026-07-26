@@ -53,8 +53,6 @@ const EXPECTED_TOOLS = [
   'cat_cafe_update_workflow',
   // Multi-mention orchestration (F086 M1)
   'cat_cafe_multi_mention',
-  // F079 Gap 4: Cat-initiated voting
-  'cat_cafe_start_vote',
   // Permission tools (this is the regression guard)
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
@@ -145,7 +143,6 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_guide_control',
   'cat_cafe_update_workflow',
   'cat_cafe_multi_mention',
-  'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check',
   // F139 Phase 3A: Schedule tools
@@ -388,7 +385,6 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_request_permission',
   'cat_cafe_register_pr_tracking',
   'cat_cafe_update_workflow',
-  'cat_cafe_start_vote',
   'cat_cafe_update_bootcamp_state',
   'cat_cafe_bootcamp_env_check', // writes bootcampState.envCheck via callbackPost
   'cat_cafe_update_guide_state',

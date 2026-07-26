@@ -341,7 +341,7 @@ describe('RedisMessageStore freshness linearization', { skip: redisIsolationSkip
       threadId,
       audience: OPUS_AUDIENCE,
       baseline,
-      idempotencyKey: 'invocation-1:start-vote',
+      idempotencyKey: 'invocation-1:draft-reply',
       groupId: 'invocation-1',
     };
 

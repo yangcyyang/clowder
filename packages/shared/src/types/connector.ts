@@ -191,19 +191,6 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     },
   },
   {
-    id: 'vote-result',
-    displayName: '投票结果',
-    icon: 'ballot',
-    color: { primary: '#7C3AED', secondary: '#F5F3FF' },
-    description: '投票系统自动汇总结果',
-    tailwindTheme: {
-      avatar: 'bg-conn-purple-bg ring-2 ring-conn-purple-ring',
-      label: 'text-conn-purple-text',
-      labelLink: 'text-conn-purple-text hover:text-conn-purple-hover',
-      bubble: 'border border-conn-purple-bubble-border bg-conn-purple-bubble-bg',
-    },
-  },
-  {
     id: 'multi-mention-result',
     displayName: 'Multi-Mention 结果',
     icon: 'users',

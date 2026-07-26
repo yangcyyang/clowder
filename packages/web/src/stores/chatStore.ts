@@ -1049,10 +1049,6 @@ export interface ChatState {
   coCreatorEditorOpen: boolean;
   openCoCreatorEditor: () => void;
   closeCoCreatorEditor: () => void;
-
-  // ── F079: Vote modal ──
-  showVoteModal: boolean;
-  setShowVoteModal: (show: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -1410,9 +1406,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   coCreatorEditorOpen: false,
   openCoCreatorEditor: () => set({ coCreatorEditorOpen: true }),
   closeCoCreatorEditor: () => set({ coCreatorEditorOpen: false }),
-
-  showVoteModal: false,
-  setShowVoteModal: (show) => set({ showVoteModal: show }),
 
   // ── Active-thread actions ──
 

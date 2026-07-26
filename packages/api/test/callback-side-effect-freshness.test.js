@@ -80,58 +80,6 @@ describe('protected callback side effects', () => {
     });
   }
 
-  test('start-vote: stale is inert, current executes once, replay is inert', async () => {
-    const staleThread = threadStore.create('user-1', 'stale vote');
-    const staleAuth = await createProtectedInvocation(staleThread.id);
-    await appendNewerUserInput(staleThread.id);
-    const payload = { question: 'A or B?', options: ['A', 'B'], voters: ['codex'] };
-    const stale = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
-      payload,
-    });
-    assert.equal(stale.json().status, 'freshness_retry_required');
-    assert.equal(await threadStore.getVotingState(staleThread.id), null);
-    assert.equal(
-      broadcasts.some((entry) => entry.event === 'vote_started'),
-      false,
-    );
-
-    const currentThread = threadStore.create('user-1', 'current vote');
-    const currentAuth = await createProtectedInvocation(currentThread.id);
-    const request = {
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': currentAuth.invocationId, 'x-callback-token': currentAuth.callbackToken },
-      payload,
-    };
-    const first = await app.inject(request);
-    const voteBroadcastsAfterFirst = broadcasts.filter((entry) => entry.event === 'vote_started').length;
-    const replay = await app.inject(request);
-    assert.equal(first.json().status, 'ok');
-    assert.equal(replay.json().status, 'duplicate');
-    assert.equal(broadcasts.filter((entry) => entry.event === 'vote_started').length, voteBroadcastsAfterFirst);
-  });
-
-  test('a protected invocation superseded without a new message cannot start a vote', async () => {
-    const thread = threadStore.create('user-1', 'superseded vote');
-    const oldAuth = await createProtectedInvocation(thread.id);
-    await registry.create('user-1', 'opus', thread.id);
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': oldAuth.invocationId, 'x-callback-token': oldAuth.callbackToken },
-      payload: { question: 'old question', options: ['A', 'B'], voters: ['codex'] },
-    });
-    assert.equal(response.json().status, 'stale_ignored');
-    assert.equal(await threadStore.getVotingState(thread.id), null);
-    assert.equal(
-      broadcasts.some((entry) => entry.event === 'vote_started'),
-      false,
-    );
-  });
-
   test('create-task: stale is inert, current executes once, replay is inert', async () => {
     const staleThreadId = 'task-stale';
     const staleAuth = await createProtectedInvocation(staleThreadId);

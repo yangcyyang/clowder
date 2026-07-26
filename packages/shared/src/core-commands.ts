@@ -130,32 +130,6 @@ export const CORE_COMMANDS: readonly SlashCommandDefinition[] = [
     surface: 'web',
     source: 'core',
   },
-  // --- vote ---
-  { name: '/vote', usage: '/vote', description: '打开投票配置面板', category: 'vote', surface: 'web', source: 'core' },
-  {
-    name: '/vote status',
-    usage: '/vote status',
-    description: '查看当前投票状态',
-    category: 'vote',
-    surface: 'web',
-    source: 'core',
-  },
-  {
-    name: '/vote cast',
-    usage: '/vote cast <选项>',
-    description: '投票给指定选项',
-    category: 'vote',
-    surface: 'web',
-    source: 'core',
-  },
-  {
-    name: '/vote end',
-    usage: '/vote end',
-    description: '结束当前投票并显示结果',
-    category: 'vote',
-    surface: 'web',
-    source: 'core',
-  },
   // --- connector ---
   {
     name: '/commands',

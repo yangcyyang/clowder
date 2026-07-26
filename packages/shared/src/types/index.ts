@@ -3,35 +3,6 @@
  * 导出所有类型定义
  */
 
-// F093 World Engine types (re-exported from schemas for convenience)
-export type {
-  CanonPromotionRecord,
-  CanonStatus,
-  CanonSummaryEntry,
-  CareLoopHint,
-  CharacterCoreIdentity,
-  CharacterGrowthState,
-  CharacterInnerDrive,
-  CharacterMaskOverlay,
-  CharacterRecord,
-  CharacterRelationshipTension,
-  CharacterVoiceAndImage,
-  JsonPatchOperation,
-  RelationshipBond,
-  SceneRecord,
-  SceneStatus,
-  WorldAction,
-  WorldActionEnvelope,
-  WorldActorKind,
-  WorldActorRef,
-  WorldContextEnvelope,
-  WorldEventEntry,
-  WorldEventType,
-  WorldMode,
-  WorldRecallResult,
-  WorldRecord,
-  WorldStatus,
-} from '../schemas/world.js';
 // A2A Protocol types (F050 Phase 3)
 export type {
   A2AAgentCard,
@@ -203,10 +174,16 @@ export type {
 export { CAT_PERMISSION_PROFILES } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
-export type { BuiltinAccountClient } from './client-routing.js';
+export type {
+  AccountBindingMode,
+  BuiltinAccountClient,
+  ClientAuthCapabilities,
+  ClientAuthMode,
+} from './client-routing.js';
 export {
   builtinAccountFamilyForClient,
   builtinAccountIdForClient,
+  getClientAuthCapabilities,
   protocolForClient,
 } from './client-routing.js';
 // Command types (F142 Phase B — slash command framework)
@@ -307,23 +284,6 @@ export type {
   TriageIntentCardInput,
   TriageResult,
 } from './intent-card.js';
-// Leaderboard types (F075 排行榜)
-export type {
-  Achievement,
-  CvoLevel,
-  GameRecord,
-  GameRecordInput,
-  GameStats,
-  LeaderboardEvent,
-  LeaderboardRange,
-  LeaderboardStatsResponse,
-  MentionStats,
-  RankedCat,
-  SillyCatEntry,
-  SillyStats,
-  StreakCat,
-  WorkStats,
-} from './leaderboard.js';
 // Limb types (F126 四肢控制面)
 export type {
   ILimbNode,

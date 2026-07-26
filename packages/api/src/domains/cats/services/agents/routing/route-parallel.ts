@@ -737,7 +737,6 @@ export async function* routeParallel(
         loadStandardContext,
         loadFullContext,
         hasPackBlocks: Boolean(packBlocks),
-        hasWorldContext: false,
         hasSessionBootstrap: Boolean(bootstrapCtx),
         hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,

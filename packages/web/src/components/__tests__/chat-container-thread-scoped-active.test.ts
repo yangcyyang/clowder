@@ -131,8 +131,6 @@ vi.mock('../SplitPaneView', () => ({
 vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
-vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
-vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 

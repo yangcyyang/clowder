@@ -57,7 +57,7 @@ describe('RichBlocks dispatcher — trusted-provenance gate (F174 D2b-1 cloud P2
     const html = renderToStaticMarkup(
       <RichBlocks
         blocks={[callbackAuthBlock]}
-        messageSource={{ connector: 'vote-result', label: 'Vote', icon: 'ballot' }}
+        messageSource={{ connector: 'multi-mention-result', label: 'Multi-Mention', icon: 'users' }}
       />,
     );
     expect(html).not.toContain('CALLBACK AUTH FAILURE');

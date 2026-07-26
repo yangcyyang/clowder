@@ -182,8 +182,6 @@ import {
   intentCardRoutes,
   invocationsRoutes,
   knowledgeRoutes,
-  leaderboardEventsRoutes,
-  leaderboardRoutes,
   libraryRoutes,
   localCliProbesRoutes,
   memoryPublishRoutes,
@@ -232,7 +230,6 @@ import {
   workspaceEditRoutes,
   workspaceGitRoutes,
   workspaceRoutes,
-  worldRoutes,
 } from './routes/index.js';
 import { autoFollowOnAppend } from './routes/activity-auto-follow.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
@@ -1392,18 +1389,6 @@ async function main(): Promise<void> {
     dailyTimer.unref();
   }
 
-  // F093: World Engine — runtime store + coordinator + context provider
-  const { SqliteWorldStore } = await import('./domains/world/SqliteWorldStore.js');
-  const { WorldRuntimeCoordinator } = await import('./domains/world/WorldRuntimeCoordinator.js');
-  const { WorldContextProvider } = await import('./domains/world/WorldContextProvider.js');
-  const { WorldKnowledgeAdapter } = await import('./domains/world/WorldKnowledgeAdapter.js');
-  const worldDbPath = process.env.WORLD_DB ?? resolve(repoRoot, 'world.sqlite');
-  const worldStore = new SqliteWorldStore(worldDbPath);
-  await worldStore.initialize();
-  const worldCoordinator = new WorldRuntimeCoordinator(worldStore);
-  const worldKnowledgeAdapter = new WorldKnowledgeAdapter(memoryServices.evidenceStore);
-  const worldContextProvider = new WorldContextProvider(worldStore, worldKnowledgeAdapter);
-
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -1434,8 +1419,6 @@ async function main(): Promise<void> {
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
     guideSessionStore,
     dismissTracker,
-    worldContextProvider,
-    worldStore,
   });
 
   // F39: Message queue delivery
@@ -1610,13 +1593,6 @@ async function main(): Promise<void> {
   const { promptCaptureRoutes } = await import('./routes/prompt-captures.js');
   await app.register(promptCaptureRoutes);
 
-  // F075 Phase B+C: Game + Achievement stores
-  const { GameStore } = await import('./domains/leaderboard/game-store.js');
-  const { AchievementStore } = await import('./domains/leaderboard/achievement-store.js');
-  const gameStore = new GameStore();
-  const achievementStore = new AchievementStore();
-  await app.register(leaderboardRoutes, { messageStore, gameStore, achievementStore });
-  await app.register(leaderboardEventsRoutes, { gameStore, achievementStore });
   await app.register(bootcampRoutes, { threadStore });
   await app.register(firstRunQuestRoutes, { threadStore });
   const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore };
@@ -1771,9 +1747,6 @@ async function main(): Promise<void> {
     ...(followStore ? { followStore } : {}),
     ...(readStateStore ? { readStateStore } : {}),
   });
-
-  // F093: World Engine — routes (store + coordinator initialized above, before AgentRouter)
-  await app.register(worldRoutes, { worldStore, coordinator: worldCoordinator });
 
   const fetchIssuesForSync = async (repo: string) => {
     const { execFile } = await import('node:child_process');
@@ -1987,10 +1960,6 @@ async function main(): Promise<void> {
     }
   }
   await app.register(sessionStrategyConfigRoutes);
-
-  // Voting system (F079)
-  const { voteRoutes } = await import('./routes/votes.js');
-  await app.register(voteRoutes, { threadStore, socketManager, messageStore });
 
   // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search
   await app.register(evidenceRoutes, {

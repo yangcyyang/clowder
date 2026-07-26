@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import type { CatConfig, CatId, CompiledPackBlocks, ToolPolicy, WorldContextEnvelope } from '@cat-cafe/shared';
+import type { CatConfig, CatId, CompiledPackBlocks, ToolPolicy } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -222,11 +222,6 @@ export interface InvocationContext {
    * Injected into static identity via buildStaticIdentity → packBlocks.
    */
   packBlocks?: CompiledPackBlocks | null;
-  /**
-   * F093: World context envelope for world-building mode.
-   * When present, injects world state (characters, scene, canon) into the prompt.
-   */
-  worldContext?: WorldContextEnvelope;
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -1269,37 +1264,6 @@ function buildTurnMetaLines(context: InvocationContext): string[] {
   // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
   if (context.guideCandidate) {
     lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
-  }
-
-  // F093: World context envelope — inject world state for world-building mode
-  if (context.worldContext) {
-    const wc = context.worldContext;
-    lines.push('');
-    lines.push(`## 🌍 World: ${wc.world.name} [${wc.world.status}]`);
-    if (wc.world.constitution) lines.push(`Constitution: ${wc.world.constitution}`);
-    lines.push(`Scene: ${wc.scene.name} [${wc.scene.status}]`);
-    if (wc.characters.length > 0) {
-      lines.push('Characters:');
-      for (const ch of wc.characters) {
-        const identity = ch.coreIdentity?.name ?? ch.characterId;
-        const drive = ch.innerDrive?.motivation ? ` — ${ch.innerDrive.motivation}` : '';
-        lines.push(`- ${identity}${drive}`);
-      }
-    }
-    if (wc.canonSummary.length > 0) {
-      lines.push('Established canon:');
-      for (const cs of wc.canonSummary) lines.push(`- ${cs.summary}`);
-    }
-    if (wc.recentEvents.length > 0) {
-      lines.push(`Recent events (${wc.recentEvents.length}):`);
-      for (const ev of wc.recentEvents.slice(-5)) {
-        lines.push(`- [${ev.type}] ${JSON.stringify(ev.payload)}`);
-      }
-    }
-    if (wc.careLoopHint) {
-      lines.push(`Care hint: ${wc.careLoopHint.trigger} → ${wc.careLoopHint.suggestion}`);
-    }
-    lines.push('');
   }
 
   if (context.governanceSourceContext) {

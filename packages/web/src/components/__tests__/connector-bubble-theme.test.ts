@@ -34,51 +34,27 @@ describe('ConnectorBubble theme', () => {
     container.remove();
   });
 
-  it('uses purple theme for vote-result connector', () => {
-    const message: ChatMessage = {
-      id: 'm-vote',
-      type: 'connector',
-      content: '投票结果: 谁最坏？',
-      timestamp: Date.now(),
-      source: {
-        connector: 'vote-result',
-        label: '投票结果',
-        icon: 'ballot',
-      },
-    };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('bg-conn-purple-bg');
-    expect(html).toContain('border-conn-purple-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
-    expect(html).not.toContain('bg-conn-slate-bg');
-  });
-
   it('renders rich block fields inside connector bubble', () => {
     const message: ChatMessage = {
-      id: 'm-vote-rich',
+      id: 'm-mm-rich',
       type: 'connector',
-      content: '投票结果: 谁最坏？',
+      content: 'Multi-Mention 结果: 谁最坏？',
       timestamp: Date.now(),
       source: {
-        connector: 'vote-result',
-        label: '投票结果',
-        icon: 'ballot',
+        connector: 'multi-mention-result',
+        label: 'Multi-Mention 结果',
+        icon: 'users',
       },
       extra: {
         rich: {
           v: 1 as const,
           blocks: [
             {
-              id: 'vote-1',
+              id: 'mm-1',
               kind: 'card' as const,
               v: 1 as const,
-              title: '投票结果: 谁最坏？',
-              bodyMarkdown: '实名投票 · 2 票',
+              title: 'Multi-Mention 结果: 谁最坏？',
+              bodyMarkdown: '2 只猫已回复',
               tone: 'info' as const,
               fields: [
                 { label: 'opus', value: '1 票 (50%)' },

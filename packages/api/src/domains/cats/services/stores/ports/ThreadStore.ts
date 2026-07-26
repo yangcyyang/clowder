@@ -230,8 +230,6 @@ export interface Thread {
   routingPolicy?: ThreadRoutingPolicyV1;
   /** F065 Phase B: Rolling memory across sealed sessions */
   threadMemory?: ThreadMemoryV1;
-  /** F079: Active voting state */
-  votingState?: VotingStateV1;
   /** UI bubble display override: thinking block expand/collapse. 'global' = follow config hub default. */
   bubbleThinking?: 'global' | 'expanded' | 'collapsed';
   /** UI bubble display override: CLI output block expand/collapse. 'global' = follow config hub default. */
@@ -370,22 +368,6 @@ export interface GuideStateV1 {
   offeredBy?: string;
 }
 
-/** F079: Voting state stored in thread metadata */
-export interface VotingStateV1 {
-  v: 1;
-  question: string;
-  options: string[];
-  votes: Record<string, string>; // catId/userId -> option
-  anonymous: boolean;
-  deadline: number; // timestamp
-  createdBy: string;
-  status: 'active' | 'closed';
-  /** Phase 2: designated voters (catIds). When set, auto-close when all voted. */
-  voters?: string[];
-  /** Gap 4: catId that initiated the vote (only set for cat-initiated votes via MCP). */
-  initiatedByCat?: string;
-}
-
 /**
  * Common interface for thread stores (in-memory and future Redis).
  */
@@ -431,9 +413,6 @@ export interface IThreadStore {
   getThreadMemory(threadId: string): ThreadMemoryV1 | null | Promise<ThreadMemoryV1 | null>;
   /** F065 Phase B: Update thread memory after session seal. */
   updateThreadMemory(threadId: string, memory: ThreadMemoryV1): void | Promise<void>;
-  /** F079: Get/update voting state */
-  getVotingState(threadId: string): VotingStateV1 | null | Promise<VotingStateV1 | null>;
-  updateVotingState(threadId: string, state: VotingStateV1 | null): void | Promise<void>;
   /** Update bubble display overrides (thinking/CLI expand/collapse). */
   updateBubbleDisplay(
     threadId: string,
@@ -784,21 +763,6 @@ export class ThreadStore implements IThreadStore {
   updateThreadMemory(threadId: string, memory: ThreadMemoryV1): void {
     const thread = this.get(threadId);
     if (thread) thread.threadMemory = memory;
-  }
-
-  getVotingState(threadId: string): VotingStateV1 | null {
-    const thread = this.get(threadId);
-    return thread?.votingState ?? null;
-  }
-
-  updateVotingState(threadId: string, state: VotingStateV1 | null): void {
-    const thread = this.get(threadId);
-    if (!thread) return;
-    if (state === null) {
-      delete thread.votingState;
-    } else {
-      thread.votingState = state;
-    }
   }
 
   updateBubbleDisplay(
