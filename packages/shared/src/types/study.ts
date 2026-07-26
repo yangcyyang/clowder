@@ -4,7 +4,7 @@
 
 export type ArtifactJobState = 'queued' | 'running' | 'ready' | 'failed';
 
-export type ArtifactKind = 'note' | 'podcast' | 'research-report';
+export type ArtifactKind = 'note' | 'research-report';
 
 export interface StudyArtifact {
   readonly id: string;

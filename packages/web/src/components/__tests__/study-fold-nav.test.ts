@@ -3,11 +3,6 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock PodcastPlayer to avoid complex deps
-vi.mock('@/components/signals/PodcastPlayer', () => ({
-  PodcastPlayer: () => React.createElement('div', { 'data-testid': 'podcast-player' }),
-}));
-
 // Mock apiFetch — P1 fix: StudyFoldArea now uses apiFetch (not bare fetch) for auth headers
 const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({

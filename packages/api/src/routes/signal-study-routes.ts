@@ -168,7 +168,7 @@ export const signalStudyRoutes: FastifyPluginAsync<StudyRouteOptions> = async (a
       return { threadId: existingThread.threadId };
     }
 
-    // No study thread — create one + link (same pattern as resolveStudyThread in podcast routes)
+    // No study thread — create one + link
     const thread = await opts.threadStore.create(userId, `Study: ${article.title}`);
     await opts.threadStore.addParticipants(thread.id, ['opus' as never]);
     await studyMeta.linkThread(params.id, article.filePath, {

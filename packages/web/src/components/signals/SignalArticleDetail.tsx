@@ -288,7 +288,6 @@ export function SignalArticleDetail({
         collections={collections}
         onAddToCollection={handleCollectionAdd}
         onCreateCollection={handleCollectionCreate}
-        onStudyMetaRefresh={refreshStudyMeta}
       />
       <section className="mt-4">
         <div className="flex items-center justify-between">

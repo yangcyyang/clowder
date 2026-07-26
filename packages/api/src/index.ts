@@ -202,7 +202,6 @@ import {
   sessionStrategyConfigRoutes,
   sessionTranscriptRoutes,
   signalCollectionRoutes,
-  signalPodcastRoutes,
   signalStudyRoutes,
   signalsRoutes,
   skillsRoutes,
@@ -1970,13 +1969,6 @@ async function main(): Promise<void> {
   await app.register(signalsRoutes);
   await app.register(signalStudyRoutes, { threadStore });
   await app.register(signalCollectionRoutes);
-  await app.register(signalPodcastRoutes, {
-    messageStore,
-    threadStore,
-    router,
-    invocationRecordStore,
-    invocationTracker,
-  });
 
   // Serve uploaded files (images)
   const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);

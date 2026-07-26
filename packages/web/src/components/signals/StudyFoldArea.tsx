@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { getThreadHref } from '../ThreadSidebar/thread-navigation';
-import { PodcastPlayer } from './PodcastPlayer';
 
 interface StudyFoldAreaProps {
   readonly articleId: string;
@@ -16,7 +15,6 @@ interface StudyFoldAreaProps {
   readonly collections?: readonly { id: string; name: string }[] | undefined;
   readonly onAddToCollection?: (collectionId: string) => Promise<void>;
   readonly onCreateCollection?: (name: string) => Promise<void>;
-  readonly onStudyMetaRefresh?: () => void;
 }
 
 function formatDate(iso: string): string {
@@ -57,7 +55,6 @@ export function StudyFoldArea({
   collections,
   onAddToCollection,
   onCreateCollection,
-  onStudyMetaRefresh,
 }: StudyFoldAreaProps) {
   const [open, setOpen] = useState(!!studyMeta?.lastStudiedAt);
   const [linkInput, setLinkInput] = useState('');
@@ -80,7 +77,6 @@ export function StudyFoldArea({
   const threads = studyMeta?.threads ?? [];
   const artifacts = studyMeta?.artifacts ?? [];
   const notes = artifacts.filter((a) => a.kind === 'note');
-  const podcasts = artifacts.filter((a) => a.kind === 'podcast');
   const reports = artifacts.filter((a) => a.kind === 'research-report');
 
   const hasContent = threads.length > 0 || artifacts.length > 0;
@@ -255,9 +251,6 @@ export function StudyFoldArea({
               </ul>
             </div>
           )}
-
-          {/* AC-5: 播客播放器 */}
-          <PodcastPlayer articleId={articleId} podcasts={podcasts} onArtifactCreated={onStudyMetaRefresh} />
 
           {reports.length > 0 && (
             <div className="mt-3">

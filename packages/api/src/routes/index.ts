@@ -55,7 +55,6 @@ export { sessionHooksRoutes } from './session-hooks.js';
 export { sessionStrategyConfigRoutes } from './session-strategy-config.js';
 export { sessionTranscriptRoutes } from './session-transcript.js';
 export { signalCollectionRoutes } from './signal-collection-routes.js';
-export { signalPodcastRoutes } from './signal-podcast-routes.js';
 export { signalStudyRoutes } from './signal-study-routes.js';
 export { signalsRoutes } from './signals.js';
 export { skillsRoutes } from './skills.js';

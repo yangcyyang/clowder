@@ -139,30 +139,6 @@ async function handleListStudies(input: { articleId?: string; kind?: string; lim
   return successResult('List all studies: not yet implemented (requires article ID for now).');
 }
 
-async function handleGeneratePodcast(input: {
-  articleId: string;
-  mode: string;
-  speakers?: string[];
-}): Promise<ToolResult> {
-  const result = await apiJson(`/api/signals/articles/${encodeURIComponent(input.articleId)}/podcast`, {
-    method: 'POST',
-    body: JSON.stringify({ mode: input.mode }),
-  });
-  if (!result.ok) return errorResult(result.error);
-
-  const data = result.data as { artifact?: { id?: string; state?: string } };
-  const duration = input.mode === 'essence' ? '2-3 min' : '10 min';
-
-  return successResult(
-    [
-      `Podcast generation triggered:`,
-      `  Artifact: ${data.artifact?.id ?? 'unknown'}`,
-      `  State: ${data.artifact?.state ?? 'queued'}`,
-      `  Mode: ${input.mode} (${duration})`,
-    ].join('\n'),
-  );
-}
-
 // --- Tool definitions ---
 
 export const signalUpdateArticleInputSchema = {
@@ -195,14 +171,8 @@ export const signalSaveNotesInputSchema = {
 
 export const signalListStudiesInputSchema = {
   articleId: z.string().optional().describe('Filter by article'),
-  kind: z.enum(['note', 'podcast', 'research-report']).optional().describe('Filter by artifact kind'),
+  kind: z.enum(['note', 'research-report']).optional().describe('Filter by artifact kind'),
   limit: z.number().int().min(1).max(50).optional().describe('Max results'),
-};
-
-export const signalGeneratePodcastInputSchema = {
-  articleId: z.string().min(1).describe('Article ID'),
-  mode: z.enum(['essence', 'deep']).describe('Podcast mode: essence (2-3 min) or deep (10 min)'),
-  speakers: z.array(z.string()).optional().describe('Cat IDs for voices (1-3)'),
 };
 
 export const signalStudyTools = [
@@ -236,7 +206,7 @@ export const signalStudyTools = [
     name: 'signal_start_study',
     description:
       'Start studying a Signal article. Returns full article content for context injection and optionally links a thread. ' +
-      'WORKFLOW: start_study → read and discuss → save_notes → optionally generate_podcast. ' +
+      'WORKFLOW: start_study → read and discuss → save_notes. ' +
       'Use this as the entry point for deep-diving into an article.',
     inputSchema: signalStartStudyInputSchema,
     handler: handleStartStudy,
@@ -252,20 +222,10 @@ export const signalStudyTools = [
   {
     name: 'signal_list_studies',
     description:
-      'List study artifacts (notes, podcasts, research reports) for an article. ' +
+      'List study artifacts (notes, research reports) for an article. ' +
       'Use to check what study work has already been done on an article. ' +
       'TIP: Pass articleId to narrow results to a specific article; omit to list studies across all articles.',
     inputSchema: signalListStudiesInputSchema,
     handler: handleListStudies,
-  },
-  {
-    name: 'signal_generate_podcast',
-    description:
-      'Generate a podcast from an article study. ' +
-      'MODE SELECTION: essence = 2-3 min quick overview, deep = 10 min thorough analysis. ' +
-      'Optional speakers param takes cat IDs for voice assignments (1-3 speakers). ' +
-      'Returns an artifact ID and state (queued → processing → complete).',
-    inputSchema: signalGeneratePodcastInputSchema,
-    handler: handleGeneratePodcast,
   },
 ] as const;
