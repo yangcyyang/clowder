@@ -2166,6 +2166,18 @@ async function main(): Promise<void> {
       queueProcessor,
     });
     claimedIdleScheduler.start();
+
+    // 批次4-B2 分轨超时提醒 (env CLOWDER_REVIEW_REMINDER_SCHEDULER, default ON — see
+    // env-registry.ts). Same Redis-mode-only rationale as ClaimedIdleScheduler above.
+    const { ReviewReminderScheduler } = await import('./domains/cats/services/agents/invocation/ReviewReminderScheduler.js');
+    const reviewReminderScheduler = new ReviewReminderScheduler({
+      taskStore,
+      messageStore,
+      socketManager,
+      invocationQueue,
+      queueProcessor,
+    });
+    reviewReminderScheduler.start();
   }
 
   // A1 (batch 4-A): 启动权限自检 — one-shot, NOT a recurring poller (see

@@ -2226,6 +2226,47 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CLOWDER_REVIEW_REMINDER_SCHEDULER',
+    defaultValue: '(未设置 → 开启)',
+    description:
+      '批次4-B2 分轨超时提醒(ReviewReminderScheduler)：每 60s 扫描 status=in_review 的任务，按验收人类型分轨提醒——gate(猫)轨 24h 私提醒验收人一次(唤醒投递，不依赖认领闲置唤醒器开关)；human 轨 48h 私提醒(挂进票自己的讨论 thread) → 96h 频道内可见提醒(@owner) → 默认 10 天(执行文档给的是 7-14 天区间，非单点值，见 CLOWDER_REVIEW_REMINDER_HUMAN_LEVEL3_DAYS)状态动作：强制把票从 in_review 打回 doing 并通知双方重新提交或弃票。三级封顶，每票每级只触发一次，不重复轰炸；任务重新进入 in_review(被打回后再提交)会获得全新的提醒预算。默认开启。置 "0"/"false" 关闭。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_REVIEW_REMINDER_GATE_HOURS',
+    defaultValue: '24',
+    description: '配合 CLOWDER_REVIEW_REMINDER_SCHEDULER 使用：gate(猫)轨验收提醒的小时阈值——超过此值且尚未提醒过才会触发。非正数或非法值回退默认 24。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_REVIEW_REMINDER_HUMAN_LEVEL1_HOURS',
+    defaultValue: '48',
+    description: '配合 CLOWDER_REVIEW_REMINDER_SCHEDULER 使用：human 轨第一级"私提醒"(挂进任务自己的讨论 thread)的小时阈值。非正数或非法值回退默认 48。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_REVIEW_REMINDER_HUMAN_LEVEL2_HOURS',
+    defaultValue: '96',
+    description: '配合 CLOWDER_REVIEW_REMINDER_SCHEDULER 使用：human 轨第二级"频道内可见@owner"提醒的小时阈值——从进入 in_review 起累计的绝对小时数(默认 96=48+48)，不是"第一级触发后再等 48 小时"。非正数或非法值回退默认 96。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_REVIEW_REMINDER_HUMAN_LEVEL3_DAYS',
+    defaultValue: '10（执行文档给的是 7-14 天区间，10 为区间内的折衷默认值）',
+    description: '配合 CLOWDER_REVIEW_REMINDER_SCHEDULER 使用：human 轨第三级"状态动作"(强制打回 doing)的天数阈值——执行文档只给了 7-14 天的区间没有定点，10 是区间内保守居中的默认选择，铲屎官可按需调整。非正数或非法值回退默认 10。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CLOWDER_CLI_IDLE_TIMEOUT_SEC',
     defaultValue: '0（未设置/0 → 完全关闭，零行为变化）',
     description:
