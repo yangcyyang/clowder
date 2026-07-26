@@ -55,6 +55,20 @@ describe('classifyRunFailureForTask', () => {
     assert.equal(classifyRunFailureForTask('assistant produced invalid JSON'), 'agent_error');
     assert.equal(classifyRunFailureForTask(undefined), 'agent_error');
   });
+
+  test('A 包遗留转交: governance-gate errorCodes map to infra_error (not agent_error)', () => {
+    // invoke-single-cat.ts's governance block sets InvocationRecord.error to exactly one of
+    // these two literal strings (see provider-error-classification.ts's own coverage note).
+    assert.equal(classifyRunFailureForTask('PROJECT_PERMISSION_DENIED'), 'infra_error');
+    assert.equal(classifyRunFailureForTask('GOVERNANCE_BOOTSTRAP_REQUIRED'), 'infra_error');
+  });
+
+  test('A 包遗留转交: EPERM/EACCES/permission wording maps to infra_error (not agent_error)', () => {
+    assert.equal(classifyRunFailureForTask('spawn failed: EPERM'), 'infra_error');
+    assert.equal(classifyRunFailureForTask('EACCES: permission denied, open /some/path'), 'infra_error');
+    assert.equal(classifyRunFailureForTask('operation not permitted'), 'infra_error');
+    assert.equal(classifyRunFailureForTask('Permission denied'), 'infra_error');
+  });
 });
 
 describe('applyTaskRunOutcome', () => {
@@ -182,6 +196,31 @@ describe('applyTaskRunOutcome', () => {
       0,
       'no status actually changed, so no lifecycle notice should be posted',
     );
+  });
+
+  test('A 包遗留转交: governance-blocked run → task moves to blocked (not failed)', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = messageStoreStub();
+    const socketManager = socketManagerStub();
+    const created = taskStore.create({
+      threadId: 't1',
+      title: '治理拦截的任务',
+      why: '',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+      status: 'doing',
+    });
+
+    const updated = await applyTaskRunOutcome({
+      task: created,
+      invocationId: 'inv-6',
+      finalStatus: 'failed',
+      errorText: 'PROJECT_PERMISSION_DENIED',
+      deps: { taskStore, messageStore, socketManager },
+    });
+
+    assert.equal(updated.status, 'blocked', '治理拦截应归为 infra_error → blocked，而不是 agent_error → failed');
+    assert.equal(updated.failureClass, 'infra_error');
   });
 
   test('secrets in the run error text are redacted before being stored on the task', async () => {

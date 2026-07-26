@@ -331,7 +331,13 @@ export const taskLifecycleTools = [
       'Update a task you own — status, failure detail, or a note. ' +
       'Status transitions are validated: you cannot jump straight to "done" without first marking "in_review" ' +
       '(mark in_review with evidence — test output, diff, screenshot — then done once verified). "done" is terminal. ' +
-      'GOTCHA: you can only update tasks assigned to you.',
+      'Marking in_review auto-resolves and notifies the reviewer (batch4-B1): a human reviewer sees the normal ' +
+      'status-change notice; a cat reviewer gets an actual wake-up invocation. The platform automatically anchors a ' +
+      'git evidence snapshot (commit sha/diff stat/changed files + a static scan for binary/control-char/secret-shaped ' +
+      'content) into the task thread — no separate step needed. ' +
+      'GOTCHA: you can only update tasks assigned to you. ' +
+      'GOTCHA: you can never be your own reviewer — if the resolved reviewer would be you, the server silently ' +
+      'redirects it to the platform default reviewer (or human) instead of failing the update.',
     inputSchema: taskUpdateInputSchema,
     handler: handleTaskUpdate,
   },

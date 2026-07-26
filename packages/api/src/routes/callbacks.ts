@@ -2616,6 +2616,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       messageStore,
       ...(threadStore ? { threadStore } : {}),
       ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
+      // 批次4-B1: gate(猫)验收人置 in_review 时的唤醒投递依赖这两个 — 缺省时静默跳过唤醒。
+      ...(opts.invocationQueue ? { invocationQueue: opts.invocationQueue } : {}),
+      ...(queueProcessor ? { queueProcessor } : {}),
     });
   }
 

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { isLegalTaskStatusTransition } = await import(
+const { isLegalTaskStatusTransition, resolveReviewerAvoidingSelfReview } = await import(
   '../dist/domains/cats/services/tasks/task-status-transitions.js'
 );
 
@@ -44,5 +44,60 @@ describe('isLegalTaskStatusTransition', () => {
     assert.equal(isLegalTaskStatusTransition('blocked', 'doing').ok, true);
     assert.equal(isLegalTaskStatusTransition('failed', 'todo').ok, true);
     assert.equal(isLegalTaskStatusTransition('in_review', 'doing').ok, true, 'rejected-back-to-work stays legal');
+  });
+});
+
+/**
+ * 批次4-B1 B-AC1: "执行者永不 review 自己的票" —— 服务端校验.
+ * docs/prd/batch4-codex-execution.md §3 B1: "拒绝或落回缺省"两种设计都被文档允许，但
+ * B-AC1 验收标准明确写"执行者=reviewer 被服务端拒绝" —— 本实现按 AC 选择"拒绝"。
+ */
+describe('resolveReviewerAvoidingSelfReview', () => {
+  test('candidate reviewer differs from owner — passes through unchanged', () => {
+    const result = resolveReviewerAvoidingSelfReview({
+      candidateReviewerId: 'gpt52',
+      ownerCatId: 'opus',
+      defaultReviewerId: 'human',
+    });
+    assert.deepEqual(result, { ok: true, reviewerId: 'gpt52' });
+  });
+
+  test('reviewerId is the literal human — never a self-review conflict regardless of owner', () => {
+    const result = resolveReviewerAvoidingSelfReview({
+      candidateReviewerId: 'human',
+      ownerCatId: 'opus',
+      defaultReviewerId: 'human',
+    });
+    assert.equal(result.ok, true);
+  });
+
+  test('no owner (unclaimed task) — no self-review possible', () => {
+    const result = resolveReviewerAvoidingSelfReview({
+      candidateReviewerId: 'opus',
+      ownerCatId: null,
+      defaultReviewerId: 'human',
+    });
+    assert.equal(result.ok, true);
+  });
+
+  test('B-AC1: candidate reviewer === owner (self-review) — rejected, not silently redirected', () => {
+    const result = resolveReviewerAvoidingSelfReview({
+      candidateReviewerId: 'opus',
+      ownerCatId: 'opus',
+      defaultReviewerId: 'gpt52',
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /不能自己审自己的票/);
+    assert.equal(result.suggestedReviewerId, 'gpt52', 'suggests the platform default as the way forward');
+  });
+
+  test('self-review AND the configured default also equals the owner — suggests human as the final safe harbor', () => {
+    const result = resolveReviewerAvoidingSelfReview({
+      candidateReviewerId: 'opus',
+      ownerCatId: 'opus',
+      defaultReviewerId: 'opus',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.suggestedReviewerId, 'human');
   });
 });

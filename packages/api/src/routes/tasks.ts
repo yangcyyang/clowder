@@ -15,6 +15,12 @@ import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  onTaskEnteredReview,
+  prepareReviewActionEvent,
+  prepareReviewEntry,
+} from '../domains/cats/services/tasks/task-review-transition.js';
+import { resolveReviewerIdForNewTask } from '../domains/cats/services/tasks/task-reviewer-defaults.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
@@ -369,7 +375,13 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
-    const created = await taskStore.create(toCreateInput(result.data));
+    // 批次4-B1 缺省规则: 有父票继承其 reviewer，否则平台默认验收人。
+    const parentTaskForReviewer = result.data.parentTaskId ? await taskStore.get(result.data.parentTaskId) : null;
+    const createInput: CreateTaskInput = {
+      ...toCreateInput(result.data),
+      reviewerId: resolveReviewerIdForNewTask({ parentTask: parentTaskForReviewer }),
+    };
+    const created = await taskStore.create(createInput);
     const task =
       created.kind === 'work'
         ? (
@@ -625,7 +637,32 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       reply.status(403);
       return { error: 'Task belongs to another user' };
     }
-    const updated = await taskStore.update(id, toUpdateInput(result.data));
+
+    // 批次4-B1/B4④: entering/leaving in_review gets reviewer resolution + self-review
+    // guard + review-action audit merged into this same update call (see task-review-transition.ts).
+    const updateInput = toUpdateInput(result.data);
+    const enteringReview = result.data.status === 'in_review' && result.data.status !== previous.status;
+    if (enteringReview) {
+      const prepared = prepareReviewEntry(previous);
+      if (!prepared.ok) {
+        reply.status(409);
+        return { error: prepared.reason, code: 'SELF_REVIEW_REJECTED', suggestedReviewerId: prepared.suggestedReviewerId };
+      }
+      updateInput.reviewerId = prepared.reviewerId;
+      updateInput.events = [...(updateInput.events ?? []), ...prepared.events];
+    } else if (result.data.status && result.data.status !== previous.status) {
+      const actionEvents = prepareReviewActionEvent({
+        previousStatus: previous.status,
+        nextStatus: result.data.status,
+        previousEvents: previous.events,
+        actorId: userId,
+      });
+      if (actionEvents.length > 0) {
+        updateInput.events = [...(updateInput.events ?? []), ...actionEvents];
+      }
+    }
+
+    const updated = await taskStore.update(id, updateInput);
     if (!updated) {
       reply.status(404);
       return { error: 'Task not found' };
@@ -634,6 +671,9 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     emitTaskAttention(socketManager, previous, updated);
     await appendTaskUpdateNotices(previous, updated);
+    if (enteringReview) {
+      void onTaskEnteredReview(updated, { taskStore, threadStore, messageStore, socketManager }).catch(() => {});
+    }
 
     return updated;
   });

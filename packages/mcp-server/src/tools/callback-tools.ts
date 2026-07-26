@@ -1221,7 +1221,13 @@ export const callbackTools = [
     name: 'cat_cafe_update_task',
     description:
       'Update the status of a task you own. Use to mark tasks as doing/in_review/blocked/done. ' +
+      'Marking in_review auto-resolves and notifies the reviewer (batch4-B1): a human reviewer sees the normal ' +
+      'status-change notice; a cat reviewer gets an actual wake-up invocation. A git evidence snapshot (commit sha/ ' +
+      'diff stat/changed files + a static scan for binary/control-char/secret-shaped content) is auto-anchored into ' +
+      'the task thread — no separate step needed. ' +
       'GOTCHA: You can only update tasks assigned to you (your catId). ' +
+      'GOTCHA: you can never be your own reviewer — the server silently redirects a self-review to the platform ' +
+      'default reviewer (or human) instead of failing the update. ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation.',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,

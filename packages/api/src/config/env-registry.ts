@@ -2208,6 +2208,24 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CLOWDER_TASK_DEFAULT_REVIEWER',
+    defaultValue: "(未设置 → 'human')",
+    description:
+      '批次4-B1: 任务验收人缺省规则的"常设 gate 猫"——人建的票(或无父票的建票)在置 reviewerId 时落到这只猫；未设置或配的猫已不存在于注册表则回落到人工验收(human)。agent 拆的子票继承父票 reviewer，不受此项影响。执行者(ownerCatId)与验收人相同时(自审)，置 in_review 会被服务端自动改派回此默认值，若默认值恰好也是执行者自己则最终改派人工验收(task-status-transitions.ts resolveReviewerAvoidingSelfReview)。改值无需重启——每次任务创建/进入 in_review 都会重新读取。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_REVIEW_EVIDENCE_AUTO_ANCHOR',
+    defaultValue: '(未设置 → 开启)',
+    description:
+      '批次4-B4①③: 任务置 in_review 时自动把最近一次提交的 commit sha/diff stat/改动文件清单锚进票的讨论 thread，并对该 diff 做静态扫描(二进制文件改动/裸控制字符如 NUL/密钥形态字符串，复用 env-var-secret-guard.ts 的 textContainsSecretValue，不新造平行正则)。仓库目录取任务所在 thread 绑定的 projectPath，未绑定时退回 api 进程自身 cwd(git -C 对子目录同样有效，无需定位 monorepo 根)；目录必须先过 isUnderAllowedRoot 才会执行 git 只读子进程。任何失败(非 git 仓库、无提交、越权目录、git 缺失、超时)一律静默跳过，绝不阻塞 in_review 转移本身——纯 best-effort 可见性，不是验收门禁。默认开启。置 "0"/"false" 关闭。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CLOWDER_CLI_IDLE_TIMEOUT_SEC',
     defaultValue: '0（未设置/0 → 完全关闭，零行为变化）',
     description:

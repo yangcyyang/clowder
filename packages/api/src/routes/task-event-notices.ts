@@ -33,7 +33,17 @@ export type TaskLifecycleSystemKind =
   | 'task_status_changed'
   | 'task_idle_escalated'
   /** 批次4-B5 (docs/research/raft-r9-ticket-hygiene.md B5.3): active-task downgrade notice. */
-  | 'task_progress_attached';
+  | 'task_progress_attached'
+  /** 批次4-B2 分轨超时提醒: gate(猫)轨 24h 私提醒 / human 轨 48h 私提醒 / human 轨 +48h
+   *  频道内可见@owner —— 三个非终态提醒级别共用一个 systemKind，级别本身由 eventType/
+   *  content 区分（见 ReviewReminderScheduler.ts）。 */
+  | 'task_review_reminder'
+  /** 批次4-B2 human 轨第三级状态动作: 超时未验收，平台强制把票从 in_review 打回 doing。 */
+  | 'task_review_timeout_reverted'
+  /** 批次4-B3 失能打标: assignee 状态异常持续 >30 分钟，票被打上"assignee 失能"标。 */
+  | 'assignee_incapacitated'
+  /** 批次4-B3: assignee 恢复，标记已清除（真空期记录留在 TaskEvent 里，不在此通知里）。 */
+  | 'assignee_recovered';
 
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 /** module-level, process-local: adequate for "don't spam the same transition twice within 5 minutes" — not a durable ledger. */

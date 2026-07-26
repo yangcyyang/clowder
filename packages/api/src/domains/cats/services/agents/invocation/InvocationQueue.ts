@@ -100,7 +100,11 @@ export interface QueueEntry {
     /** Batch 3-A item 1: unowned-task wake-up nudge to a candidate cat (auto-claim canary). */
     | 'auto_claim'
     /** ClaimedIdleScheduler: claimed-but-idle wake-up nudge to the task's own owner cat. */
-    | 'claimed_idle_nudge';
+    | 'claimed_idle_nudge'
+    /** 批次4-B1: task entered in_review and its reviewer resolved to a registered cat (gate 轨) — durable wake-up so the reviewer actually looks. */
+    | 'gate_review_wakeup'
+    /** 批次4-B2: gate(猫)轨 24h 私提醒 — reviewer hasn't acted since entering review. */
+    | 'gate_review_reminder';
   /** Existing message type with scheduler-specific presentation metadata. */
   responsePresentation?: 'silent_receipt';
   /** Scheduled work must not resume a provider-native CLI session from an earlier run. */

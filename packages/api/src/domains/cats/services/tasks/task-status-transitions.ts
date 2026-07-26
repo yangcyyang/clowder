@@ -1,4 +1,5 @@
-import type { TaskStatus } from '@cat-cafe/shared';
+import type { CatId, TaskStatus } from '@cat-cafe/shared';
+import { HUMAN_REVIEWER, type ReviewerId } from './task-reviewer-defaults.js';
 
 /**
  * Batch 2-C: minimal legal-transition guard for `cat_cafe_task_update`.
@@ -34,4 +35,39 @@ export function isLegalTaskStatusTransition(from: TaskStatus, to: TaskStatus): T
   }
 
   return { ok: true };
+}
+
+/**
+ * 批次4-B1: "执行者永不 review 自己的票" —— 服务端校验, 在置 in_review 的迁移里做
+ * (docs/prd/batch4-codex-execution.md §3 B1 + B-AC1), 不能只靠前端.
+ *
+ * Pure function — no env/catRegistry access here (task-status-transitions.ts stays a plain
+ * rules module, matching its existing style); callers resolve `defaultReviewerId` themselves
+ * via task-reviewer-defaults.ts's resolveConfiguredDefaultReviewerId() and pass it in.
+ *
+ * Behavior: 执行文档正文允许"拒绝或落回缺省"两种实现，但 B-AC1 的验收标准明确写的是
+ * "执行者=reviewer 被服务端拒绝"——按 AC 的可测试表述实现为拒绝（HTTP 409 style: caller
+ * rejects the whole in_review transition), 而不是静默改派。错误结果里带上
+ * `suggestedReviewerId`（默认验收人；若默认验收人恰好也是执行者自己，则建议人工验收）供
+ * 调用方在错误提示里指引猫"下次应该怎么办"，不需要猫自己再去猜默认值。
+ */
+export type ReviewerAssignmentResolution =
+  | { ok: true; reviewerId: ReviewerId }
+  | { ok: false; reason: string; suggestedReviewerId: ReviewerId };
+
+export function resolveReviewerAvoidingSelfReview(params: {
+  candidateReviewerId: ReviewerId;
+  ownerCatId: CatId | null;
+  defaultReviewerId: ReviewerId;
+}): ReviewerAssignmentResolution {
+  const { candidateReviewerId, ownerCatId, defaultReviewerId } = params;
+  if (!ownerCatId || candidateReviewerId !== ownerCatId) {
+    return { ok: true, reviewerId: candidateReviewerId };
+  }
+  const suggestedReviewerId = defaultReviewerId !== ownerCatId ? defaultReviewerId : HUMAN_REVIEWER;
+  return {
+    ok: false,
+    reason: `执行者与验收人相同(${String(ownerCatId)})，不能自己审自己的票——请改派验收人（建议：${String(suggestedReviewerId)}）后再置 in_review`,
+    suggestedReviewerId,
+  };
 }

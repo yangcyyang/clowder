@@ -52,11 +52,32 @@ const MAX_ERROR_TEXT_LEN = 500;
  * Best-effort classifier from a free-text invocation error into the TaskFailureClass enum.
  * Deliberately independent from RunLedgerAssembler's classifyFailure (different target enum,
  * different file — not touched here to stay clear of unrelated concurrent edits).
+ *
+ * A 包遗留转交 (2026-07-26, 批次4-A 验收报告点名转交给 B 域): this classifier did not
+ * recognize the governance-gate errorCodes (PROJECT_PERMISSION_DENIED /
+ * GOVERNANCE_BOOTSTRAP_REQUIRED, see invoke-single-cat.ts's governance block) or
+ * EPERM/EACCES/"operation not permitted"/"permission denied" wording — a task whose linked
+ * run failed because governance intercepted dispatch was therefore classified agent_error →
+ * task moved to 'failed' instead of infra_error → 'blocked'. Fixed by adding these to the
+ * infra_error tier (same bucket "process/environment problem, not the agent's fault" as the
+ * existing spawn/ENOENT/ECONNREFUSED checks below) — mirrors
+ * provider-error-classification.ts's PERMISSION_DENIED_TEXT_PATTERN wording exactly, but kept
+ * as a literal string-match addition here rather than delegating to that module's
+ * classifyProviderErrorText: the two classifiers have different taxonomies (9 kinds mapped
+ * through toTaskFailureClass vs this function's 7 direct TaskFailureClass values) and
+ * different priority orders, so a wholesale switch would silently reclassify other error
+ * texts (e.g. abort-shaped text) beyond the specific gap being closed here.
  */
 export function classifyRunFailureForTask(errorText: string | undefined): TaskFailureClass {
   const value = (errorText ?? '').toLowerCase();
   if (value.includes('timeout') || value.includes('timed out') || value.includes('runtime_hung')) return 'timeout';
   if (
+    value.includes('project_permission_denied') ||
+    value.includes('governance_bootstrap_required') ||
+    value.includes('eperm') ||
+    value.includes('eacces') ||
+    value.includes('operation not permitted') ||
+    value.includes('permission denied') ||
     value.includes('spawn') ||
     value.includes('enoent') ||
     value.includes('econnrefused') ||

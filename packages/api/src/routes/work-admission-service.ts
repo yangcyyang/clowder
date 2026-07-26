@@ -7,6 +7,7 @@ import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { parseBoolean } from '../config/parse-utils.js';
+import { resolveReviewerIdForNewTask } from '../domains/cats/services/tasks/task-reviewer-defaults.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 import { appendTaskLifecycleNotice, taskLifecycleLabel } from './task-event-notices.js';
 import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
@@ -255,6 +256,8 @@ export async function admitWorkMessage(input: {
     createdBy: 'user',
     userId,
     sourceMessageId: sourceMessage.id,
+    // 批次4-B1 缺省规则: 人建的票(work-admission 恒无 parentTaskId) → 平台配置的默认验收人。
+    reviewerId: resolveReviewerIdForNewTask({ parentTask: null }),
     ...(ownerCatId ? { ownerCatId, status: 'doing', events: initialClaimEvents(ownerCatId, now) } : {}),
   });
 

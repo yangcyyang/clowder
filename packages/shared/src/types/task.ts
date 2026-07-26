@@ -51,7 +51,45 @@ export type TaskEventType =
    *  ticket — the source message's content was attached as a progress note in the task's
    *  own discussion thread. `data` carries { sourceMessageId, sourceThreadId,
    *  progressMessageId } pointers only (content lives in the discussion thread message). */
-  | 'progress_note';
+  | 'progress_note'
+  /** 批次4-B1: task entered 'in_review' and its reviewer was resolved (default rule or
+   *  inherited from parent) and notified. `data` carries { reviewerId, selfReviewRedirectedFrom?,
+   *  reason? } — the redirect fields are present only when the "执行者永不 review 自己的票"
+   *  server-side guard fired (see task-status-transitions.ts resolveReviewerAvoidingSelfReview). */
+  | 'review_requested'
+  /** 批次4-B2 分轨超时提醒: one reminder fired for the current review cycle (scoped to events
+   *  after the most recent 'review_requested'/status_changed-to-in_review event — a fresh
+   *  in_review entry gets a fresh budget). `data` carries { track: 'gate' | 'human', level: 1 | 2 | 3 }.
+   *  Each (track, level) pair fires at most once per review cycle — see ReviewReminderScheduler.ts. */
+  | 'review_reminder_sent'
+  /** 批次4-B2 human 轨第三级状态动作: the review sat unanswered past the terminal window (default
+   *  10 days, env-configurable within the spec's 7-14 day range) — platform force-reverted the
+   *  task from 'in_review' back to 'doing' and notified both submitter and reviewer. Terminal for
+   *  the review cycle: the scheduler never re-fires reminders for this cycle after this event. */
+  | 'review_timeout_reverted'
+  /** 批次4-B3 失能打标: the task's assignee (ownerCatId) has shown a continuous (no intervening
+   *  success), >30-minute streak of an incapacitating provider-error classification (quota /
+   *  permission_denied / repeated process-crash — see provider-error-classification.ts) and was
+   *  auto-tagged. `data` carries { classification, since }. Never triggers auto-reassignment —
+   *  see AssigneeIncapacitationScheduler.ts. */
+  | 'assignee_incapacitated'
+  /** 批次4-B3: the tagged assignee recovered (a successful run was observed) — tag cleared.
+   *  `data` carries { classification, since, durationMs } as the permanent "vacuum period"
+   *  record (Raft: 验收时要知道这段真空期), even though the live tag itself is gone. */
+  | 'assignee_recovered'
+  /** 批次4-B4①③: task entered 'in_review' — best-effort git evidence snapshot (commit sha,
+   *  diff stat, changed file list) anchored to the task thread, plus a static scan result
+   *  (binary files / bare control chars / secret-shaped strings in the diff). `data` carries
+   *  { repoDir, commitSha, hasUncommittedChanges, changedFileCount, scanFlags }. Absent when the
+   *  git snapshot itself failed (no repo, no permission, etc — best-effort, never blocks the
+   *  transition) — see task-review-evidence.ts. */
+  | 'evidence_anchored'
+  /** 批次4-B4④ 验收动作留痕: the task left 'in_review' (approved to 'done', sent back to
+   *  'doing'/'blocked', or marked 'failed') via a human/cat-initiated status change (never for
+   *  the automated review_timeout_reverted path, which has its own event). `data` carries
+   *  { from: 'in_review', to, actorId, evidenceEventTs? } pointing back at the evidence_anchored
+   *  event (if any) that was current at decision time. */
+  | 'review_action_recorded';
 
 /**
  * Task kind discriminator (#320).
@@ -153,6 +191,13 @@ export interface TaskItem {
   readonly retryOf?: string;
   /** Task this one branches from for an alternative approach. */
   readonly branchOf?: string;
+  /**
+   * 批次4-B1: 验收人——猫 id 或字面量 'human'. 只此一个字段(不做"gate 预验/人类终审"
+   * 双字段). 缺省规则、自审校正见 task-reviewer-defaults.ts / task-status-transitions.ts。
+   * Absent on legacy tasks created before this batch — callers should treat that the same
+   * as 'human' (the ultimate default).
+   */
+  readonly reviewerId?: CatId | 'human';
 }
 
 export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'createdBy'> & {
@@ -173,6 +218,10 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   parentTaskId?: string;
   retryOf?: string;
   branchOf?: string;
+  /** 批次4-B1: explicit reviewer, when the caller already resolved one (e.g. inherited from a
+   * parent task). Most creation paths omit this and let the platform resolve the default —
+   * see task-reviewer-defaults.ts's resolveReviewerIdForNewTask(). */
+  reviewerId?: CatId | 'human';
 };
 
 /** Mutable partial for updates — strips readonly from TaskItem fields */
@@ -193,4 +242,7 @@ export type UpdateTaskInput = {
   branchOf?: string;
   /** Actor to attribute auto-generated task ledger events to. */
   eventCatId?: string;
+  /** 批次4-B1: reviewer reassignment (default-rule resolution at creation, or the
+   * self-review auto-redirect at the in_review transition — see task-status-transitions.ts). */
+  reviewerId?: CatId | 'human';
 };

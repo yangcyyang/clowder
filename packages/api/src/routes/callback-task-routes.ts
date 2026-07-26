@@ -2,17 +2,25 @@
  * Callback task routes — MCP post_message 回传的任务更新端点
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, TaskEvent, TaskItem } from '@cat-cafe/shared';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { parseBoolean } from '../config/parse-utils.js';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isSubjectOwnershipConflictError, type ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  onTaskEnteredReview,
+  prepareReviewActionEvent,
+  prepareReviewEntry,
+} from '../domains/cats/services/tasks/task-review-transition.js';
+import { resolveReviewerIdForNewTask } from '../domains/cats/services/tasks/task-reviewer-defaults.js';
 import { isLegalTaskStatusTransition } from '../domains/cats/services/tasks/task-status-transitions.js';
 import {
   resolveTaskSurfaceBinding,
@@ -99,6 +107,9 @@ export function registerCallbackTaskRoutes(
     threadStore?: IThreadStore;
     freshnessGate?: FreshnessEgressGate;
     registry: Pick<InvocationRegistry, 'isLatest'>;
+    /** 批次4-B1: gate(猫)验收人置 in_review 时的唤醒投递（durable enqueue）。缺省时静默跳过唤醒，人类验收人的可见通知不受影响。 */
+    invocationQueue?: Pick<InvocationQueue, 'hasActiveIdempotencyKey' | 'enqueue' | 'persistEntry'>;
+    queueProcessor?: Pick<QueueProcessor, 'tryAutoExecute'>;
   },
 ): void {
   const { taskStore, socketManager, messageStore, threadStore } = deps;
@@ -165,6 +176,31 @@ export function registerCallbackTaskRoutes(
     if (why) updateData.why = why;
     updateData.eventCatId = actor.catId;
 
+    // 批次4-B1/B4④: entering/leaving in_review gets reviewer resolution + self-review
+    // guard + review-action audit merged into this same update call (see task-review-transition.ts).
+    const reviewEvents: TaskEvent[] = [];
+    if (status && status !== existing.status) {
+      if (status === 'in_review') {
+        const prepared = prepareReviewEntry(existing);
+        if (!prepared.ok) {
+          reply.status(409);
+          return { error: prepared.reason, code: 'SELF_REVIEW_REJECTED', suggestedReviewerId: prepared.suggestedReviewerId };
+        }
+        updateData.reviewerId = prepared.reviewerId;
+        reviewEvents.push(...prepared.events);
+      } else {
+        reviewEvents.push(
+          ...prepareReviewActionEvent({
+            previousStatus: existing.status,
+            nextStatus: status,
+            previousEvents: existing.events,
+            actorId: actor.catId,
+          }),
+        );
+      }
+    }
+    if (reviewEvents.length > 0) updateData.events = reviewEvents;
+
     const updated = await taskStore.update(taskId, updateData);
     if (!updated) {
       reply.status(500);
@@ -173,6 +209,16 @@ export function registerCallbackTaskRoutes(
 
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     emitTaskAttention(existing.status, updated);
+    if (status === 'in_review' && status !== existing.status && messageStore && threadStore) {
+      void onTaskEnteredReview(updated, {
+        taskStore,
+        threadStore,
+        messageStore,
+        socketManager,
+        invocationQueue: deps.invocationQueue,
+        queueProcessor: deps.queueProcessor,
+      }).catch(() => {});
+    }
     return { status: 'ok', task: updated };
   });
 
@@ -303,6 +349,9 @@ export function registerCallbackTaskRoutes(
       return { status: 'existing_task', code: 'TASK_ALREADY_ACTIVE', task: binding.task };
     }
 
+    // 批次4-B1 缺省规则: agent 拆的子票继承父票 reviewer(binding.task 就是校验通过的父票，
+    // 无需额外查询); 无父票则回落到平台默认验收人。
+    const parentTaskForReviewer = parentTaskId && binding.outcome === 'bound' && binding.surface === 'task_thread' ? binding.task : null;
     const created = await taskStore.create({
       threadId: actor.threadId,
       title,
@@ -312,6 +361,7 @@ export function registerCallbackTaskRoutes(
       subjectKey: null,
       ownerCatId: resolvedOwnerCatId,
       userId: actor.userId,
+      reviewerId: resolveReviewerIdForNewTask({ parentTask: parentTaskForReviewer }),
       ...(parentTaskId ? { parentTaskId } : {}),
     });
     const task =
@@ -697,12 +747,14 @@ export function registerCallbackTaskRoutes(
       resolvedOwnerCatId = createCatId(resolved.ok);
     }
 
+    let parentTaskForReviewer: TaskItem | null = null;
     if (parsed.data.parentTaskId) {
       const parent = await taskStore.get(parsed.data.parentTaskId);
       if (!parent) {
         reply.status(400);
         return { error: 'parentTaskId does not exist' };
       }
+      parentTaskForReviewer = parent;
     }
 
     if (parsed.data.subjectKey) {
@@ -725,6 +777,10 @@ export function registerCallbackTaskRoutes(
       kind: 'work' as const,
       subjectKey: parsed.data.subjectKey ?? null,
       userId: principal.userId,
+      // 批次4-B1 缺省规则: 有父票继承其 reviewer，否则平台默认验收人。subjectKey 去重已在
+      // 上面确认"尚无同 subject 的既有票"，所以下面的 upsertBySubject/create 对本调用而言
+      // 恒是一次真正的新建 —— 不存在"覆盖既有票已改派的 reviewer"的风险。
+      reviewerId: resolveReviewerIdForNewTask({ parentTask: parentTaskForReviewer }),
       ...(resolvedOwnerCatId ? { ownerCatId: resolvedOwnerCatId, status: 'doing' as const } : {}),
       ...(parsed.data.parentTaskId ? { parentTaskId: parsed.data.parentTaskId } : {}),
     };
@@ -797,6 +853,31 @@ export function registerCallbackTaskRoutes(
     if (failureReason) updateData.failureReason = failureReason;
     if (why) updateData.why = why;
 
+    // 批次4-B1/B4④: entering/leaving in_review gets reviewer resolution + self-review
+    // guard + review-action audit merged into this same update call (see task-review-transition.ts).
+    const reviewEvents: TaskEvent[] = [];
+    if (status && status !== existing.status) {
+      if (status === 'in_review') {
+        const prepared = prepareReviewEntry(existing);
+        if (!prepared.ok) {
+          reply.status(409);
+          return { error: prepared.reason, code: 'SELF_REVIEW_REJECTED', suggestedReviewerId: prepared.suggestedReviewerId };
+        }
+        updateData.reviewerId = prepared.reviewerId;
+        reviewEvents.push(...prepared.events);
+      } else {
+        reviewEvents.push(
+          ...prepareReviewActionEvent({
+            previousStatus: existing.status,
+            nextStatus: status,
+            previousEvents: existing.events,
+            actorId: principal.catId,
+          }),
+        );
+      }
+    }
+    if (reviewEvents.length > 0) updateData.events = reviewEvents;
+
     const updated = await taskStore.update(taskId, updateData);
     if (!updated) {
       reply.status(500);
@@ -817,6 +898,16 @@ export function registerCallbackTaskRoutes(
         tone: status === 'done' ? 'success' : 'info',
         dedupeKey: status,
         deps: { messageStore, socketManager },
+      }).catch(() => {});
+    }
+    if (status === 'in_review' && status !== existing.status && messageStore && threadStore) {
+      void onTaskEnteredReview(updated, {
+        taskStore,
+        threadStore,
+        messageStore,
+        socketManager,
+        invocationQueue: deps.invocationQueue,
+        queueProcessor: deps.queueProcessor,
       }).catch(() => {});
     }
     return { status: 'ok', task: updated };

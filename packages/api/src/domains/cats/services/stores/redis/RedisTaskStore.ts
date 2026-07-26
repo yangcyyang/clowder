@@ -107,6 +107,7 @@ export class RedisTaskStore implements ITaskStore {
       parentTaskId: input.parentTaskId,
       retryOf: input.retryOf,
       branchOf: input.branchOf,
+      reviewerId: input.reviewerId,
     };
 
     await this.writeTask(task);
@@ -172,6 +173,7 @@ export class RedisTaskStore implements ITaskStore {
         parentTaskId: input.parentTaskId,
         retryOf: input.retryOf,
         branchOf: input.branchOf,
+        reviewerId: input.reviewerId,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -235,6 +237,7 @@ export class RedisTaskStore implements ITaskStore {
         parentTaskId: input.parentTaskId,
         retryOf: input.retryOf,
         branchOf: input.branchOf,
+        reviewerId: input.reviewerId,
       };
       const written = await this.writeTask(task, { syncSubject: false, requireSubjectOwner: true });
       if (!written) {
@@ -266,6 +269,7 @@ export class RedisTaskStore implements ITaskStore {
       parentTaskId: input.parentTaskId ?? existing.parentTaskId,
       retryOf: input.retryOf ?? existing.retryOf,
       branchOf: input.branchOf ?? existing.branchOf,
+      reviewerId: input.reviewerId ?? existing.reviewerId,
       updatedAt: now,
     };
 
@@ -334,6 +338,7 @@ export class RedisTaskStore implements ITaskStore {
       ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
       ...(input.retryOf !== undefined ? { retryOf: input.retryOf } : {}),
       ...(input.branchOf !== undefined ? { branchOf: input.branchOf } : {}),
+      ...(input.reviewerId !== undefined ? { reviewerId: input.reviewerId } : {}),
       updatedAt: now,
     };
 
@@ -621,6 +626,7 @@ export class RedisTaskStore implements ITaskStore {
       parentTaskId: task.parentTaskId ?? '',
       retryOf: task.retryOf ?? '',
       branchOf: task.branchOf ?? '',
+      reviewerId: task.reviewerId ?? '',
     };
     if (task.automationState) {
       out.automationState = JSON.stringify(task.automationState);
@@ -656,6 +662,7 @@ export class RedisTaskStore implements ITaskStore {
       parentTaskId: data.parentTaskId || undefined,
       retryOf: data.retryOf || undefined,
       branchOf: data.branchOf || undefined,
+      reviewerId: (data.reviewerId || undefined) as TaskItem['reviewerId'],
     };
     let task = base;
     if (data.automationState) {

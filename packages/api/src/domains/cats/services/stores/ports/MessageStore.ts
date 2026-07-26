@@ -138,7 +138,11 @@ export interface StoredMessage {
       | 'task_status_changed'
       | 'task_idle_escalated'
       | 'task_progress_attached'
-      | 'cli_session_rotated';
+      | 'cli_session_rotated'
+      | 'task_review_reminder'
+      | 'task_review_timeout_reverted'
+      | 'assignee_incapacitated'
+      | 'assignee_recovered';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
     /** P2-3: Aggregated emoji reactions for this message. */

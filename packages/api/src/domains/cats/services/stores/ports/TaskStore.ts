@@ -210,6 +210,7 @@ export class TaskStore implements ITaskStore {
       parentTaskId: input.parentTaskId,
       retryOf: input.retryOf,
       branchOf: input.branchOf,
+      reviewerId: input.reviewerId,
     };
 
     this.tasks.set(task.id, task);
@@ -258,6 +259,7 @@ export class TaskStore implements ITaskStore {
           parentTaskId: input.parentTaskId ?? existing.parentTaskId,
           retryOf: input.retryOf ?? existing.retryOf,
           branchOf: input.branchOf ?? existing.branchOf,
+          reviewerId: input.reviewerId ?? existing.reviewerId,
           updatedAt: Date.now(),
         };
         this.tasks.set(existingId, updated);
@@ -358,6 +360,7 @@ export class TaskStore implements ITaskStore {
       ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
       ...(input.retryOf !== undefined ? { retryOf: input.retryOf } : {}),
       ...(input.branchOf !== undefined ? { branchOf: input.branchOf } : {}),
+      ...(input.reviewerId !== undefined ? { reviewerId: input.reviewerId } : {}),
       updatedAt: now,
     };
 

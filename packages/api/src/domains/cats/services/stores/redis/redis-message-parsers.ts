@@ -67,7 +67,11 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_idle_escalated'
         | 'task_progress_attached'
         | 'cli_session_rotated'
-        | 'sanity_handoff';
+        | 'sanity_handoff'
+        | 'task_review_reminder'
+        | 'task_review_timeout_reverted'
+        | 'assignee_incapacitated'
+        | 'assignee_recovered';
       slockThread?: { branchThreadId: string; replyCount: number };
     }
   | undefined {
@@ -103,7 +107,11 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_idle_escalated'
         | 'task_progress_attached'
         | 'cli_session_rotated'
-        | 'sanity_handoff';
+        | 'sanity_handoff'
+        | 'task_review_reminder'
+        | 'task_review_timeout_reverted'
+        | 'assignee_incapacitated'
+        | 'assignee_recovered';
       slockThread?: { branchThreadId: string; replyCount: number };
     } = {};
     let hasField = false;
@@ -162,7 +170,11 @@ export function safeParseExtra(raw: string | undefined):
       parsed.systemKind === 'task_idle_escalated' ||
       parsed.systemKind === 'task_progress_attached' ||
       parsed.systemKind === 'cli_session_rotated' ||
-      parsed.systemKind === 'sanity_handoff'
+      parsed.systemKind === 'sanity_handoff' ||
+      parsed.systemKind === 'task_review_reminder' ||
+      parsed.systemKind === 'task_review_timeout_reverted' ||
+      parsed.systemKind === 'assignee_incapacitated' ||
+      parsed.systemKind === 'assignee_recovered'
     ) {
       result.systemKind = parsed.systemKind;
       hasField = true;
