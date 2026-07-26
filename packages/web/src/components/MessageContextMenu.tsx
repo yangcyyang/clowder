@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { HubIcon } from './hub-icons';
 
 export interface ReactionQuickPick {
   emoji: string;
@@ -34,6 +35,8 @@ interface MenuItem {
   key: string;
   label: string;
   onClick: () => void;
+  /** cy 2026-07-26 Raft density parity: leading icon name from hub-icons.tsx's ICON_PATHS. */
+  icon: string;
 }
 
 const MENU_MARGIN = 8;
@@ -115,27 +118,36 @@ export function MessageContextMenu({
     itemRefs.current[0]?.focus();
   }, []);
 
+  // cy 2026-07-26 Raft density parity: icon choices follow the existing hub-icons.tsx path set
+  // (no new dependency). Copy Link/Copy Markdown share the "copy" verb but get visually distinct
+  // icons; Pin has no literal thumbtack in the set so "target" (pinpoint) stands in — see commit
+  // message for the full mapping rationale.
   const primaryItems: MenuItem[] = [
-    { key: 'copy-link', label: 'Copy Link', onClick: onCopyLink },
-    { key: 'copy-markdown', label: 'Copy Markdown', onClick: onCopyMarkdown },
-    { key: 'select-message', label: 'Select Message', onClick: onSelectMessage },
+    { key: 'copy-link', label: 'Copy Link', onClick: onCopyLink, icon: 'external-link' },
+    { key: 'copy-markdown', label: 'Copy Markdown', onClick: onCopyMarkdown, icon: 'copy' },
+    { key: 'select-message', label: 'Select Message', onClick: onSelectMessage, icon: 'check' },
     {
       key: 'save-message',
       label: saved ? 'Unsave Message' : 'Save Message',
       onClick: () => onSave?.(),
+      icon: 'download',
     },
-    ...(onConvertToTask ? [{ key: 'convert-to-task', label: 'Convert to Task', onClick: onConvertToTask }] : []),
+    ...(onConvertToTask
+      ? [{ key: 'convert-to-task', label: 'Convert to Task', onClick: onConvertToTask, icon: 'plus' }]
+      : []),
   ];
 
   // Pre-existing actions (pin/edit/share/delete) — kept as an additional group below the
   // Raft-parity items rather than removed, since they're the only UI surface these already
   // shipped features (pin, inline edit, soft/hard delete) have. See handoff notes.
   const secondaryItems: MenuItem[] = [
-    ...(onPin ? [{ key: 'pin', label: 'Pin message', onClick: onPin }] : []),
-    ...(onEdit ? [{ key: 'edit', label: 'Edit message', onClick: onEdit }] : []),
-    { key: 'share', label: 'Share messages...', onClick: () => onShare?.() },
-    ...(onSoftDelete ? [{ key: 'soft-delete', label: 'Delete message', onClick: onSoftDelete }] : []),
-    ...(onHardDelete ? [{ key: 'hard-delete', label: 'Delete permanently', onClick: onHardDelete }] : []),
+    ...(onPin ? [{ key: 'pin', label: 'Pin message', onClick: onPin, icon: 'target' }] : []),
+    ...(onEdit ? [{ key: 'edit', label: 'Edit message', onClick: onEdit, icon: 'pencil' }] : []),
+    { key: 'share', label: 'Share messages...', onClick: () => onShare?.(), icon: 'users' },
+    ...(onSoftDelete ? [{ key: 'soft-delete', label: 'Delete message', onClick: onSoftDelete, icon: 'x' }] : []),
+    ...(onHardDelete
+      ? [{ key: 'hard-delete', label: 'Delete permanently', onClick: onHardDelete, icon: 'trash' }]
+      : []),
   ];
 
   const allItems = [...primaryItems, ...secondaryItems];
@@ -189,7 +201,10 @@ export function MessageContextMenu({
       <div className="fixed inset-0 z-[9998]" onClick={onClose} aria-hidden="true" />
       <div
         ref={menuRef}
-        className="fixed z-[9999] min-w-[180px] rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] py-1 shadow-lg"
+        // cy 2026-07-26 Raft density parity: fixed compact width (~256px, was an unbounded
+        // min-w-[180px]) — density/structure only, colors/border/shadow stay on Clowder's own
+        // tokens (see task boundary notes in the commit message).
+        className="fixed z-[9999] w-64 rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] py-1 shadow-lg"
         style={{ top: pos.top, left: pos.left }}
         role="menu"
         onKeyDown={handleKeyDown}
@@ -199,7 +214,9 @@ export function MessageContextMenu({
             <div
               role="group"
               aria-label="快速表情回应"
-              className="flex items-center justify-between gap-1 px-2 py-1.5"
+              // Raft parity: tightly clustered + left-aligned, not spread with justify-between
+              // (that was stretching ~200px gaps between 6 emoji across the full row width).
+              className="flex items-center justify-start gap-1 px-2 py-1.5"
             >
               {reactions.map((reaction) => (
                 <button
@@ -228,10 +245,11 @@ export function MessageContextMenu({
             }}
             type="button"
             onClick={() => runAndClose(item.onClick)}
-            className="w-full px-3 py-1.5 text-left text-sm text-[var(--cafe-text)] transition-colors hover:bg-[var(--cafe-surface-elevated)] focus-visible:outline-none focus-visible:bg-[var(--cafe-surface-elevated)]"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--cafe-text)] transition-colors hover:bg-[var(--cafe-surface-elevated)] focus-visible:outline-none focus-visible:bg-[var(--cafe-surface-elevated)]"
             role="menuitem"
           >
-            {item.label}
+            <HubIcon name={item.icon} className="h-4 w-4 shrink-0 text-[var(--cafe-text-secondary)]" />
+            <span>{item.label}</span>
           </button>
         ))}
 
@@ -248,10 +266,11 @@ export function MessageContextMenu({
                   }}
                   type="button"
                   onClick={() => runAndClose(item.onClick)}
-                  className="w-full px-3 py-1.5 text-left text-sm text-[var(--cafe-text)] transition-colors hover:bg-[var(--cafe-surface-elevated)] focus-visible:outline-none focus-visible:bg-[var(--cafe-surface-elevated)]"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--cafe-text)] transition-colors hover:bg-[var(--cafe-surface-elevated)] focus-visible:outline-none focus-visible:bg-[var(--cafe-surface-elevated)]"
                   role="menuitem"
                 >
-                  {item.label}
+                  <HubIcon name={item.icon} className="h-4 w-4 shrink-0 text-[var(--cafe-text-secondary)]" />
+                  <span>{item.label}</span>
                 </button>
               );
             })}
