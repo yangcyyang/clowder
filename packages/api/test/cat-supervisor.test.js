@@ -52,6 +52,42 @@ describe('CatSupervisor', () => {
     assert.deepEqual(statuses, ['online_idle', 'processing', 'online_idle']);
   });
 
+  it('跨视图感知修复: markProcessing(catIds, threadId) 让 catStatusChange 携带 threadId,markIdle 后清除关联', async () => {
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, processingTimeoutMs: 60_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex', 'thread-branch-1');
+    const processingCall = deps.socketManager.emitToUser.mock.calls.find(
+      (call) => call.arguments[2].status === 'processing',
+    );
+    assert.equal(processingCall.arguments[2].threadId, 'thread-branch-1');
+
+    await supervisor.markIdle('codex');
+    const idleCalls = deps.socketManager.emitToUser.mock.calls.filter((call) => call.arguments[2].status === 'online_idle');
+    // idle 事件仍带上"最后已知" threadId(方便前端归因到具体分支后再清灯)
+    assert.equal(idleCalls.at(-1).arguments[2].threadId, 'thread-branch-1');
+
+    // 再次 markProcessing 不传 threadId 时不应该带上任何残留的旧 threadId
+    await supervisor.markProcessing('codex');
+    const secondProcessingCall = deps.socketManager.emitToUser.mock.calls
+      .filter((call) => call.arguments[2].status === 'processing')
+      .at(-1);
+    assert.equal(secondProcessingCall.arguments[2].threadId, undefined);
+  });
+
+  it('跨视图感知修复: 不传 threadId 时 catStatusChange 载荷里没有 threadId 字段(向后兼容)', async () => {
+    const deps = makeDeps();
+    const supervisor = new CatSupervisor({ ...deps, processingTimeoutMs: 60_000 });
+    await supervisor.syncCats({ codex: catConfig('codex') });
+
+    await supervisor.markProcessing('codex');
+    const processingCall = deps.socketManager.emitToUser.mock.calls.find(
+      (call) => call.arguments[2].status === 'processing',
+    );
+    assert.equal('threadId' in processingCall.arguments[2], false);
+  });
+
   it('marks a long-running processing cat as timeout', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const deps = makeDeps();

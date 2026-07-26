@@ -154,7 +154,8 @@ interface LoggerLike {
 }
 
 interface CatSupervisorLike {
-  markProcessing(catIds: string | readonly string[]): Promise<void> | void;
+  /** threadId: 跨视图感知修复(可选) — 让 catStatusChange 广播带上执行所在的 thread。 */
+  markProcessing(catIds: string | readonly string[], threadId?: string): Promise<void> | void;
   markOutput?(catIds: string | readonly string[]): Promise<void> | void;
   pauseForTool?(catIds: string | readonly string[]): Promise<void> | void;
   resumeAfterTool?(catIds: string | readonly string[]): Promise<void> | void;
@@ -2215,7 +2216,7 @@ export class QueueProcessor {
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId);
-      void this.deps.catSupervisor?.markProcessing(targetCats);
+      void this.deps.catSupervisor?.markProcessing(targetCats, threadId);
 
       // 3. Backfill message ID
       if (messageId) {

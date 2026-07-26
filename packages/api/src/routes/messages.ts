@@ -105,7 +105,8 @@ interface StreamingHookLike {
 }
 
 interface CatSupervisorLike {
-  markProcessing(catIds: string | readonly string[]): Promise<void> | void;
+  /** threadId: 跨视图感知修复(可选) — 让 catStatusChange 广播带上执行所在的 thread。 */
+  markProcessing(catIds: string | readonly string[], threadId?: string): Promise<void> | void;
   markIdle(catIds: string | readonly string[]): Promise<void> | void;
 }
 
@@ -1378,7 +1379,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             targetCats,
             phase: 'runtime_starting',
           });
-          void opts.catSupervisor?.markProcessing(targetCats);
+          void opts.catSupervisor?.markProcessing(targetCats, executionThreadId);
 
           await opts.invocationRecordStore?.update(createResult.invocationId, { phase: 'first_token_waiting' });
           opts.socketManager.broadcastToRoom(`thread:${executionThreadId}`, 'invocation_phase', {
@@ -1972,7 +1973,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }, HEARTBEAT_INTERVAL_MS);
 
         try {
-          void opts.catSupervisor?.markProcessing(targetCats);
+          void opts.catSupervisor?.markProcessing(targetCats, resolvedThreadId);
           // #768: intent_mode deferred to first CLI event (legacy path)
           let intentModeBroadcast = false;
 

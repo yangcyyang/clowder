@@ -657,6 +657,28 @@ export type CatStatusType =
   | 'alive_but_silent'
   | 'suspected_stall';
 
+/**
+ * 跨视图感知修复(F001-跨视图感知): 全局(跨 thread)猫活动的二态显示值——
+ * 与 CatAvatar 本地的 activityStatus 语义一致('active' 会带脉动动画),但这里是
+ * chatStore 侧的数据类型,供 globalCatActivity 与任意消费方(侧边栏/主频道提示条)复用。
+ */
+export type GlobalCatActivityStatus = 'active' | 'idle';
+
+/**
+ * 跨视图感知修复: chatStore 全局切片 `globalCatActivity` 的条目类型。由 useSocket 的
+ * catStatusChange 监听器**无条件**写入(不受"猫是否属于当前 thread 的
+ * targetCats/activeInvocations" 门槛限制)——这正是修复"干活中主频道零感知"事故的关键:
+ * 旧逻辑只在猫属于当前 thread 时才更新 per-thread catStatuses,分支里的执行状态直接被丢弃。
+ *
+ * 与既有 per-thread `catStatuses`(ThinkingIndicator 依赖)相互独立,互不影响、互不覆盖。
+ */
+export interface GlobalCatActivityEntry {
+  status: GlobalCatActivityStatus;
+  /** 猫当前(或最近一次)执行所在的 thread——用于侧边栏/主频道提示条渲染"正在 <thread> 干活"。 */
+  threadId?: string;
+  updatedAt: number;
+}
+
 /** F39: Queue entry from backend InvocationQueue */
 export interface QueueEntry {
   id: string;

@@ -132,6 +132,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     getThreadState,
     threadStates,
     catStatuses,
+    globalCatActivity,
   } = useChatStore();
   const { cats } = useCatData();
   const [isCreating, setIsCreating] = useState(false);
@@ -703,8 +704,33 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     for (const state of Object.values(threadStates)) {
       collect(state.catStatuses);
     }
+    // 跨视图感知修复(F001): 上面两路只看得到"当前 thread"和"已同步进 threadStates 的
+    // thread"——猫如果在一个从未打开过的分支(比如 thread-first 自动路由出的分支)里干活,
+    // 完全不会出现在这两路数据里,侧边栏对此零感知。globalCatActivity 是无条件写入的
+    // 全局真相来源,在这里兜底覆盖为 streaming,修复"分支里干活、侧边栏灯不亮"的问题。
+    for (const [catId, entry] of Object.entries(globalCatActivity ?? {})) {
+      if (entry.status === 'active') {
+        map.set(catId, 'streaming');
+      }
+    }
     return map;
-  }, [catStatuses, threadStates]);
+  }, [catStatuses, threadStates, globalCatActivity]);
+
+  /**
+   * 跨视图感知修复(F001): 悬浮提示——如果猫当前活跃状态来自 globalCatActivity(即可能
+   * 是一个不在当前视野里的分支),给出"正在 <thread 标题或'某分支'> 干活"这样更具体的提示,
+   * 而不是笼统的"工作中"。没有关联 threadId,或不是 active 状态时返回 null,调用方回退到
+   * 既有的通用文案。
+   */
+  const getBranchActivityTitle = useCallback(
+    (catId: string): string | null => {
+      const entry = globalCatActivity?.[catId];
+      if (entry?.status !== 'active') return null;
+      const branchLabel = entry.threadId ? (threads.find((t) => t.id === entry.threadId)?.title ?? '某分支') : '某分支';
+      return `正在${branchLabel}干活`;
+    },
+    [globalCatActivity, threads],
+  );
   const activeDmCatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const thread of sidebarThreads) {
@@ -1035,6 +1061,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                   const isActiveDm = activeDmCatIds.has(cat.id);
                   const dmThread = dmThreadByCatId.get(cat.id);
                   const unreadCount = dmThread ? (getThreadState(dmThread.id)?.unreadCount ?? 0) : 0;
+                  // 跨视图感知修复(F001): 优先用 globalCatActivity 派生的"正在 <thread> 干活"提示,
+                  // 没有(不是来自跨 thread 活动、或没带 threadId)时回退既有的通用文案。
+                  const activityDotLabel =
+                    getBranchActivityTitle(cat.id) ??
+                    (status === 'streaming' ? '工作中' : status === 'offline' ? '离线' : '在线空闲');
                   return (
                     <button
                       key={cat.id}
@@ -1052,7 +1083,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       <span className="relative flex-shrink-0">
                         <CatAvatar catId={cat.id} size={24} tone={status === 'streaming' || isActiveDm ? 'default' : 'quiet'} />
                         <span
-                          aria-label={status === 'streaming' ? '工作中' : status === 'offline' ? '离线' : '在线空闲'}
+                          aria-label={activityDotLabel}
+                          title={activityDotLabel}
                           className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--clowder-sidebar-bg)]"
                           style={{
                             backgroundColor:

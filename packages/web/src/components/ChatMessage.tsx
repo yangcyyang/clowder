@@ -341,11 +341,38 @@ function ThreadReplyBadge({
           <span
             data-thread-unread-dot="true"
             aria-hidden="true"
-            className="h-2 w-2 flex-shrink-0 rounded-full bg-conn-emerald-text"
+            className="h-2 w-2 flex-shrink-0 rounded-full bg-conn-emerald-text motion-safe:animate-pulse"
           />
-          <span className="shrink-0 text-conn-emerald-text">· {newCount} new</span>
+          {/* 跨视图感知修复(F001) 附带优化项 3: "· M new" 视觉强化——加粗 + 提亮,
+              幅度克制(不换底色、不加边框),复用既有 conn-emerald CSS 变量。 */}
+          <span className="shrink-0 font-extrabold text-conn-emerald-text">· {newCount} new</span>
         </>
       )}
+    </button>
+  );
+}
+
+/**
+ * 跨视图感知修复(F001): 主频道内联"分支工作中"提示条——当这条消息锚定的分支里有
+ * 猫正在执行(来自 globalCatActivity,无条件更新,不受"当前 thread" 门槛限制)时,
+ * 顶替 ThreadReplyBadge 出现在同一个徽标位置。点击行为与 ThreadReplyBadge 一致
+ * (打开分支面板)。执行结束后(globalCatActivity 清灯)会自然回归既有 replies 徽标。
+ */
+function ThreadBranchWorkingBadge({ catLabel, onOpen }: { catLabel: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`${catLabel}正在分支中回复,点击打开 Thread`}
+      title={`${catLabel}正在分支中回复…`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen();
+      }}
+      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--slock-radius-sm)] border-2 border-conn-amber-text bg-conn-amber-bg px-2 py-1 text-[11px] font-semibold leading-none text-conn-amber-text shadow-[var(--slock-shadow-chip)] transition-colors hover:bg-conn-amber-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)] motion-safe:animate-pulse"
+    >
+      <span aria-hidden="true">🐱</span>
+      <span className="shrink-0 truncate">{catLabel}正在分支中回复…</span>
     </button>
   );
 }
@@ -367,6 +394,7 @@ function MessageBadgeRow({
   onReferenceThreadAddress,
   onCopyThreadAddress,
   viewer,
+  branchWorkingCatId,
 }: {
   task?: { task: TaskItem; seq: number; assigneeLabel?: string };
   taskCreatedNotice?: { taskId: string; taskThreadId: string };
@@ -383,9 +411,12 @@ function MessageBadgeRow({
   onReferenceThreadAddress?: () => void;
   onCopyThreadAddress?: () => void;
   viewer?: ThreadViewer;
+  /** 跨视图感知修复(F001): 这条消息锚定的分支里正在执行的猫(来自 globalCatActivity)。 */
+  branchWorkingCatId?: string;
 }) {
   const hasReply = !!(threadReplyInfo && threadReplyInfo.replyCount > 0 && onOpenThread);
-  if (!task && !hasReply) return null;
+  const hasBranchWorking = !!(branchWorkingCatId && onOpenThread);
+  if (!task && !hasReply && !hasBranchWorking) return null;
 
   // [thread-task-design §3 step 1.2] Show the fuller notice bar in place of the
   // compact chip only for the task this live event actually pointed at — avoids
@@ -404,19 +435,29 @@ function MessageBadgeRow({
             onOpen={onOpenTaskThread}
           />
         )}
-        {hasReply && threadReplyInfo && (
-          <ThreadReplyBadge
-            count={threadReplyInfo.replyCount}
-            newCount={threadReplyInfo.newCount}
-            latestReply={threadReplyInfo.latestReply}
-            latestAuthorLabel={
-              threadReplyInfo.latestReply?.catId
-                ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
-                : '你'
-            }
+        {/* 跨视图感知修复(F001): 分支执行中时,工作提示条顶替 replies 徽标占据同一个位置;
+            执行结束(hasBranchWorking 变 false)后自动回归既有 replies 徽标,互斥渲染。 */}
+        {hasBranchWorking ? (
+          <ThreadBranchWorkingBadge
+            catLabel={getCatById(branchWorkingCatId!)?.displayName ?? branchWorkingCatId!}
             onOpen={() => onOpenThread!(messageId)}
-            viewer={viewer}
           />
+        ) : (
+          hasReply &&
+          threadReplyInfo && (
+            <ThreadReplyBadge
+              count={threadReplyInfo.replyCount}
+              newCount={threadReplyInfo.newCount}
+              latestReply={threadReplyInfo.latestReply}
+              latestAuthorLabel={
+                threadReplyInfo.latestReply?.catId
+                  ? (getCatById(threadReplyInfo.latestReply.catId)?.displayName ?? threadReplyInfo.latestReply.catId)
+                  : '你'
+              }
+              onOpen={() => onOpenThread!(messageId)}
+              viewer={viewer}
+            />
+          )
         )}
         <ThreadAddressActions
           token={threadAddressToken}
@@ -507,6 +548,9 @@ export function ChatMessage({
   const threadMessages = useChatStore((s) => s.messages);
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const catStatuses = useChatStore((s) => s.catStatuses);
+  // 跨视图感知修复(F001): globalCatActivity 无条件更新(不受当前 thread 门槛限制),
+  // 用来判断"这条消息锚定的分支里,是否有猫正在执行"——即使这个分支从没被打开过。
+  const globalCatActivity = useChatStore((s) => s.globalCatActivity);
   const tasks = useTaskStore((s) => s.tasks);
   const isUser = message.type === 'user' && !message.catId;
   const isSystem = message.type === 'system';
@@ -536,6 +580,19 @@ export function ChatMessage({
     .find(({ task }) => task.sourceMessageId === message.id);
   const taskAssignee = taskEntry?.task.ownerCatId ? getCatById(taskEntry.task.ownerCatId) : undefined;
   const taskAssigneeLabel = taskAssignee ? formatCatName(taskAssignee) : (taskEntry?.task.ownerCatId ?? undefined);
+  /**
+   * 跨视图感知修复(F001) 功能2: 主频道内联"分支工作中"提示条。
+   * threadReplyInfo.branchThreadId 复用既有 replies 徽标的数据源(#404 anchoring:
+   * 分支一旦被 thread-first 自动创建,extra.slockThread.branchThreadId 就已经写好,
+   * 不需要等第一条回复落地——见 MessageStore.ts branchMessage())。这里只是拿它去查
+   * globalCatActivity 里有没有猫正挂在这个分支上执行。
+   */
+  const branchThreadId = threadReplyInfo?.branchThreadId;
+  const branchWorkingCatId = branchThreadId
+    ? Object.entries(globalCatActivity ?? {}).find(
+        ([, entry]) => entry.status === 'active' && entry.threadId === branchThreadId,
+      )?.[0]
+    : undefined;
   const isWhisper = message.visibility === 'whisper';
   const isRevealed = isWhisper && !!message.revealedAt;
   const isSchedulerReply = isSchedulerReplyPreview(message.replyPreview);
@@ -825,6 +882,7 @@ export function ChatMessage({
             onReferenceThreadAddress={onReferenceThreadAddress}
             onCopyThreadAddress={onCopyThreadAddress}
             viewer={viewer}
+            branchWorkingCatId={branchWorkingCatId}
           />
         </div>
       </div>
@@ -994,6 +1052,7 @@ export function ChatMessage({
           onReferenceThreadAddress={onReferenceThreadAddress}
           onCopyThreadAddress={onCopyThreadAddress}
           viewer={viewer}
+          branchWorkingCatId={branchWorkingCatId}
         />
       </div>
     </div>

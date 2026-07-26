@@ -13,6 +13,8 @@ import type {
   ChatMessageMetadata,
   ChatMessagePatch,
   GameState,
+  GlobalCatActivityEntry,
+  GlobalCatActivityStatus,
   QueueEntry,
   RichBlock,
   Thread,
@@ -33,6 +35,8 @@ export type {
   EvidenceResultData,
   FileContent,
   GameState,
+  GlobalCatActivityEntry,
+  GlobalCatActivityStatus,
   ImageContent,
   MessageContent,
   QueueEntry,
@@ -695,6 +699,13 @@ export interface ChatState {
   // Global state
   currentThreadId: string;
   currentProjectPath: string;
+  /**
+   * 跨视图感知修复(F001): 全局(跨 thread)猫活动状态,由 useSocket 的 catStatusChange
+   * 监听器无条件写入——不像 per-thread `catStatuses` 那样只在猫属于当前 thread 时才更新。
+   * 用于修复"猫在分支里干活时主频道/侧边栏完全零感知"的问题。与 catStatuses 相互独立,
+   * ThinkingIndicator 等既有消费方不受影响。
+   */
+  globalCatActivity: Record<string, GlobalCatActivityEntry>;
   /** Transient: suppress initThreadUnread re-hydration for recently-cleared threads */
   _unreadSuppressedUntil: Record<string, number>;
   /** #586: Count of in-flight ack requests per thread — suppression clears only when 0 */
@@ -758,6 +769,12 @@ export interface ChatState {
   setIntentMode: (mode: 'execute' | 'ideate' | null) => void;
   setTargetCats: (cats: string[]) => void;
   setCatStatus: (catId: string, status: CatStatusType) => void;
+  /**
+   * 跨视图感知修复(F001): 无条件更新猫的全局活动状态——由 useSocket 的 catStatusChange
+   * 监听器直接调用,不做"是否属于当前 thread"的门槛判断。`status: 'idle'` 会清掉记录
+   * (防止长期显示"正在工作"的僵尸灯)。
+   */
+  setGlobalCatActivity: (catId: string, status: GlobalCatActivityStatus, threadId?: string) => void;
   clearCatStatuses: () => void;
   setCatInvocation: (catId: string, info: Partial<CatInvocationInfo>) => void;
   setMessageUsage: (messageId: string, usage: TokenUsage) => void;
@@ -1075,6 +1092,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   currentThreadId: 'default',
   currentProjectPath: 'default',
+  globalCatActivity: {},
   _unreadSuppressedUntil: {},
   _pendingAckCount: {},
   threads: [],
@@ -1759,6 +1777,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (state.catStatuses[catId] === status) return state;
       const catStatuses = { ...state.catStatuses, [catId]: status };
       return { catStatuses, ...mirrorActiveFlat(state, { catStatuses }) };
+    }),
+
+  /**
+   * 跨视图感知修复(F001): 全局切片,独立于 catStatuses/threadStates,不参与
+   * mirrorActiveFlat/mirrorActiveToThreadStates 那套"当前 thread 镜像"机制——
+   * 就是要让它不受"当前 thread"影响,任意 thread 里的执行都能被记录到。
+   */
+  setGlobalCatActivity: (catId, status, threadId) =>
+    set((state) => {
+      if (status === 'idle') {
+        if (!(catId in state.globalCatActivity)) return state;
+        const next = { ...state.globalCatActivity };
+        delete next[catId];
+        return { globalCatActivity: next };
+      }
+      const existing = state.globalCatActivity[catId];
+      if (existing?.status === status && existing.threadId === threadId) return state;
+      return {
+        globalCatActivity: {
+          ...state.globalCatActivity,
+          [catId]: { status, threadId, updatedAt: Date.now() },
+        },
+      };
     }),
 
   clearCatStatuses: () =>

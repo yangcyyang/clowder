@@ -113,6 +113,11 @@ type CatStatusChangeEvent = {
   catId: string;
   status: 'online_idle' | 'processing' | 'timeout' | 'offline';
   updatedAt: number;
+  /**
+   * 跨视图感知修复(F001): 可选新字段——CatSupervisor 侧仅在调用 markProcessing(catIds, threadId)
+   * 时才附带(见 packages/api/.../CatSupervisor.ts)。老服务端/老事件不带这个字段也不影响解析。
+   */
+  threadId?: string;
 };
 
 const mapSupervisorStatusToUiStatus = (
@@ -789,6 +794,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       if (isInCurrentThread) {
         state.setCatStatus(data.catId, uiStatus);
       }
+      // 跨视图感知修复(F001): 无条件更新全局活动状态——不受上面 isInCurrentThread 门槛限制。
+      // 这正是修复"猫在分支里干活时主频道零感知"事故的关键一行:旧逻辑只在猫属于当前
+      // thread 时才写状态,分支执行的事件会被上面的门槛直接丢弃,主频道/侧边栏永远看不到。
+      state.setGlobalCatActivity?.(data.catId, data.status === 'processing' ? 'active' : 'idle', data.threadId);
       recordInvocationEvent({
         event: 'agent_message',
         eventType: `cat_status:${data.status}`,

@@ -52,6 +52,12 @@ export class CatSupervisor {
   private readonly enabledCats = new Set<string>();
   private readonly timeoutTimers = new Map<string, NodeJS.Timeout>();
   private readonly watchdogPhases = new Map<string, WatchdogPhase>();
+  /**
+   * 跨视图感知修复: catId -> 最近一次 markProcessing 传入的 threadId。
+   * 让 catStatusChange 载荷带上 threadId,前端才能知道"猫在哪个分支干活"而不只是"猫在干活"。
+   * 只在 processing/timeout 期间保留;一旦落回 online_idle/offline 就清掉,避免僵尸关联。
+   */
+  private readonly catThreadMap = new Map<string, string>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: CatSupervisorDeps) {
@@ -111,9 +117,14 @@ export class CatSupervisor {
     }
   }
 
-  async markProcessing(catIds: string | readonly string[]): Promise<void> {
+  /**
+   * @param threadId 跨视图感知修复(可选,向后兼容): 本次执行锚定的 thread——写入
+   *   catThreadMap,随 catStatusChange 一起广播,让不在当前 thread 的前端也能定位"在哪干活"。
+   */
+  async markProcessing(catIds: string | readonly string[], threadId?: string): Promise<void> {
     for (const catId of this.normalizeCatIds(catIds)) {
       if (!this.enabledCats.has(catId)) this.enabledCats.add(catId);
+      if (threadId) this.catThreadMap.set(catId, threadId);
       await this.setStatus(catId, 'processing');
       if (this.legacyProcessingTimeoutMs !== null) {
         this.armLegacyTimeout(catId);
@@ -240,11 +251,20 @@ export class CatSupervisor {
     if (!opts.force && this.statuses.get(catId) === status) return;
     this.statuses.set(catId, status);
     await this.redis?.set(`cat:status:${catId}`, status);
+    // 跨视图感知修复: threadId 是可选新增字段——仅在 catThreadMap 里有记录时才附带,
+    // 老前端/老测试忽略未知字段即可,不破坏既有 payload 形状。
+    const threadId = this.catThreadMap.get(catId);
     this.socketManager.emitToUser(this.userId, 'catStatusChange', {
       catId,
       status,
       updatedAt: Date.now(),
+      ...(threadId ? { threadId } : {}),
     });
+    // 落回非 processing/timeout(即 online_idle/offline)时清掉关联,防止关联线程失效后
+    // 仍在后续 force-refresh(runHeartbeat/recoverStaleStatuses)里被误带出去。
+    if (status !== 'processing' && status !== 'timeout') {
+      this.catThreadMap.delete(catId);
+    }
   }
 
   private normalizeCatIds(catIds: string | readonly string[]): string[] {
