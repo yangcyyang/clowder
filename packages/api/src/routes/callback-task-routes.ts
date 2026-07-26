@@ -38,6 +38,8 @@ import {
   downgradeMessageToActiveTaskProgress,
   findActiveOwnedTaskInThread,
   isTicketHygieneActiveTaskDowngradeEnabled,
+  persistTaskHoistedOriginNotice,
+  resolveTaskHoistAnchor,
 } from './work-admission-service.js';
 
 // ============================================================================
@@ -671,7 +673,17 @@ export function registerCallbackTaskRoutes(
     // （task_create 仍可建新票）。只在真正要"转票"之前判——existingTask 复用（上面）代表
     // 这条消息本来就已经有自己的票，不属于本规则要拦的"记账式误认领"。
     if (isTicketHygieneActiveTaskDowngradeEnabled()) {
-      const activeTask = await findActiveOwnedTaskInThread(taskStore, sourceMessage.threadId, catId);
+      // 批次4-B5.5: resolve the lookup at the SAME layer B5.5 anchors newly-created tasks
+      // to (the post-hoist top-level channel, when the hoist switch is on — a no-op
+      // resolving back to sourceMessage.threadId otherwise). B5.1 already guarantees
+      // sourceMessage.threadId itself is top-level by the time we reach here, but an
+      // explicitly-created active task this same cat owns may have been HOISTED to the
+      // channel from a branch earlier — comparing at the channel layer on both sides is
+      // what keeps this lookup correct regardless of how that active task was created
+      // (see delivery report "B5.3 判定层选择" for the full reasoning, incl. why this
+      // must stay gated on the same switch as the anchor it's matching against).
+      const activeTaskScope = await resolveTaskHoistAnchor(threadStore, sourceMessage.threadId);
+      const activeTask = await findActiveOwnedTaskInThread(taskStore, activeTaskScope.threadId, catId);
       if (activeTask) {
         const downgraded = await downgradeMessageToActiveTaskProgress({
           task: activeTask,
@@ -769,8 +781,28 @@ export function registerCallbackTaskRoutes(
       }
     }
 
+    // 批次4-B5.5 建票上浮 (entry ① cat_cafe_task_create): a branch/discussion-thread
+    // caller gets the new task anchored to the top-level channel it traces up to instead
+    // of the branch — see resolveTaskHoistAnchor in work-admission-service.ts. threadStore
+    // is optional on this route's deps (unlike admitWorkMessage's callers, which always
+    // have one); best-effort no-op when it's missing, same as the discussion-thread wiring
+    // just below.
+    const hoistPlan = threadStore
+      ? await resolveTaskHoistAnchor(threadStore, threadId)
+      : { threadId, originThreadId: threadId, hoisted: false as const };
+    const hoistEvents: TaskEvent[] = hoistPlan.hoisted
+      ? [
+          {
+            ts: new Date().toISOString(),
+            catId: principal.catId,
+            type: 'hoisted_to_channel',
+            data: { originThreadId: hoistPlan.originThreadId },
+          },
+        ]
+      : [];
+
     const createInput = {
-      threadId,
+      threadId: hoistPlan.threadId,
       title: parsed.data.title,
       why: parsed.data.why ?? '',
       createdBy: createCatId(principal.catId),
@@ -783,6 +815,7 @@ export function registerCallbackTaskRoutes(
       reviewerId: resolveReviewerIdForNewTask({ parentTask: parentTaskForReviewer }),
       ...(resolvedOwnerCatId ? { ownerCatId: resolvedOwnerCatId, status: 'doing' as const } : {}),
       ...(parsed.data.parentTaskId ? { parentTaskId: parsed.data.parentTaskId } : {}),
+      ...(hoistEvents.length ? { events: hoistEvents } : {}),
     };
 
     let created;
@@ -808,6 +841,12 @@ export function registerCallbackTaskRoutes(
         : created;
 
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
+
+    // 批次4-B5.5 回执: leave the lightweight receipt in the originating branch thread.
+    if (hoistPlan.hoisted && messageStore) {
+      await persistTaskHoistedOriginNotice(task, hoistPlan.originThreadId, { taskStore, messageStore, socketManager });
+    }
+
     reply.status(201);
     return { status: 'ok', task };
   });

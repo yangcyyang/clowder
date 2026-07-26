@@ -446,6 +446,219 @@ describe('F194 §3 step 3: "As Task" forced admission', () => {
   });
 });
 
+// 批次4-B5.5 建票上浮到主频道 (docs/prd/batch4-codex-execution.md §3 B5.5).
+// Entry ②/③ in the PRD's inventory: 人类 As Task (this describe's first two tests) and
+// 右键 Convert-to-Task (POST /api/messages/:id/convert-to-task, the rest of this describe).
+// Both share admitWorkMessage's decision.reason === 'as_task_explicit' hoist gate
+// (work-admission-service.ts resolveTaskHoistAnchor) — entry ① (cat_cafe_task_create) is
+// covered separately in test/integration/task-lifecycle-callback.test.js.
+describe('批次4-B5.5 建票上浮到主频道 (As Task / Convert-to-Task)', () => {
+  afterEach(() => {
+    delete process.env.CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL;
+  });
+
+  // ---- AC①/②: As Task ----
+  test('AC①: asTask=true from inside a branch thread anchors the task to the top-level channel, leaves a branch receipt, and records origin fields', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const branch = await threadStore.create('alice', 'Branch', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: branch.id, content: '@opus 随便记一下这个分支里的活', asTask: true },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const mainTasks = await taskStore.listByThread(main.id);
+    assert.equal(mainTasks.length, 1, 'task must be hoisted to the top-level channel');
+    const task = mainTasks[0];
+    const hoistEvent = task.events?.find((e) => e.type === 'hoisted_to_channel');
+    assert.ok(hoistEvent, 'a hoisted_to_channel event must be recorded');
+    assert.equal(hoistEvent.data.originThreadId, branch.id);
+    assert.equal(typeof hoistEvent.data.originMessageId, 'string', 'As Task always has a concrete source message');
+
+    const branchTasks = await taskStore.listByThread(branch.id);
+    assert.equal(branchTasks.length, 0, 'the task must not remain anchored to the branch');
+
+    const branchMessages = await messageStore.getByThread(branch.id, 20);
+    const notice = branchMessages.find((m) => m.extra?.systemKind === 'task_hoisted_to_channel');
+    assert.ok(notice, 'a lightweight receipt must be posted back to the originating branch');
+    assert.match(notice.content, /已在主频道创建任务/);
+  });
+
+  // ---- AC②: multi-level nesting, exercised via the As Task entry point ----
+  test('AC②: asTask=true from a 3-level-deep nested branch resolves all the way up to the root channel', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const branch1 = await threadStore.create('alice', 'Branch1', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-1' },
+    });
+    const branch2 = await threadStore.create('alice', 'Branch2', undefined, {
+      relation: { v: 1, kind: 'task_thread', parentThreadId: branch1.id, rootMessageId: 'root-2' },
+    });
+    const branch3 = await threadStore.create('alice', 'Branch3', undefined, {
+      relation: { v: 1, kind: 'message_thread', parentThreadId: branch2.id, rootMessageId: 'root-3' },
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: branch3.id, content: '@opus 三层嵌套分支里记的活', asTask: true },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const mainTasks = await taskStore.listByThread(main.id);
+    assert.equal(mainTasks.length, 1, 'must resolve all the way to the root channel, not just one level up');
+  });
+
+  // ---- AC⑤ (asTask side) ----
+  test('AC⑤: CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL=false restores the old (anchor-stays-on-branch) behavior for asTask', async () => {
+    process.env.CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL = 'false';
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const branch = await threadStore.create('alice', 'Branch', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { threadId: branch.id, content: '@opus 随便记一下这个分支里的活', asTask: true },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const branchTasks = await taskStore.listByThread(branch.id);
+    assert.equal(branchTasks.length, 1, 'with the gate off, the task stays anchored to the branch it was created from');
+    assert.equal((await taskStore.listByThread(main.id)).length, 0);
+  });
+
+  // ---- AC③: Convert-to-Task ----
+  test('AC③: Convert-to-Task from inside a branch thread anchors the task to the top-level channel, leaves a branch receipt, and records origin fields', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const branch = await threadStore.create('alice', 'Branch', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+    });
+    const msg = await messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: '这个方案我们要单独跟一下',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: branch.id,
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${msg.id}/convert-to-task`,
+      payload: { userId: 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    const task = res.json().task;
+    assert.equal(task.threadId, main.id, 'task must be anchored to the top-level channel, not the branch');
+    const hoistEvent = task.events?.find((e) => e.type === 'hoisted_to_channel');
+    assert.ok(hoistEvent, 'a hoisted_to_channel event must be recorded');
+    assert.equal(hoistEvent.data.originThreadId, branch.id);
+    assert.equal(hoistEvent.data.originMessageId, msg.id);
+
+    const branchMessages = await messageStore.getByThread(branch.id, 20);
+    const notice = branchMessages.find((m) => m.extra?.systemKind === 'task_hoisted_to_channel');
+    assert.ok(notice, 'a lightweight receipt must be posted back to the originating branch');
+    assert.match(notice.content, /已在主频道创建任务/);
+  });
+
+  // ---- AC④ (Convert-to-Task side) ----
+  test('AC④: Convert-to-Task from a top-level thread is unaffected (unchanged pre-B5.5 success path)', async () => {
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const msg = await messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: '这个功能需要修一下',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: main.id,
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${msg.id}/convert-to-task`,
+      payload: { userId: 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().task.threadId, main.id);
+    assert.equal(res.json().task.events?.some((e) => e.type === 'hoisted_to_channel') ?? false, false);
+  });
+
+  // ---- AC⑤ (Convert-to-Task side): pre-B5.5 behavior was a 409 rejection, not a no-op hoist ----
+  test('AC⑤: CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL=false restores the pre-B5.5 409 NOT_TOP_LEVEL rejection for Convert-to-Task', async () => {
+    process.env.CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL = 'false';
+    const taskStore = new TaskStore();
+    const threadStore = new ThreadStore();
+    const messageStore = new MessageStore();
+    const events = [];
+    const routeCalls = [];
+    const main = await threadStore.create('alice', 'Main');
+    const branch = await threadStore.create('alice', 'Branch', undefined, {
+      relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+    });
+    const msg = await messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: '这个方案我们要单独跟一下',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: branch.id,
+    });
+    const app = await buildApp({ taskStore, threadStore, messageStore, events, routeCalls });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${msg.id}/convert-to-task`,
+      payload: { userId: 'alice' },
+    });
+
+    assert.equal(res.statusCode, 409, res.body);
+    assert.equal(res.json().code, 'NOT_TOP_LEVEL');
+  });
+});
+
 describe('thread-first 默认开的轻量豁免（CLOWDER_THREAD_FIRST_MIN_CHARS）', () => {
   let prevDefault;
   let prevMinChars;

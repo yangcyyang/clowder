@@ -2181,6 +2181,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL',
+    defaultValue: 'true（默认开）',
+    description:
+      '批次4-B5.5 建票上浮到主频道（铲屎官定稿，docs/prd/batch4-codex-execution.md §3 B5.5）：三个显式建票入口——猫 cat_cafe_task_create（/api/callbacks/task-create）、人类"As Task"勾选、右键 Convert-to-Task（/api/messages/:id/convert-to-task）——若发起 thread 是分支/讨论 thread（有 relation 字段，见 ThreadStore.ts computeThreadKind），任务的 threadId 沿 relation.parentThreadId 父链上溯（resolveTopLevelThreadId/resolveTaskHoistAnchor，work-admission-service.ts；带深度上限防环）锚定到顶层频道；任务卡与"已创建任务"通告落在顶层频道，发起的分支 thread 里另留一条轻量回执"已在主频道创建任务 #N"（systemKind=task_hoisted_to_channel），任务创建事件记一条 hoisted_to_channel 记录 originThreadId/原消息 id 供回溯。顶层频道/DM 内发起的建票（本就无 relation）行为不变。B5.3 活跃票降级的同猫同 thread 查找也复用同一 resolveTaskHoistAnchor，保持判定层与建票落点一致（见批次4-B5.5 交付报告）。置 "false" 关闭：三个入口回退到"任务锚定在发起 thread 本身"的旧行为，且 Convert-to-Task 对分支消息恢复 409 NOT_TOP_LEVEL 拒绝（其 B5.5 前的行为）。改值无需重启——每次请求都会重新读取。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CLOWDER_LIBRARY_REBUILD_HOURS',
     defaultValue: '24',
     description:

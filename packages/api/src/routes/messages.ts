@@ -120,7 +120,12 @@ import { ensureMessageAnchoredThread } from './task-discussion-thread.js';
 import { isThreadAddressRoutingEnabled, resolveThreadAddress } from './thread-address.js';
 import { deriveThreadReplySummary, type ThreadReplySummary } from './thread-reply-summary.js';
 import { classifyWorkAdmission, forceCreateFromMessage } from './work-admission.js';
-import { admitWorkMessage, type ExecutionRouteV1, isAutoTaskThreadRoutingEnabled } from './work-admission-service.js';
+import {
+  admitWorkMessage,
+  type ExecutionRouteV1,
+  isAutoTaskThreadRoutingEnabled,
+  isTicketHygieneHoistToChannelEnabled,
+} from './work-admission-service.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
 const DEFAULT_ORPHAN_DRAFT_CLEANUP_GRACE_MS = 30_000;
@@ -2061,7 +2066,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
   // POST /api/messages/:id/convert-to-task — Raft 三显式入口之一（右键"转为任务"，
   // 批次2 集成：契约与前端 MessageActions.handleConvertToTask 对齐 {userId,title?,why?}
-  // → {task, created}）。仅顶层消息可转：消息所在 thread 带 relation（即本身是分支）时拒绝。
+  // → {task, created}）。批次4-B5.5 建票上浮前：消息所在 thread 带 relation（即本身是
+  // 分支）时一律拒绝（NOT_TOP_LEVEL）。B5.5 起：默认改为放行 + 上浮到顶层频道（见下方
+  // admitWorkMessage 内的 resolveTaskHoistAnchor——decision.reason 恒为
+  // 'as_task_explicit'，这条路径必定命中）；CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL=false
+  // 时才恢复本项旧行为（直接拒绝）。
   app.post('/api/messages/:id/convert-to-task', async (request, reply) => {
     const { id: messageId } = request.params as { id: string };
     const body = (request.body ?? {}) as { userId?: string; title?: string; why?: string };
@@ -2083,7 +2092,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (thread.relation) {
+    if (thread.relation && !isTicketHygieneHoistToChannelEnabled()) {
       reply.status(409);
       return { error: 'Only top-level messages can be converted to a task', code: 'NOT_TOP_LEVEL' };
     }

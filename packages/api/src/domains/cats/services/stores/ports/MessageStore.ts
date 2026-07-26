@@ -142,7 +142,8 @@ export interface StoredMessage {
       | 'task_review_reminder'
       | 'task_review_timeout_reverted'
       | 'assignee_incapacitated'
-      | 'assignee_recovered';
+      | 'assignee_recovered'
+      | 'task_hoisted_to_channel';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };
     /** P2-3: Aggregated emoji reactions for this message. */

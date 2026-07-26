@@ -43,7 +43,11 @@ export type TaskLifecycleSystemKind =
   /** 批次4-B3 失能打标: assignee 状态异常持续 >30 分钟，票被打上"assignee 失能"标。 */
   | 'assignee_incapacitated'
   /** 批次4-B3: assignee 恢复，标记已清除（真空期记录留在 TaskEvent 里，不在此通知里）。 */
-  | 'assignee_recovered';
+  | 'assignee_recovered'
+  /** 批次4-B5.5 建票上浮: left in the ORIGINATING branch/discussion thread (not task.threadId —
+   *  see `noticeThreadId` below) when an explicit task-creation entry point hoisted the new
+   *  task up to the top-level channel it traced up to. */
+  | 'task_hoisted_to_channel';
 
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 /** module-level, process-local: adequate for "don't spam the same transition twice within 5 minutes" — not a durable ledger. */
@@ -100,6 +104,13 @@ export async function appendTaskLifecycleNotice(params: {
   /** Dedupe scope beyond task id, e.g. the target status ("doing", "in_review"). */
   dedupeKey: string;
   /**
+   * 批次4-B5.5 建票上浮: post to this thread instead of `task.threadId` — used for the
+   * origin-branch receipt ("已在主频道创建任务 #N") when the task itself now lives in the
+   * hoisted top-level channel but the notice belongs in the branch that asked. Defaults to
+   * `task.threadId` (every pre-B5.5 caller is unaffected).
+   */
+  noticeThreadId?: string;
+  /**
    * Batch 3-A item 2: narrowed to the one method this function actually calls so that
    * callers holding a minimal test-seam interface (e.g. QueueProcessor's SocketManagerLike)
    * can reuse this notice helper without needing a full concrete SocketManager instance.
@@ -107,6 +118,7 @@ export async function appendTaskLifecycleNotice(params: {
   deps: { messageStore: IMessageStore; socketManager: Pick<SocketManager, 'broadcastToRoom'> };
 }): Promise<{ posted: boolean }> {
   const now = Date.now();
+  const targetThreadId = params.noticeThreadId ?? params.task.threadId;
   if (!dedupeGateOpen(`${params.task.id}:${params.systemKind}:${params.dedupeKey}`, now)) {
     return { posted: false };
   }
@@ -125,12 +137,12 @@ export async function appendTaskLifecycleNotice(params: {
       content: params.content,
       mentions: [],
       timestamp: now,
-      threadId: params.task.threadId,
+      threadId: targetThreadId,
       source,
       extra: { systemKind: params.systemKind },
     });
-    params.deps.socketManager.broadcastToRoom(`thread:${params.task.threadId}`, 'connector_message', {
-      threadId: params.task.threadId,
+    params.deps.socketManager.broadcastToRoom(`thread:${targetThreadId}`, 'connector_message', {
+      threadId: targetThreadId,
       message: {
         id: stored.id,
         type: 'connector',
@@ -141,7 +153,7 @@ export async function appendTaskLifecycleNotice(params: {
     });
     return { posted: true };
   } catch (err) {
-    log.warn({ err, taskId: params.task.id, threadId: params.task.threadId }, 'Failed to persist task lifecycle notice');
+    log.warn({ err, taskId: params.task.id, threadId: targetThreadId }, 'Failed to persist task lifecycle notice');
     return { posted: false };
   }
 }

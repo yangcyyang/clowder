@@ -89,7 +89,19 @@ export type TaskEventType =
    *  the automated review_timeout_reverted path, which has its own event). `data` carries
    *  { from: 'in_review', to, actorId, evidenceEventTs? } pointing back at the evidence_anchored
    *  event (if any) that was current at decision time. */
-  | 'review_action_recorded';
+  | 'review_action_recorded'
+  /** 批次4-B5.5 建票上浮 (docs/prd/batch4-codex-execution.md §3 B5.5): an explicit
+   *  ticket-creation entry point (cat cat_cafe_task_create, human "As Task", right-click
+   *  Convert-to-Task) was invoked from inside a branch/discussion thread and the resulting
+   *  task was anchored to the top-level channel it traced up to, instead of the branch —
+   *  Raft's "分支=讨论, 频道=任务层" structural rule. Recorded once, at task creation, only
+   *  when hoisting actually moved the anchor (top-level/DM-initiated creation never gets
+   *  this event). `data` carries optional { originThreadId?, originMessageId? } — the
+   *  pre-hoist thread the request came from, and (when a concrete message triggered the
+   *  creation — As Task / Convert-to-Task, not cat_cafe_task_create) that message's id —
+   *  so the discussion context that led to the task can still be traced back. See
+   *  resolveTopLevelThreadId / resolveTaskHoistAnchor in work-admission-service.ts. */
+  | 'hoisted_to_channel';
 
 /**
  * Task kind discriminator (#320).

@@ -98,6 +98,121 @@ export function isTicketHygieneActiveTaskDowngradeEnabled(env: NodeJS.ProcessEnv
   return parseBoolean(env.CLOWDER_TICKET_HYGIENE_ACTIVE_TASK_DOWNGRADE, true);
 }
 
+// ============================================================================
+// 批次4-B5.5 建票上浮到主频道 (docs/prd/batch4-codex-execution.md §3 B5.5): an explicit
+// ticket-creation entry point (cat cat_cafe_task_create, human "As Task", right-click
+// Convert-to-Task) invoked from inside a branch/discussion thread anchors the new task
+// to the top-level channel it traces up to instead of the branch — Raft's "分支=讨论,
+// 频道=任务层" structural rule. B5.1 is the rejection face (branch messages can't become
+// a task via message-id); B5.5 is the exit face (explicit creation still succeeds, it
+// just lands one level up). Shared by all three entry points (callback-task-routes.ts's
+// /api/callbacks/task-create, and messages.ts's "As Task" + Convert-to-Task, both of
+// which route through admitWorkMessage below) plus B5.3's active-task lookup scope
+// (see the delivery report for why that lookup must resolve at the same layer).
+// ============================================================================
+
+/** B5.5 建票上浮: env gate. Default on; 'false' fully reverts to pre-B5.5 behavior — a
+ *  new task stays anchored to whatever thread it was actually created from (including a
+ *  branch), and messages.ts's Convert-to-Task route resumes rejecting branch-thread
+ *  messages with 409 NOT_TOP_LEVEL (its pre-B5.5 behavior). See env-registry.ts. */
+export function isTicketHygieneHoistToChannelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseBoolean(env.CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL, true);
+}
+
+/** Depth cap for the parent-chain walk below — guards against a corrupted/cyclic relation
+ *  graph hanging a request. Generous for any realistic nesting depth (manual branches are
+ *  rarely more than 2-3 deep). */
+const HOIST_TOP_LEVEL_MAX_DEPTH = 32;
+
+/**
+ * 批次4-B5.5: walk `threadId`'s `relation.parentThreadId` chain up to its top-level
+ * ancestor — a channel/lobby/DM thread with no `relation` (same branch-detection
+ * criterion B5.1 uses: `thread.relation` truthy = branch/discussion thread, see
+ * ThreadStore.ts computeThreadKind). Handles arbitrary nesting (a branch off a branch
+ * off a branch...) — each hop re-fetches the parent's own thread record, so a nested
+ * discussion-of-a-discussion resolves all the way to the root channel, not just one
+ * level up. Depth-capped (HOIST_TOP_LEVEL_MAX_DEPTH) so a corrupted/cyclic relation graph
+ * cannot hang the request; hitting the cap, a missing thread, or a dangling parent link
+ * all just return the last resolvable id instead of throwing — hoisting never fails the
+ * request, it just stops climbing.
+ */
+export async function resolveTopLevelThreadId(
+  threadStore: Pick<IThreadStore, 'get'>,
+  threadId: string,
+): Promise<string> {
+  let currentId = threadId;
+  for (let depth = 0; depth < HOIST_TOP_LEVEL_MAX_DEPTH; depth++) {
+    const thread = await threadStore.get(currentId);
+    if (!thread?.relation) return currentId;
+    currentId = thread.relation.parentThreadId;
+  }
+  return currentId;
+}
+
+export interface TaskHoistAnchor {
+  /** Where the task (or a B5.3-style same-layer lookup) should be anchored. Equals the
+   *  input threadId whenever `hoisted` is false. */
+  readonly threadId: string;
+  /** The pre-hoist threadId the request actually came from. Always populated; equals
+   *  `threadId` when `hoisted` is false (nothing to trace back to). */
+  readonly originThreadId: string;
+  /** True only when the gate is on AND `threadId` actually had a branch/discussion
+   *  ancestor to climb past (top-level/DM input is never "hoisted", it has nowhere to go). */
+  readonly hoisted: boolean;
+}
+
+/**
+ * 批次4-B5.5: env-gated wrapper around resolveTopLevelThreadId — the one function every
+ * explicit creation entry point (and B5.3's active-task lookup) should call instead of
+ * resolveTopLevelThreadId directly, so the "is hoisting even on" check never drifts out
+ * of sync between call sites.
+ */
+export async function resolveTaskHoistAnchor(
+  threadStore: Pick<IThreadStore, 'get'>,
+  threadId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<TaskHoistAnchor> {
+  if (!isTicketHygieneHoistToChannelEnabled(env)) {
+    return { threadId, originThreadId: threadId, hoisted: false };
+  }
+  const topLevelThreadId = await resolveTopLevelThreadId(threadStore, threadId);
+  if (topLevelThreadId === threadId) {
+    return { threadId, originThreadId: threadId, hoisted: false };
+  }
+  return { threadId: topLevelThreadId, originThreadId: threadId, hoisted: true };
+}
+
+/**
+ * 批次4-B5.5 回执: a lightweight receipt left in the originating branch/discussion thread
+ * when an explicit task-creation entry point hoisted the new task up to the top-level
+ * channel — "讨论上下文可回溯" (Raft r9 / B5.5 §2): the branch that asked still shows
+ * where the task landed. Reuses the appendTaskLifecycleNotice shape (same dedupe,
+ * source, socket broadcast) with `noticeThreadId` pointed at the origin instead of
+ * task.threadId (which is now the hoisted channel and already gets its own "已创建任务"
+ * notice via persistOwnedTaskCreatedNotice/persistUnclaimedTaskNotice below, or the
+ * task_created socket broadcast for the cat_cafe_task_create route).
+ */
+export async function persistTaskHoistedOriginNotice(
+  task: TaskItem,
+  originThreadId: string,
+  deps: {
+    taskStore: Pick<ITaskStore, 'listByThread'>;
+    messageStore: IMessageStore;
+    socketManager: Pick<SocketManager, 'broadcastToRoom'>;
+  },
+): Promise<void> {
+  const label = await taskLifecycleLabel(deps.taskStore, task);
+  await appendTaskLifecycleNotice({
+    task,
+    noticeThreadId: originThreadId,
+    content: `已在主频道创建任务 ${label}`,
+    systemKind: 'task_hoisted_to_channel',
+    eventType: 'hoisted_to_channel',
+    dedupeKey: 'hoisted',
+    deps,
+  });
+}
+
 function initialClaimEvents(ownerCatId: CatId | undefined, timestamp: number): readonly TaskEvent[] | undefined {
   if (!ownerCatId) return undefined;
   const ts = new Date(timestamp).toISOString();
@@ -243,10 +358,36 @@ export async function admitWorkMessage(input: {
   const { decision, sourceMessage, userId, deps } = input;
   const ownerCatId = decision.ownerCatId;
   const now = Date.now();
+
+  // 批次4-B5.5 建票上浮: only the two human explicit-declaration entrances (As Task
+  // checkbox, right-click Convert-to-Task) share this exact reason literal —
+  // forceCreateFromMessage (work-admission.ts) is their sole producer. Heuristic
+  // auto-admission (classifyWorkAdmission's 'explicit_action'/'line_leading_mention_action'),
+  // pending-plan approval ('approval_with_pending_plan'), and the message-id claim path's
+  // own manually-built decision ('explicit_action') are all deliberately excluded — none of
+  // those are one of B5.5's three named entry points (see delivery report).
+  const hoistPlan =
+    decision.reason === 'as_task_explicit'
+      ? await resolveTaskHoistAnchor(deps.threadStore, sourceMessage.threadId)
+      : { threadId: sourceMessage.threadId, originThreadId: sourceMessage.threadId, hoisted: false as const };
+
   const subjectKey = `work-intake:${sourceMessage.threadId}:${sourceMessage.id}`;
+  const claimEvents = ownerCatId ? (initialClaimEvents(ownerCatId, now) ?? []) : [];
+  const hoistEvents: TaskEvent[] = hoistPlan.hoisted
+    ? [
+        {
+          ts: new Date(now).toISOString(),
+          catId: 'user',
+          type: 'hoisted_to_channel',
+          data: { originThreadId: hoistPlan.originThreadId, originMessageId: sourceMessage.id },
+        },
+      ]
+    : [];
+  const seedEvents = [...claimEvents, ...hoistEvents];
+
   const task = await deps.taskStore.upsertBySubject({
     kind: 'work',
-    threadId: sourceMessage.threadId,
+    threadId: hoistPlan.threadId,
     subjectKey,
     title: taskTitleForSource(sourceMessage, decision.taskTitle),
     why:
@@ -258,7 +399,8 @@ export async function admitWorkMessage(input: {
     sourceMessageId: sourceMessage.id,
     // 批次4-B1 缺省规则: 人建的票(work-admission 恒无 parentTaskId) → 平台配置的默认验收人。
     reviewerId: resolveReviewerIdForNewTask({ parentTask: null }),
-    ...(ownerCatId ? { ownerCatId, status: 'doing', events: initialClaimEvents(ownerCatId, now) } : {}),
+    ...(ownerCatId ? { ownerCatId, status: 'doing' } : {}),
+    ...(seedEvents.length ? { events: seedEvents } : {}),
   });
 
   const discussion = await ensureTaskDiscussionThread(
@@ -296,6 +438,12 @@ export async function admitWorkMessage(input: {
       await wakeCandidateCatsForUnclaimedTask(discussion.task, sourceMessage, deps).catch(() => {});
     } else {
       await persistOwnedTaskCreatedNotice(discussion.task, deps);
+    }
+    // 批次4-B5.5 回执: the "已创建任务" notice above already landed in the (now hoisted)
+    // main channel via discussion.task.threadId — this leaves the matching lightweight
+    // receipt back in the branch that actually asked for it.
+    if (hoistPlan.hoisted) {
+      await persistTaskHoistedOriginNotice(discussion.task, hoistPlan.originThreadId, deps);
     }
   }
 

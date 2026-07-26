@@ -992,4 +992,203 @@ describe('Task lifecycle callback routes (batch 2-C)', () => {
       });
     });
   });
+
+  // ---- 批次4-B5.5 建票上浮到主频道 (docs/prd/batch4-codex-execution.md §3 B5.5) ----
+  // Entry ① in the PRD's inventory: 猫侧显式建票 cat_cafe_task_create → /api/callbacks/task-create.
+  describe('B5.5 建票上浮到主频道 (cat_cafe_task_create entry)', () => {
+    function withEnv(overrides, fn) {
+      const previous = {};
+      for (const key of Object.keys(overrides)) previous[key] = process.env[key];
+      Object.assign(process.env, overrides);
+      return Promise.resolve()
+        .then(fn)
+        .finally(() => {
+          for (const key of Object.keys(overrides)) {
+            if (previous[key] === undefined) delete process.env[key];
+            else process.env[key] = previous[key];
+          }
+        });
+    }
+
+    // ---- AC① ----
+    test('AC①: cat_cafe_task_create from inside a branch thread anchors the task to the top-level channel, leaves a branch receipt, and records origin fields', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const branch = await threadStore.create('user-1', 'Branch', undefined, {
+        relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-create',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: '分支里建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      const task = res.json().task;
+      assert.equal(task.threadId, main.id, 'task must be anchored to the top-level channel, not the branch');
+
+      const hoistEvent = task.events?.find((e) => e.type === 'hoisted_to_channel');
+      assert.ok(hoistEvent, 'a hoisted_to_channel event must be recorded');
+      assert.equal(hoistEvent.data.originThreadId, branch.id);
+
+      const branchMessages = await messageStore.getByThread(branch.id, 20);
+      const notice = branchMessages.find((m) => m.extra?.systemKind === 'task_hoisted_to_channel');
+      assert.ok(notice, 'a lightweight receipt must be posted back to the originating branch');
+      assert.match(notice.content, /已在主频道创建任务/);
+
+      const mainTasks = await taskStore.listByThread(main.id);
+      assert.equal(mainTasks.length, 1, 'the task must actually live at the top-level channel');
+    });
+
+    // ---- AC② ----
+    test('AC②: a task_create from a 3-level-deep nested branch resolves all the way up to the root channel', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const branch1 = await threadStore.create('user-1', 'Branch1', undefined, {
+        relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-1' },
+      });
+      const branch2 = await threadStore.create('user-1', 'Branch2', undefined, {
+        relation: { v: 1, kind: 'task_thread', parentThreadId: branch1.id, rootMessageId: 'root-2' },
+      });
+      const branch3 = await threadStore.create('user-1', 'Branch3', undefined, {
+        relation: { v: 1, kind: 'message_thread', parentThreadId: branch2.id, rootMessageId: 'root-3' },
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch3.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-create',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: '三层嵌套分支里建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      assert.equal(
+        res.json().task.threadId,
+        main.id,
+        'must resolve all the way to the root channel, not just one level up',
+      );
+    });
+
+    // ---- AC④ ----
+    test('AC④: a top-level channel invocation is unaffected (no hoist, no event)', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-create',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: '顶层频道建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      const task = res.json().task;
+      assert.equal(task.threadId, main.id);
+      assert.equal(task.events?.some((e) => e.type === 'hoisted_to_channel') ?? false, false);
+    });
+
+    test('AC④: a DM thread invocation is unaffected (no hoist)', async () => {
+      const app = await createApp();
+      const dm = await threadStore.create('user-1', 'DM with codex');
+      await threadStore.updateIsDM(dm.id, true);
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', dm.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/task-create',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: 'DM 里建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      assert.equal(res.json().task.threadId, dm.id);
+    });
+
+    // ---- AC⑤ ----
+    test('AC⑤: CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL=false restores the old (anchor-stays-on-branch) behavior', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const branch = await threadStore.create('user-1', 'Branch', undefined, {
+          relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-create',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { title: '关闭开关后建的票' },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+        const task = res.json().task;
+        assert.equal(
+          task.threadId,
+          branch.id,
+          'with the gate off, the task stays anchored to the branch it was created from',
+        );
+
+        const branchMessages = await messageStore.getByThread(branch.id, 20);
+        assert.equal(
+          branchMessages.some((m) => m.extra?.systemKind === 'task_hoisted_to_channel'),
+          false,
+          'no receipt when the gate is off',
+        );
+      });
+    });
+
+    // ---- B5.3 判定层一致性: 上浮后 findActiveOwnedTaskInThread 必须按同一层判定 ----
+    test('B5.3 判定层一致性: an active task hoisted from a branch is still found (and downgrades) a same-cat message-id claim from that same branch, with B5.1 relaxed', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_THREAD_HIERARCHY: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const branch = await threadStore.create('user-1', 'Branch', undefined, {
+          relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+        });
+
+        // codex creates an owned task from inside the branch — it gets hoisted to main.
+        const invocation1 = await registry.create('user-1', 'codex', branch.id);
+        const createRes = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-create',
+          headers: { 'x-invocation-id': invocation1.invocationId, 'x-callback-token': invocation1.callbackToken },
+          payload: { title: '正在处理的活跃票', ownerCatId: 'codex' },
+        });
+        assert.equal(createRes.statusCode, 201, createRes.body);
+        const activeTask = createRes.json().task;
+        assert.equal(activeTask.threadId, main.id, 'sanity check: the active task really did get hoisted to main');
+
+        // A second message, still inside the SAME branch (B5.1 relaxed so this reaches B5.3).
+        const msg2 = await messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: '顺便看看这个也修一下',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: branch.id,
+        });
+        const invocation2 = await registry.create('user-1', 'codex', branch.id);
+        const claimRes = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/task-claim',
+          headers: { 'x-invocation-id': invocation2.invocationId, 'x-callback-token': invocation2.callbackToken },
+          payload: { messageId: msg2.id, title: '顺便的这个' },
+        });
+
+        assert.equal(claimRes.statusCode, 200, claimRes.body);
+        const claimBody = claimRes.json();
+        assert.equal(claimBody.downgraded, true, 'must downgrade onto the already-hoisted active task, not mint a duplicate');
+        assert.equal(claimBody.task.id, activeTask.id);
+
+        const allMainTasks = await taskStore.listByThread(main.id);
+        assert.equal(allMainTasks.length, 1, 'no duplicate ticket at the channel layer');
+      });
+    });
+  });
 });

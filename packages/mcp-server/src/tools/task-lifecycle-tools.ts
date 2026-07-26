@@ -321,6 +321,9 @@ export const taskLifecycleTools = [
       'instead of creating a duplicate (use cat_cafe_task_claim on it instead). ' +
       'Prefer independent subtasks over sequential chains when splitting work; leave subtasks unassigned by ' +
       'default so others can claim them rather than claiming everything yourself. ' +
+      'GOTCHA (batch4-B5.5 建票上浮): calling this from inside a branch/discussion thread does not create the ' +
+      'task there — it is automatically anchored to the top-level channel that thread traces up to instead ' +
+      '(a brief receipt is left behind in the branch); this is expected, not an error. ' +
       'Output: new task appears in the thread task panel with its own discussion thread already created.',
     inputSchema: taskCreateInputSchema,
     handler: handleTaskCreate,
