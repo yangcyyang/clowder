@@ -708,7 +708,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   loadStandardContext: boolean;
   loadFullContext: boolean;
   hasSessionBootstrap: boolean;
-  hasSignalArticles: boolean;
   hasAlwaysOnDocs: boolean;
   hasSopHint: boolean;
   hasMcpInstructions: boolean;
@@ -735,7 +734,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.projectContextDeferred) loadedBlocks.push('project-progress:on-demand');
   if (input.hasMcpInstructions) loadedBlocks.push('mcp-callback-instructions');
   if (input.hasSessionBootstrap) loadedBlocks.push('session-bootstrap');
-  if (input.hasSignalArticles) loadedBlocks.push('signal-articles');
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
   if (input.hasSopHint) loadedBlocks.push('sop-hint');
   if (input.historySummary) loadedBlocks.push('history-summary');

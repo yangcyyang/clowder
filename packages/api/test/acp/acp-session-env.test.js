@@ -15,7 +15,6 @@ const CALLBACK_ENV = {
   CAT_CAFE_CALLBACK_TOKEN: 'tok-xyz',
   CAT_CAFE_USER_ID: 'user-1',
   CAT_CAFE_CAT_ID: 'gemini',
-  CAT_CAFE_SIGNAL_USER: 'gemini',
 };
 
 describe('materializeSessionMcpServers', () => {
@@ -52,12 +51,12 @@ describe('materializeSessionMcpServers', () => {
   it('does not modify non-cat-cafe servers', () => {
     const base = [
       { name: 'playwright', command: 'npx', args: ['@playwright/mcp'], env: [] },
-      { name: 'cat-cafe-signals', command: 'node', args: ['signals.js'], env: [] },
+      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] },
     ];
 
     const result = materializeSessionMcpServers(base, CALLBACK_ENV);
     assert.deepStrictEqual(result[0].env, [], 'playwright should be untouched');
-    assert.ok(result[1].env.length > 0, 'cat-cafe-signals should get env');
+    assert.ok(result[1].env.length > 0, 'cat-cafe-collab should get env');
   });
 
   it('does not inject into servers with coincidental cat-cafe prefix (e.g. cat-cafeteria)', () => {

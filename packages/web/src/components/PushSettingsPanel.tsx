@@ -11,7 +11,6 @@ const NOTIFY_TYPES = [
   { id: 'permission', label: '权限请求', desc: '猫猫需要授权时通知' },
   { id: 'mention', label: '@提及', desc: '协作成员提及你时' },
   { id: 'schedule', label: '定时任务', desc: '定时任务执行结果' },
-  { id: 'signal', label: '信号更新', desc: '新信号入站提醒' },
 ] as const;
 
 type NotifyTypeId = (typeof NOTIFY_TYPES)[number]['id'];
@@ -22,7 +21,6 @@ const defaultPrefs: Record<NotifyTypeId, boolean> = {
   permission: true,
   mention: true,
   schedule: true,
-  signal: false,
 };
 
 function loadPrefs(): Record<NotifyTypeId, boolean> {

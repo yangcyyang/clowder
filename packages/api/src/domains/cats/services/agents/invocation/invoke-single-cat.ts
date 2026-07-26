@@ -384,18 +384,6 @@ export interface InvocationDeps {
   readonly tmuxGateway?: TmuxGateway;
   /** F089 Phase 2: agent pane registry for observability */
   readonly agentPaneRegistry?: AgentPaneRegistry;
-  /** F091: Lookup signal articles linked to a thread for context injection */
-  readonly signalArticleLookup?: (threadId: string) => Promise<
-    readonly {
-      id: string;
-      title: string;
-      source: string;
-      tier: number;
-      contentSnippet: string;
-      note?: string | undefined;
-      relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
-    }[]
-  >;
 }
 
 /**
@@ -567,7 +555,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // can resolve to a concrete value.
     CAT_CAFE_THREAD_ID: threadId,
     ...resolveClowderCliEnv(hostProjectRoot),
-    ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
   };
 
   const auditLog = getEventAuditLog();

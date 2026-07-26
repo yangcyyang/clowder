@@ -12,7 +12,7 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/signals', '/memory', '/mission', '/search'];
+const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/memory', '/mission', '/search'];
 const SIDEBAR_DEFAULT_WIDTH = 260;
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 340;

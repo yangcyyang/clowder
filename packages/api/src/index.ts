@@ -121,7 +121,6 @@ import { shouldTrackApiActivity } from './domains/health/activity-route-filter.j
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
-import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
 import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
@@ -199,9 +198,6 @@ import {
   sessionHooksRoutes,
   sessionStrategyConfigRoutes,
   sessionTranscriptRoutes,
-  signalCollectionRoutes,
-  signalStudyRoutes,
-  signalsRoutes,
   skillsRoutes,
   sliceRoutes,
   summariesRoutes,
@@ -1392,7 +1388,6 @@ async function main(): Promise<void> {
     socketManager,
     ...(tmuxGateway ? { tmuxGateway } : {}),
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
-    signalArticleLookup: createSignalArticleLookup({ transcriptReader }),
     evidenceStore: memoryServices.evidenceStore,
     threadHistorySummaryStore: memoryServices.threadHistorySummaryStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
@@ -1956,10 +1951,6 @@ async function main(): Promise<void> {
     threadStore,
     registry: commandRegistry,
   });
-  await app.register(signalsRoutes);
-  await app.register(signalStudyRoutes, { threadStore });
-  await app.register(signalCollectionRoutes);
-
   // Serve uploaded files (images)
   const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
   await app.register(uploadsRoutes, { uploadDir });

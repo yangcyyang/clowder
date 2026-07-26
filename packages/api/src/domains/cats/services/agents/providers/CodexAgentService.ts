@@ -274,7 +274,6 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe', 'index.js'],
   ['cat-cafe-collab', 'collab.js'],
   ['cat-cafe-memory', 'memory.js'],
-  ['cat-cafe-signals', 'signals.js'],
 ] as const;
 
 function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Record<string, string>): string[] {
@@ -306,7 +305,6 @@ function buildCatCafeMcpConfigArgs(workingDirectory?: string, callbackEnv?: Reco
     'CLOWDER_API_BEARER_TOKEN',
     'CAT_CAFE_USER_ID',
     'CAT_CAFE_CAT_ID',
-    'CAT_CAFE_SIGNAL_USER',
   ] as const;
   for (const [serverName, entrypoint] of CAT_CAFE_MCP_SERVER_ENTRIES) {
     const serverPath = resolve(mcpDistDir, entrypoint);

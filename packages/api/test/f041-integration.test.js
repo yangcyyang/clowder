@@ -181,28 +181,23 @@ describe('F041 Cloud P1-1: bootstrap generates CLI configs', () => {
     const claudeServers = await readClaudeMcpConfig(cliPaths.anthropic);
     assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-collab'));
     assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-memory'));
-    assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-signals'));
 
     const codexServers = await readCodexMcpConfig(cliPaths.openai);
     assert.ok(codexServers.find((s) => s.name === 'cat-cafe-collab'));
     assert.ok(codexServers.find((s) => s.name === 'cat-cafe-memory'));
-    assert.ok(codexServers.find((s) => s.name === 'cat-cafe-signals'));
 
     const geminiServers = await readGeminiMcpConfig(cliPaths.google);
     const collab = geminiServers.find((s) => s.name === 'cat-cafe-collab');
     const memory = geminiServers.find((s) => s.name === 'cat-cafe-memory');
-    const signals = geminiServers.find((s) => s.name === 'cat-cafe-signals');
     assert.ok(collab);
     assert.ok(memory);
-    assert.ok(signals);
-    for (const server of [collab, memory, signals]) {
+    for (const server of [collab, memory]) {
       assert.deepEqual(server.env, {
         CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
         CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
         CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
         CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
         CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-        CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
       });
     }
   });
@@ -424,8 +419,8 @@ describe('F041 Discovery Consistency', () => {
       geminiConfig: join(dir, 'nonexistent.json'),
     });
 
-    // Should have: cat-cafe main(1) + split(3) + pencil + jetbrains (discovered)
-    assert.equal(config.capabilities.length, 6);
+    // Should have: cat-cafe main(1) + split(2) + pencil + jetbrains (discovered)
+    assert.equal(config.capabilities.length, 5);
 
     const catCafeMain = config.capabilities.find((c) => c.id === 'cat-cafe');
     assert.ok(catCafeMain);
@@ -435,7 +430,6 @@ describe('F041 Discovery Consistency', () => {
     assert.ok(catCafeCollab);
     assert.equal(catCafeCollab.source, 'cat-cafe');
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-memory'));
-    assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-signals'));
 
     const pencil = config.capabilities.find((c) => c.id === 'pencil');
     assert.ok(pencil);

@@ -24,7 +24,7 @@ export const CAT_CAFE_CALLBACK_ENV_KEYS = [
 ];
 
 const KIMI_CONTEXT_TAIL_BYTES = 64 * 1024;
-const MANAGED_KIMI_MCP_SERVER_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+const MANAGED_KIMI_MCP_SERVER_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory']);
 
 function shouldCarryExistingMcpServer(name: string): boolean {
   // Project-level probe servers are diagnostics artifacts. They often exit

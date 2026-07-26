@@ -144,25 +144,6 @@ export interface InvocationContext {
     readonly featureId: string;
   };
   /**
-   * F091: Active Signal articles in discussion context.
-   * Injected when 铲屎官 links a Signal article in the thread.
-   */
-  activeSignals?: readonly {
-    readonly id: string;
-    readonly title: string;
-    readonly source: string;
-    readonly tier: number;
-    readonly contentSnippet: string;
-    readonly note?: string | undefined;
-    readonly relatedDiscussions?:
-      | readonly {
-          readonly sessionId: string;
-          readonly snippet: string;
-          readonly score: number;
-        }[]
-      | undefined;
-  }[];
-  /**
    * F092: Voice companion mode.
    * When true, cats should prioritize audio rich blocks for spoken output.
    */
@@ -1188,23 +1169,6 @@ function buildTurnMetaLines(context: InvocationContext): string[] {
 
   if (context.governanceSourceContext) {
     lines.push(context.governanceSourceContext, '');
-  }
-
-  // F091: Active Signal articles in discussion context
-  if (context.activeSignals && context.activeSignals.length > 0) {
-    lines.push('Signal articles linked to this thread:');
-    for (const s of context.activeSignals) {
-      lines.push(`### [${s.id}] ${s.title} (${s.source}/T${s.tier})`);
-      if (s.note) lines.push(`Note: ${s.note}`);
-      lines.push(s.contentSnippet);
-      // AC-10: Related discussions from our memory architecture (session search)
-      if (s.relatedDiscussions && s.relatedDiscussions.length > 0) {
-        lines.push('Related past discussions:');
-        for (const d of s.relatedDiscussions) {
-          lines.push(`- [session:${d.sessionId}] ${d.snippet}`);
-        }
-      }
-    }
   }
 
   // F167 Phase D simplified: routing belongs to server + explicit line-start @, not an agent-side decision tree.

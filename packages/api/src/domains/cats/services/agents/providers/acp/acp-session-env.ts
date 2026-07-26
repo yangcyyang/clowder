@@ -19,7 +19,6 @@ const CALLBACK_ENV_KEYS = [
   'CLOWDER_API_BEARER_TOKEN',
   'CAT_CAFE_USER_ID',
   'CAT_CAFE_CAT_ID',
-  'CAT_CAFE_SIGNAL_USER',
 ] as const;
 
 function isCatCafeStdioServer(server: AcpMcpServer): server is AcpMcpServerStdio {

@@ -248,10 +248,8 @@ function parseFrontmatterStringField(value: unknown): string | undefined {
 
 /**
  * Parse optional YAML frontmatter (`---\n...\n---\n`) from a memory/candidate/
- * notes document — same delimiter convention as
- * domains/signals/services/article-document.ts (parseFrontmatter). Missing or
- * malformed frontmatter is backward-compatible: returns `frontmatter: null`
- * and the original text as `body`; never throws.
+ * notes document. Missing or malformed frontmatter is backward-compatible:
+ * returns `frontmatter: null` and the original text as `body`; never throws.
  */
 export function parseMemoryFrontmatter(raw: string): ParsedMemoryDocument {
   if (!raw.startsWith('---\n')) return { frontmatter: null, body: raw };

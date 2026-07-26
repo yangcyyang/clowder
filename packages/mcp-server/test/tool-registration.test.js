@@ -56,18 +56,6 @@ const EXPECTED_TOOLS = [
   // Direct evidence/reflect tools
   'cat_cafe_search_evidence',
   'cat_cafe_reflect',
-  // Signal Hunter tools (F21 S5) + F091 Study tools
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_mark_read',
-  'signal_summarize',
-  'signal_start_study',
-  'signal_save_notes',
-  'signal_list_studies',
-  'signal_update_article',
-  'signal_delete_article',
-  'signal_link_thread',
   // Session chain tools
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_events',
@@ -140,20 +128,6 @@ const EXPECTED_MEMORY_TOOLS = [
   'cat_cafe_read_skill',
 ];
 
-const EXPECTED_SIGNAL_TOOLS = [
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_mark_read',
-  'signal_summarize',
-  'signal_start_study',
-  'signal_save_notes',
-  'signal_list_studies',
-  'signal_update_article',
-  'signal_delete_article',
-  'signal_link_thread',
-];
-
 function assertUnique(values, label) {
   assert.equal(new Set(values).size, values.length, `${label} must not contain duplicate tool names`);
 }
@@ -163,7 +137,6 @@ describe('MCP Server Tool Registration', () => {
     assertUnique(EXPECTED_TOOLS, 'EXPECTED_TOOLS');
     assertUnique(EXPECTED_COLLAB_TOOLS, 'EXPECTED_COLLAB_TOOLS');
     assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
-    assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
   });
 
   test('all expected tools are registered via createServer()', async () => {
@@ -320,13 +293,6 @@ describe('MCP Server Tool Registration', () => {
     assert.deepEqual([...registered].sort(), [...EXPECTED_MEMORY_TOOLS].sort());
   });
 
-  test('createSignalsServer registers only signals tool surface', async () => {
-    const { createSignalsServer } = await import('../dist/signals.js');
-    const server = createSignalsServer();
-    const registered = Object.keys(server._registeredTools);
-
-    assert.deepEqual([...registered].sort(), [...EXPECTED_SIGNAL_TOOLS].sort());
-  });
 });
 
 // --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
@@ -358,13 +324,6 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_hold_ball', // callbackPost → writes scheduled task
   'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
-  'signal_mark_read',
-  'signal_summarize',
-  'signal_start_study',
-  'signal_save_notes',
-  'signal_update_article',
-  'signal_delete_article',
-  'signal_link_thread',
 ];
 
 const EXPECTED_READONLY_TOOLS = [
@@ -375,10 +334,6 @@ const EXPECTED_READONLY_TOOLS = [
   'cat_cafe_read_session_events',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_invocation_detail',
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_list_studies',
   // F061 Bug-F workaround: read-only shell exec whitelist enforced at handler level
   'cat_cafe_shell_exec',
 ];

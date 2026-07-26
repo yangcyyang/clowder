@@ -375,27 +375,6 @@ export async function* routeParallel(
             teammates: teammates.map((id) => id as string),
           })
         : '';
-      // F091: Inject linked signal articles into context
-      let activeSignals:
-        | readonly {
-            id: string;
-            title: string;
-            source: string;
-            tier: number;
-            contentSnippet: string;
-            note?: string | undefined;
-            relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
-          }[]
-        | undefined;
-      if (loadFullContext && deps.invocationDeps.signalArticleLookup) {
-        try {
-          const signals = await deps.invocationDeps.signalArticleLookup(threadId);
-          if (signals.length > 0) activeSignals = signals;
-        } catch {
-          /* best-effort: signal lookup failure does not block invocation */
-        }
-      }
-
       const skillRouterContext = resolveSkillRouterContext(message);
       const invocationContextInput: InvocationContext = {
         catId,
@@ -414,7 +393,6 @@ export async function* routeParallel(
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
-        ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
         threadId,
       };
@@ -705,7 +683,6 @@ export async function* routeParallel(
         loadStandardContext,
         loadFullContext,
         hasSessionBootstrap: Boolean(bootstrapCtx),
-        hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,
         hasSopHint: Boolean(loadFullContext && sopStageHint),
         hasMcpInstructions: Boolean(mcpInstructions),

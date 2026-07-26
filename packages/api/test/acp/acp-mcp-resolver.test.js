@@ -126,16 +126,16 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.ok(result[0].args[0].endsWith('packages/mcp-server/dist/collab.js'));
   });
 
-  it('auto-generates all four builtin cat-cafe servers', () => {
+  it('auto-generates all three builtin cat-cafe servers', () => {
     const root = makeTempRoot(); // no .mcp.json
-    const result = resolveAcpMcpServers(root, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+    const result = resolveAcpMcpServers(root, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory']);
 
-    assert.equal(result.length, 4);
+    assert.equal(result.length, 3);
     const names = result.map((s) => s.name);
-    assert.deepStrictEqual(names, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+    assert.deepStrictEqual(names, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory']);
 
     const entrypoints = result.map((s) => s.args[0].split('/').pop());
-    assert.deepStrictEqual(entrypoints, ['index.js', 'collab.js', 'memory.js', 'signals.js']);
+    assert.deepStrictEqual(entrypoints, ['index.js', 'collab.js', 'memory.js']);
   });
 
   it('falls back to .mcp.json for non-builtin servers', () => {

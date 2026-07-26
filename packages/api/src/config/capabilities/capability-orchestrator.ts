@@ -565,7 +565,7 @@ export function buildCatCafeMcpDescriptor(projectRoot: string): McpServerDescrip
   };
 }
 
-const CAT_CAFE_SPLIT_SERVER_IDS = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'] as const;
+const CAT_CAFE_SPLIT_SERVER_IDS = ['cat-cafe-collab', 'cat-cafe-memory'] as const;
 
 /**
  * Resolve the runtime binary root (where Clowder AI MCP server code lives).
@@ -606,13 +606,6 @@ function buildCatCafeSplitMcpDescriptors(binaryRoot: string): McpServerDescripto
       name: 'cat-cafe-memory',
       command: 'node',
       args: [resolve(binaryRoot, 'packages/mcp-server/dist/memory.js')],
-      enabled: true,
-      source: 'cat-cafe',
-    },
-    {
-      name: 'cat-cafe-signals',
-      command: 'node',
-      args: [resolve(binaryRoot, 'packages/mcp-server/dist/signals.js')],
       enabled: true,
       source: 'cat-cafe',
     },

@@ -23,22 +23,3 @@ export {
   ToolCallContentSchema,
   ToolResultContentSchema,
 } from './message.schema.js';
-export type {
-  SignalArticleInput,
-  SignalArticleUpdateInput,
-  SignalSourceInput,
-} from './signals.schema.js';
-export {
-  SignalArticleSchema,
-  SignalArticleStatusSchema,
-  SignalArticleUpdateSchema,
-  SignalCategorySchema,
-  SignalFetchMethodSchema,
-  SignalKeywordFilterSchema,
-  SignalScheduleFrequencySchema,
-  SignalSourceConfigSchema,
-  SignalSourceFetchConfigSchema,
-  SignalSourceScheduleSchema,
-  SignalSourceSchema,
-  SignalTierSchema,
-} from './signals.schema.js';

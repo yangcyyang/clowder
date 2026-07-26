@@ -24,8 +24,6 @@
     "test:lane:local-os": "node scripts/run-test-lane.mjs --tier local-os",
     "test:lane:external": "node scripts/run-test-lane.mjs --tier external",
     "test:antigravity-smoke": "RUN_ANTIGRAVITY_SMOKE=true pnpm run build && RUN_ANTIGRAVITY_SMOKE=true bash ./scripts/with-test-home.sh node --test test/antigravity-smoke.test.js",
-    "fetch-signals": "node dist/scripts/fetch-signals.js",
-    "migrate-signals": "node dist/scripts/migrate-signals.js",
     "rebuild-index": "node dist/scripts/rebuild-index.js",
     "project:init": "node dist/scripts/project-init.js",
     "test:redis": "bash ./scripts/with-test-home.sh bash ./scripts/run-isolated-redis-tests.sh",

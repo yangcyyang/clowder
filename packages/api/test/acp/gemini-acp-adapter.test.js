@@ -1844,7 +1844,6 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
       CAT_CAFE_CALLBACK_TOKEN: 'tok-abc',
       CAT_CAFE_USER_ID: 'user-1',
       CAT_CAFE_CAT_ID: 'gemini',
-      CAT_CAFE_SIGNAL_USER: 'gemini',
     };
 
     for await (const _ of adapter.invoke('hello', { callbackEnv })) {
@@ -1896,7 +1895,6 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
       CAT_CAFE_CALLBACK_TOKEN: 'token-acp-123',
       CAT_CAFE_USER_ID: 'default-user',
       CAT_CAFE_CAT_ID: 'gemini',
-      CAT_CAFE_SIGNAL_USER: 'gemini',
     };
 
     for await (const _ of adapter.invoke('hello', { callbackEnv })) {

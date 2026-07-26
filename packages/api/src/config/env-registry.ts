@@ -31,8 +31,6 @@ export type EnvCategory =
   | 'tts'
   | 'frontend'
   | 'push'
-  | 'signal'
-  | 'github_review'
   | 'evidence'
   | 'quota'
   | 'telemetry'
@@ -84,8 +82,6 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   tts: '语音合成 (TTS)',
   frontend: '前端',
   push: '推送通知',
-  signal: 'Signal 信号源',
-  github_review: 'GitHub Review 监控',
   evidence: 'F102 记忆系统',
   quota: '额度监控',
   telemetry: '可观测性 (OTel)',
@@ -1496,32 +1492,6 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'VAPID 联系方式 (mailto: 或 URL)',
     category: 'push',
     sensitive: false,
-  },
-
-  // --- signal ---
-  {
-    name: 'SIGNALS_ROOT_DIR',
-    defaultValue: '(未设置)',
-    description: 'Signal 信号源数据目录',
-    category: 'signal',
-    sensitive: false,
-  },
-  {
-    name: 'CAT_CAFE_SIGNAL_USER',
-    defaultValue: 'codex',
-    description: 'Signal 默认执行猫',
-    category: 'signal',
-    sensitive: false,
-  },
-
-  // --- github_review (W3 prune-w3a 后仅剩 MCP PAT，供 Signals GitHub 抓取器使用) ---
-  {
-    name: 'GITHUB_MCP_PAT',
-    defaultValue: '(未设置)',
-    description: 'GitHub Personal Access Token (MCP 用)',
-    category: 'github_review',
-    sensitive: true,
-    runtimeEditable: true,
   },
 
   // --- evidence (F102 记忆系统) ---

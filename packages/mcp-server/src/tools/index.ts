@@ -102,20 +102,6 @@ export {
   shellExecInputSchema,
   shellTools,
 } from './shell-tools.js';
-export { signalStudyTools } from './signal-study-tools.js';
-export {
-  handleSignalGetArticle,
-  handleSignalListInbox,
-  handleSignalMarkRead,
-  handleSignalSearch,
-  handleSignalSummarize,
-  signalGetArticleInputSchema,
-  signalListInboxInputSchema,
-  signalMarkReadInputSchema,
-  signalSearchInputSchema,
-  signalSummarizeInputSchema,
-  signalsTools,
-} from './signals-tools.js';
 export {
   handleListSkills,
   handleReadSkill,

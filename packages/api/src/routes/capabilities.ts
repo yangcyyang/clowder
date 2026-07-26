@@ -447,7 +447,6 @@ async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string,
 const MCP_DESCRIPTIONS: Record<string, string> = {
   'cat-cafe-collab': '三猫协作工具 — 消息、上下文、任务、权限等（协作核心）',
   'cat-cafe-memory': '三猫记忆工具 — 证据检索、反思、会话链回放',
-  'cat-cafe-signals': '信号猎手工具 — inbox 检索、搜索、摘要',
 };
 const MAX_CONCURRENT_MCP_PROBES = 4;
 const DOCKER_GATEWAY_DESCRIPTION_BASE =
@@ -719,7 +718,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const discoveredServers = deduplicateDiscoveredMcpServers([...projectLevelServers, ...userLevelServers]);
     // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
     // not be re-added alongside the split 'cat-cafe-*' built-in entries.
-    const CAT_CAFE_BUILTIN_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+    const CAT_CAFE_BUILTIN_NAMES = new Set(['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory']);
     for (const server of discoveredServers) {
       if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
       const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);

@@ -8,8 +8,6 @@ import {
   scheduleTools,
   sessionChainTools,
   shellTools,
-  signalStudyTools,
-  signalsTools,
   skillTools,
   taskLifecycleTools,
   writeMemoryTools,
@@ -43,11 +41,6 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   // Skill router pull model (read-only local catalog)
   'cat_cafe_list_skills',
   'cat_cafe_read_skill',
-  // Signals (read-only)
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_list_studies',
   // Shell exec (F061 Bug-F workaround — read-only whitelist enforced at tool level)
   'cat_cafe_shell_exec',
 ]);
@@ -110,8 +103,6 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
   ...writeMemoryTools,
 ]);
 
-const signalTools: readonly ToolDef[] = applyReadonlyFilter([...signalsTools, ...signalStudyTools]);
-
 function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
   for (const tool of tools) {
     server.tool(tool.name, tool.description, tool.inputSchema, async (args) => {
@@ -131,12 +122,7 @@ export function registerMemoryToolset(server: McpServer): void {
   registerTools(server, memoryTools);
 }
 
-export function registerSignalToolset(server: McpServer): void {
-  registerTools(server, signalTools);
-}
-
 export function registerFullToolset(server: McpServer): void {
   registerCollabToolset(server);
   registerMemoryToolset(server);
-  registerSignalToolset(server);
 }

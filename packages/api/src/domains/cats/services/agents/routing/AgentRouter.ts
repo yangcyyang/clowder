@@ -183,18 +183,6 @@ export interface AgentRouterOptions {
   tmuxGateway?: import('../../../../terminal/tmux-gateway.js').TmuxGateway;
   /** F089 Phase 2: agent pane registry for observability */
   agentPaneRegistry?: import('../../../../terminal/agent-pane-registry.js').AgentPaneRegistry;
-  /** F091: Signal article lookup for thread context injection */
-  signalArticleLookup?: (threadId: string) => Promise<
-    readonly {
-      id: string;
-      title: string;
-      source: string;
-      tier: number;
-      contentSnippet: string;
-      note?: string | undefined;
-      relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
-    }[]
-  >;
   /** F148: Evidence store for hierarchical context recall */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   /** Phase 3B: read-only summary_segments source for history summary injection */
@@ -230,18 +218,6 @@ export class AgentRouter {
   private socketManager: import('../../../../../infrastructure/websocket/SocketManager.js').SocketManager | undefined;
   private tmuxGateway: import('../../../../terminal/tmux-gateway.js').TmuxGateway | undefined;
   private agentPaneRegistry: import('../../../../terminal/agent-pane-registry.js').AgentPaneRegistry | undefined;
-  private signalArticleLookup?:
-    | ((threadId: string) => Promise<
-        readonly {
-          id: string;
-          title: string;
-          source: string;
-          tier: number;
-          contentSnippet: string;
-          note?: string | undefined;
-        }[]
-      >)
-    | undefined;
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
   private threadHistorySummaryStore?: import('../../../../memory/index.js').IThreadHistorySummaryStore;
   /** F150 */
@@ -283,7 +259,6 @@ export class AgentRouter {
     this.socketManager = options.socketManager;
     this.tmuxGateway = options.tmuxGateway;
     this.agentPaneRegistry = options.agentPaneRegistry;
-    this.signalArticleLookup = options.signalArticleLookup;
     this.evidenceStore = options.evidenceStore;
     this.threadHistorySummaryStore = options.threadHistorySummaryStore;
     this.toolUsageCounter = options.toolUsageCounter;
@@ -741,7 +716,6 @@ export class AgentRouter {
         ...(this.executionDigestStore ? { executionDigestStore: this.executionDigestStore } : {}),
         ...(this.tmuxGateway ? { tmuxGateway: this.tmuxGateway } : {}),
         ...(this.agentPaneRegistry ? { agentPaneRegistry: this.agentPaneRegistry } : {}),
-        ...(this.signalArticleLookup ? { signalArticleLookup: this.signalArticleLookup } : {}),
       },
       messageStore: this.messageStore,
       ...(routeFreshnessGate ? { freshnessGate: routeFreshnessGate } : {}),

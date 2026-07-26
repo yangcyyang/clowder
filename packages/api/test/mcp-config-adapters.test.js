@@ -446,7 +446,6 @@ describe('writeGeminiMcpConfig', () => {
       CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
       CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
       CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
     });
   });
 
@@ -472,7 +471,6 @@ describe('writeGeminiMcpConfig', () => {
       CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
       CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
       CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
     });
   });
 
@@ -566,7 +564,6 @@ describe('writeKimiMcpConfig', () => {
       CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
       CLOWDER_API_BEARER_TOKEN: '${CLOWDER_API_BEARER_TOKEN}',
       CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
     });
   });
 });
