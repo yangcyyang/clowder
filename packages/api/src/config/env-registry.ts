@@ -329,14 +329,6 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'GAME_NARRATOR_ENABLED',
-    defaultValue: '(未设置 → 不启用)',
-    description: '设为 true 启用游戏叙述者模式',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
     name: 'WEB_PUBLIC_DIR',
     defaultValue: '../web/public',
     description: 'Web 前端静态文件目录（connector gateway 静态资源服务）',
@@ -2099,7 +2091,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CLOWDER_AUTO_RETRY',
     defaultValue: '(未设置 → 关闭)',
     description:
-      '批次3-B 白名单自动重试：置 true/1 时，终态 failed 且错误分类 ∈ {transient_network, cli_crash} 的 invocation 由 AutoRetryScheduler 按指数退避（30s/120s）自动重试，每 run 上限 2 次；quota/aborted/agent_error/context_overflow 永不自动重试。默认关闭，不影响既有手动重试端点。',
+      '批次3-B 白名单自动重试：置 true/1 时，终态 failed 且错误分类 ∈ {transient_network, cli_crash, cli_stall, output_truncated} 的 invocation 由 AutoRetryScheduler 按指数退避（30s/120s）自动重试，每 run 上限 2 次；quota/aborted/agent_error/context_overflow 永不自动重试。cli_stall/output_truncated 为 R8-2（docs/research/reliability-raft-round8-absorption.md §二）新增：前者是 CLOWDER_CLI_IDLE_TIMEOUT_SEC 看门狗杀死空闲子进程的分类，后者是输出截断信号的分类（provider-error-classification.ts）。默认关闭，不影响既有手动重试端点。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: false,
@@ -2220,6 +2212,15 @@ export const ENV_VARS: EnvDefinition[] = [
     defaultValue: '(未设置 → 全部关闭，不轮转任何猫)',
     description:
       '配合 CLOWDER_CLI_SESSION_MAX_MB 使用：逗号分隔的 catId 白名单（如 "grok" 或 "grok,kimi"），只有名单内的猫会被 CLI 原生 session 体积轮转门控中；未设置或为空则即使 CLOWDER_CLI_SESSION_MAX_MB>0 也不轮转任何猫。灰度纪律：先只开 grok（事故猫，也是本轮唯一实现了原生 session 路径解析的 provider）。改值无需重启——每次 invocation 都会重新读取。',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_CLI_IDLE_TIMEOUT_SEC',
+    defaultValue: '0（未设置/0 → 完全关闭，零行为变化）',
+    description:
+      'R8-1（docs/research/reliability-raft-round8-absorption.md §二）CLI 流空闲看门狗：utils/cli-spawn.ts 记录子进程 stdout/stderr 最后一次收到任意数据的时间，空闲超过此秒数即杀掉子进程（先 SIGTERM，KILL_GRACE_MS 后 SIGKILL 兜底），错误文本固定为 "cli stream idle timeout after <N>s"。与既有的 CLI_TIMEOUT_MS 总超时、#774 CPU 感知的 stallAutoKill（ProcessLivenessProbe，靠 CPU 是否增长区分"忙"与"闲"）相互独立、互不替代——本看门狗不看 CPU，只看有没有吐字节，专治"连接通着但一声不吭"（荧荧事故：白等 58 分钟才被 1 小时总超时兜住）。杀后错误经 provider 既有失败路径进入 classifyProviderError → cli_stall → infra_error（provider-error-classification.ts），并因文本含 "timeout" 被 task-run-linkage.ts 的 classifyRunFailureForTask 判为 timeout → 关联任务转 blocked。默认 0 = 关闭，不改变任何现有行为；灰度建议先设 300（5 分钟，与 #774 stallAutoKill 的 stallWarningMs 默认值同量级）。改值无需重启——每次 invocation spawn 时都会重新读取。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: true,

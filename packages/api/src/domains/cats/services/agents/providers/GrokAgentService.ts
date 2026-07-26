@@ -307,7 +307,11 @@ export class GrokAgentService implements AgentService {
           yield {
             type: 'error',
             catId: this.catId,
-            error: `Grok CLI 响应超时 (${Math.round(rawEvent.timeoutMs / 1000)}s)`,
+            // R8-1: idle watchdog kills carry a specific English message (wording
+            // discipline for classifyProviderError's cli_stall + task-run-linkage's
+            // timeout→blocked matching — see utils/cli-spawn.ts). Surface it verbatim
+            // instead of the normal composed Chinese timeout string.
+            error: rawEvent.idleWatchdogKill ? rawEvent.message : `Grok CLI 响应超时 (${Math.round(rawEvent.timeoutMs / 1000)}s)`,
             metadata,
             timestamp: Date.now(),
           };

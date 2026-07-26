@@ -147,15 +147,52 @@ describe('provider-error-classification', () => {
     assert.equal(result.kind, 'context_overflow');
   });
 
-  // ─── Whitelist + TaskFailureClass mapping ───
+  // ─── R8-1/R8-2 (docs/research/reliability-raft-round8-absorption.md §二): cli_stall + output_truncated ───
 
-  test('AUTO_RETRY_WHITELIST contains exactly transient_network and cli_crash', () => {
-    assert.deepEqual([...mod.AUTO_RETRY_WHITELIST].sort(), ['cli_crash', 'transient_network']);
+  test('R8-1: structured idleWatchdogKill flag classifies as cli_stall', () => {
+    const result = mod.classifyProviderError({ idleWatchdogKill: true, message: 'unrelated text' });
+    assert.equal(result.kind, 'cli_stall');
+    assert.equal(result.evidence, 'structured');
   });
 
-  test('isAutoRetryEligible whitelists only transient_network and cli_crash', () => {
+  test('R8-1: literal cli-spawn.ts wording classifies as cli_stall (text tier)', () => {
+    const result = mod.classifyProviderErrorText('cli stream idle timeout after 300s');
+    assert.equal(result.kind, 'cli_stall');
+    assert.equal(result.evidence, 'text');
+  });
+
+  test('R8-1: cli_stall wording does not get swallowed by cli_crash\'s generic exit pattern', () => {
+    // Sanity check for tier ordering: cli_stall (5) is checked before cli_crash (7).
+    const result = mod.classifyProviderErrorText('cli stream idle timeout after 60s');
+    assert.notEqual(result.kind, 'cli_crash');
+    assert.equal(result.kind, 'cli_stall');
+  });
+
+  test('R8-2: structured outputTruncated flag classifies as output_truncated', () => {
+    const result = mod.classifyProviderError({ outputTruncated: true });
+    assert.equal(result.kind, 'output_truncated');
+    assert.equal(result.evidence, 'structured');
+  });
+
+  test('R8-2: generic truncation wording classifies as output_truncated (text tier) — no current provider confirmed to emit this, see module doc', () => {
+    assert.equal(mod.classifyProviderErrorText('response truncated due to max_tokens').kind, 'output_truncated');
+    assert.equal(mod.classifyProviderErrorText('output truncated: max_output_tokens reached').kind, 'output_truncated');
+  });
+
+  // ─── Whitelist + TaskFailureClass mapping ───
+
+  test('AUTO_RETRY_WHITELIST contains exactly transient_network, cli_crash, cli_stall, output_truncated (R8-2 expansion)', () => {
+    assert.deepEqual(
+      [...mod.AUTO_RETRY_WHITELIST].sort(),
+      ['cli_crash', 'cli_stall', 'output_truncated', 'transient_network'],
+    );
+  });
+
+  test('isAutoRetryEligible whitelists transient_network, cli_crash, cli_stall, output_truncated', () => {
     assert.equal(mod.isAutoRetryEligible('transient_network'), true);
     assert.equal(mod.isAutoRetryEligible('cli_crash'), true);
+    assert.equal(mod.isAutoRetryEligible('cli_stall'), true);
+    assert.equal(mod.isAutoRetryEligible('output_truncated'), true);
     assert.equal(mod.isAutoRetryEligible('quota'), false);
     assert.equal(mod.isAutoRetryEligible('aborted'), false);
     assert.equal(mod.isAutoRetryEligible('agent_error'), false);
@@ -167,6 +204,8 @@ describe('provider-error-classification', () => {
     assert.equal(mod.toTaskFailureClass('transient_network'), 'infra_error');
     assert.equal(mod.toTaskFailureClass('cli_crash'), 'infra_error');
     assert.equal(mod.toTaskFailureClass('context_overflow'), 'infra_error');
+    assert.equal(mod.toTaskFailureClass('cli_stall'), 'infra_error');
+    assert.equal(mod.toTaskFailureClass('output_truncated'), 'infra_error');
     assert.equal(mod.toTaskFailureClass('aborted'), 'manual_fail');
     assert.equal(mod.toTaskFailureClass('agent_error'), 'agent_error');
   });

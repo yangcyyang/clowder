@@ -14,8 +14,23 @@
  *                           text heuristics (reused, not re-implemented, to avoid drift)
  *   4. transient_network  — Node network error codes / 5xx (structured) or
  *                           ECONNRESET-shaped text (text)
- *   5. cli_crash          — non-zero exit code / signal-kill with no usable output
- *   6. agent_error        — fallback bucket for everything else
+ *   5. cli_stall          — R8-1/R8-2 (docs/research/reliability-raft-round8-absorption.md
+ *                           §二): the CLI stream idle watchdog (utils/cli-spawn.ts) killed
+ *                           the child because no stdout/stderr data arrived for too long.
+ *                           Checked before cli_crash — it is a more specific, known cause
+ *                           of the same "process died on us" shape.
+ *   6. output_truncated   — R8-2: CLI reported an explicit output-length/truncation signal.
+ *                           NOTE (coverage honesty — see report): as of this batch, no
+ *                           provider in this repo is confirmed to surface such a signal on
+ *                           its *failure* path (Anthropic API's stop_reason:'max_tokens' and
+ *                           ACP's AcpStopReason:'max_tokens' both exist, but both codepaths
+ *                           treat them as normal successful completions, never as a failure
+ *                           string reaching this classifier). This tier + pattern is added
+ *                           per "识别不了的不猜，先占位" as a receiving slot for the day a
+ *                           provider's failure text does mention truncation — it does not
+ *                           claim any provider triggers it today.
+ *   7. cli_crash          — non-zero exit code / signal-kill with no usable output
+ *   8. agent_error        — fallback bucket for everything else
  *
  * Follow-up (not done in this batch — would require touching each
  * providers/*AgentService.ts's error-handling code, deferred to keep this
@@ -37,6 +52,8 @@ export type ProviderErrorClassificationKind =
   | 'quota'
   | 'context_overflow'
   | 'transient_network'
+  | 'cli_stall'
+  | 'output_truncated'
   | 'cli_crash'
   | 'agent_error';
 
@@ -62,6 +79,10 @@ export interface ProviderErrorEvidence {
   readonly nodeErrorCode?: string;
   /** True when the CLI produced no usable stdout/NDJSON events before dying — the "silent crash" signature that separates cli_crash from a network blip. Defaults to true (unknown = assume no output) when omitted, since most callers today can't report this yet. */
   readonly emptyOutput?: boolean;
+  /** R8-1: true when utils/cli-spawn.ts's stdout/stderr idle watchdog killed the child (CliSpawnOptions.idleTimeoutMs / CLOWDER_CLI_IDLE_TIMEOUT_SEC — see `__cliTimeout.idleWatchdogKill`). Highest-priority structured signal for `cli_stall`. */
+  readonly idleWatchdogKill?: boolean;
+  /** R8-2: true when a caller has structured evidence that the CLI's output was truncated (max-tokens/length limit). No current caller sets this — see module doc's coverage note; kept for future callers with richer signal. */
+  readonly outputTruncated?: boolean;
 }
 
 export interface ProviderErrorClassification {
@@ -86,6 +107,11 @@ const NETWORK_ERROR_CODES = new Set([
 const ABORT_TEXT_PATTERN = /\b(AbortError|aborted|user[_-]?cancel(?:ed|led)?)\b/i;
 const QUOTA_TEXT_PATTERN = /(quota|rate[- ]?limit|usage limit|too many requests|insufficient_quota|billing|配额|额度)/i;
 const NETWORK_TEXT_PATTERN = /(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|socket hang up|network error|fetch failed)/i;
+/** R8-1: matches utils/cli-spawn.ts's `cli stream idle timeout after <N>s` (idleWatchdogKill) wording — see that module's comment for the wording discipline. */
+const CLI_STALL_TEXT_PATTERN = /cli stream idle timeout/i;
+/** R8-2: no confirmed current producer — see module doc coverage note. Generic enough to catch future provider text without being so broad it swallows unrelated errors. */
+const OUTPUT_TRUNCATED_TEXT_PATTERN =
+  /(max[_-]?output[_-]?tokens|output[- ]?truncated|response[- ]?truncated|truncated (?:due to|because of) (?:length|max[_-]?tokens|token limit)|finish_reason["'\s:]*["']?length)/i;
 const CLI_EXIT_TEXT_PATTERN = /CLI 异常退出 \(code:\s*(?:\d+|null)(?:,\s*signal:\s*[^)]+)?\)/i;
 
 /**
@@ -129,7 +155,24 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'transient_network', evidence: 'text', reason: message };
   }
 
-  // 5) CLI crash: non-zero exit / signal-kill, no usable output.
+  // 5) CLI stream idle watchdog (R8-1) — structured flag first, then the
+  //    literal wording utils/cli-spawn.ts emits when it fires.
+  if (evidence.idleWatchdogKill) {
+    return { kind: 'cli_stall', evidence: 'structured', reason: 'idle_watchdog_kill' };
+  }
+  if (message && CLI_STALL_TEXT_PATTERN.test(message)) {
+    return { kind: 'cli_stall', evidence: 'text', reason: message };
+  }
+
+  // 6) Output truncated (R8-2) — no confirmed current producer, see module doc.
+  if (evidence.outputTruncated) {
+    return { kind: 'output_truncated', evidence: 'structured', reason: 'output_truncated' };
+  }
+  if (message && OUTPUT_TRUNCATED_TEXT_PATTERN.test(message)) {
+    return { kind: 'output_truncated', evidence: 'text', reason: message };
+  }
+
+  // 7) CLI crash: non-zero exit / signal-kill, no usable output.
   const hasAbnormalExit =
     (evidence.exitCode !== undefined && evidence.exitCode !== null && evidence.exitCode !== 0) ||
     Boolean(evidence.signal);
@@ -144,7 +187,7 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'cli_crash', evidence: 'text', reason: message };
   }
 
-  // 6) Fallback.
+  // 8) Fallback.
   if (message) {
     return { kind: 'agent_error', evidence: 'text', reason: message };
   }
@@ -160,10 +203,17 @@ export function classifyProviderErrorText(message: string): ProviderErrorClassif
  * Whitelist consumed by AutoRetryScheduler (batch 3-B, item 3). Kept here,
  * next to the classification table, so the whitelist can never drift out of
  * sync with the kinds this module actually produces.
+ *
+ * R8-2 (docs/research/reliability-raft-round8-absorption.md §二): extended with
+ * cli_stall + output_truncated — both are infra-caused, not agent-authored, the
+ * same rationale that already justified transient_network/cli_crash. Only takes
+ * effect when CLOWDER_AUTO_RETRY is explicitly turned on (default off).
  */
 export const AUTO_RETRY_WHITELIST: ReadonlySet<ProviderErrorClassificationKind> = new Set([
   'transient_network',
   'cli_crash',
+  'cli_stall',
+  'output_truncated',
 ]);
 
 export function isAutoRetryEligible(kind: ProviderErrorClassificationKind): boolean {
@@ -203,6 +253,8 @@ export function toTaskFailureClass(kind: ProviderErrorClassificationKind): TaskF
     case 'transient_network':
     case 'cli_crash':
     case 'context_overflow':
+    case 'cli_stall':
+    case 'output_truncated':
       return 'infra_error';
     case 'aborted':
       // Closest existing semantic: an explicit signal ended the run, not an

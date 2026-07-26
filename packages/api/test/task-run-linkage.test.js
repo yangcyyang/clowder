@@ -34,6 +34,13 @@ describe('classifyRunFailureForTask', () => {
     assert.equal(classifyRunFailureForTask('runtime_hung: no output for 10m'), 'timeout');
   });
 
+  test('R8-1: cli stream idle watchdog wording maps to timeout (blocked, not failed)', () => {
+    // utils/cli-spawn.ts's exact idleWatchdogKill message — wording discipline requires
+    // this to contain "timeout" (checked here) and NOT "spawn"/"budget" (see
+    // provider-error-classification.test.js for the classifyProviderError→cli_stall side).
+    assert.equal(classifyRunFailureForTask('cli stream idle timeout after 300s'), 'timeout');
+  });
+
   test('maps infra-ish text to infra_error', () => {
     assert.equal(classifyRunFailureForTask('spawn claude ENOENT'), 'infra_error');
     assert.equal(classifyRunFailureForTask('connect ECONNREFUSED 127.0.0.1:1234'), 'infra_error');

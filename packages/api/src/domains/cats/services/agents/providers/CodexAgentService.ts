@@ -663,7 +663,13 @@ export class CodexAgentService implements AgentService {
           yield {
             type: 'error',
             catId: this.catId,
-            error: `缅因猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
+            // R8-1: idle watchdog kills carry a specific English message (wording
+            // discipline for classifyProviderError's cli_stall + task-run-linkage's
+            // timeout→blocked matching — see utils/cli-spawn.ts). Surface it verbatim
+            // instead of the normal composed Chinese timeout string.
+            error: event.idleWatchdogKill
+              ? event.message
+              : `缅因猫 CLI 响应超时 (${Math.round(event.timeoutMs / 1000)}s${event.firstEventAt == null ? ', 未收到首帧' : ''})`,
             metadata,
             timestamp: Date.now(),
           };

@@ -78,6 +78,15 @@ describe('env-registry', () => {
     assert.equal(apiKey.hubVisible, false);
   });
 
+  it('R8-1: registers CLOWDER_CLI_IDLE_TIMEOUT_SEC, non-sensitive, runtime-editable, default 0 (off)', () => {
+    const def = ENV_VARS.find((v) => v.name === 'CLOWDER_CLI_IDLE_TIMEOUT_SEC');
+    assert.ok(def, 'CLOWDER_CLI_IDLE_TIMEOUT_SEC should be in registry');
+    assert.equal(def.category, 'cli');
+    assert.equal(def.sensitive, false);
+    assert.equal(def.runtimeEditable, true);
+    assert.match(def.defaultValue, /0/);
+  });
+
   it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
     const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
     assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');

@@ -195,6 +195,40 @@ describe('AutoRetryScheduler', () => {
       assert.equal(record.autoRetryCount, 1);
     });
 
+    test('R8-2: whitelisted cli_stall failure due for retry gets claimed and succeeds (idle watchdog + auto-retry wiring)', async () => {
+      store.seed(
+        makeRecord({
+          id: 'r-cli-stall',
+          terminalEvent: { kind: 'cli_stall', at: Date.now() - 60_000, source: 'x' },
+          updatedAt: Date.now() - 60_000, // past the 30s first-tier backoff
+        }),
+      );
+      const scheduler = makeScheduler();
+      await scheduler.tick();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const record = await store.get('r-cli-stall');
+      assert.equal(record.status, 'succeeded');
+      assert.equal(record.autoRetryCount, 1);
+    });
+
+    test('R8-2: whitelisted output_truncated failure due for retry gets claimed and succeeds', async () => {
+      store.seed(
+        makeRecord({
+          id: 'r-output-truncated',
+          terminalEvent: { kind: 'output_truncated', at: Date.now() - 60_000, source: 'x' },
+          updatedAt: Date.now() - 60_000,
+        }),
+      );
+      const scheduler = makeScheduler();
+      await scheduler.tick();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const record = await store.get('r-output-truncated');
+      assert.equal(record.status, 'succeeded');
+      assert.equal(record.autoRetryCount, 1);
+    });
+
     test('non-whitelisted quota failure is never auto-retried', async () => {
       store.seed(
         makeRecord({

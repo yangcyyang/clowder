@@ -1357,3 +1357,162 @@ test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives bef
     sleeper.kill();
   }
 });
+
+// === R8-1: CLI stream idle watchdog (docs/research/reliability-raft-round8-absorption.md §二) ===
+// Independent of #774's CPU-aware ProcessLivenessProbe/stallAutoKill above — this
+// watchdog only tracks whether ANY byte arrived on stdout/stderr, no CPU sampling.
+// Gated by idleTimeoutMs (CliSpawnOptions override used here) / CLOWDER_CLI_IDLE_TIMEOUT_SEC
+// in production; 0/undefined = disabled (zero behavior change).
+
+test('R8-1: idleTimeoutMs=0 (default off) — long silence never triggers the idle watchdog', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 0 }, { spawnFn }),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  await new Promise((r) => setImmediate(r));
+
+  // Advance far past any plausible idle threshold — with the watchdog disabled,
+  // nothing should fire.
+  t.mock.timers.tick(10_000_000);
+  await new Promise((r) => setImmediate(r));
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.equal(timeout, undefined, 'idle watchdog must be a no-op when idleTimeoutMs=0');
+  assert.ok(proc.kill.mock.callCount() === 0, 'must never kill when disabled');
+});
+
+test('R8-1: idle watchdog kills the child and yields the literal "cli stream idle timeout after <N>s" wording', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  await new Promise((r) => setImmediate(r));
+
+  t.mock.timers.tick(5000);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'should yield __cliTimeout');
+  assert.ok(isCliTimeout(timeout), 'must pass the isCliTimeout type guard');
+  assert.equal(timeout.idleWatchdogKill, true);
+  assert.equal(timeout.message, 'cli stream idle timeout after 5s');
+  // Wording discipline: must contain "timeout", must NOT contain "spawn"/"budget"
+  // (see provider-error-classification.ts cli_stall + task-run-linkage.ts classifyRunFailureForTask).
+  assert.ok(/timeout/i.test(timeout.message));
+  assert.ok(!/spawn/i.test(timeout.message));
+  assert.ok(!/budget/i.test(timeout.message));
+  // Guardrail #1 (single-kill): exactly one kill for this invocation.
+  assert.equal(proc.kill.mock.callCount(), 1, 'must kill exactly once, no repeat-kill loop');
+  // Kill sequence: SIGTERM first (SIGKILL escalation is scheduled but the mock
+  // process "exits" on SIGTERM already, matching real-world graceful-exit CLIs).
+  assert.equal(proc.kill.mock.calls[0].arguments[0], 'SIGTERM');
+});
+
+test('R8-1: stdout heartbeat keeps resetting the idle watchdog — slow-but-alive stream is not killed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  await new Promise((r) => setImmediate(r));
+
+  // 5 heartbeats every 3s = 15s of simulated wall-clock silence-if-not-reset,
+  // well past the 5s idle threshold — but each heartbeat resets the watchdog.
+  for (let i = 0; i < 5; i++) {
+    t.mock.timers.tick(3000);
+    await new Promise((r) => setImmediate(r));
+    proc.stdout.write(JSON.stringify({ type: 'item.progress', i }) + '\n');
+    await new Promise((r) => setImmediate(r));
+  }
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.equal(timeout, undefined, 'heartbeat must keep resetting the idle watchdog');
+  assert.ok(results.some((r) => r?.type === 'turn.completed'));
+});
+
+test('R8-1: stderr heartbeat also resets the idle watchdog (not just stdout)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'claude', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  await new Promise((r) => setImmediate(r));
+
+  for (let i = 0; i < 5; i++) {
+    t.mock.timers.tick(3000);
+    await new Promise((r) => setImmediate(r));
+    proc.stderr.write(`thinking step ${i}...\n`);
+    await new Promise((r) => setImmediate(r));
+  }
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.equal(timeout, undefined, 'stderr-only heartbeat must also reset the idle watchdog');
+  assert.ok(results.some((r) => r?.type === 'turn.completed'));
+});
+
+test('R8-1: idle watchdog fires even while the CPU-aware probe would classify the process as busy-silent', async (t) => {
+  // This is the actual gap R8-1 closes (docs/research/reliability-raft-round8-absorption.md
+  // §二): a process that *looks* busy (CPU noise) but has gone silent on both streams would
+  // only be caught by the #774 stallAutoKill if CPU is flat; the idle watchdog does not care
+  // about CPU at all, so it still fires. We simulate this simply by NOT passing a
+  // livenessProbe at all (no CPU-aware mechanism engaged) and confirming the idle watchdog
+  // alone is sufficient to end a silent invocation well before any large hard-timeout would.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli(
+      { command: 'codex', args: [], timeoutMs: 60 * 60 * 1000, idleTimeoutMs: 300_000 },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
+  await new Promise((r) => setImmediate(r));
+
+  t.mock.timers.tick(300_000);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'idle watchdog should fire long before the 1h hard timeout');
+  assert.equal(timeout.idleWatchdogKill, true);
+  assert.equal(timeout.message, 'cli stream idle timeout after 300s');
+});

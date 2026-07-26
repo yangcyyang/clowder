@@ -12,7 +12,7 @@ import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructur
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
-import { resolveCliTimeoutMs } from './cli-timeout.js';
+import { resolveCliIdleTimeoutMs, resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
@@ -222,13 +222,52 @@ export async function* spawnCli(
   };
   if (timeoutMs > 0) resetTimeout(); // Start initial timeout only if enabled
 
+  // R8-1 (docs/research/reliability-raft-round8-absorption.md §二): CLI stream idle
+  // watchdog. Independent of the CLI_TIMEOUT_MS hard cap above and the CPU-aware
+  // ProcessLivenessProbe/#774 stallAutoKill below — this one only cares whether ANY
+  // byte arrived on stdout or stderr recently, so it still catches a child that looks
+  // "busy" (CPU noise) but has gone silent on both streams. Gated by
+  // CLOWDER_CLI_IDLE_TIMEOUT_SEC; 0/unset = disabled (zero behavior change).
+  const idleWatchdogMs = resolveCliIdleTimeoutMs(options.idleTimeoutMs);
+  let idleWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  let idleWatchdogKilled = false;
+  const resetIdleWatchdog = (): void => {
+    if (idleWatchdogMs <= 0) return; // disabled
+    if (idleWatchdogTimer) clearTimeout(idleWatchdogTimer);
+    idleWatchdogTimer = setTimeout(() => {
+      idleWatchdogKilled = true;
+      timedOut = true;
+      processAliveAtTimeout = !childExited;
+      const idleCatId = options.env?.CAT_CAFE_CAT_ID ?? 'unknown';
+      const idleThreadId = options.env?.CAT_CAFE_THREAD_ID ?? 'unknown';
+      log.warn(
+        {
+          catId: idleCatId,
+          threadId: idleThreadId,
+          invocationId: options.invocationId,
+          idleTimeoutSec: idleWatchdogMs / 1000,
+        },
+        '[cli-spawn] cli stream idle timeout — killing child process',
+      );
+      killChild();
+    }, idleWatchdogMs);
+    idleWatchdogTimer.unref();
+  };
+  if (idleWatchdogMs > 0) resetIdleWatchdog(); // Start initial idle watchdog only if enabled
+
   // Attach stderr handler now that resetTimeout is defined
   // Reset timeout on stderr activity — CLI is alive (working on tools, thinking, etc.)
   child.stderr?.on('data', (chunk: Buffer) => {
     stderrBuffer += chunk.toString();
     resetTimeout();
     probe?.notifyActivity(); // F118: stderr = CLI alive, sync to probe
+    resetIdleWatchdog(); // R8-1: any stderr data resets the idle watchdog
   });
+
+  // R8-1: track raw stdout activity independent of NDJSON validity — malformed
+  // chatter still proves the process is alive and talking, unlike resetTimeout()
+  // above which only resets after a successfully *parsed* NDJSON event.
+  child.stdout?.on('data', () => resetIdleWatchdog());
 
   // AbortSignal
   const abortHandler = (): void => killChild();
@@ -443,11 +482,18 @@ export async function* spawnCli(
       const stallWarningMs = probe?.config.stallWarningMs;
       yield {
         __cliTimeout: true,
-        timeoutMs: stallKilled && stallWarningMs ? stallWarningMs : timeoutMs,
-        // Sanitized message — no raw stderr exposed to users
-        message: stallKilled
-          ? `CLI idle-silent 超时 (${Math.round((stallWarningMs ?? timeoutMs) / 1000)}s — stall auto-kill)`
-          : `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
+        timeoutMs: idleWatchdogKilled ? idleWatchdogMs : stallKilled && stallWarningMs ? stallWarningMs : timeoutMs,
+        // Sanitized message — no raw stderr exposed to users.
+        // R8-1 wording discipline (docs/research/reliability-raft-round8-absorption.md
+        // §二): must contain the literal word "timeout" (task-run-linkage.ts's
+        // classifyRunFailureForTask matches on it → task status → blocked) and must
+        // NOT contain "spawn"/"budget" (would misclassify as infra_error/budget_exhausted
+        // there). Do not reword without re-checking that classifier.
+        message: idleWatchdogKilled
+          ? `cli stream idle timeout after ${Math.round(idleWatchdogMs / 1000)}s`
+          : stallKilled
+            ? `CLI idle-silent 超时 (${Math.round((stallWarningMs ?? timeoutMs) / 1000)}s — stall auto-kill)`
+            : `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
         command: options.command,
         // F118: Diagnostic enrichment
         firstEventAt,
@@ -456,6 +502,7 @@ export async function* spawnCli(
         silenceDurationMs: lastEventAt ? Date.now() - lastEventAt : timeoutMs,
         processAlive: processAliveAtTimeout,
         ...(stallKilled ? { stallKill: true } : {}),
+        ...(idleWatchdogKilled ? { idleWatchdogKill: true } : {}),
         ...(options.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options.rawArchivePath ? { rawArchivePath: options.rawArchivePath } : {}),
@@ -463,6 +510,7 @@ export async function* spawnCli(
     }
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (idleWatchdogTimer) clearTimeout(idleWatchdogTimer);
     if (escalationTimer !== undefined) clearTimeout(escalationTimer);
     if (options.signal) {
       options.signal.removeEventListener('abort', abortHandler);
@@ -537,6 +585,12 @@ export function isCliTimeout(value: unknown): value is {
   cliSessionId?: string;
   invocationId?: string;
   rawArchivePath?: string;
+  // #774: set when the CPU-aware ProcessLivenessProbe stallAutoKill fired.
+  stallKill?: boolean;
+  // R8-1: set when the plain stdout/stderr idle watchdog fired (see cli-timeout.ts
+  // resolveCliIdleTimeoutMs / CLOWDER_CLI_IDLE_TIMEOUT_SEC). Distinct from stallKill —
+  // this one has no CPU-busy exemption.
+  idleWatchdogKill?: boolean;
 } {
   return (
     typeof value === 'object' &&

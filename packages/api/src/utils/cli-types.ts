@@ -20,6 +20,12 @@ export interface CliSpawnOptions {
   cwd?: string;
   /** Timeout in milliseconds before auto-kill (default: 300_000 = 5 min) */
   timeoutMs?: number;
+  /**
+   * R8-1: CLI stream idle watchdog override in ms (dependency-injection for tests).
+   * Production leaves this undefined — spawnCli reads CLOWDER_CLI_IDLE_TIMEOUT_SEC
+   * from process.env instead. 0/undefined-and-no-env = disabled (zero behavior change).
+   */
+  idleTimeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
