@@ -138,6 +138,16 @@ cd packages/web && pnpm vitest run <文件>
 
 B5-AC：①分支 thread 消息转票被拒且提示可读；②猫消息转票被拒；③有活跃票时人类消息转票产出进度事件+提示卡而非新票，显式 task_create 仍可建新票；④缺标题被拒、带 61 字标题被拒、原文落 thread 首条；⑤存量票不动；env 全注册契约绿；golden 绿。
 
+### B5.5 建票上浮到主频道（2026-07-26 深夜追加，铲屎官定稿；B1-B4 落地后单独小项实施，勿与其并行）
+
+铲屎官原话依据："在 thread 里聊着聊着要创建 task，创建指令应该回到上一级主频道去建——符合父子层级关系、避免子级建票不可见、父级是管理全部 Task 的场景。"与 Raft 结构规则（分支=讨论上下文，频道=任务层）互为表里：B5.1 是"分支内不许转票"的拒绝面，B5.5 是"任务归位主频道"的出口面。
+
+1. **上浮规则**：在分支/讨论 thread 内发起的**显式建票**（猫的 task_create、人类的 As Task / Convert-to-Task）→ 任务的 threadId 沿 parent 链上溯锚定到**顶层频道**；任务卡与"已创建任务"系统通告发在主频道。顶层频道/DM 内发起的建票行为不变。
+2. **回执与溯源**：发起的分支 thread 里留一条轻量回执（"已在主频道创建任务 #N"，复用 appendTaskLifecycleNotice 模式）；任务创建事件记录 originThreadId/originMessageId，讨论上下文可回溯。
+3. **任务讨论 thread 不受影响**：票自己的讨论分支仍照常挂在票下。
+4. env：`CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL`（默认开，可关回旧行为），注册中文说明。
+5. B5.5-AC：①分支内猫 task_create → 票锚定顶层频道+主频道通告+分支回执+origin 字段在案；②多级嵌套分支上溯到根频道；③人类 As Task/Convert-to-Task 同样上浮；④顶层/DM 行为不变；⑤关闭开关回旧行为；红→绿测试，golden 与既有票面卫生测试零回归。
+
 ### B 包验收标准
 - B-AC1：猫置 in_review → 验收人按缺省规则被通知；执行者=reviewer 被服务端拒绝。
 - B-AC2：构造超时 → gate 轨 24h、human 轨 48h/96h/第三级各触发一次且不超一次；第三级实际把票降回 doing。
