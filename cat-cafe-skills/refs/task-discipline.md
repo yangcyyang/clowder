@@ -103,6 +103,14 @@ topics: [task, thread, raft-replication, sop, memory, search]
 
 **工具**：`cat_cafe_reply_in_thread` / `cat_cafe_cross_post_message` 发最小可动作消息；`cat_cafe_task_unclaim` 明确放手（附 why）而不是悄悄消失。
 
+## 纪律 11：票面卫生——一个工作流一张票，标题必须短动词短语
+
+建票/认领时：**标题是"干什么"的短动词短语（≤30 字）**，不是你的发言原文；一条工作流（如"守卫修复上线"）从头到尾用**同一张票**推进，换班回述、讨论回复、裁定意见一律写在票的 thread 或频道里，**绝不为它们新建票**。判断口诀：这张票关掉时，能用一句话说清"完成了什么"吗？说不清=不该建。
+
+**为什么**：2026-07-26 实证血案——推特日报频道一晚产出 6 张标题为大段对话原文的票（"【换班回述】①目标…"、"洋哥这招管用…"），5 张堆死在 in_review，任务板变成对话镜像，无法验收、无法追责（Raft 侧同款 #403 垃圾票躺了很多天）。平台自动建票已关闭，垃圾票全部来自猫把"每轮响应"误当"新工作流"。
+
+**工具**：`task_create(subjectKey)` 建票前查重；进行中的工作流用 `task_update` 改状态 + `post_progress` 报进度，而不是新建票。
+
 ## 速查表
 
 | # | 纪律 | 违反的后果 | 主要工具 |
@@ -117,3 +125,4 @@ topics: [task, thread, raft-replication, sop, memory, search]
 | 8 | 记忆带 msg-id 面包屑 | 结论无法回溯核实 | `search_messages` 返回 msg-id |
 | 9 | 长任务先写 Active Context | 压缩后断片，重复劳动 | MEMORY.md + `post_progress` |
 | 10 | 停手前清欠 | 阻塞项无人知晓，链路卡死 | `reply_in_thread` / `task_unclaim` |
+| 11 | 票面卫生：一流一票、短标题 | 任务板变对话镜像，in_review 堆死 | `task_create(subjectKey)` 查重 + `post_progress` |
