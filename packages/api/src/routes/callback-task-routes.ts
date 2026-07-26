@@ -354,8 +354,28 @@ export function registerCallbackTaskRoutes(
     // 批次4-B1 缺省规则: agent 拆的子票继承父票 reviewer(binding.task 就是校验通过的父票，
     // 无需额外查询); 无父票则回落到平台默认验收人。
     const parentTaskForReviewer = parentTaskId && binding.outcome === 'bound' && binding.surface === 'task_thread' ? binding.task : null;
+
+    // 批次4-B5.5 补漏 (legacy 入口 cat_cafe_create_task/handleCreateTask →
+    // /api/callbacks/create-task): 这是三入口盘点之外遗漏的第四个"猫侧显式建票"面——
+    // 与 /api/callbacks/task-create（cat_cafe_task_create）同构，同样接入
+    // resolveTaskHoistAnchor，同一个开关/同一份上溯实现。threadStore 在本路由 deps 里
+    // 是可选的，缺省时静默不上浮（与下方 ensureTaskDiscussionThread 的兜底一致）。
+    const hoistPlan = threadStore
+      ? await resolveTaskHoistAnchor(threadStore, actor.threadId)
+      : { threadId: actor.threadId, originThreadId: actor.threadId, hoisted: false as const };
+    const hoistEvents: TaskEvent[] = hoistPlan.hoisted
+      ? [
+          {
+            ts: new Date().toISOString(),
+            catId: actor.catId,
+            type: 'hoisted_to_channel',
+            data: { originThreadId: hoistPlan.originThreadId },
+          },
+        ]
+      : [];
+
     const created = await taskStore.create({
-      threadId: actor.threadId,
+      threadId: hoistPlan.threadId,
       title,
       why: why ?? '',
       createdBy: actor.catId,
@@ -365,6 +385,7 @@ export function registerCallbackTaskRoutes(
       userId: actor.userId,
       reviewerId: resolveReviewerIdForNewTask({ parentTask: parentTaskForReviewer }),
       ...(parentTaskId ? { parentTaskId } : {}),
+      ...(hoistEvents.length ? { events: hoistEvents } : {}),
     });
     const task =
       threadStore && messageStore
@@ -378,6 +399,12 @@ export function registerCallbackTaskRoutes(
         : created;
 
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);
+
+    // 批次4-B5.5 回执: leave the lightweight receipt in the originating branch thread.
+    if (hoistPlan.hoisted && messageStore) {
+      await persistTaskHoistedOriginNotice(task, hoistPlan.originThreadId, { taskStore, messageStore, socketManager });
+    }
+
     reply.status(201);
     return { status: 'ok', task };
   });

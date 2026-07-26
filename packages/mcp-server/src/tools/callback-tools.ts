@@ -1244,12 +1244,17 @@ export const callbackTools = [
   {
     name: 'cat_cafe_create_task',
     description:
+      'DEPRECATED: prefer cat_cafe_task_create instead (same dual-auth surface, actively maintained; this legacy ' +
+      'tool is kept only for backward compatibility). ' +
       'Create a new 🧶 毛线球 (yarn ball) task in the current thread. ' +
       'Use when: user says "建个毛线球", "记一下任务", "track this", or you identify persistent work items across sessions — ' +
       'e.g. "fix login timeout", "update API docs", "review F160 spec". ' +
       'NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:"checklist"). ' +
       'Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and 铲屎官. ' +
       'GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. ' +
+      'GOTCHA (batch4-B5.5 建票上浮): calling this from inside a branch/discussion thread does not create the ' +
+      'task there — it is automatically anchored to the top-level channel that thread traces up to instead ' +
+      '(a brief receipt is left behind in the branch); this is expected, not an error. ' +
       'Inside an auto-admitted task thread, an omitted parentTaskId reuses the current task; pass the current taskId as parentTaskId only for an intentional child task. ' +
       'TIP: Include a "why" to give context to whoever picks up the task.',
     inputSchema: createTaskInputSchema,

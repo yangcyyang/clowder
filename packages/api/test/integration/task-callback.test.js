@@ -656,4 +656,106 @@ describe('Task Callback Integration', () => {
 
     assert.equal(response.statusCode, 400);
   });
+
+  // ---- 批次4-B5.5 补漏: legacy cat_cafe_create_task (/api/callbacks/create-task) ----
+  // 验收发现的绕过洞——三入口盘点漏了这条 invocation-only 的 legacy 建票路由，猫从分支
+  // thread 用旧工具建票会绕过上浮，票仍落分支。接入同一份 resolveTaskHoistAnchor。
+  describe('B5.5 建票上浮到主频道 (legacy cat_cafe_create_task 补漏)', () => {
+    function withEnv(overrides, fn) {
+      const previous = {};
+      for (const key of Object.keys(overrides)) previous[key] = process.env[key];
+      Object.assign(process.env, overrides);
+      return Promise.resolve()
+        .then(fn)
+        .finally(() => {
+          for (const key of Object.keys(overrides)) {
+            if (previous[key] === undefined) delete process.env[key];
+            else process.env[key] = previous[key];
+          }
+        });
+    }
+
+    test('legacy create-task from inside a branch thread anchors the task to the top-level channel, leaves a branch receipt, and records origin fields', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const branch = await threadStore.create('user-1', 'Branch', undefined, {
+        relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-task',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: 'legacy 工具在分支里建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      const task = res.json().task;
+      assert.equal(task.threadId, main.id, 'task must be anchored to the top-level channel, not the branch');
+
+      const hoistEvent = task.events?.find((e) => e.type === 'hoisted_to_channel');
+      assert.ok(hoistEvent, 'a hoisted_to_channel event must be recorded');
+      assert.equal(hoistEvent.data.originThreadId, branch.id);
+
+      const branchMessages = await messageStore.getByThread(branch.id, 20);
+      const notice = branchMessages.find((m) => m.extra?.systemKind === 'task_hoisted_to_channel');
+      assert.ok(notice, 'a lightweight receipt must be posted back to the originating branch');
+      assert.match(notice.content, /已在主频道创建任务/);
+
+      const mainTasks = await taskStore.listByThread(main.id);
+      assert.equal(mainTasks.length, 1, 'the task must actually live at the top-level channel');
+    });
+
+    test('legacy create-task from a top-level channel is unaffected (no hoist, no event)', async () => {
+      const app = await createApp();
+      const main = await threadStore.create('user-1', 'Main');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex', main.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-task',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { title: 'legacy 工具在顶层频道建的票' },
+      });
+
+      assert.equal(res.statusCode, 201, res.body);
+      const task = res.json().task;
+      assert.equal(task.threadId, main.id);
+      assert.equal(task.events?.some((e) => e.type === 'hoisted_to_channel') ?? false, false);
+    });
+
+    test('CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL=false restores the old (anchor-stays-on-branch) behavior for legacy create-task', async () => {
+      await withEnv({ CLOWDER_TICKET_HYGIENE_HOIST_TO_CHANNEL: 'false' }, async () => {
+        const app = await createApp();
+        const main = await threadStore.create('user-1', 'Main');
+        const branch = await threadStore.create('user-1', 'Branch', undefined, {
+          relation: { v: 1, kind: 'inline_reply', parentThreadId: main.id, rootMessageId: 'root-msg' },
+        });
+        const { invocationId, callbackToken } = await registry.create('user-1', 'codex', branch.id);
+
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/callbacks/create-task',
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+          payload: { title: '关闭开关后 legacy 工具建的票' },
+        });
+
+        assert.equal(res.statusCode, 201, res.body);
+        const task = res.json().task;
+        assert.equal(
+          task.threadId,
+          branch.id,
+          'with the gate off, the task stays anchored to the branch it was created from',
+        );
+
+        const branchMessages = await messageStore.getByThread(branch.id, 20);
+        assert.equal(
+          branchMessages.some((m) => m.extra?.systemKind === 'task_hoisted_to_channel'),
+          false,
+          'no receipt when the gate is off',
+        );
+      });
+    });
+  });
 });
