@@ -104,5 +104,12 @@ export function formatVisibleSystemInfo(parsed: Record<string, unknown>): Visibl
     return formatSanityStateChanged(parsed);
   }
 
+  // cy 2026-07-26 追加: sanity_* 全家族兜底。任何 sanity_ 前缀但未被上面专门处理的
+  // 内部事件（如 sanity_seal_cooldown_skipped，以及任何未来新增的 sanity_* 类型）
+  // 统一收敛成一行紧凑文案，类型名原样带上便于排查，绝不再让裸 JSON 刷屏。
+  if (typeof parsed?.type === 'string' && parsed.type.startsWith('sanity_')) {
+    return { content: `⚙️ 系统事件 · ${parsed.type}`, variant: 'info' };
+  }
+
   return null;
 }

@@ -59,6 +59,49 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
     }
   };
 
+  const wakeButtonLabel =
+    wakeState === 'working'
+      ? '正在唤醒…'
+      : wakeState === 'done'
+        ? '已唤醒'
+        : wakeState === 'error'
+          ? '重试立即唤醒'
+          : '立即唤醒';
+
+  // cy 2026-07-26: "交接已排队"忙线挂号卡压扁成一行——"是觉得它占地方了，你把它调矮
+  // 一点，整体高度都窄一些"。原三层结构（标题行 + 内容行 + 独立按钮行）收敛成一行
+  // 紧凑条：⏳ @猫 忙线排队 · 空闲自动唤醒 [立即唤醒]。wakeNow/canWakeNow/wakeState
+  // 回调逻辑完全不变，只改这一分支的布局。targetCatId 优先读结构化 meta 字段，历史
+  // 消息缺这个字段时回退到从 content 里的 "@xxx" 前缀解析，两条路径都覆盖测试。
+  if (canWakeNow) {
+    const metaTargetCatId = typeof source.meta?.targetCatId === 'string' ? source.meta.targetCatId : undefined;
+    const contentMention = message.content.match(/^@(\S+)/)?.[1];
+    const mentionLabel = metaTargetCatId ? `@${metaTargetCatId}` : contentMention ? `@${contentMention}` : '';
+
+    return (
+      <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
+        <div
+          data-testid="a2a-pending-compact"
+          className="system-notice-bar flex w-fit max-w-[85%] items-center gap-2 rounded-[var(--slock-radius-sm)] px-3 py-1.5 text-cafe-secondary"
+        >
+          <span aria-hidden="true" className="shrink-0 leading-none">
+            ⏳
+          </span>
+          <span className="min-w-0 truncate text-sm">{mentionLabel ? `${mentionLabel} ` : ''}忙线排队 · 空闲自动唤醒</span>
+          <span className="shrink-0 text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+          <button
+            type="button"
+            onClick={wakeNow}
+            disabled={wakeState === 'working' || wakeState === 'done'}
+            className="ml-auto shrink-0 border border-cafe-border px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+          >
+            {wakeButtonLabel}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-message-id={message.id} data-notice-tone={tone} className="flex justify-center mb-3">
       <div className="w-fit max-w-[85%]">
@@ -75,22 +118,6 @@ export function SystemNoticeBar({ message }: SystemNoticeBarProps) {
             </span>
             <div className="min-w-0 flex-1 text-sm leading-6">
               <MarkdownContent content={message.content} />
-              {canWakeNow ? (
-                <button
-                  type="button"
-                  onClick={wakeNow}
-                  disabled={wakeState === 'working' || wakeState === 'done'}
-                  className="mt-1.5 border border-cafe-border px-2 py-0.5 text-xs font-medium disabled:opacity-50"
-                >
-                  {wakeState === 'working'
-                    ? '正在唤醒…'
-                    : wakeState === 'done'
-                      ? '已唤醒'
-                      : wakeState === 'error'
-                        ? '重试立即唤醒'
-                        : '立即唤醒'}
-                </button>
-              ) : null}
             </div>
           </div>
         </div>

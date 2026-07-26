@@ -93,3 +93,55 @@ describe('formatVisibleSystemInfo — sanity_state_changed', () => {
     expect(result?.content).not.toContain('"type"');
   });
 });
+
+/**
+ * cy 2026-07-26 追加: sanity_* 全家族兜底。
+ * 频道里出现过 {"type":"sanity_seal_cooldown_skipped","catId":"gpt52",...,
+ * "remainingMs":573319} 这类内部事件裸 JSON——跟 sanity_state_changed 同一个根因
+ * （不在 formatVisibleSystemInfo 的 if/else-if 链里，consumed 恒为 false）。这里加
+ * 一个"parsed.type 以 sanity_ 开头但不是已专门处理的 sanity_state_changed"的家族级
+ * 兜底分支，保证未来任何新增 sanity_* 事件类型都不会再裸 JSON 刷屏。
+ */
+describe('formatVisibleSystemInfo — sanity_* family fallback', () => {
+  it('formats a known sanity_* member (sanity_seal_cooldown_skipped) as a compact pill carrying the raw type name', () => {
+    const result = formatVisibleSystemInfo({
+      type: 'sanity_seal_cooldown_skipped',
+      catId: 'gpt52',
+      remainingMs: 573319,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.content).toBe('⚙️ 系统事件 · sanity_seal_cooldown_skipped');
+    expect(result?.variant).toBe('info');
+  });
+
+  it('also catches a made-up future sanity_* type — this is a prefix catch-all, not a hardcoded allowlist', () => {
+    const result = formatVisibleSystemInfo({
+      type: 'sanity_fake_future_event',
+      someField: 'whatever',
+    });
+
+    expect(result?.content).toBe('⚙️ 系统事件 · sanity_fake_future_event');
+    expect(result?.variant).toBe('info');
+  });
+
+  it('never leaks raw JSON for sanity_* fallback members either', () => {
+    const result = formatVisibleSystemInfo({ type: 'sanity_seal_cooldown_skipped', catId: 'gpt52' });
+    expect(result?.content).not.toMatch(/[{}]/);
+    expect(result?.content).not.toContain('"catId"');
+  });
+
+  it('does not let the family fallback shadow the specific sanity_state_changed handler', () => {
+    const result = formatVisibleSystemInfo({
+      type: 'sanity_state_changed',
+      catId: 'gpt52',
+      from: 'green',
+      to: 'yellow',
+      ratio: 0.806,
+    });
+
+    // Must still be the specific human pill, not the generic "⚙️ 系统事件 · sanity_state_changed".
+    expect(result?.content).toBe('⚠️ 砚砚 上下文 80.6% 绿→黄');
+    expect(result?.content).not.toContain('⚙️ 系统事件');
+  });
+});
