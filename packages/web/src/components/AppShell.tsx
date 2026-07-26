@@ -8,8 +8,6 @@ import { QuickSwitchPalette } from './QuickSwitchPalette';
 import { ThreadSidebar } from './ThreadSidebar';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const CHROMELESS_ROUTES = ['/story-export', '/showcase'];
-
 interface AppShellProps {
   children: React.ReactNode;
 }
@@ -52,7 +50,7 @@ export function AppShell({ children }: AppShellProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
+  if (isExport) {
     return <>{children}</>;
   }
   const hideThreadSidebar = SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r));

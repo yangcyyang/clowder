@@ -21,7 +21,6 @@ const ALLOWLISTED_PATHS = [
   'theme-tokens.css',
   'color-utils.ts',
   'types.ts',
-  'story-export/story-data.ts',
 ];
 
 function collectFiles(dir: string, exts: string[]): string[] {
