@@ -127,6 +127,17 @@ cd packages/web && pnpm vitest run <文件>
 - 实施顺序：①③④先行，②（隔离重跑）其次。
 - **永不自动化**：diff 与声明的语义一致性判断、对抗性边界推演、范围裁定——这三样永远留给人。
 
+### B5 票面卫生平台防呆（2026-07-26 晚追加，依据 Raft 第九轮访谈定稿，详见 docs/research/raft-r9-ticket-hygiene.md）
+
+背景：`task_claim --message-id`（callback-task-routes.ts:526 附近）被执行猫每轮当记账动作使用，一晚产出 8+ 张标题为对话原文的垃圾票；纯纪律已被实证守不住。四条规则（各带 env 开关默认开，红→绿测试）：
+
+1. **B5.1 层级规则**：分支/讨论 thread 内的消息不可经 message-id 转票；拒绝响应给猫可读提示（"讨论上下文不入票；新工作请 task_create + 自拟标题"）。
+2. **B5.2 自噬禁止**：猫发的消息一律不可经 message-id 转票（人类消息可）；猫的工作票必须显式 task_create + 自拟标题。
+3. **B5.3 活跃票降级**：同猫同 thread 已有活跃票（todo/doing/in_review）时，对人类消息的转票降级为"挂进度事件到活跃票"，并发可见提示卡"已挂到 #N；若这是新工作请显式建票"（显式逃生门）。
+4. **B5.4 标题强制**：message-id 转票必须随附猫自拟标题（≤60 字，非截断），原文写入票 thread 首条；缺标题拒绝。mcp-server 的 task claim 工具 schema 同步加 title 参数与说明。
+
+B5-AC：①分支 thread 消息转票被拒且提示可读；②猫消息转票被拒；③有活跃票时人类消息转票产出进度事件+提示卡而非新票，显式 task_create 仍可建新票；④缺标题被拒、带 61 字标题被拒、原文落 thread 首条；⑤存量票不动；env 全注册契约绿；golden 绿。
+
 ### B 包验收标准
 - B-AC1：猫置 in_review → 验收人按缺省规则被通知；执行者=reviewer 被服务端拒绝。
 - B-AC2：构造超时 → gate 轨 24h、human 轨 48h/96h/第三级各触发一次且不超一次；第三级实际把票降回 doing。
