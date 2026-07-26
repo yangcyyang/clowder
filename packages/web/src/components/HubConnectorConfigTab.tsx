@@ -1,7 +1,6 @@
 'use client';
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { useGuideStore } from '@/stores/guideStore';
 import { apiFetch } from '@/utils/api-client';
 import { FeishuQrPanel } from './FeishuQrPanel';
 import { DEFAULT_VISUAL, ExternalLinkIcon, LockIcon, PLATFORM_VISUALS, StepBadge, WifiIcon } from './HubConfigIcons';
@@ -63,11 +62,6 @@ function formatHeartbeat(ts: number): string {
 }
 
 export function HubConnectorConfigTab() {
-  const activeGuideStep = useGuideStore((s) => {
-    const session = s.session;
-    if (!session || session.currentStepIndex >= session.flow.steps.length) return null;
-    return session.flow.steps[session.currentStepIndex];
-  });
   const [platforms, setPlatforms] = useState<PlatformStatus[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -98,11 +92,7 @@ export function HubConnectorConfigTab() {
   }, [fetchStatus]);
 
   const handleExpand = (platformId: string) => {
-    const guideToggleTarget = `connector.${platformId}`;
     if (expandedId === platformId) {
-      if (activeGuideStep?.advance === 'click' && activeGuideStep.target === guideToggleTarget) {
-        return;
-      }
       setExpandedId(null);
       setFieldValues({});
       setSaveResult(null);
@@ -206,7 +196,6 @@ export function HubConnectorConfigTab() {
             key={platform.id}
             className="console-list-card rounded-2xl overflow-hidden shadow-[0_12px_30px_rgba(43,33,26,0.08)] hover:shadow-[0_12px_30px_rgba(43,33,26,0.12)]"
             data-testid={`platform-card-${platform.id}`}
-            data-guide-id={`connector.${platform.id}`}
             data-active={isExpanded ? 'true' : 'false'}
           >
             <button
@@ -324,9 +313,7 @@ export function HubConnectorConfigTab() {
                     </div>
                     {idx === 0 && (
                       <div className="ml-[26px]">
-                        <div data-guide-id="connector.weixin.qr-panel">
-                          <WeixinQrPanel configured={platform.configured} />
-                        </div>
+                        <WeixinQrPanel configured={platform.configured} />
                       </div>
                     )}
                   </div>

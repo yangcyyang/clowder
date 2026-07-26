@@ -1077,48 +1077,6 @@ export async function handleGetThreadCats(): Promise<ToolResult> {
   return callbackGet('/api/callbacks/thread-cats');
 }
 
-// F155: Guide Engine
-
-export const updateGuideStateInputSchema = {
-  threadId: z.string().min(1).describe('Thread ID where the guide is being offered/active'),
-  guideId: z.string().min(1).describe('Guide ID (e.g. "add-member")'),
-  status: z
-    .enum(['offered', 'awaiting_choice', 'completed', 'cancelled'])
-    .describe(
-      'Target guide status. Valid transitions: offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. Use cat_cafe_start_guide for →active.',
-    ),
-  currentStep: z.number().int().min(0).optional().describe('Current step index (only when status=active)'),
-};
-
-export async function handleUpdateGuideState(input: {
-  threadId: string;
-  guideId: string;
-  status: string;
-  currentStep?: number | undefined;
-}): Promise<ToolResult> {
-  const body: Record<string, unknown> = { threadId: input.threadId, guideId: input.guideId, status: input.status };
-  if (input.currentStep !== undefined) body['currentStep'] = input.currentStep;
-  return callbackPost('/api/callbacks/update-guide-state', body);
-}
-
-export async function handleStartGuide(input: { guideId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId });
-}
-
-export const getAvailableGuidesInputSchema = {};
-
-export async function handleGetAvailableGuides(): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/get-available-guides', {});
-}
-
-export async function handleGuideResolve(input: { intent: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-resolve', { intent: input.intent });
-}
-
-export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-control', { action: input.action });
-}
-
 export async function handleHoldBall(input: {
   reason: string;
   nextStep: string;
@@ -1356,63 +1314,6 @@ export const callbackTools = [
       'GOTCHA: callbackTo is usually your own catId so responses come back to you.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
-  },
-  // ============ F155: Guide Engine ============
-  {
-    name: 'cat_cafe_update_guide_state',
-    description:
-      'Update the guide session state for a thread after you have already decided a guided flow is appropriate. ' +
-      'This is not a raw-text trigger path: do not infer guide offers from `/guide` or keywords alone. ' +
-      'First call creates state (status must be "offered"). Subsequent calls must follow valid non-start transitions: ' +
-      'offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. ' +
-      'Do not use this tool to enter "active" — call cat_cafe_start_guide for offered/awaiting_choice→active so frontend start side effects run. ' +
-      'One active guide per thread — complete or cancel before offering a new one.',
-    inputSchema: updateGuideStateInputSchema,
-    handler: handleUpdateGuideState,
-  },
-  {
-    name: 'cat_cafe_get_available_guides',
-    description:
-      'Fetch the current catalog of guides that are actually available in this thread context. ' +
-      'Use this after you decide a user likely needs a step-by-step walkthrough instead of a plain explanation. ' +
-      'Returns guide IDs, names, descriptions, categories, priorities, and estimated times so you can recommend the best-fit guide to the user. ' +
-      'Do not guess from keywords alone — inspect the returned guide metadata first, then ask the user whether to start one. ' +
-      'On confirmation, call cat_cafe_start_guide with the chosen guideId.',
-    inputSchema: getAvailableGuidesInputSchema,
-    handler: handleGetAvailableGuides,
-  },
-  {
-    name: 'cat_cafe_guide_resolve',
-    description:
-      'Legacy alias for guide discovery by explicit intent. ' +
-      'Use only when an older prompt or caller still sends a concrete intent string and expects ranked guide matches. ' +
-      'For new code and new prompts, prefer cat_cafe_get_available_guides and let the cat choose based on catalog metadata.',
-    inputSchema: {
-      intent: z.string().min(1).describe('User intent text (e.g. "添加成员", "配置飞书")'),
-    },
-    handler: handleGuideResolve,
-  },
-  {
-    name: 'cat_cafe_start_guide',
-    description:
-      'Start an interactive guided flow on the Console frontend. ' +
-      'Requires the guide to be in "offered" or "awaiting_choice" state (call cat_cafe_update_guide_state first after you intentionally offered the guide). ' +
-      'Transitions guide to "active" and emits socket event for frontend overlay.',
-    inputSchema: {
-      guideId: z.string().min(1).describe('Guide flow ID (e.g. "add-member")'),
-    },
-    handler: handleStartGuide,
-  },
-  {
-    name: 'cat_cafe_guide_control',
-    description:
-      'Control an active guide session. Requires guide to be in "active" state. ' +
-      'Actions: "next" (advance), "skip" (skip step), "exit" (cancel guide). ' +
-      'Use this only after a guide has been explicitly started; forward-only — no back.',
-    inputSchema: {
-      action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
-    },
-    handler: handleGuideControl,
   },
   {
     name: 'cat_cafe_hold_ball',

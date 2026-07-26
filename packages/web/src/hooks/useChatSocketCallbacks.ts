@@ -157,8 +157,6 @@ export function useChatSocketCallbacks({
       },
       onAuthorizationRequest: handleAuthRequest,
       onAuthorizationResponse: handleAuthResponse,
-      // B-5: Guide events now flow directly from useSocket → guideStore.reduceServerEvent
-      // (CustomEvent bridge removed — no onGuideStart/onGuideControl/onGuideComplete needed)
       onIndexEvent,
     }),
     [

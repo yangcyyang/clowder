@@ -348,26 +348,6 @@ export interface FirstRunQuestStateV1 {
   errorDetected?: boolean;
 }
 
-/** F155: Guide session status */
-export type GuideStatus = 'offered' | 'awaiting_choice' | 'active' | 'completed' | 'cancelled';
-
-/** F155: Scene-based bidirectional guide state — thread-level authority */
-export interface GuideStateV1 {
-  v: 1;
-  guideId: string;
-  status: GuideStatus;
-  /** Owning user for default-thread guide state. */
-  userId?: string;
-  currentStep?: number;
-  offeredAt: number;
-  startedAt?: number;
-  completedAt?: number;
-  /** True after the first agent turn has seen the completion (one-shot consumption). */
-  completionAcked?: boolean;
-  /** catId that offered this guide (prevents multi-cat duplicate offers). */
-  offeredBy?: string;
-}
-
 /**
  * Common interface for thread stores (in-memory and future Redis).
  */

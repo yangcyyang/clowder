@@ -25,7 +25,6 @@ export { externalProjectRoutes } from './external-projects.js';
 export { featureDocDetailRoutes } from './feature-doc-detail.js';
 export { firstRunQuestRoutes } from './first-run-quest.js';
 export { governanceStatusRoute } from './governance-status.js';
-export { guideActionRoutes } from './guide-action-routes.js';
 export { intentCardRoutes } from './intent-card-routes.js';
 export { invocationsRoutes } from './invocations.js';
 export { knowledgeRoutes } from './knowledge.js';

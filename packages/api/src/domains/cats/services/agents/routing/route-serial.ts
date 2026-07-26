@@ -40,11 +40,6 @@ import {
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import {
-  ackGuideCompletion,
-  guideContextForCat,
-  prepareGuideContext,
-} from '../../../../guides/GuideRoutingInterceptor.js';
 import { resolveContextCacheLayoutForCat } from '../../../../../config/context-cache-layout.js';
 import { readUserProfileForPrompt } from '../memory/UserProfileStore.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
@@ -452,8 +447,7 @@ export async function* routeSerial(
   let sopStageHint: { stage: string; suggestedSkill: string | null; featureId: string } | undefined;
   // F092: Voice companion mode
   let voiceMode: boolean | undefined;
-  const targetCatIds = new Set<string>(targetCats);
-  // Thread read: shared across routingPolicy, voiceMode, SOP, and guide interceptor
+  // Thread read: shared across routingPolicy, voiceMode, and SOP
   let routeThread: Thread | null = null;
   if (deps.invocationDeps.threadStore) {
     try {
@@ -489,18 +483,6 @@ export async function* routeSerial(
   const mentionParentSpan = new Map<number, Span>();
   const pendingDispatchSpans: { span: Span; lastChildIndex: number }[] = [];
   let routeTotalTokens = 0;
-
-  // F155: Guide interceptor — resume existing guide state only
-  const guideCtx = await prepareGuideContext({
-    thread: routeThread,
-    guideSessionStore: deps.invocationDeps.guideSessionStore,
-    targetCats,
-    message,
-    userId,
-    threadId,
-    log,
-    dismissTracker: deps.invocationDeps.dismissTracker,
-  });
 
   try {
     while (index < worklist.length) {
@@ -669,7 +651,6 @@ export async function* routeSerial(
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
@@ -982,7 +963,6 @@ export async function* routeSerial(
         hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,
         hasSopHint: Boolean(loadFullContext && sopStageHint),
-        hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
         hasLessonsContext: Boolean(lessonsContext && staticIdentity.includes('公共踩坑记录（LESSONS.md，低优先级）')),
@@ -1014,8 +994,6 @@ export async function* routeSerial(
       let firstMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let hadError = false;
-      /** F155: tracks whether cat produced user-visible output (for guide completion ack). */
-      let catProducedOutput = false;
       let sawUserFacingSystemInfo = false;
       // #267: track errors that happened BEFORE abort — only these are real provider failures
       let hadProviderError = false;
@@ -1503,7 +1481,6 @@ export async function* routeSerial(
       let mentionsUser = false;
 
       if (textContent) {
-        catProducedOutput = true;
         const sanitized = sanitizeInjectedContent(textContent);
 
         // F22: Extract cc_rich blocks from text (Route B fallback for non-MCP cats)
@@ -2243,11 +2220,6 @@ export async function* routeSerial(
           },
           'Cat produced no text — evaluating silent_completion',
         );
-        // A synthetic silent-completion notice is runtime diagnostics, not a
-        // cat-authored response and must not acknowledge a pending guide.
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo) {
-          catProducedOutput = true;
-        }
 
         if (shouldPersistNoTextMessage) {
           let storedRichMessageId: string | undefined;
@@ -2661,22 +2633,6 @@ export async function* routeSerial(
           threadId,
           hadError: hadProviderError,
           ...(evalSignals ? { eval: evalSignals } : {}),
-        });
-      }
-
-      // F155: Ack guide completion only after cat produced visible output.
-      if (deps.invocationDeps.threadStore) {
-        const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
-        const sessionStore = deps.invocationDeps.guideSessionStore!;
-        await ackGuideCompletion({
-          ctx: guideCtx,
-          catId,
-          catProducedOutput,
-          targetCatIds,
-          threadId,
-          userId,
-          guideStore: createGuideStoreBridge(sessionStore),
-          threadStore: deps.invocationDeps.threadStore!,
         });
       }
 

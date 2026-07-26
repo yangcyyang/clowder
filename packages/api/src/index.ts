@@ -170,7 +170,6 @@ import {
   featureDocDetailRoutes,
   firstRunQuestRoutes,
   governanceStatusRoute,
-  guideActionRoutes,
   intentCardRoutes,
   invocationsRoutes,
   knowledgeRoutes,
@@ -566,11 +565,6 @@ async function main(): Promise<void> {
       },
     );
   };
-  // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
-  const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
-  const guideSessionStore = new InMemoryGuideSessionStore();
-  const { InMemoryGuideDismissTracker } = await import('./domains/guides/GuideDismissTracker.js');
-  const dismissTracker = new InMemoryGuideDismissTracker();
   const taskStore = createTaskStore(redis);
   const communityIssueStore = createCommunityIssueStore(redis);
 
@@ -1391,8 +1385,6 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     threadHistorySummaryStore: memoryServices.threadHistorySummaryStore,
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
-    guideSessionStore,
-    dismissTracker,
   });
 
   // F39: Message queue delivery
@@ -1512,15 +1504,6 @@ async function main(): Promise<void> {
   });
   await app.register(agentMemoryRoutes);
   await app.register(remindersRoutes, { reminderStore });
-  // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
-  if (threadStore) {
-    await app.register(guideActionRoutes, {
-      threadStore,
-      socketManager,
-      guideSessionStore,
-      dismissTracker,
-    });
-  }
   await app.register(catsRoutes);
 
   // F182 Phase D: disable-impact endpoint
@@ -1598,7 +1581,6 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
-    guideSessionStore,
     holdBallDeps: {
       registry,
       taskRunner: taskRunnerV2,
@@ -1641,7 +1623,6 @@ async function main(): Promise<void> {
     backlogStore,
     ...(readStateStore ? { readStateStore } : {}),
     ...(followStore ? { followStore } : {}),
-    guideSessionStore,
   });
   await app.register(threadBranchRoutes, {
     threadStore,

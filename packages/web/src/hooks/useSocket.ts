@@ -10,7 +10,6 @@ import {
 } from '@/debug/invocationEventDebug';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useGuideStore } from '@/stores/guideStore';
 import { useRuntimeEventsStore } from '@/stores/runtimeEventsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -199,7 +198,6 @@ export interface SocketCallbacks {
     reason: 'canceled' | 'failed';
     queue: import('../stores/chat-types').QueueEntry[];
   }) => void;
-  // B-5: Guide events removed from callbacks — now go directly to guideStore.reduceServerEvent
   /** F152 Phase B: Memory bootstrap index events */
   onIndexEvent?: (event: string, data: Record<string, unknown>) => void;
 }
@@ -424,9 +422,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const socketRef = useRef<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
-  const pendingGuideStartsRef = useRef<Map<string, { guideId: string; threadId: string; timestamp: number }>>(
-    new Map(),
-  );
   // F173 Phase E (KD-1): bg refs (bgStreamRefs / bgFinalizedRefs / bgSeq) moved to
   // useAgentMessages — single dispatch handler owns them now。
   const userIdRef = useRef(getUserId());
@@ -1006,57 +1001,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       },
     );
 
-    // F155/B-5: Guide events → Zustand reducer (no CustomEvent bridge)
-    socket.on('guide_start', (data: { guideId: string; threadId: string; timestamp: number }) => {
-      const routeThread = threadIdRef.current;
-      const storeThread = useChatStore.getState().currentThreadId;
-      const isActiveThread = Boolean(
-        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-      );
-      if (!isActiveThread) {
-        pendingGuideStartsRef.current.set(data.threadId, data);
-        return;
-      }
-      pendingGuideStartsRef.current.delete(data.threadId);
-      useGuideStore.getState().reduceServerEvent({ action: 'start', guideId: data.guideId, threadId: data.threadId });
-    });
-
-    socket.on('guide_control', (data: { action: string; guideId: string; threadId: string; timestamp: number }) => {
-      if (data.action === 'exit') {
-        pendingGuideStartsRef.current.delete(data.threadId);
-      }
-      const routeThread = threadIdRef.current;
-      const storeThread = useChatStore.getState().currentThreadId;
-      const isActiveThread = Boolean(
-        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-      );
-      if (!isActiveThread) return;
-      const action =
-        data.action === 'exit'
-          ? 'control_exit'
-          : data.action === 'skip'
-            ? 'control_skip'
-            : data.action === 'next'
-              ? 'control_next'
-              : undefined;
-      if (action) {
-        useGuideStore.getState().reduceServerEvent({ action, guideId: data.guideId, threadId: data.threadId });
-      }
-    });
-
-    socket.on('guide_complete', (data: { guideId: string; threadId: string; timestamp: number }) => {
-      pendingGuideStartsRef.current.delete(data.threadId);
-      const routeThread = threadIdRef.current;
-      const storeThread = useChatStore.getState().currentThreadId;
-      const isActiveThread = Boolean(
-        data.threadId && routeThread && storeThread && data.threadId === routeThread && data.threadId === storeThread,
-      );
-      if (!isActiveThread) return;
-      useGuideStore
-        .getState()
-        .reduceServerEvent({ action: 'complete', guideId: data.guideId, threadId: data.threadId });
-    });
-
     // F152 Phase B: Memory bootstrap progress events
     socket.on('index:progress', (data: Record<string, unknown>) => {
       callbacksRef.current.onIndexEvent?.('index:progress', data);
@@ -1213,20 +1157,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       joinRoom(threadId);
     }
   }, [threadId, joinRoom]);
-
-  const storeThreadId = useChatStore((s) => s.currentThreadId);
-  useEffect(() => {
-    if (!threadId) return;
-    if (storeThreadId !== threadId) return;
-    const pendingStart = pendingGuideStartsRef.current.get(threadId);
-    if (!pendingStart) return;
-    pendingGuideStartsRef.current.delete(threadId);
-    useGuideStore.getState().reduceServerEvent({
-      action: 'start',
-      guideId: pendingStart.guideId,
-      threadId: pendingStart.threadId,
-    });
-  }, [threadId, storeThreadId]);
 
   const cancelInvocation = useCallback((tid: string, catId?: string) => {
     socketRef.current?.emit('cancel_invocation', catId ? { threadId: tid, catId } : { threadId: tid });

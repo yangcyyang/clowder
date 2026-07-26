@@ -90,16 +90,6 @@ export interface RichAudioBlock extends RichBlockBase {
   mimeType?: string;
 }
 
-/** F155: Direct action for interactive options that bypass the chat message pipeline */
-export interface OptionAction {
-  /** Action type — 'callback' calls an API endpoint directly from the frontend */
-  type: 'callback';
-  /** API endpoint path (e.g. '/api/guide-actions/start') */
-  endpoint: string;
-  /** Payload sent as JSON body to the endpoint */
-  payload?: Record<string, unknown>;
-}
-
 /** F096: Interactive rich block — user can select/confirm within the block */
 export interface InteractiveOption {
   id: string;
@@ -114,8 +104,6 @@ export interface InteractiveOption {
   customInput?: boolean;
   /** Placeholder text for the custom input field */
   customInputPlaceholder?: string;
-  /** F155: When present, clicking this option calls the endpoint directly instead of sending a chat message */
-  action?: OptionAction;
 }
 
 export interface RichInteractiveBlock extends RichBlockBase {

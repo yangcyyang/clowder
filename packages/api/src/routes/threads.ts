@@ -63,8 +63,6 @@ export interface ThreadsRoutesOptions {
   readStateStore?: IThreadReadStateStore;
   /** F095 Phase C: validate backlogItemId on thread creation */
   backlogStore?: IBacklogStore;
-  /** B-4: Cascade delete guide session when thread is deleted */
-  guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** batch 3-D: Cascade delete follow records when thread is deleted */
   followStore?: IFollowStore;
 }
@@ -733,9 +731,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         reply.status(400);
         return { error: 'Cannot delete this thread' };
       }
-
-      // B-4: Cascade delete guide session to prevent stale sessions on deleted threads
-      void opts.guideSessionStore?.delete(id).catch(() => {});
 
       // batch 3-D: Cascade delete follow records so a deleted thread's followers
       // don't linger in Activity aggregation (docs/research/clowder-raft-thread-task-design.md §3 step 2)

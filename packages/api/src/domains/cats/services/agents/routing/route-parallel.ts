@@ -18,11 +18,6 @@ import {
   ROUTE_TOTAL_TOKENS,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import {
-  ackGuideCompletion,
-  guideContextForCat,
-  prepareGuideContext,
-} from '../../../../guides/GuideRoutingInterceptor.js';
 import { resolveContextCacheLayoutForCat } from '../../../../../config/context-cache-layout.js';
 import { readUserProfileForPrompt } from '../memory/UserProfileStore.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
@@ -291,8 +286,7 @@ export async function* routeParallel(
   let sopStageHint: { stage: string; suggestedSkill: string | null; featureId: string } | undefined;
   // F092: Voice companion mode
   let voiceMode: boolean | undefined;
-  const targetCatIds = new Set<string>(targetCats);
-  // Thread read: shared across routingPolicy, voiceMode, SOP, and guide interceptor
+  // Thread read: shared across routingPolicy, voiceMode, and SOP
   let routeThread: Thread | null = null;
   if (deps.invocationDeps.threadStore) {
     try {
@@ -322,18 +316,6 @@ export async function* routeParallel(
   const historyGovernanceHistory = historyGovernanceObserveEnabled
     ? await readHistoryForGovernanceObservation(deps, threadId, userId, history)
     : undefined;
-
-  // F155: Guide interceptor — resume existing guide state only
-  const guideCtx = await prepareGuideContext({
-    thread: routeThread,
-    guideSessionStore: deps.invocationDeps.guideSessionStore,
-    targetCats,
-    message,
-    userId,
-    threadId,
-    log,
-    dismissTracker: deps.invocationDeps.dismissTracker,
-  });
 
   // F148 OQ-2: briefing→invocation link per cat (must be before Promise.all — TDZ fix)
   const catBriefingMessageId = new Map<string, string>();
@@ -434,7 +416,6 @@ export async function* routeParallel(
         ...(loadFullContext && sopStageHint ? { sopStageHint } : {}),
         ...(activeSignals ? { activeSignals } : {}),
         ...(voiceMode ? { voiceMode } : {}),
-        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         threadId,
       };
       let invocationContext = buildInvocationContext(invocationContextInput);
@@ -727,7 +708,6 @@ export async function* routeParallel(
         hasSignalArticles: Boolean(activeSignals?.length),
         hasAlwaysOnDocs: false,
         hasSopHint: Boolean(loadFullContext && sopStageHint),
-        hasGuideContext: Boolean(loadFullContext && guideCtx),
         hasMcpInstructions: Boolean(mcpInstructions),
         hasAgentMemory: Boolean(agentMemoryContext),
         hasLessonsContext: Boolean(lessonsContext && staticIdentity.includes('公共踩坑记录（LESSONS.md，低优先级）')),
@@ -1266,11 +1246,9 @@ export async function* routeParallel(
         // the same id; otherwise IDB/live bubbles use parent id while hydration uses
         // per-cat invocation_created id, creating duplicate bubbles after refresh.
         const persistedInvocationId = options.parentInvocationId ?? ownInvId;
-        let catProducedOutput = false;
         const text = catText.get(msg.catId);
         const callbackDisposition = catCallbackDisposition.get(msg.catId) ?? 'none';
         if (callbackDisposition !== 'none') {
-          catProducedOutput = true;
           options.persistenceContext ??= { failed: false, errors: [] };
           options.persistenceContext.egressByCat ??= {};
           const callbackMessageId = catCallbackMessageId.get(msg.catId);
@@ -1330,7 +1308,6 @@ export async function* routeParallel(
             } as AgentMessage;
           }
         } else if (text) {
-          catProducedOutput = true;
           const meta = catMeta.get(msg.catId);
           const sanitized = sanitizeInjectedContent(text);
           // F22: Extract cc_rich blocks from text + merge with buffered
@@ -1538,12 +1515,6 @@ export async function* routeParallel(
           const sawUserFacingSystemInfo = catSawUserFacingSystemInfo.get(msg.catId) === true;
           const shouldPersistNoTextMessage = hasRichBlocks;
           const shouldPersistSilentNotice = !hasRichBlocks && !sawUserFacingSystemInfo;
-
-          // A synthetic silent-completion notice is runtime diagnostics, not a
-          // cat-authored response and must not acknowledge a pending guide.
-          if (shouldPersistNoTextMessage || sawUserFacingSystemInfo) {
-            catProducedOutput = true;
-          }
 
           if (shouldPersistNoTextMessage) {
             try {
@@ -1870,7 +1841,6 @@ export async function* routeParallel(
           }
         }
 
-        // F155: Ack guide completion only after cat produced visible output.
         for (const compactBoundary of catCompactBoundarySignals.get(msg.catId) ?? []) {
           await appendCompactBoundaryTaskEvent(deps, {
             threadId,
@@ -1882,21 +1852,6 @@ export async function* routeParallel(
           });
         }
         catCompactBoundarySignals.delete(msg.catId);
-
-        if (deps.invocationDeps.threadStore) {
-          const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
-          const sessionStore = deps.invocationDeps.guideSessionStore!;
-          await ackGuideCompletion({
-            ctx: guideCtx,
-            catId: msg.catId as string,
-            catProducedOutput,
-            targetCatIds,
-            threadId,
-            userId,
-            guideStore: createGuideStoreBridge(sessionStore),
-            threadStore: deps.invocationDeps.threadStore!,
-          });
-        }
 
         const isFinal = completedCount === targetCats.length;
 

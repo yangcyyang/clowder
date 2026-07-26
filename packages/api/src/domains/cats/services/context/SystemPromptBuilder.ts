@@ -31,7 +31,6 @@ import { listAgentMemoryNotes } from '../agents/memory/AgentMemoryStore.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
-import { buildGuidePromptLines } from '../../../guides/GuidePromptSection.js';
 import type {
   ThreadMentionRoutingFeedback,
   ThreadParticipantActivity,
@@ -192,20 +191,6 @@ export interface InvocationContext {
    */
   a2aTriggerMessageId?: string;
   a2aTriggerContent?: string;
-  /**
-   * F155: Matched guide candidate from routing-layer keyword match.
-   * When present, cats load guide-interaction skill and offer the guide.
-   */
-  guideCandidate?: {
-    id: string;
-    name: string;
-    estimatedTime: string;
-    status: 'offered' | 'awaiting_choice' | 'active' | 'completed';
-    /** True only on the first routing-layer match before any guideState has been persisted. */
-    isNewOffer?: boolean;
-    /** When user clicked an interactive selection, carries the chosen label. */
-    userSelection?: string;
-  };
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -1199,11 +1184,6 @@ function buildTurnMetaLines(context: InvocationContext): string[] {
       'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在铲屎官明确要求语音时才发。',
       '',
     );
-  }
-
-  // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
-  if (context.guideCandidate) {
-    lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
   }
 
   if (context.governanceSourceContext) {

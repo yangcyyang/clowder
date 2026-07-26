@@ -55,10 +55,6 @@ export const tokenUsage = lazy(() =>
   meter().createCounter('cat_cafe.token.usage', { description: 'Cumulative token consumption', unit: 'tokens' }),
 );
 
-export const guideTransitions = lazy(() =>
-  meter().createCounter('cat_cafe.guide.transitions', { description: 'Guide lifecycle state transitions' }),
-);
-
 export const inlineActionChecked = lazy(() =>
   meter().createCounter('cat_cafe.a2a.inline_action.checked', {
     description: 'Total inline action @mention detection invocations',

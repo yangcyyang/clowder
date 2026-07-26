@@ -3,7 +3,6 @@ import { Space_Grotesk } from 'next/font/google';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
 import { ChunkLoadRefreshGuard } from '@/components/ChunkLoadRefreshGuard';
-import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
@@ -90,7 +89,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <AppShell>{children}</AppShell>
           </ConfirmProvider>
           <BrakeModal />
-          <GuideOverlay />
           <ToastContainer />
         </ThemeProvider>
       </body>

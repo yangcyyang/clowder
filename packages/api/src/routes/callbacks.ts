@@ -58,7 +58,6 @@ import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-messag
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
-import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
@@ -131,18 +130,10 @@ export interface CallbackRoutesOptions {
   socketManager: SocketManager;
   /** F174 D2b-1: in-context surface for callback auth failures (optional — back-compat). */
   callbackAuthNotifier?: CallbackAuthSystemMessageNotifier;
-  /** F155 review fix: allow tests to inject a failing guide flow loader. */
-  loadGuideFlow?: (guideId: string) => unknown;
-  /** F155 review fix: allow tests to inject guide availability prerequisites. */
-  getGuideAvailabilityContext?: (
-    threadId: string,
-  ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
-  /** F155 B-4: Independent guide session store */
-  guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
   agentRegistry?: { getAllEntries(): Map<string, unknown> };
   /** For post_message @mention → invocation triggering */
@@ -2709,17 +2700,4 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registry,
     ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
   });
-
-  // F155: Guide engine — state-validated routes with ThreadStore authority
-  if (opts.threadStore) {
-    await registerCallbackGuideRoutes(app, {
-      registry,
-      threadStore: opts.threadStore,
-      socketManager,
-      ...(opts.guideSessionStore ? { guideSessionStore: opts.guideSessionStore } : {}),
-      ...(opts.loadGuideFlow ? { loadGuideFlow: opts.loadGuideFlow } : {}),
-      ...(opts.getGuideAvailabilityContext ? { getGuideAvailabilityContext: opts.getGuideAvailabilityContext } : {}),
-      ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
-    });
-  }
 };

@@ -73,7 +73,7 @@ export const PROMPT_SECTION_REGISTRY: readonly PromptSectionMeta[] = [
     cacheClass: 'volatile',
     slot: 'meta',
     description:
-      'A2A 来源/乒乓球警告/当前模式/Task Gate/Skill Router 命中/contextUsageWarning/voiceMode/guide/world/signals',
+      'A2A 来源/乒乓球警告/当前模式/Task Gate/Skill Router 命中/contextUsageWarning/voiceMode/world/signals',
   },
   {
     id: 'cross-session-memory',

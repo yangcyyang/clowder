@@ -711,7 +711,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   hasSignalArticles: boolean;
   hasAlwaysOnDocs: boolean;
   hasSopHint: boolean;
-  hasGuideContext: boolean;
   hasMcpInstructions: boolean;
   hasAgentMemory: boolean;
   hasLessonsContext: boolean;
@@ -739,7 +738,6 @@ export function buildRuntimeContextBudgetSnapshot(input: {
   if (input.hasSignalArticles) loadedBlocks.push('signal-articles');
   if (input.hasAlwaysOnDocs) loadedBlocks.push('always-on-docs');
   if (input.hasSopHint) loadedBlocks.push('sop-hint');
-  if (input.hasGuideContext) loadedBlocks.push('guide-context');
   if (input.historySummary) loadedBlocks.push('history-summary');
   if (input.skillRouterMatchedSkills) {
     loadedBlocks.push('skill-router');
@@ -756,7 +754,7 @@ export function buildRuntimeContextBudgetSnapshot(input: {
     skippedBlocks.push('project-progress');
   }
   if (!input.loadFullContext) {
-    skippedBlocks.push('signal-articles', 'always-on-docs', 'sop-hint', 'guide-context');
+    skippedBlocks.push('signal-articles', 'always-on-docs', 'sop-hint');
   }
 
   const historyCount = Math.max(0, input.historyCount ?? 0);
@@ -1805,34 +1803,6 @@ export function getService(services: Record<string, AgentService>, catId: CatId)
   const service = services[catId];
   if (!service) throw new Error(`Unknown cat ID: ${catId as string}`);
   return service;
-}
-
-export function shouldHandleCompletedGuide(
-  guideCompletionOwner: string | undefined,
-  targetCatIds: ReadonlySet<string>,
-  fallbackCatId: string | undefined,
-  catId: string,
-): boolean {
-  if (!guideCompletionOwner) return true;
-  if (guideCompletionOwner === catId) return true;
-  if (!targetCatIds.has(guideCompletionOwner)) return fallbackCatId === catId;
-  return false;
-}
-
-export function shouldHandleOfferedGuide(
-  guideOfferOwner: string | undefined,
-  targetCatIds: ReadonlySet<string>,
-  fallbackCatId: string | undefined,
-  catId: string,
-  hasUserSelection: boolean,
-  allowOwnerMissingFallback = false,
-): boolean {
-  if (!guideOfferOwner) return true;
-  if (guideOfferOwner === catId) return true;
-  if ((hasUserSelection || allowOwnerMissingFallback) && !targetCatIds.has(guideOfferOwner)) {
-    return fallbackCatId === catId;
-  }
-  return false;
 }
 
 export function detectContextDegradation(
