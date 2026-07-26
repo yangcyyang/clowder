@@ -20,7 +20,7 @@ export interface ExecutionRouteV1 {
   replyTargetThreadId: string;
   executionMessageId: string;
   /** message_anchor: F194 §3 step 2 thread-first routing (messages.ts), independent of any task. */
-  mode: 'task_thread' | 'explicit_cross_thread' | 'message_anchor';
+  mode: 'task_thread' | 'message_anchor';
   taskId?: string;
   ownerCatId?: CatId;
 }

@@ -14,13 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import {
-  type CatId,
-  catRegistry,
-  type MessageContent,
-  parseThreadAddressToken,
-  THREAD_ADDRESS_ROOT_ID_RE,
-} from '@cat-cafe/shared';
+import { type CatId, catRegistry, type MessageContent } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
@@ -117,7 +111,6 @@ import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 import { ensureMessageAnchoredThread } from './task-discussion-thread.js';
-import { isThreadAddressRoutingEnabled, resolveThreadAddress } from './thread-address.js';
 import { deriveThreadReplySummary, type ThreadReplySummary } from './thread-reply-summary.js';
 import { classifyWorkAdmission, forceCreateFromMessage } from './work-admission.js';
 import {
@@ -191,24 +184,6 @@ export interface MessagesRoutesOptions {
 }
 
 const log = createModuleLogger('routes/messages');
-
-function withExecutionCrossPostAudit(
-  message: AgentMessage,
-  executionRoute: ExecutionRouteV1 | undefined,
-  invocationId: string,
-): AgentMessage {
-  if (executionRoute?.mode !== 'explicit_cross_thread') return message;
-  return {
-    ...message,
-    extra: {
-      ...(message.extra ?? {}),
-      crossPost: {
-        sourceThreadId: executionRoute.sourceThreadId,
-        sourceInvocationId: invocationId,
-      },
-    },
-  };
-}
 
 function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | undefined): void {
   if (!deps) return;
@@ -470,39 +445,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       };
     }
 
-    const parsedThreadAddress = isThreadAddressRoutingEnabled(resolvedThreadId)
-      ? parseThreadAddressToken(content)
-      : ({ kind: 'none' } as const);
-    if (parsedThreadAddress.kind === 'invalid') {
-      reply.status(400);
-      return {
-        error: '线程地址无效或无权限，本次未启动执行',
-        code: 'THREAD_ADDRESS_INVALID',
-      };
-    }
-
-    let explicitThreadAddress:
-      | { ok: true; sourceThreadId: string; rootMessageId: string; replyTargetThreadId: string }
-      | undefined;
-    if (parsedThreadAddress.kind === 'valid') {
-      if (!opts.threadStore || !opts.invocationRecordStore) {
-        reply.status(400);
-        return { error: '线程地址无效或无权限，本次未启动执行', code: 'THREAD_ADDRESS_INVALID' };
-      }
-      const resolvedAddress = await resolveThreadAddress(parsedThreadAddress, {
-        sourceThreadId: resolvedThreadId,
-        userId,
-        messageStore: opts.messageStore,
-        threadStore: opts.threadStore,
-      });
-      if (!resolvedAddress.ok) {
-        reply.status(400);
-        return { error: '线程地址无效或无权限，本次未启动执行', code: resolvedAddress.code };
-      }
-      explicitThreadAddress = resolvedAddress;
-    }
-
-    const routingThreadId = explicitThreadAddress?.replyTargetThreadId ?? resolvedThreadId;
+    const routingThreadId = resolvedThreadId;
     let validatedReplyTo: string | undefined;
     if (replyTo) {
       const parentMsg = await opts.messageStore.getById(replyTo);
@@ -513,10 +456,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           { replyTo, threadId: routingThreadId, parentThreadId: parentMsg?.threadId },
           '[messages] replyTo rejected: not found or wrong thread',
         );
-        if (explicitThreadAddress) {
-          reply.status(400);
-          return { error: '线程地址无效或无权限，本次未启动执行', code: 'THREAD_ADDRESS_INVALID' };
-        }
       }
     }
     if (routingThreadId !== resolvedThreadId) resetStreak(routingThreadId);
@@ -553,82 +492,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     let rootUserMessage: StoredMessage | undefined;
     let executionRoute: ExecutionRouteV1 | undefined;
     let admittedInvocation: { outcome: string; invocationId: string } | undefined;
-
-    if (explicitThreadAddress) {
-      rootUserMessage = await opts.messageStore.append({
-        userId,
-        catId: null,
-        content,
-        mentions: targetCats,
-        timestamp: Date.now(),
-        threadId: resolvedThreadId,
-        idempotencyKey: resolvedIdempotencyKey,
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(whisperVisibility && whisperRecipients
-          ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-          : {}),
-      });
-      const executionMessage = await opts.messageStore.append({
-        userId,
-        catId: null,
-        content,
-        mentions: targetCats,
-        timestamp: rootUserMessage.timestamp,
-        threadId: explicitThreadAddress.replyTargetThreadId,
-        idempotencyKey: resolvedIdempotencyKey,
-        extra: { crossPost: { sourceThreadId: resolvedThreadId } },
-        ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(whisperVisibility && whisperRecipients
-          ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-          : {}),
-      });
-      executionMessageId = executionMessage.id;
-      executionRoute = {
-        version: 1,
-        sourceThreadId: resolvedThreadId,
-        rootMessageId: rootUserMessage.id,
-        replyTargetThreadId: explicitThreadAddress.replyTargetThreadId,
-        executionMessageId: executionMessage.id,
-        mode: 'explicit_cross_thread',
-      };
-      try {
-        admittedInvocation = await opts.invocationRecordStore!.create({
-          threadId: explicitThreadAddress.replyTargetThreadId,
-          userId,
-          targetCats,
-          intent: intent.intent,
-          idempotencyKey: resolvedIdempotencyKey,
-        });
-      } catch (err) {
-        log.error(
-          { err, sourceThreadId: resolvedThreadId, replyTargetThreadId: explicitThreadAddress.replyTargetThreadId },
-          '[F194] explicit thread address invocation admission failed',
-        );
-        reply.status(503);
-        return {
-          error: '线程路由建立失败，未启动执行',
-          code: 'THREAD_ADDRESS_ADMISSION_FAILED',
-          userMessageId: rootUserMessage.id,
-        };
-      }
-      if (admittedInvocation.outcome === 'duplicate') {
-        reply.status(200);
-        return {
-          status: 'duplicate',
-          invocationId: admittedInvocation.invocationId,
-          userMessageId: rootUserMessage.id,
-        };
-      }
-      void deliverWebUserMessageToConnector(
-        explicitThreadAddress.replyTargetThreadId,
-        content,
-        executionMessage.id,
-        opts,
-        log,
-        { visibility: whisperVisibility },
-      );
-    }
 
     // F194 §3 step 2 (thread-first routing): in a thread that opted into
     // routingPolicy.mode='thread-first', every @mention message — including
@@ -1512,9 +1375,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               cursorBoundaries,
               persistenceContext,
               parentInvocationId: createResult.invocationId,
-              ...(executionRoute?.mode === 'explicit_cross_thread'
-                ? { crossPostSourceThreadId: executionRoute.sourceThreadId }
-                : {}),
             },
           )) {
             if (controller?.signal.aborted) {
@@ -1623,11 +1483,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               }
             }
 
-            const broadcastPayload = withExecutionCrossPostAudit(
-              { ...msg, invocationId: createResult.invocationId },
-              executionRoute,
-              createResult.invocationId,
-            );
+            const broadcastPayload = { ...msg, invocationId: createResult.invocationId };
 
             if (msg.type === 'a2a_handoff') {
               const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, executionThreadId);
@@ -1652,20 +1508,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             // would cause a duplicate with misleading text.
             if (controller.signal.reason === 'preempted') {
               opts.socketManager.broadcastAgentMessage(
-                withExecutionCrossPostAudit(
-                  {
-                    type: 'system_info',
-                    catId: targetCats[0] ?? getDefaultCatId(),
-                    content: JSON.stringify({
-                      type: 'invocation_preempted',
-                      detail: 'This response was superseded by a newer request.',
-                      invocationId: createResult.invocationId,
-                    }),
-                    timestamp: Date.now(),
-                  },
-                  executionRoute,
-                  createResult.invocationId,
-                ),
+                {
+                  type: 'system_info',
+                  catId: targetCats[0] ?? getDefaultCatId(),
+                  content: JSON.stringify({
+                    type: 'invocation_preempted',
+                    detail: 'This response was superseded by a newer request.',
+                    invocationId: createResult.invocationId,
+                  }),
+                  timestamp: Date.now(),
+                },
                 executionThreadId,
               );
             }
@@ -1689,16 +1541,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               error: `Message delivered but persistence failed: ${errorDetail}`,
             });
             opts.socketManager.broadcastAgentMessage(
-              withExecutionCrossPostAudit(
-                {
-                  type: 'error',
-                  catId: getDefaultCatId(),
-                  error: '消息已发送但未能保存，刷新后可能丢失。可点击重试。',
-                  timestamp: Date.now(),
-                },
-                executionRoute,
-                createResult.invocationId,
-              ),
+              {
+                type: 'error',
+                catId: getDefaultCatId(),
+                error: '消息已发送但未能保存，刷新后可能丢失。可点击重试。',
+                timestamp: Date.now(),
+              },
               executionThreadId,
             );
 
@@ -1881,17 +1729,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               error: errorMsg,
             });
             opts.socketManager.broadcastAgentMessage(
-              withExecutionCrossPostAudit(
-                {
-                  type: 'error',
-                  catId: getDefaultCatId(),
-                  error: errorMsg,
-                  isFinal: true,
-                  timestamp: Date.now(),
-                },
-                executionRoute,
-                createResult.invocationId,
-              ),
+              {
+                type: 'error',
+                catId: getDefaultCatId(),
+                error: errorMsg,
+                isFinal: true,
+                timestamp: Date.now(),
+              },
               executionThreadId,
             );
 
@@ -2026,42 +1870,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }
       })();
     }
-  });
-
-  app.get('/api/thread-address/resolve', async (request, reply) => {
-    const query = z
-      .object({
-        rootMessageId: z.string().regex(THREAD_ADDRESS_ROOT_ID_RE),
-        sourceThreadId: z.string().min(1).max(100),
-      })
-      .safeParse(request.query);
-    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
-    if (!query.success || !userId || !opts.threadStore || !isThreadAddressRoutingEnabled(query.data.sourceThreadId)) {
-      reply.status(404);
-      return { error: '线程地址不可用', code: 'THREAD_ADDRESS_INVALID' };
-    }
-    const resolution = await resolveThreadAddress(
-      {
-        kind: 'valid',
-        token: `#Thread:${query.data.rootMessageId}`,
-        label: 'Thread',
-        rootMessageId: query.data.rootMessageId,
-      },
-      {
-        sourceThreadId: query.data.sourceThreadId,
-        userId,
-        messageStore: opts.messageStore,
-        threadStore: opts.threadStore,
-      },
-    );
-    if (!resolution.ok) {
-      reply.status(404);
-      return { error: '线程地址不可用', code: resolution.code };
-    }
-    return {
-      rootMessageId: resolution.rootMessageId,
-      threadId: resolution.replyTargetThreadId,
-    };
   });
 
   // POST /api/messages/:id/convert-to-task — Raft 三显式入口之一（右键"转为任务"，

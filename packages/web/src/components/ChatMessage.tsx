@@ -1,14 +1,12 @@
 'use client';
 
-import { parseThreadAddressToken, type TaskItem } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import type { TaskItem } from '@cat-cafe/shared';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
-import { apiFetch } from '@/utils/api-client';
 import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
@@ -90,72 +88,6 @@ function getTaskMetaLabels(task: TaskItem): string[] {
   if (evidenceCount > 0) labels.push(`交付证据 ${evidenceCount}/5`);
 
   return labels.slice(0, 2);
-}
-
-function ThreadAddressActions({
-  token,
-  onReference,
-  onCopy,
-}: {
-  token?: string;
-  onReference?: () => void;
-  onCopy?: () => void;
-}) {
-  const sourceThreadId = useChatStore((state) => state.currentThreadId);
-  const [authorized, setAuthorized] = useState(false);
-  const parsed = token ? parseThreadAddressToken(token) : { kind: 'none' as const };
-  const rootMessageId = parsed.kind === 'valid' ? parsed.rootMessageId : null;
-
-  useEffect(() => {
-    setAuthorized(false);
-    if (!rootMessageId) return;
-    const controller = new AbortController();
-    void apiFetch(
-      `/api/thread-address/resolve?rootMessageId=${encodeURIComponent(rootMessageId)}&sourceThreadId=${encodeURIComponent(sourceThreadId)}`,
-      { signal: controller.signal },
-    )
-      .then((response) => {
-        if (response.ok) setAuthorized(true);
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [rootMessageId, sourceThreadId]);
-
-  if (!token || !authorized || (!onReference && !onCopy)) return null;
-  return (
-    <span className="inline-flex shrink-0 items-stretch gap-1" data-thread-address-actions>
-      {onReference && (
-        <button
-          type="button"
-          aria-label="引用 Thread 地址"
-          title={`引用 ${token}`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onReference();
-          }}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-sm font-black shadow-[var(--slock-shadow-chip)] hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
-        >
-          ↩
-        </button>
-      )}
-      {onCopy && (
-        <button
-          type="button"
-          aria-label="复制 Thread 地址"
-          title={`复制 ${token}`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onCopy();
-          }}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--slock-radius-sm)] border-2 border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] text-sm font-black shadow-[var(--slock-shadow-chip)] hover:bg-[var(--console-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cafe-accent)]"
-        >
-          ⧉
-        </button>
-      )}
-    </span>
-  );
 }
 
 function MessageTaskBadge({
@@ -379,9 +311,7 @@ function ThreadBranchWorkingBadge({ catLabel, onOpen }: { catLabel: string; onOp
 }
 
 /**
- * #404 系跟进（chip 票）：任务徽章 + 回复入口现在并排一行（Raft `[状态 #号] [💬 N reply]`
- * 样式），共享一份 ThreadAddressActions（此前两个徽章各自条件渲染一份、靠互斥的
- * addressToken 传参凑单份显示——现在收成一处，不再靠隐式互斥）。
+ * #404 系跟进（chip 票）：任务徽章 + 回复入口现在并排一行（Raft `[状态 #号] [💬 N reply]` 样式）。
  */
 function MessageBadgeRow({
   task,
@@ -391,9 +321,6 @@ function MessageBadgeRow({
   onOpenTaskThread,
   messageId,
   getCatById,
-  threadAddressToken,
-  onReferenceThreadAddress,
-  onCopyThreadAddress,
   viewer,
   branchWorkingCatId,
 }: {
@@ -408,9 +335,6 @@ function MessageBadgeRow({
   onOpenTaskThread?: (task: TaskItem) => void;
   messageId: string;
   getCatById: (id: string) => CatData | undefined;
-  threadAddressToken?: string;
-  onReferenceThreadAddress?: () => void;
-  onCopyThreadAddress?: () => void;
   viewer?: ThreadViewer;
   /** 跨视图感知修复(F001): 这条消息锚定的分支里正在执行的猫(来自 globalCatActivity)。 */
   branchWorkingCatId?: string;
@@ -460,11 +384,6 @@ function MessageBadgeRow({
             />
           )
         )}
-        <ThreadAddressActions
-          token={threadAddressToken}
-          onReference={onReferenceThreadAddress}
-          onCopy={onCopyThreadAddress}
-        />
       </div>
     </>
   );
@@ -504,9 +423,6 @@ interface ChatMessageProps {
   };
   onOpenThread?: (messageId: string) => void;
   onOpenTaskThread?: (task: TaskItem) => void;
-  threadAddressToken?: string;
-  onReferenceThreadAddress?: () => void;
-  onCopyThreadAddress?: () => void;
   isEditing?: boolean;
   editDraft?: string;
   isSavingEdit?: boolean;
@@ -527,9 +443,6 @@ export function ChatMessage({
   threadReplyInfo,
   onOpenThread,
   onOpenTaskThread,
-  threadAddressToken,
-  onReferenceThreadAddress,
-  onCopyThreadAddress,
   isEditing = false,
   editDraft = '',
   isSavingEdit = false,
@@ -893,9 +806,6 @@ export function ChatMessage({
             onOpenTaskThread={onOpenTaskThread}
             messageId={message.id}
             getCatById={getCatById}
-            threadAddressToken={threadAddressToken}
-            onReferenceThreadAddress={onReferenceThreadAddress}
-            onCopyThreadAddress={onCopyThreadAddress}
             viewer={viewer}
             branchWorkingCatId={branchWorkingCatId}
           />
@@ -1063,9 +973,6 @@ export function ChatMessage({
           onOpenTaskThread={onOpenTaskThread}
           messageId={message.id}
           getCatById={getCatById}
-          threadAddressToken={threadAddressToken}
-          onReferenceThreadAddress={onReferenceThreadAddress}
-          onCopyThreadAddress={onCopyThreadAddress}
           viewer={viewer}
           branchWorkingCatId={branchWorkingCatId}
         />

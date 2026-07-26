@@ -1,6 +1,5 @@
 'use client';
 
-import { formatThreadAddressToken } from '@cat-cafe/shared';
 import { useRouter } from 'next/navigation';
 import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
@@ -528,7 +527,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // setCurrentThread saves old thread state to map, restores new thread state.
   const setCurrentProject = useChatStore((s) => s.setCurrentProject);
   const storeThreads = useChatStore((s) => s.threads);
-  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const handleSkipFirstRunQuest = useCallback(() => {
     // Session-only skip — next refresh will re-check backend state
     setShowFirstRunQuestPrompt(false);
@@ -839,24 +837,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [addToast, isDeletingChannel, isSavingChannel, navigateToThread, threadId]);
 
-  const handleReferenceThreadAddress = useCallback(
-    (token: string) => {
-      setPendingChatInsert({ threadId, text: `${token}\n` });
-    },
-    [setPendingChatInsert, threadId],
-  );
-  const handleCopyThreadAddress = useCallback(
-    async (token: string) => {
-      try {
-        await navigator.clipboard.writeText(token);
-        addToast({ type: 'success', title: 'Thread 地址已复制', message: token, duration: 2400 });
-      } catch {
-        addToast({ type: 'error', title: '复制失败', message: '请手动选择 Thread 地址。', duration: 3200 });
-      }
-    },
-    [addToast],
-  );
-
   const renderSingleMessage = useCallback(
     (msg: ChatMessageData, index: number) => {
       if (!shouldRenderChatMessage(msg)) return null;
@@ -878,7 +858,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             newCount: threadStates[baseThreadReplyInfo.branchThreadId]?.unreadCount ?? 0,
           }
         : undefined;
-      const threadAddressToken = baseThreadReplyInfo ? formatThreadAddressToken(currentThreadTitle, msg.id) : undefined;
       const showUnreadDivider = unreadDividerIndex === index;
 
       return (
@@ -900,13 +879,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               threadReplyInfo={threadReplyInfo}
               onOpenThread={handleOpenInlineThread}
               onOpenTaskThread={handleOpenTaskThread}
-              threadAddressToken={threadAddressToken}
-              onReferenceThreadAddress={
-                threadAddressToken ? () => handleReferenceThreadAddress(threadAddressToken) : undefined
-              }
-              onCopyThreadAddress={
-                threadAddressToken ? () => void handleCopyThreadAddress(threadAddressToken) : undefined
-              }
               isEditing={editingMessageId === msg.id}
               editDraft={editingMessageId === msg.id ? editingDraft : ''}
               isSavingEdit={isSavingEdit && editingMessageId === msg.id}
@@ -935,9 +907,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       handleSaveEditMessage,
       handleCancelEditMessage,
       handleRetryFailedSend,
-      currentThreadTitle,
-      handleReferenceThreadAddress,
-      handleCopyThreadAddress,
       canConvertToTask,
     ],
   );
