@@ -925,9 +925,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const catCafeRoot = getProjectRoot();
     let governanceHealth: CapabilityBoardResponse['governanceHealth'];
     if (projectRoot !== catCafeRoot) {
-      const { GovernanceRegistry } = await import('../config/governance/governance-registry.js');
-      const registry = new GovernanceRegistry(catCafeRoot);
-      governanceHealth = await registry.checkHealth(projectRoot);
+      try {
+        const { GovernanceRegistry } = await import('../config/governance/governance-registry.js');
+        const registry = new GovernanceRegistry(catCafeRoot);
+        governanceHealth = await registry.checkHealth(projectRoot);
+      } catch (err) {
+        // A3: registry.get()/read() now propagates EPERM/EACCES instead of silently
+        // reporting "never-synced" (see governance-registry.ts module doc). This is a
+        // broad multi-section dashboard — a registry read hiccup must degrade this one
+        // section, not fail the entire /api/capabilities response.
+        app.log.warn({ err, projectRoot }, '[capabilities] governance health check failed (non-blocking)');
+        governanceHealth = { projectPath: projectRoot, status: 'never-synced', packVersion: null, lastSyncedAt: null, findings: [] };
+      }
     }
 
     // 8. Build response with cat family + project metadata

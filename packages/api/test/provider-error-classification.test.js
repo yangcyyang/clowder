@@ -179,13 +179,67 @@ describe('provider-error-classification', () => {
     assert.equal(mod.classifyProviderErrorText('output truncated: max_output_tokens reached').kind, 'output_truncated');
   });
 
+  // ─── batch 4-A (F070 addendum): permission_denied — governance-interception storm fix ───
+  // Root cause (see batch report for full production-log evidence): the F070 governance
+  // gate's block sets InvocationRecord.error to the literal errorCode string
+  // (PROJECT_PERMISSION_DENIED / GOVERNANCE_BOOTSTRAP_REQUIRED, see invoke-single-cat.ts)
+  // with no explicit terminalEvent — before this fix that text fell through every tier to
+  // the 'agent_error' fallback and was "safe" from auto-retry only by accident (no regex
+  // happened to match it). These are the literal strings every governance-block call site
+  // actually sets.
+
+  test('F070: literal errorCode GOVERNANCE_BOOTSTRAP_REQUIRED classifies as permission_denied (text tier)', () => {
+    const result = mod.classifyProviderErrorText('GOVERNANCE_BOOTSTRAP_REQUIRED');
+    assert.equal(result.kind, 'permission_denied');
+    assert.equal(result.evidence, 'text');
+  });
+
+  test('F070: literal errorCode PROJECT_PERMISSION_DENIED classifies as permission_denied (text tier)', () => {
+    const result = mod.classifyProviderErrorText('PROJECT_PERMISSION_DENIED');
+    assert.equal(result.kind, 'permission_denied');
+  });
+
+  test('base A2: EPERM wording classifies as permission_denied (text tier)', () => {
+    assert.equal(mod.classifyProviderErrorText('spawn claude EPERM').kind, 'permission_denied');
+    assert.equal(mod.classifyProviderErrorText('Error: EACCES: permission denied, open').kind, 'permission_denied');
+    assert.equal(mod.classifyProviderErrorText('operation not permitted').kind, 'permission_denied');
+  });
+
+  test('structured nodeErrorCode EPERM/EACCES classifies as permission_denied', () => {
+    assert.equal(mod.classifyProviderError({ nodeErrorCode: 'EPERM', message: 'unrelated' }).kind, 'permission_denied');
+    assert.equal(
+      mod.classifyProviderError({ nodeErrorCode: 'EACCES', message: 'unrelated' }).evidence,
+      'structured',
+    );
+  });
+
+  test('structured permissionDenied flag classifies as permission_denied regardless of unrelated text', () => {
+    // Note: 'quota exceeded' is deliberately NOT used here (unlike the aborted-flag test
+    // above) — permission_denied's tier (5) sits after quota/context_overflow/transient_network
+    // (tiers 2-4) in the priority order, matching this module's established sequential-tier
+    // convention (see 'priority: quota (structured) beats network text' — an earlier tier's
+    // TEXT can win over a later tier's structured evidence; only aborted, at tier 1, truly
+    // wins "regardless of text"). This test asserts the structured flag beats permission_denied's
+    // OWN and later (cli_stall/output_truncated/cli_crash) tiers' text, not earlier ones.
+    const result = mod.classifyProviderError({ permissionDenied: true, message: 'unrelated trailing stderr' });
+    assert.equal(result.kind, 'permission_denied');
+    assert.equal(result.evidence, 'structured');
+  });
+
+  test('priority: permission_denied is checked before cli_crash — an abnormal exit with EPERM wording must not be swallowed by the generic crash bucket', () => {
+    const result = mod.classifyProviderError({ exitCode: 1, emptyOutput: true, message: 'spawn EPERM' });
+    assert.equal(result.kind, 'permission_denied');
+    assert.notEqual(result.kind, 'cli_crash');
+  });
+
   // ─── Whitelist + TaskFailureClass mapping ───
 
-  test('AUTO_RETRY_WHITELIST contains exactly transient_network, cli_crash, cli_stall, output_truncated (R8-2 expansion)', () => {
+  test('AUTO_RETRY_WHITELIST contains exactly transient_network, cli_crash, cli_stall, output_truncated (R8-2 expansion) — permission_denied must NEVER be added', () => {
     assert.deepEqual(
       [...mod.AUTO_RETRY_WHITELIST].sort(),
       ['cli_crash', 'cli_stall', 'output_truncated', 'transient_network'],
     );
+    assert.equal(mod.AUTO_RETRY_WHITELIST.has('permission_denied'), false);
   });
 
   test('isAutoRetryEligible whitelists transient_network, cli_crash, cli_stall, output_truncated', () => {
@@ -199,6 +253,10 @@ describe('provider-error-classification', () => {
     assert.equal(mod.isAutoRetryEligible('context_overflow'), false);
   });
 
+  test('F070: isAutoRetryEligible(permission_denied) is false — governance/OS permission blocks are never auto-retry-eligible', () => {
+    assert.equal(mod.isAutoRetryEligible('permission_denied'), false);
+  });
+
   test('toTaskFailureClass mapping table', () => {
     assert.equal(mod.toTaskFailureClass('quota'), 'budget_exhausted');
     assert.equal(mod.toTaskFailureClass('transient_network'), 'infra_error');
@@ -208,5 +266,6 @@ describe('provider-error-classification', () => {
     assert.equal(mod.toTaskFailureClass('output_truncated'), 'infra_error');
     assert.equal(mod.toTaskFailureClass('aborted'), 'manual_fail');
     assert.equal(mod.toTaskFailureClass('agent_error'), 'agent_error');
+    assert.equal(mod.toTaskFailureClass('permission_denied'), 'infra_error');
   });
 });

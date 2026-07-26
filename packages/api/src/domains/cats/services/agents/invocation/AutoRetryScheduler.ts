@@ -19,6 +19,25 @@
  * out of this batch's edit scope (parallel batch 3-A owns it — see report).
  * A periodic scan lets this feature observe those records without touching
  * that file, mirroring the existing StartupReconciler.ts scan pattern.
+ *
+ * batch 4-A (F070 addendum — 07-26 governance-interception storm root-cause fix):
+ * a governance-gate block (errorCode PROJECT_PERMISSION_DENIED /
+ * GOVERNANCE_BOOTSTRAP_REQUIRED, see invoke-single-cat.ts) now classifies as the
+ * dedicated `permission_denied` kind (provider-error-classification.ts) instead of
+ * falling through to `agent_error` by accident. Both are outside
+ * AUTO_RETRY_WHITELIST, so this was already a no-op in practice — but the accidental
+ * safety depended on no regex happening to match the literal errorCode text. This
+ * scheduler's OWN retry-completion path (runClaimedRetry, below) now tags a
+ * re-encountered governance block with the explicit `permission_denied` terminalEvent
+ * kind rather than `agent_error`, so classification is structurally guaranteed rather
+ * than incidental. Investigation note (see batch report for full evidence): the
+ * production storm's actual re-dispatch driver was ClaimedIdleScheduler re-sending its
+ * idle nudge every ~60s scan (pre-fix nudge-count persistence bug, batch 4-C's C1) —
+ * NOT this scheduler, which was never enabled in production during that window
+ * (CLOWDER_AUTO_RETRY defaults off). This fix is defense-in-depth: it guarantees that
+ * *no* current or future consumer of InvocationRecord classification (this scheduler,
+ * or anything built on top of it later) can ever treat a permission block as
+ * retry-eligible, regardless of which mechanism re-triggers dispatch.
  */
 
 import type { CatId } from '@cat-cafe/shared';
@@ -298,7 +317,9 @@ export class AutoRetryScheduler {
           status: 'failed',
           phase: 'done',
           error: governanceErrorCode,
-          terminalEvent: buildTerminalEvent('agent_error', TERMINAL_SOURCE, {
+          // batch 4-A (F070 addendum): explicit permission_denied, not agent_error —
+          // this is a governance/OS block, never auto-retry-eligible (see module doc).
+          terminalEvent: buildTerminalEvent('permission_denied', TERMINAL_SOURCE, {
             reason: 'governance_block',
             governanceErrorCode,
           }),

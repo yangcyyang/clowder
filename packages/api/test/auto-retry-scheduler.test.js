@@ -350,6 +350,54 @@ describe('AutoRetryScheduler', () => {
       assert.equal(record.status, 'succeeded', 'ECONNRESET text should classify as transient_network and be retried');
     });
 
+    // ─── batch 4-A (F070 addendum): governance-interception storm root-cause fix ───
+    // messages.ts / invocations.ts retry endpoint / callback-a2a-trigger.ts /
+    // callback-multi-mention-routes.ts / QueueProcessor.ts's executeEntry all set
+    // `status: 'failed', error: <governance errorCode>` on an F070 governance-gate
+    // block WITHOUT an explicit terminalEvent — this test's shape (error text, no
+    // terminalEvent) mirrors that real behavior exactly (contrast with r8 above,
+    // same fallback path, opposite — and correct — outcome).
+
+    test('F070: governance-blocked record (no terminalEvent, raw errorCode text — matches messages.ts/QueueProcessor.ts today) classifies as permission_denied and is NEVER auto-retried', async () => {
+      const { classifyProviderErrorText } = await import(
+        '../dist/domains/cats/services/agents/invocation/provider-error-classification.js'
+      );
+      // Sanity: the classification this scheduler's fallback depends on.
+      assert.equal(classifyProviderErrorText('GOVERNANCE_BOOTSTRAP_REQUIRED').kind, 'permission_denied');
+
+      store.seed(
+        makeRecord({
+          id: 'r-governance',
+          error: 'GOVERNANCE_BOOTSTRAP_REQUIRED', // no terminalEvent: mirrors the real F070 governance-block update
+          updatedAt: Date.now() - 200_000,
+        }),
+      );
+      const scheduler = makeScheduler();
+      await scheduler.tick();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const record = await store.get('r-governance');
+      assert.equal(record.status, 'failed', 'governance block must never be silently retried');
+      assert.equal(record.autoRetryCount, 0);
+    });
+
+    test('F070: governance-blocked record with explicit permission_denied terminalEvent (this scheduler\'s own retry-completion path) is NEVER auto-retried', async () => {
+      store.seed(
+        makeRecord({
+          id: 'r-governance-explicit',
+          terminalEvent: { kind: 'permission_denied', at: Date.now() - 200_000, source: 'x' },
+          updatedAt: Date.now() - 200_000,
+        }),
+      );
+      const scheduler = makeScheduler();
+      await scheduler.tick();
+      await new Promise((r) => setTimeout(r, 20));
+
+      const record = await store.get('r-governance-explicit');
+      assert.equal(record.status, 'failed');
+      assert.equal(record.autoRetryCount, 0);
+    });
+
     test('provider error during retry keeps the record failed with the fresh error', async () => {
       store.seed(
         makeRecord({

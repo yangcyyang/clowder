@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -107,5 +107,33 @@ describe('governance-preflight', () => {
     const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
     assert.equal(result.ready, false);
     assert.ok(result.reason?.includes('.kimi/skills'));
+  });
+
+  // ─── A3 (batch 4-A): registry query resilience — real incident regression ───
+  // A project confirmed via /api/governance/confirm was later reported
+  // needs_bootstrap because GovernanceRegistry.get() returned undefined for a
+  // project that WAS registered. checkGovernancePreflight() (line 74: `const entry
+  // = await registry.get(projectPath)`) has NO local try/catch around that call —
+  // it is invoke-single-cat.ts's OWN fail-open try/catch (built for the 2026-07-25
+  // incident) that turns a thrown filesystem-permission error into `needsPermission:
+  // true` end-to-end. This test proves the half of that chain that lives in this
+  // module: a genuinely-registered-but-currently-unreadable registry file must
+  // THROW here (so the caller can distinguish "cannot verify" from "not
+  // registered"), not silently behave as if nothing were ever confirmed.
+  it('A3: registry confirmed but registry.json is transiently unreadable (EPERM/EACCES) — must throw, not silently report needsBootstrap', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    await service.bootstrap(externalProject, { dryRun: false }); // registers + confirms
+
+    const registryFile = join(catCafeRoot, '.cat-cafe', 'governance-registry.json');
+    await chmod(registryFile, 0o000);
+    try {
+      await assert.rejects(
+        () => checkGovernancePreflight(externalProject, catCafeRoot),
+        'an unreadable registry file must propagate as an error, not resolve to { needsBootstrap: true } ' +
+          '(that message tells a confirmed user to re-confirm something that is not actually missing)',
+      );
+    } finally {
+      await chmod(registryFile, 0o644); // restore so afterEach's rm() can clean up
+    }
   });
 });

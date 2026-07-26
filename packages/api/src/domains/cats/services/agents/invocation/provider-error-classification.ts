@@ -14,12 +14,24 @@
  *                           text heuristics (reused, not re-implemented, to avoid drift)
  *   4. transient_network  — Node network error codes / 5xx (structured) or
  *                           ECONNRESET-shaped text (text)
- *   5. cli_stall          — R8-1/R8-2 (docs/research/reliability-raft-round8-absorption.md
+ *   5. permission_denied  — batch 4-A (F070 addendum, 2026-07-26 验收后追加): the
+ *                           governance gate blocked dispatch (errorCode
+ *                           PROJECT_PERMISSION_DENIED / GOVERNANCE_BOOTSTRAP_REQUIRED,
+ *                           see invoke-single-cat.ts's governance block) or a CLI child
+ *                           exited immediately with EPERM/EACCES in its stderr (macOS TCC
+ *                           revocation). Checked before cli_stall/cli_crash — like cli_stall,
+ *                           it is a more specific, known cause of the same "process died /
+ *                           never produced output" shape, and unlike every other kind here
+ *                           it is NEVER auto-retry-eligible: retrying a permission block
+ *                           without a human granting access just re-fails identically. This
+ *                           is the root-cause fix for the 07-26 governance-interception
+ *                           storm — see AutoRetryScheduler.ts's module doc.
+ *   6. cli_stall          — R8-1/R8-2 (docs/research/reliability-raft-round8-absorption.md
  *                           §二): the CLI stream idle watchdog (utils/cli-spawn.ts) killed
  *                           the child because no stdout/stderr data arrived for too long.
  *                           Checked before cli_crash — it is a more specific, known cause
  *                           of the same "process died on us" shape.
- *   6. output_truncated   — R8-2: CLI reported an explicit output-length/truncation signal.
+ *   7. output_truncated   — R8-2: CLI reported an explicit output-length/truncation signal.
  *                           NOTE (coverage honesty — see report): as of this batch, no
  *                           provider in this repo is confirmed to surface such a signal on
  *                           its *failure* path (Anthropic API's stop_reason:'max_tokens' and
@@ -29,8 +41,8 @@
  *                           per "识别不了的不猜，先占位" as a receiving slot for the day a
  *                           provider's failure text does mention truncation — it does not
  *                           claim any provider triggers it today.
- *   7. cli_crash          — non-zero exit code / signal-kill with no usable output
- *   8. agent_error        — fallback bucket for everything else
+ *   8. cli_crash          — non-zero exit code / signal-kill with no usable output
+ *   9. agent_error        — fallback bucket for everything else
  *
  * Follow-up (not done in this batch — would require touching each
  * providers/*AgentService.ts's error-handling code, deferred to keep this
@@ -39,6 +51,17 @@
  * from utils/cli-spawn.ts through to this classifier instead of only the
  * flattened `AgentMessage.error` string, so exitCode/signal/httpStatus are
  * always structured evidence rather than falling back to regex.
+ *
+ * Coverage honesty for permission_denied (batch 4-A): the governance-block errorCode
+ * text tier (PROJECT_PERMISSION_DENIED / GOVERNANCE_BOOTSTRAP_REQUIRED) is confirmed
+ * live — it is the literal `error` string every F070 governance-block call site
+ * (messages.ts, invocations.ts retry endpoint, callback-a2a-trigger.ts,
+ * callback-multi-mention-routes.ts, QueueProcessor.ts's own executeEntry) sets on the
+ * InvocationRecord today. The EPERM/EACCES CLI-crash text tier and the structured
+ * `permissionDenied` flag mirror the base A2 spec ("CLI 启动即退且 stderr 含
+ * EPERM/permission") but — same caveat as output_truncated — no current provider
+ * wiring is confirmed to pass `permissionDenied: true` as structured evidence yet;
+ * only the governance-gate codes are guaranteed to hit this tier today.
  */
 
 import {
@@ -52,6 +75,7 @@ export type ProviderErrorClassificationKind =
   | 'quota'
   | 'context_overflow'
   | 'transient_network'
+  | 'permission_denied'
   | 'cli_stall'
   | 'output_truncated'
   | 'cli_crash'
@@ -83,6 +107,8 @@ export interface ProviderErrorEvidence {
   readonly idleWatchdogKill?: boolean;
   /** R8-2: true when a caller has structured evidence that the CLI's output was truncated (max-tokens/length limit). No current caller sets this — see module doc's coverage note; kept for future callers with richer signal. */
   readonly outputTruncated?: boolean;
+  /** batch 4-A: true when a caller has structured evidence of an OS permission block — a governance gate block (F070) or a CLI child that exited immediately because macOS (TCC) denied filesystem access. No current caller sets this flag yet (see module doc's coverage note); the governance errorCode text tier is what actually fires today. */
+  readonly permissionDenied?: boolean;
 }
 
 export interface ProviderErrorClassification {
@@ -107,6 +133,19 @@ const NETWORK_ERROR_CODES = new Set([
 const ABORT_TEXT_PATTERN = /\b(AbortError|aborted|user[_-]?cancel(?:ed|led)?)\b/i;
 const QUOTA_TEXT_PATTERN = /(quota|rate[- ]?limit|usage limit|too many requests|insufficient_quota|billing|配额|额度)/i;
 const NETWORK_TEXT_PATTERN = /(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|socket hang up|network error|fetch failed)/i;
+/**
+ * batch 4-A (F070 addendum): the two governance-gate errorCodes are matched as literal
+ * tokens — invoke-single-cat.ts's governance block sets InvocationRecord.error to exactly
+ * one of these two strings (see messages.ts / invocations.ts / callback-a2a-trigger.ts /
+ * callback-multi-mention-routes.ts / QueueProcessor.ts's executeEntry, all of which flow
+ * through classifyProviderErrorText via this exact fallback path — none of them attach a
+ * structured `permissionDenied` flag or an explicit terminalEvent kind today). The
+ * EPERM/EACCES/wording alternatives mirror invoke-single-cat.ts's own
+ * `isFilesystemPermissionError` helper so "CLI 启动即退 + stderr 含 EPERM/permission" (base
+ * A2 spec) resolves to the same kind once a provider surfaces that text.
+ */
+const PERMISSION_DENIED_TEXT_PATTERN =
+  /(PROJECT_PERMISSION_DENIED|GOVERNANCE_BOOTSTRAP_REQUIRED|\bEPERM\b|\bEACCES\b|operation not permitted|permission denied)/i;
 /** R8-1: matches utils/cli-spawn.ts's `cli stream idle timeout after <N>s` (idleWatchdogKill) wording — see that module's comment for the wording discipline. */
 const CLI_STALL_TEXT_PATTERN = /cli stream idle timeout/i;
 /** R8-2: no confirmed current producer — see module doc coverage note. Generic enough to catch future provider text without being so broad it swallows unrelated errors. */
@@ -155,7 +194,22 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'transient_network', evidence: 'text', reason: message };
   }
 
-  // 5) CLI stream idle watchdog (R8-1) — structured flag first, then the
+  // 5) Permission denied (batch 4-A, F070 addendum) — structured flag first, then the
+  //    governance-gate errorCode literals / EPERM-EACCES wording. Checked before
+  //    cli_stall/cli_crash: like cli_stall, this is a more specific, known cause of the
+  //    same "process died / never produced output" shape, and it must never be
+  //    swallowed by the generic cli_crash bucket (which IS auto-retry-eligible).
+  if (evidence.permissionDenied) {
+    return { kind: 'permission_denied', evidence: 'structured', reason: 'permission_denied' };
+  }
+  if (evidence.nodeErrorCode === 'EPERM' || evidence.nodeErrorCode === 'EACCES') {
+    return { kind: 'permission_denied', evidence: 'structured', reason: evidence.nodeErrorCode };
+  }
+  if (message && PERMISSION_DENIED_TEXT_PATTERN.test(message)) {
+    return { kind: 'permission_denied', evidence: 'text', reason: message };
+  }
+
+  // 6) CLI stream idle watchdog (R8-1) — structured flag first, then the
   //    literal wording utils/cli-spawn.ts emits when it fires.
   if (evidence.idleWatchdogKill) {
     return { kind: 'cli_stall', evidence: 'structured', reason: 'idle_watchdog_kill' };
@@ -164,7 +218,7 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'cli_stall', evidence: 'text', reason: message };
   }
 
-  // 6) Output truncated (R8-2) — no confirmed current producer, see module doc.
+  // 7) Output truncated (R8-2) — no confirmed current producer, see module doc.
   if (evidence.outputTruncated) {
     return { kind: 'output_truncated', evidence: 'structured', reason: 'output_truncated' };
   }
@@ -172,7 +226,7 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'output_truncated', evidence: 'text', reason: message };
   }
 
-  // 7) CLI crash: non-zero exit / signal-kill, no usable output.
+  // 8) CLI crash: non-zero exit / signal-kill, no usable output.
   const hasAbnormalExit =
     (evidence.exitCode !== undefined && evidence.exitCode !== null && evidence.exitCode !== 0) ||
     Boolean(evidence.signal);
@@ -187,7 +241,7 @@ export function classifyProviderError(evidence: ProviderErrorEvidence): Provider
     return { kind: 'cli_crash', evidence: 'text', reason: message };
   }
 
-  // 8) Fallback.
+  // 9) Fallback.
   if (message) {
     return { kind: 'agent_error', evidence: 'text', reason: message };
   }
@@ -208,6 +262,13 @@ export function classifyProviderErrorText(message: string): ProviderErrorClassif
  * cli_stall + output_truncated — both are infra-caused, not agent-authored, the
  * same rationale that already justified transient_network/cli_crash. Only takes
  * effect when CLOWDER_AUTO_RETRY is explicitly turned on (default off).
+ *
+ * `permission_denied` is DELIBERATELY excluded (batch 4-A, F070 addendum) and must
+ * stay excluded: retrying a governance/OS permission block without a human granting
+ * access or completing governance confirmation cannot ever succeed — it just re-fails
+ * identically. Before this batch these errors fell through to the `agent_error`
+ * fallback bucket and were "safe" only by accident (no regex happened to match the
+ * literal errorCode text); this whitelist is the authoritative, explicit gate now.
  */
 export const AUTO_RETRY_WHITELIST: ReadonlySet<ProviderErrorClassificationKind> = new Set([
   'transient_network',
@@ -245,6 +306,11 @@ export type TaskFailureClassMirror =
  * dedicated slot in that enum — it maps to 'infra_error', with the real
  * classification preserved verbatim in the terminal event's
  * `detail.classificationReason` for anyone reading the raw InvocationRecord.
+ * `permission_denied` (batch 4-A) maps the same way: it's an environment/OS
+ * condition, not an agent bug, matching the same "closest existing bucket"
+ * rationale — the real kind is still preserved verbatim wherever the terminal
+ * event itself is inspected. It must NEVER be inferred as retry-eligible from
+ * this mapping alone — that gate is AUTO_RETRY_WHITELIST, not this function.
  */
 export function toTaskFailureClass(kind: ProviderErrorClassificationKind): TaskFailureClassMirror {
   switch (kind) {
@@ -255,6 +321,7 @@ export function toTaskFailureClass(kind: ProviderErrorClassificationKind): TaskF
     case 'context_overflow':
     case 'cli_stall':
     case 'output_truncated':
+    case 'permission_denied':
       return 'infra_error';
     case 'aborted':
       // Closest existing semantic: an explicit signal ended the run, not an

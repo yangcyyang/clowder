@@ -2026,7 +2026,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CLOWDER_AUTO_RETRY',
     defaultValue: '(未设置 → 关闭)',
     description:
-      '批次3-B 白名单自动重试：置 true/1 时，终态 failed 且错误分类 ∈ {transient_network, cli_crash, cli_stall, output_truncated} 的 invocation 由 AutoRetryScheduler 按指数退避（30s/120s）自动重试，每 run 上限 2 次；quota/aborted/agent_error/context_overflow 永不自动重试。cli_stall/output_truncated 为 R8-2（docs/research/reliability-raft-round8-absorption.md §二）新增：前者是 CLOWDER_CLI_IDLE_TIMEOUT_SEC 看门狗杀死空闲子进程的分类，后者是输出截断信号的分类（provider-error-classification.ts）。默认关闭，不影响既有手动重试端点。',
+      '批次3-B 白名单自动重试：置 true/1 时，终态 failed 且错误分类 ∈ {transient_network, cli_crash, cli_stall, output_truncated} 的 invocation 由 AutoRetryScheduler 按指数退避（30s/120s）自动重试，每 run 上限 2 次；quota/aborted/agent_error/context_overflow/permission_denied 永不自动重试。cli_stall/output_truncated 为 R8-2（docs/research/reliability-raft-round8-absorption.md §二）新增：前者是 CLOWDER_CLI_IDLE_TIMEOUT_SEC 看门狗杀死空闲子进程的分类，后者是输出截断信号的分类（provider-error-classification.ts）。permission_denied 为批次4-A（F070 治理拦截终态化）新增：治理门拦截（PROJECT_PERMISSION_DENIED/GOVERNANCE_BOOTSTRAP_REQUIRED）或 CLI 因 EPERM/EACCES 启动即退，零重试——07-26 治理拦截风暴的根因修复。默认关闭，不影响既有手动重试端点。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: false,

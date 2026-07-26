@@ -74,6 +74,27 @@ describe('invocation-terminal-event', () => {
     assert.equal(resolved.kind, 'missing_terminal_event');
   });
 
+  // ─── batch 4-A (F070 addendum): governance-interception storm root-cause fix ───
+  // messages.ts / invocations.ts retry endpoint / callback-a2a-trigger.ts /
+  // callback-multi-mention-routes.ts / QueueProcessor.ts's executeEntry all set
+  // `status: 'failed', error: <governance errorCode>` with NO explicit terminalEvent
+  // on an F070 governance-gate block — every one of those five call sites' actual
+  // persisted terminalEvent is derived HERE, since both InvocationRecordStore.ts and
+  // RedisInvocationRecordStore.ts call resolveTerminalEvent() for every terminal
+  // update that didn't supply an explicit terminalEvent. This is the single choke
+  // point that decides whether a governance-blocked invocation is retry-eligible.
+
+  test('F070: governance errorCode GOVERNANCE_BOOTSTRAP_REQUIRED classifies as permission_denied, not agent_error', () => {
+    const resolved = mod.resolveTerminalEvent({ status: 'failed', error: 'GOVERNANCE_BOOTSTRAP_REQUIRED' });
+    assert.equal(resolved.kind, 'permission_denied');
+    assert.equal(resolved.source, 'derived-from-error');
+  });
+
+  test('F070: governance errorCode PROJECT_PERMISSION_DENIED classifies as permission_denied, not agent_error', () => {
+    const resolved = mod.resolveTerminalEvent({ status: 'failed', error: 'PROJECT_PERMISSION_DENIED' });
+    assert.equal(resolved.kind, 'permission_denied');
+  });
+
   test('buildTerminalEvent stamps kind/source/at and omits detail when absent', () => {
     const before = Date.now();
     const event = mod.buildTerminalEvent('agent_error', 'test-source');
