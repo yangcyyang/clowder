@@ -516,7 +516,7 @@ export function useChatHistory(threadId: string) {
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
               scheduler?: SchedulerMessageExtra['scheduler'];
-              systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed';
+              systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed' | 'sanity_handoff';
               agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
               slockThread?: {
                 branchThreadId: string;

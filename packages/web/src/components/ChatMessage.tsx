@@ -26,6 +26,7 @@ import { QUEUE_PANEL_FOCUS_EVENT } from './QueuePanel';
 import { ReplyPill } from './ReplyPill';
 import { BriefingCard } from './rich/BriefingCard';
 import { RichBlocks } from './rich/RichBlocks';
+import { SanityHandoffCard } from './SanityHandoffCard';
 import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
@@ -670,6 +671,20 @@ export function ChatMessage({
     if (message.variant === 'governance_blocked' && message.extra?.governanceBlocked) {
       const { projectPath, reasonKind, invocationId } = message.extra.governanceBlocked;
       return <GovernanceBlockedCard projectPath={projectPath} reasonKind={reasonKind} invocationId={invocationId} />;
+    }
+
+    // cy 2026-07-26: 理智线自动交接包默认折叠——"理智线交接的这种内容属于系统消息，
+    // 可以折叠起来，我有需要再自己点击展开"。判定字段 extra.systemKind==='sanity_handoff'
+    // 见 invoke-single-cat.ts generateAndPersistSanityHandoff() 的 messageStore.append()。
+    // 只改渲染呈现——message.content 原样传入卡片，不做任何改写。
+    if (message.extra?.systemKind === 'sanity_handoff') {
+      return (
+        <div data-message-id={message.id} className="flex justify-center mb-3">
+          <div className="max-w-[85%] w-full">
+            <SanityHandoffCard content={visibleContent} />
+          </div>
+        </div>
+      );
     }
 
     // F045: variant='thinking' is deprecated — thinking is now embedded in assistant bubbles.

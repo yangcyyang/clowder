@@ -78,7 +78,10 @@ export function ChatContainerHeader({
         </button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <ThreadIndicator threadId={threadId} showChannelStamp={threadKind === 'channel'} />
-          <PresentAgentsIndicator threadId={threadId} />
+          {/* cy 2026-07-26: 频道头部参与猫头像堆已按铲屎官要求摘除挂载
+              （"头部红圈头像堆感觉没什么作用，看能不能把它删掉"）。PresentAgentsIndicator
+              定义本身保留在下方——它自己的单测 chat-container-header-present-agents.test.ts
+              仍直接单测这个 export，全库确认无其他挂载点后再考虑连组件一起删。 */}
         </div>
         {/* 批次 3 F-E: 画像人审全局入口 — 铲屎官钦点位置，工具栏图标区最左侧 */}
         <UserProfileCandidatesEntry />

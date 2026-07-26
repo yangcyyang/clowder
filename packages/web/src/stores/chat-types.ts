@@ -354,7 +354,8 @@ export interface ChatMessage {
      * pipeline race; without marker it ends up visually after the bubble it
      * should precede.
      */
-    systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed';
+    /** sanity_handoff: 理智线黄/红区自动交接包（cy 2026-07-26 起默认折叠渲染，见 SanityHandoffCard）。 */
+    systemKind?: 'a2a_routing' | 'progress_heartbeat' | 'task_created_unclaimed' | 'sanity_handoff';
     /** Model-authored, non-terminal acknowledgement/heartbeat. */
     agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
     /** Slock 归档导入：当前批次消息对应的 thread 回复分支。 */
