@@ -65,6 +65,7 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_created'
         | 'task_status_changed'
         | 'task_idle_escalated'
+        | 'task_progress_attached'
         | 'cli_session_rotated'
         | 'sanity_handoff';
       slockThread?: { branchThreadId: string; replyCount: number };
@@ -100,6 +101,7 @@ export function safeParseExtra(raw: string | undefined):
         | 'task_created'
         | 'task_status_changed'
         | 'task_idle_escalated'
+        | 'task_progress_attached'
         | 'cli_session_rotated'
         | 'sanity_handoff';
       slockThread?: { branchThreadId: string; replyCount: number };
@@ -158,6 +160,7 @@ export function safeParseExtra(raw: string | undefined):
       parsed.systemKind === 'task_created' ||
       parsed.systemKind === 'task_status_changed' ||
       parsed.systemKind === 'task_idle_escalated' ||
+      parsed.systemKind === 'task_progress_attached' ||
       parsed.systemKind === 'cli_session_rotated' ||
       parsed.systemKind === 'sanity_handoff'
     ) {

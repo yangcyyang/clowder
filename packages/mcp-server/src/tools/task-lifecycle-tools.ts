@@ -27,7 +27,30 @@ export const taskClaimInputSchema = {
     .describe(
       'Convert this message into a task and claim it in one step (Raft "task claim --message-id"). ' +
         'Use when the work item only exists as a message so far — do NOT create a new task for it first, ' +
-        'this does both atomically. Exactly one of taskId/messageId required.',
+        'this does both atomically. Exactly one of taskId/messageId required. ' +
+        'Ticket-hygiene guardrails on this path (batch4-B5, all return a Chinese `hint` explaining what to do instead): ' +
+        '(1) the message must be a TOP-LEVEL channel/DM message — a message inside a branch/discussion thread is ' +
+        'rejected (403 TASK_CLAIM_THREAD_NOT_TOP_LEVEL), discussion context is not a claimable work item; ' +
+        '(2) the message must be HUMAN-authored — a cat-authored message is rejected (403 ' +
+        'TASK_CLAIM_CAT_AUTHORED_MESSAGE), your own work (progress notes, handoffs, reviews) must go through ' +
+        'cat_cafe_task_create instead, never through claiming a message; ' +
+        '(3) if you already own an ACTIVE task (todo/doing/in_review) in this same thread, this call is downgraded: ' +
+        'no new task is created — the message is attached as a progress note on your existing active task instead ' +
+        '(response has downgraded:true); if this really is separate new work, use cat_cafe_task_create explicitly ' +
+        'instead of message-id claiming; ' +
+        '(4) requires the `title` parameter (see below) — missing/too-long title is rejected (400 ' +
+        'TASK_CLAIM_TITLE_REQUIRED / TASK_CLAIM_TITLE_TOO_LONG).',
+    ),
+  title: z
+    .string()
+    .max(500)
+    .optional()
+    .describe(
+      'Required when claiming by messageId (ignored/not needed for taskId claims): a short, self-authored task ' +
+        'title, 1-60 characters after trimming whitespace. Do NOT paste or truncate the raw message text as the ' +
+        'title — write a real short name for the work item. The original message full text is preserved ' +
+        'automatically as the first post in the task discussion thread, so nothing is lost by keeping the title ' +
+        'short. Missing, empty, or over 60 chars is rejected with a Chinese hint explaining this.',
     ),
   why: z.string().max(1000).optional().describe('Optional note explaining why you are claiming this task'),
   agentKeyCatId: agentKeyCatIdSchema,
@@ -119,6 +142,7 @@ export const searchMessagesInputSchema = {
 export async function handleTaskClaim(input: {
   taskId?: string | undefined;
   messageId?: string | undefined;
+  title?: string | undefined;
   why?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
@@ -127,6 +151,7 @@ export async function handleTaskClaim(input: {
     {
       ...(input.taskId ? { taskId: input.taskId } : {}),
       ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(input.title ? { title: input.title } : {}),
       ...(input.why ? { why: input.why } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
@@ -272,8 +297,18 @@ export const taskLifecycleTools = [
       'Claim a task before starting action work — by taskId, or by messageId to convert a plain message into a ' +
       "task and claim it in one step (Raft: 'always claim a task before starting work'). " +
       'Use when: fulfilling a request requires action beyond just replying (running tools, writing code, making changes). ' +
-      'NOT for: pure question-answering (no claim needed for that). ' +
-      'Output: task moves to doing, owned by you; conflicts return 409 with the current ownerCatId — stop instead of duplicating work. ' +
+      'NOT for: pure question-answering (no claim needed for that); NOT a bookkeeping action to repeat every turn — ' +
+      'claim once at the start of a work item, then use cat_cafe_task_update / cat_cafe_post_progress for everything ' +
+      'that follows (a real incident: re-claiming by messageId every turn on peer verdicts and your own handoff notes ' +
+      'produced 8+ junk tickets titled with raw chat text in one night). ' +
+      'messageId claims are guarded (batch4-B5 ticket hygiene, see the messageId/title parameter docs for exact ' +
+      'error codes): only top-level channel/DM messages qualify (not messages inside a branch/discussion thread), ' +
+      'only human-authored messages qualify (not your own or another cat\'s messages), an already-active task of ' +
+      'yours in the same thread downgrades the call to a progress note instead of a new ticket, and a short ' +
+      'self-authored `title` (1-60 chars, not the raw message text) is required. ' +
+      'Output: task moves to doing, owned by you; conflicts return 409 with the current ownerCatId — stop instead ' +
+      'of duplicating work; a messageId claim may also come back with downgraded:true (attached as progress to an ' +
+      'existing task, not a new one — use cat_cafe_task_create if you really meant new independent work). ' +
       'GOTCHA: if claim fails, do not work on that task unless the owner/user explicitly redirects it to you.',
     inputSchema: taskClaimInputSchema,
     handler: handleTaskClaim,

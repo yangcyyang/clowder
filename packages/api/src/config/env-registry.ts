@@ -2145,6 +2145,42 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
+    name: 'CLOWDER_TICKET_HYGIENE_THREAD_HIERARCHY',
+    defaultValue: 'true（默认开）',
+    description:
+      '批次4-B5 票面卫生 B5.1 层级规则 (docs/research/raft-r9-ticket-hygiene.md)：分支/讨论 thread（有 relation 字段，见 ThreadStore.ts computeThreadKind）内的消息不可经 task_claim --message-id 转票——只有频道顶层消息（channel/lobby/dm）能转。拒绝时返回中文提示"讨论上下文不入票；这是新工作请用 task_create 并自拟标题"。置 "false" 关闭（回退到不做层级判断）。改值无需重启——每次请求都会重新读取。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_TICKET_HYGIENE_CAT_AUTHOR_BLOCK',
+    defaultValue: 'true（默认开）',
+    description:
+      '批次4-B5 票面卫生 B5.2 自噬禁止：猫发的消息（message.catId 非空）一律不可经 task_claim --message-id 转票，只有人类消息可以——事故实证是执行猫把同伴裁定、自己的换班回述当记账动作认领，一晚产出 8+ 张标题为对话原文的垃圾票。猫自己的工作票必须显式 task_create + 自拟标题。置 "false" 关闭。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_TICKET_HYGIENE_ACTIVE_TASK_DOWNGRADE',
+    defaultValue: 'true（默认开）',
+    description:
+      '批次4-B5 票面卫生 B5.3 活跃票降级：claim 者在同 thread 已有自己 owned 的活跃票（todo/doing/in_review）时，task_claim --message-id 不再新建票——把消息内容作为进度事件（origin=progress，同 cat_cafe_post_progress 形态）挂到活跃票的讨论 thread，并在频道内发可见提示卡"已挂到 #N 作为进度；若这是新的独立工作，请用 task_create 显式建票"（显式逃生门，防止真正的新工作被误吞）。置 "false" 关闭（回退到总是新建/复用消息自带的票）。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CLOWDER_TICKET_HYGIENE_REQUIRE_TITLE',
+    defaultValue: 'true（默认开）',
+    description:
+      '批次4-B5 票面卫生 B5.4 标题强制：task_claim --message-id 必须随附猫自拟标题（1-60 字，去首尾空白后校验）——Raft 第九轮访谈明确反对用消息原文截断当标题（截出半句话、Clowder 侧真实带出过密钥）。缺标题或超过 60 字一律拒绝并返回中文提示；原消息全文不受影响，仍会整理进票的讨论 thread 首条。置 "false" 关闭，回退到旧行为（用消息原文派生并截断标题，忽略 title 参数）。mcp-server 的 cat_cafe_task_claim 工具 schema 已同步加 title 参数。改值无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CLOWDER_LIBRARY_REBUILD_HOURS',
     defaultValue: '24',
     description:

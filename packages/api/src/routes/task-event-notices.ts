@@ -28,7 +28,12 @@ const log = createModuleLogger('routes/task-event-notices');
  * (batch 1) and is intentionally out of this union — it keeps its own literal
  * type at the call site in work-admission-service.ts.
  */
-export type TaskLifecycleSystemKind = 'task_created' | 'task_status_changed' | 'task_idle_escalated';
+export type TaskLifecycleSystemKind =
+  | 'task_created'
+  | 'task_status_changed'
+  | 'task_idle_escalated'
+  /** 批次4-B5 (docs/research/raft-r9-ticket-hygiene.md B5.3): active-task downgrade notice. */
+  | 'task_progress_attached';
 
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 /** module-level, process-local: adequate for "don't spam the same transition twice within 5 minutes" — not a durable ledger. */

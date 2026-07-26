@@ -6,6 +6,7 @@ import type { IMessageStore, StoredMessage } from '../domains/cats/services/stor
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { parseBoolean } from '../config/parse-utils.js';
 import { ensureTaskDiscussionThread } from './task-discussion-thread.js';
 import { appendTaskLifecycleNotice, taskLifecycleLabel } from './task-event-notices.js';
 import { redactSecretsInText } from '../utils/env-var-secret-guard.js';
@@ -84,6 +85,16 @@ export function isAutoClaimCatEligible(catId: string, env: NodeJS.ProcessEnv = p
   if (allowed.length === 0) return true;
   const clientId = catRegistry.tryGet(catId)?.config.clientId;
   return clientId !== undefined && allowed.includes(clientId);
+}
+
+/**
+ * 批次4-B5 票面卫生 B5.3 (docs/research/raft-r9-ticket-hygiene.md): env gate for the
+ * active-task downgrade rule — a message-id claim attempt is attached as a progress
+ * note to the cat's own already-active task in the same thread instead of minting a
+ * duplicate ticket. Default ON; set to 'false' to fully disable (see env-registry.ts).
+ */
+export function isTicketHygieneActiveTaskDowngradeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseBoolean(env.CLOWDER_TICKET_HYGIENE_ACTIVE_TASK_DOWNGRADE, true);
 }
 
 function initialClaimEvents(ownerCatId: CatId | undefined, timestamp: number): readonly TaskEvent[] | undefined {
@@ -299,4 +310,104 @@ export async function admitWorkMessage(input: {
       ...(ownerCatId ? { ownerCatId } : {}),
     },
   };
+}
+
+// ============================================================================
+// 批次4-B5 票面卫生 B5.3 — 活跃票降级 (docs/research/raft-r9-ticket-hygiene.md)
+//
+// 事故背景: task_claim --message-id 被执行猫每轮当记账动作使用，一晚产出 8+ 张标题
+// 为对话原文的垃圾票。当 claim 者在同 thread 已有自己 owned 的活跃票（todo/doing/
+// in_review）时，再来一条 message-id claim 大概率是"进度/换班回述被误当新工作认领"，
+// 不应该新建票——而是把这条消息当进度事件挂到那张活跃票上，并在原频道留一张可见提示
+// 卡，同时保留"这真的是新工作"的显式逃生门（task_create 仍然可以建新票）。
+// ============================================================================
+
+const ACTIVE_TASK_DOWNGRADE_STATUSES: ReadonlySet<TaskItem['status']> = new Set(['todo', 'doing', 'in_review']);
+
+/**
+ * B5.3: the claiming cat's own active (owned, not-yet-terminal) work task in this
+ * thread, if any — excludes pr_tracking automation tasks. When more than one
+ * qualifies (rare — a cat rarely owns two simultaneously-active tasks in the same
+ * thread) the most recently updated one wins.
+ */
+export async function findActiveOwnedTaskInThread(
+  taskStore: Pick<ITaskStore, 'listByThread'>,
+  threadId: string,
+  catId: CatId,
+): Promise<TaskItem | null> {
+  const tasks = await taskStore.listByThread(threadId);
+  const active = tasks.filter(
+    (task) => task.kind === 'work' && task.ownerCatId === catId && ACTIVE_TASK_DOWNGRADE_STATUSES.has(task.status),
+  );
+  active.sort((a, b) => b.updatedAt - a.updatedAt);
+  return active[0] ?? null;
+}
+
+/**
+ * B5.3 活跃票降级: instead of minting a new ticket for `sourceMessage`, attach its
+ * (secret-redacted) content as a progress note inside `task`'s own discussion thread —
+ * same message shape as cat_cafe_post_progress (origin:'progress', broadcast live via
+ * broadcastAgentMessage) — plus a lightweight 'progress_note' TaskEvent pointer on the
+ * task itself for auditability. Callers are responsible for the visible channel notice
+ * card (appendTaskLifecycleNotice, posted to `task.threadId` i.e. the origin channel)
+ * and for shaping the HTTP response — this function only performs the attach.
+ */
+export async function downgradeMessageToActiveTaskProgress(input: {
+  task: TaskItem;
+  sourceMessage: StoredMessage;
+  catId: CatId;
+  userId: string;
+  deps: WorkAdmissionDeps;
+}): Promise<{ task: TaskItem; label: string }> {
+  const { task, sourceMessage, catId, userId, deps } = input;
+
+  // Guarantee a discussion thread exists (idempotent no-op if already linked) —
+  // "进度的指定去处是票的 thread" (Raft r9 研判).
+  const discussion = await ensureTaskDiscussionThread(
+    task,
+    {
+      taskStore: deps.taskStore,
+      threadStore: deps.threadStore,
+      messageStore: deps.messageStore,
+      socketManager: deps.socketManager,
+    },
+    { userId, broadcastUpdate: false },
+  );
+
+  const progressContent = redactSecretsInText(sourceMessage.content);
+  const progressMessage = await deps.messageStore.append({
+    userId,
+    catId,
+    content: progressContent,
+    mentions: [],
+    origin: 'progress',
+    timestamp: Date.now(),
+    threadId: discussion.threadId,
+  });
+  deps.socketManager.broadcastAgentMessage(
+    {
+      type: 'text',
+      catId,
+      content: progressContent,
+      origin: 'progress',
+      messageId: progressMessage.id,
+      timestamp: Date.now(),
+    },
+    discussion.threadId,
+  );
+
+  const progressEvent: TaskEvent = {
+    ts: new Date().toISOString(),
+    catId,
+    type: 'progress_note',
+    data: {
+      sourceMessageId: sourceMessage.id,
+      sourceThreadId: sourceMessage.threadId,
+      progressMessageId: progressMessage.id,
+    },
+  };
+  const updated = await deps.taskStore.update(discussion.task.id, { events: [progressEvent] });
+  const finalTask = updated ?? discussion.task;
+  const label = await taskLifecycleLabel(deps.taskStore, finalTask);
+  return { task: finalTask, label };
 }

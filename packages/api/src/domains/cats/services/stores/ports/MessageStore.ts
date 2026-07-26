@@ -137,6 +137,7 @@ export interface StoredMessage {
       | 'task_created'
       | 'task_status_changed'
       | 'task_idle_escalated'
+      | 'task_progress_attached'
       | 'cli_session_rotated';
     /** Slock 归档导入：批次消息对应的 thread 回复分支。 */
     slockThread?: { branchThreadId: string; replyCount: number };

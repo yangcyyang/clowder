@@ -45,7 +45,13 @@ export type TaskEventType =
   /** ClaimedIdleScheduler: the 2-nudge cap was exhausted and the task is still idle —
    *  terminal marker for this claim cycle; the scheduler never acts on this task again
    *  until it is unclaimed/re-claimed. A system notice is posted to the main thread. */
-  | 'task_idle_escalated';
+  | 'task_idle_escalated'
+  /** 批次4-B5 票面卫生 (docs/research/raft-r9-ticket-hygiene.md B5.3): a message-id claim
+   *  attempt was downgraded onto this already-active task instead of minting a duplicate
+   *  ticket — the source message's content was attached as a progress note in the task's
+   *  own discussion thread. `data` carries { sourceMessageId, sourceThreadId,
+   *  progressMessageId } pointers only (content lives in the discussion thread message). */
+  | 'progress_note';
 
 /**
  * Task kind discriminator (#320).
