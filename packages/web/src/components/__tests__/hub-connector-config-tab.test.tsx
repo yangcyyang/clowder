@@ -114,8 +114,7 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
           ],
         }),
       );
-      // biome-ignore lint/suspicious/noExplicitAny: matches apiFetch's loose test-time signature
-    }) as any);
+    }) as unknown as typeof globalThis.fetch);
 
     await act(async () => {
       root.render(React.createElement(HubConnectorConfigTab));

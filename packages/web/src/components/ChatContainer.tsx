@@ -196,7 +196,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setCurrentThread,
     viewMode,
     setViewMode,
-    isLoading: chatIsLoading,
     clearUnread,
     rightPanelMode,
   } = useChatStore();
