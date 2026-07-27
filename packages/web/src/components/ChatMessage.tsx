@@ -12,6 +12,7 @@ import { CatAvatar } from './CatAvatar';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import { CollapsibleMessageBody } from './CollapsibleMessageBody';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
 import { DirectionPill } from './DirectionPill';
@@ -777,7 +778,12 @@ export function ChatMessage({
             ) : disableContentCollapse ? (
               <MarkdownContent content={message.content} searchHighlight={searchHighlight} />
             ) : (
-              <CollapsibleMarkdown content={message.content} searchHighlight={searchHighlight} />
+              <CollapsibleMessageBody
+                disabled={message.isStreaming}
+                fadeBackgroundVar={isWhisper && !isRevealed ? '--conn-amber-bg' : undefined}
+              >
+                <CollapsibleMarkdown content={message.content} searchHighlight={searchHighlight} />
+              </CollapsibleMessageBody>
             )}
           </div>
           {message.sendStatus === 'failed' && (
@@ -916,11 +922,13 @@ export function ChatMessage({
           ) : disableContentCollapse && hasTextContent ? (
             <MarkdownContent content={visibleContent} className={catStyle?.font} searchHighlight={searchHighlight} />
           ) : hasTextContent ? (
-            <CollapsibleMarkdown
-              content={visibleContent}
-              className={catStyle?.font}
-              searchHighlight={searchHighlight}
-            />
+            <CollapsibleMessageBody disabled={message.isStreaming}>
+              <CollapsibleMarkdown
+                content={visibleContent}
+                className={catStyle?.font}
+                searchHighlight={searchHighlight}
+              />
+            </CollapsibleMessageBody>
           ) : message.isStreaming ? (
             <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
           ) : null}
