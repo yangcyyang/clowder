@@ -142,4 +142,30 @@ describe('InlineThreadPanel IME guard', () => {
 
     expect(sentMessageRequests()).toHaveLength(1);
   });
+
+  it('does not send a delayed IME-confirmation Enter identified by native keyCode 229', async () => {
+    await mountPanel();
+    apiFetchMock.mockClear();
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await setComposerValue(textarea, '中文候选词');
+
+    await act(async () => {
+      textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      for (const callback of animationFrames.values()) callback(performance.now());
+      animationFrames.clear();
+    });
+
+    const confirmationEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    Object.defineProperty(confirmationEnter, 'keyCode', { value: 229 });
+
+    await act(async () => {
+      textarea.dispatchEvent(confirmationEnter);
+      await Promise.resolve();
+    });
+
+    expect(sentMessageRequests()).toHaveLength(0);
+    expect(confirmationEnter.defaultPrevented).toBe(false);
+  });
 });

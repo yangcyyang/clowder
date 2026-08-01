@@ -1347,7 +1347,10 @@ export function InlineThreadPanel({
 
   const handleInputKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (ime.isComposing()) return;
+      // Some IMEs dispatch their final confirmation Enter after the
+      // composition-end animation frame, but keep the native Process key (229).
+      // Do not prevent its default behavior: the IME still needs to commit the candidate.
+      if (ime.isComposing() || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
 
       if (showSlashCommands) {
         if (event.key === 'ArrowDown') {
