@@ -111,6 +111,7 @@ describe('InlineThreadPanel runtime status placement', () => {
 
     const statusRow = container.querySelector('[data-testid="inline-thread-runtime-status"]');
     expect(statusRow).toBeTruthy();
+    expect(statusRow?.getAttribute('role')).toBe('status');
     expect(statusRow?.textContent).toContain('Opus');
     // Stage label now reuses AgentStatusIndicator's getAgentStatusLabel (main-channel parity —
     // see inline-thread-panel-runtime-status-timer.test.tsx) instead of the old bespoke

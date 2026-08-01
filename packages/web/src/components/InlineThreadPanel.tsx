@@ -1596,7 +1596,12 @@ export function InlineThreadPanel({
                     `parentThreadId: sourceMessage.threadId ?? threadId`), not this branch —
                     Copy Link/Save/Delete must operate against parentThreadId or they'd
                     target/link to the wrong thread. */}
-                <MessageActions message={sourceMessage} threadId={parentThreadId} canConvertToTask={false} getCatById={getCatById}>
+                <MessageActions
+                  message={sourceMessage}
+                  threadId={parentThreadId}
+                  canConvertToTask={false}
+                  getCatById={getCatById}
+                >
                   <ChatMessage
                     message={sourceMessage}
                     getCatById={getCatById}
@@ -1676,6 +1681,7 @@ export function InlineThreadPanel({
           {runtimeCats.length > 0 && (
             <div
               className="mb-2 flex flex-wrap items-center gap-1.5"
+              role="status"
               aria-live="polite"
               aria-label="当前回复状态"
               data-testid="inline-thread-runtime-status"

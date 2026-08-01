@@ -55,18 +55,54 @@ function scanText(text, source) {
   return hits;
 }
 
+function gitOutput(args) {
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    timeout: 10_000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+function refExists(ref) {
+  try {
+    gitOutput(['rev-parse', '--verify', `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveBaseRef() {
+  const configured = process.env.FOLLOWUP_TAILS_BASE_REF?.trim();
+  if (configured) {
+    if (refExists(configured)) return configured;
+    throw new Error(`Unable to resolve Git base ref: ${configured}`);
+  }
+
+  const candidates = [];
+  try {
+    candidates.push(gitOutput(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']));
+  } catch {
+    // A new local integration branch may not have an upstream yet.
+  }
+  try {
+    candidates.push(gitOutput(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']));
+  } catch {
+    // Some local-only repositories do not have an origin remote.
+  }
+  candidates.push('origin/main', 'main');
+
+  const resolved = candidates.find((candidate) => candidate && refExists(candidate));
+  if (resolved) return resolved;
+  throw new Error('Unable to resolve Git base ref from upstream, origin/HEAD, origin/main, or main');
+}
+
 function getCommitMessages() {
   if (process.argv.includes('--no-commits')) return '';
-  try {
-    const out = execFileSync('git', ['log', '--format=%s', 'origin/main..HEAD'], {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-      timeout: 10_000,
-    });
-    return out;
-  } catch {
-    return '';
-  }
+  const baseRef = resolveBaseRef();
+  console.log(`[followup-tails] base=${baseRef}`);
+  return gitOutput(['log', '--format=%s', `${baseRef}..HEAD`]);
 }
 
 function getPrBody() {
@@ -88,7 +124,14 @@ function isExemptCommit(message) {
 function main() {
   const allHits = [];
 
-  const commitText = getCommitMessages();
+  let commitText;
+  try {
+    commitText = getCommitMessages();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`❌ ${message}`);
+    process.exit(2);
+  }
   if (commitText) {
     const commits = commitText.split('\n').filter(Boolean);
     for (const commit of commits) {
