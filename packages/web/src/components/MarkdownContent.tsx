@@ -247,6 +247,24 @@ function isInlineFilePath(children: ReactNode): boolean {
   return INLINE_FILE_PATH_RE.test(getInlineCodeText(children));
 }
 
+function InlineFilePathCode({ className, children }: { className?: string; children: ReactNode }) {
+  const display = getInlineCodeText(children);
+  const lineMatch = display.match(/:(\d+)$/u);
+  const line = lineMatch ? Number.parseInt(lineMatch[1], 10) : undefined;
+  const filePath = lineMatch ? display.slice(0, -lineMatch[0].length) : display;
+  const isAbsolute = filePath.startsWith('/');
+  const absolutePath = isAbsolute ? filePath : PROJECT_ROOT ? `${PROJECT_ROOT}/${filePath}` : null;
+  const vscodeHref = absolutePath ? `vscode://file${absolutePath}${line ? `:${line}` : ''}` : undefined;
+
+  return (
+    <code
+      className={`${className ?? ''} markdown-file-code rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
+    >
+      <FilePathLink display={display} vscodeHref={vscodeHref} filePath={filePath} line={line} />
+    </code>
+  );
+}
+
 /** F063: File path link — click opens in workspace panel, Cmd/Ctrl+click opens in VSCode */
 function FilePathLink({
   display,
@@ -675,12 +693,13 @@ const mdComponents: Components = {
   code: ({ className, children }) => {
     const isCodeBlock = /language-/.test(className ?? '');
     if (isCodeBlock) return <code className={className}>{children}</code>;
+    if (isInlineFilePath(children)) {
+      return <InlineFilePathCode className={className}>{children}</InlineFilePathCode>;
+    }
 
     return (
       <code
-        className={`${className ?? ''} ${
-          isInlineFilePath(children) ? 'markdown-file-code' : ''
-        } rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
+        className={`${className ?? ''} rounded border border-[var(--clowder-markdown-chip-border)] bg-[var(--clowder-markdown-chip-bg)] px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--clowder-markdown-chip-text)]`}
       >
         {children}
       </code>

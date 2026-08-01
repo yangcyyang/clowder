@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InlineThreadPanel } from '@/components/InlineThreadPanel';
-import type { ChatMessage } from '@/stores/chatStore';
+import { type ChatMessage, DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 
@@ -95,6 +95,7 @@ describe('InlineThreadPanel polling coordinator', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    useChatStore.setState({ threadStates: {} });
     apiFetchMock.mockReset();
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -138,6 +139,32 @@ describe('InlineThreadPanel polling coordinator', () => {
   it('runs only one messages+queue polling cycle after send while the branch is active', async () => {
     await mountPanel();
     await sendReply();
+    apiFetchMock.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(apiFetchMock.mock.calls.filter(isMessagesPoll)).toHaveLength(5);
+    expect(apiFetchMock.mock.calls.filter(isQueuePoll)).toHaveLength(5);
+  });
+
+  it('keeps polling while socket state is active when one queue response is temporarily empty', async () => {
+    queueActive = false;
+    useChatStore.setState({
+      threadStates: {
+        'thread-branch': {
+          ...DEFAULT_THREAD_STATE,
+          hasActiveInvocation: true,
+          activeInvocations: {
+            'socket-invocation': { catId: 'opus', mode: 'reply', startedAt: Date.now() },
+          },
+          catStatuses: { opus: 'streaming' },
+        },
+      },
+    });
+
+    await mountPanel();
     apiFetchMock.mockClear();
 
     await act(async () => {

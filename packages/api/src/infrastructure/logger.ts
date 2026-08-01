@@ -21,9 +21,11 @@ import pino from 'pino';
 export const isDebugMode = process.argv.includes('--debug');
 const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
 const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
+// Preserve logs written by earlier processes. Historical cleanup is a separate,
+// explicitly confirmed operation; daily retention only governs this process's rolls.
 export const LOG_ROLL_LIMIT = {
   count: 13,
-  removeOtherLogFiles: true,
+  removeOtherLogFiles: false,
 } as const;
 
 /**

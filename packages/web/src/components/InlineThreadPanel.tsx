@@ -630,6 +630,9 @@ export function InlineThreadPanel({
   const { cats } = useCatData();
   const ime = useIMEGuard();
   const threadRuntime = useChatStore((state) => state.threadStates[threadId]);
+  const hasThreadRuntimeActivity =
+    Object.keys(threadRuntime?.activeInvocations ?? {}).length > 0 ||
+    Object.values(threadRuntime?.catStatuses ?? {}).some((status) => shouldShowInlineThreadRuntimeStatus(status));
   const [panelWidth, setPanelWidth, resetPanelWidth] = usePersistedState(
     'cat-cafe:inlineThreadPanelWidth:v2',
     THREAD_PANEL_DEFAULT_WIDTH,
@@ -944,7 +947,10 @@ export function InlineThreadPanel({
       inFlight = false;
       if (disposed) return;
 
-      const runtimeStillActive = active.length > 0;
+      // The queue endpoint is a REST snapshot and can briefly return empty while
+      // the thread-scoped socket state still owns an active invocation. Keep the
+      // fallback poll chain alive until both sources agree that the branch is idle.
+      const runtimeStillActive = active.length > 0 || hasThreadRuntimeActivity;
       const hasNewCompleteMessage =
         nextMessages.length > pollBaselineCountRef.current && !nextMessages.some((message) => message.isStreaming);
       const timedOutWithoutRuntime = Date.now() - pollStartedAtRef.current >= 60_000 && !runtimeStillActive;
@@ -969,7 +975,14 @@ export function InlineThreadPanel({
       clearReplyPollTimer();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [clearReplyPollTimer, loadMessages, loadQueueRuntime, replyPollingRequested, runtimeCats.length]);
+  }, [
+    clearReplyPollTimer,
+    hasThreadRuntimeActivity,
+    loadMessages,
+    loadQueueRuntime,
+    replyPollingRequested,
+    runtimeCats.length,
+  ]);
 
   const replyMessages = useMemo(() => getInlineThreadReplyMessages(messages, sourceMessage), [messages, sourceMessage]);
   const visibleReplyMessages = useMemo(

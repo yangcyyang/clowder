@@ -65,11 +65,19 @@ describe('MarkdownContent file path links', () => {
     expect(setWorkspaceOpenFile).toHaveBeenCalledWith(path, null, 'notes');
   });
 
-  it('keeps Chinese inline Markdown paths marked with the existing file-code style', async () => {
-    await render('请阅读 `docs/个人内容资产操作系统-落地执行方案-v1.md`');
+  it('keeps a backtick-wrapped Chinese Markdown path clickable with the existing file-code style', async () => {
+    const path = 'docs/个人内容资产操作系统-落地执行方案-v1.md';
+    await render(`请阅读 \`${path}\``);
 
     const code = container.querySelector<HTMLElement>('code.markdown-file-code');
-    expect(code?.textContent).toBe('docs/个人内容资产操作系统-落地执行方案-v1.md');
+    const link = code?.querySelector<HTMLAnchorElement>('a.markdown-file-link');
+    expect(link?.textContent).toBe(path);
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    const allowed = link?.dispatchEvent(event);
+
+    expect(allowed).toBe(false);
+    expect(setWorkspaceOpenFile).toHaveBeenCalledWith(path, null, null);
   });
 
   it('keeps a configured Chinese relative path on the existing VSCode and workspace interaction', async () => {
