@@ -9,12 +9,12 @@ import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStor
 import { useTaskStore } from '@/stores/taskStore';
 import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
-import { CliOutputBlock } from './cli-output/CliOutputBlock';
-import { toCliEvents } from './cli-output/toCliEvents';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { CollapsibleMessageBody } from './CollapsibleMessageBody';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
+import { CliOutputBlock } from './cli-output/CliOutputBlock';
+import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
@@ -351,7 +351,9 @@ function MessageBadgeRow({
 
   return (
     <>
-      {showTaskCreatedNotice && task && <TaskCreatedNoticeBar task={task.task} seq={task.seq} onOpen={onOpenTaskThread} />}
+      {showTaskCreatedNotice && task && (
+        <TaskCreatedNoticeBar task={task.task} seq={task.seq} onOpen={onOpenTaskThread} />
+      )}
       <div className="mt-1.5 flex max-w-full flex-wrap items-center gap-1.5">
         {task && !showTaskCreatedNotice && (
           <MessageTaskBadge
@@ -435,6 +437,8 @@ interface ChatMessageProps {
   showRuntimeMetadata?: boolean;
   searchHighlight?: string;
   viewer?: ThreadViewer;
+  /** Thread-scoped surfaces can override the flat current-thread activity signal. */
+  activityStatusOverride?: 'active' | 'idle';
 }
 
 export function ChatMessage({
@@ -455,6 +459,7 @@ export function ChatMessage({
   viewer = DEFAULT_VIEWER,
   showRuntimeMetadata = false,
   searchHighlight,
+  activityStatusOverride,
 }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -529,9 +534,10 @@ export function ChatMessage({
     message.type === 'assistant' && !message.isStreaming ? 'motion-safe:animate-message-appear' : '';
   const catRuntimeStatus = message.catId ? catStatuses[message.catId] : undefined;
   const catActivityStatus =
-    catRuntimeStatus === 'spawning' || catRuntimeStatus === 'pending' || catRuntimeStatus === 'streaming'
+    activityStatusOverride ??
+    (catRuntimeStatus === 'spawning' || catRuntimeStatus === 'pending' || catRuntimeStatus === 'streaming'
       ? 'active'
-      : 'idle';
+      : 'idle');
   const deliveryOnlyDegraded = message.metadata?.usage?.deliveryOnlyMode === 'degraded';
   const fullRuntimeMetadataBadge = message.metadata ? (
     <div className="w-fit rounded-[var(--slock-radius-pill)] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-0.5">
@@ -750,6 +756,7 @@ export function ChatMessage({
                       onSaveEdit?.();
                     }
                   }}
+                  // biome-ignore lint/a11y/noAutofocus: edit mode is explicitly opened by the user and should receive focus.
                   autoFocus
                   disabled={isSavingEdit}
                   className="min-h-[88px] w-full resize-y rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface-elevated)] px-3 py-2 text-sm text-cafe outline-none transition-colors focus:border-[var(--cafe-accent)]"

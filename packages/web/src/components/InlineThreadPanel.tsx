@@ -661,7 +661,8 @@ export function InlineThreadPanel({
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [queueActiveInvocations, setQueueActiveInvocations] = useState<InlineThreadActiveInvocation[]>([]);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [replyPollingRequested, setReplyPollingRequested] = useState(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStartedAtRef = useRef<number>(0);
   const pollBaselineCountRef = useRef<number>(0);
   const latestMessagesRef = useRef<ChatMessageData[]>([]);
@@ -715,6 +716,7 @@ export function InlineThreadPanel({
     threadRuntime?.catInvocations,
     threadRuntime?.catStatuses,
   ]);
+  const activeRuntimeCatIds = useMemo(() => new Set(runtimeCats.map((cat) => cat.catId)), [runtimeCats]);
   // Ticking timer for the runtime-status chip row's elapsed display — same 1s-refresh
   // pattern as AgentStatusIndicator.tsx (only runs while there's something to time).
   const [runtimeStatusNow, setRuntimeStatusNow] = useState(() => Date.now());
@@ -885,33 +887,19 @@ export function InlineThreadPanel({
     }
   }, [threadId]);
 
-  const stopReplyPolling = useCallback(() => {
+  const clearReplyPollTimer = useCallback(() => {
     if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
+      clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-    pollStartedAtRef.current = 0;
-    pollBaselineCountRef.current = 0;
   }, []);
 
   const startReplyPolling = useCallback(() => {
-    stopReplyPolling();
+    clearReplyPollTimer();
     pollStartedAtRef.current = Date.now();
     pollBaselineCountRef.current = latestMessagesRef.current.length;
-
-    pollTimerRef.current = setInterval(() => {
-      void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]).then(([nextMessages, active]) => {
-        const hasNewCompleteMessage =
-          nextMessages.length > pollBaselineCountRef.current && !nextMessages.some((message) => message.isStreaming);
-        const elapsed = Date.now() - pollStartedAtRef.current;
-        const runtimeStillActive = active.length > 0;
-        const timedOutWithoutRuntime = elapsed >= 60_000 && !runtimeStillActive;
-        const hardTimedOut = elapsed >= 5 * 60_000;
-        if ((hasNewCompleteMessage && !runtimeStillActive) || timedOutWithoutRuntime || hardTimedOut)
-          stopReplyPolling();
-      });
-    }, 2000);
-  }, [loadMessages, loadQueueRuntime, stopReplyPolling]);
+    setReplyPollingRequested(true);
+  }, [clearReplyPollTimer]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -922,15 +910,66 @@ export function InlineThreadPanel({
     };
   }, [loadMessages, loadQueueRuntime]);
 
-  useEffect(() => () => stopReplyPolling(), [stopReplyPolling]);
+  useEffect(() => {
+    setReplyPollingRequested(false);
+    clearReplyPollTimer();
+    pollStartedAtRef.current = 0;
+    pollBaselineCountRef.current = 0;
+  }, [clearReplyPollTimer, threadId]);
 
   useEffect(() => {
-    if (runtimeCats.length === 0) return undefined;
-    const timer = setInterval(() => {
-      void Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]);
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [loadMessages, loadQueueRuntime, runtimeCats.length]);
+    const shouldPoll = replyPollingRequested || runtimeCats.length > 0;
+    if (!shouldPoll) return undefined;
+
+    if (pollStartedAtRef.current === 0) {
+      pollStartedAtRef.current = Date.now();
+      pollBaselineCountRef.current = latestMessagesRef.current.length;
+    }
+
+    let disposed = false;
+    let inFlight = false;
+
+    const scheduleNext = () => {
+      clearReplyPollTimer();
+      if (disposed || document.visibilityState !== 'visible') return;
+      const elapsed = Date.now() - pollStartedAtRef.current;
+      const delay = elapsed < 15_000 ? 2_000 : 5_000;
+      pollTimerRef.current = setTimeout(() => void runPoll(), delay);
+    };
+
+    const runPoll = async () => {
+      if (disposed || inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const [nextMessages, active] = await Promise.all([loadMessages({ showLoading: false }), loadQueueRuntime()]);
+      inFlight = false;
+      if (disposed) return;
+
+      const runtimeStillActive = active.length > 0;
+      const hasNewCompleteMessage =
+        nextMessages.length > pollBaselineCountRef.current && !nextMessages.some((message) => message.isStreaming);
+      const timedOutWithoutRuntime = Date.now() - pollStartedAtRef.current >= 60_000 && !runtimeStillActive;
+
+      if (replyPollingRequested && ((hasNewCompleteMessage && !runtimeStillActive) || timedOutWithoutRuntime)) {
+        setReplyPollingRequested(false);
+        return;
+      }
+      if (!replyPollingRequested && !runtimeStillActive) return;
+      scheduleNext();
+    };
+
+    const handleVisibilityChange = () => {
+      clearReplyPollTimer();
+      if (document.visibilityState === 'visible') void runPoll();
+    };
+
+    scheduleNext();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      clearReplyPollTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [clearReplyPollTimer, loadMessages, loadQueueRuntime, replyPollingRequested, runtimeCats.length]);
 
   const replyMessages = useMemo(() => getInlineThreadReplyMessages(messages, sourceMessage), [messages, sourceMessage]);
   const visibleReplyMessages = useMemo(
@@ -984,15 +1023,12 @@ export function InlineThreadPanel({
 
   // The panel instance is reused across thread switches (no key={threadId} at the call
   // site), so per-thread scroll-follow state must reset explicitly, not just on unmount.
-  // Also stop any reply-polling interval started for the thread we're leaving — it's
-  // already made harmless by the anchorThreadIdRef guard in loadMessages/loadQueueRuntime,
-  // but there's no reason to keep hitting the network for a thread the panel no longer shows.
+  // Reply polling is reset by the thread-scoped coordinator above.
   useEffect(() => {
     wasNearBottomRef.current = true;
     previousVisibleReplyCountRef.current = 0;
     setPendingNewReplyCount(0);
-    stopReplyPolling();
-  }, [threadId, stopReplyPolling]);
+  }, [threadId]);
 
   const searchableMessages = useMemo(
     () => [sourceMessage, ...visibleReplyMessages],
@@ -1639,6 +1675,7 @@ export function InlineThreadPanel({
                       <ChatMessage
                         message={msg}
                         getCatById={getCatById}
+                        activityStatusOverride={msg.catId && activeRuntimeCatIds.has(msg.catId) ? 'active' : 'idle'}
                         showRuntimeMetadata
                         searchHighlight={isHit ? searchQuery : undefined}
                       />

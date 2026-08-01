@@ -27,6 +27,7 @@ export function freshnessHoldLabel(hold: Pick<FreshnessHoldSummary, 'status' | '
 
 export function FreshnessHoldBar({ threadId }: { threadId: string }) {
   const [holds, setHolds] = useState<FreshnessHoldSummary[]>([]);
+  const holdsRef = useRef<FreshnessHoldSummary[]>([]);
   const requestGenerationRef = useRef(0);
   const { getCatById } = useCatData();
 
@@ -38,9 +39,13 @@ export function FreshnessHoldBar({ threadId }: { threadId: string }) {
         if (!response.ok) return;
         const payload = (await response.json()) as { holds?: FreshnessHoldSummary[] };
         if (signal.aborted || requestGeneration !== requestGenerationRef.current) return;
-        setHolds(Array.isArray(payload.holds) ? payload.holds : []);
+        const nextHolds = Array.isArray(payload.holds) ? payload.holds : [];
+        holdsRef.current = nextHolds;
+        setHolds(nextHolds);
+        return nextHolds;
       } catch {
         // Recovery metadata is best-effort; never replace chat with an error state.
+        return undefined;
       }
     },
     [threadId],
@@ -48,18 +53,39 @@ export function FreshnessHoldBar({ threadId }: { threadId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    let timer: number | undefined;
+    let disposed = false;
     requestGenerationRef.current += 1;
+    holdsRef.current = [];
     setHolds([]);
-    void refresh(controller.signal);
-    const interval = window.setInterval(() => void refresh(controller.signal), 5000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh(controller.signal);
+
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
     };
+    const scheduleNext = () => {
+      clearTimer();
+      if (disposed || document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(() => void runRefresh(), holdsRef.current.length > 0 ? 5_000 : 30_000);
+    };
+    const runRefresh = async () => {
+      if (disposed || document.visibilityState !== 'visible') return;
+      await refresh(controller.signal);
+      if (!disposed) scheduleNext();
+    };
+    const onVisible = () => {
+      clearTimer();
+      if (document.visibilityState === 'visible') void runRefresh();
+    };
+    void runRefresh();
     document.addEventListener('visibilitychange', onVisible);
     return () => {
+      disposed = true;
       requestGenerationRef.current += 1;
       controller.abort();
-      window.clearInterval(interval);
+      clearTimer();
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
