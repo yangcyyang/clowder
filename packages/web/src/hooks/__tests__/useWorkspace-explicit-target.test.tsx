@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setWorktreeId: vi.fn(),
   state: {
     currentProjectPath: '/workspace/current-project',
+    workspaceExplicitTargetWorktreeId: 'explicit-target' as string | null,
     workspaceOpenFilePath: 'docs/ClowderAI-功能清单.md',
     workspaceWorktreeId: 'explicit-target',
   },
@@ -54,6 +55,7 @@ describe('useWorkspace explicit cross-project target', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     latest = null;
+    mocks.state.workspaceExplicitTargetWorktreeId = 'explicit-target';
     mocks.setWorktreeId.mockReset();
     mocks.apiFetch.mockImplementation(async (url: string) => {
       if (url.startsWith('/api/workspace/worktrees?')) {
@@ -117,5 +119,23 @@ describe('useWorkspace explicit cross-project target', () => {
     expect(mocks.apiFetch).toHaveBeenCalledWith('/api/workspace/worktrees');
     expect(latest?.worktrees.map((worktree) => worktree.id)).toContain('explicit-target');
     expect(mocks.setWorktreeId).not.toHaveBeenCalledWith('current-project');
+  });
+
+  it('uses the scoped project worktree for an ordinary file when no explicit target is pending', async () => {
+    mocks.state.workspaceExplicitTargetWorktreeId = null;
+
+    function Host() {
+      latest = useWorkspace();
+      return null;
+    }
+
+    await act(async () => {
+      root.render(React.createElement(Host));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mocks.apiFetch).not.toHaveBeenCalledWith('/api/workspace/worktrees');
+    expect(mocks.setWorktreeId).toHaveBeenCalledWith('current-project');
   });
 });

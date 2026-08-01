@@ -54,6 +54,7 @@ export interface SearchResult {
 
 export function useWorkspace() {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
+  const explicitTargetWorktreeId = useChatStore((s) => s.workspaceExplicitTargetWorktreeId);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const setWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
   const projectPath = useChatStore((s) => s.currentProjectPath);
@@ -83,7 +84,7 @@ export function useWorkspace() {
         // A file-path link may explicitly target a worktree outside the current
         // project's scoped list. Keep that target available while the file is
         // open instead of immediately replacing it with the scoped default.
-        if (!currentStillExists && worktreeId && openFilePath && qs) {
+        if (!currentStillExists && worktreeId && explicitTargetWorktreeId === worktreeId && openFilePath && qs) {
           try {
             const allRes = await apiFetch('/api/workspace/worktrees');
             if (allRes.ok) {
@@ -110,7 +111,7 @@ export function useWorkspace() {
     } catch {
       /* ignore */
     }
-  }, [worktreeId, openFilePath, setWorktreeId, projectPath]);
+  }, [worktreeId, explicitTargetWorktreeId, openFilePath, setWorktreeId, projectPath]);
 
   useEffect(() => {
     fetchWorktrees();

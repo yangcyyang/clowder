@@ -1023,6 +1023,9 @@ export interface ChatState {
   // ── F63: Workspace Explorer ──
   rightPanelMode: 'status' | 'workspace';
   workspaceWorktreeId: string | null;
+  /** @internal Worktree explicitly named by the current file-open action.
+   * Keeps cross-project file links stable without affecting normal project switches. */
+  workspaceExplicitTargetWorktreeId: string | null;
   workspaceOpenTabs: string[];
   workspaceOpenFilePath: string | null;
   workspaceOpenFileLine: number | null;
@@ -1312,6 +1315,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── F63: Workspace Explorer ──
   rightPanelMode: 'status' as const,
   workspaceWorktreeId: null,
+  workspaceExplicitTargetWorktreeId: null,
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
@@ -1327,6 +1331,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (id === get().workspaceWorktreeId) return;
     set({
       workspaceWorktreeId: id,
+      workspaceExplicitTargetWorktreeId: null,
       workspaceOpenTabs: [],
       workspaceOpenFilePath: null,
       workspaceOpenFileLine: null,
@@ -1341,6 +1346,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (targetWorktreeId && targetWorktreeId !== get().workspaceWorktreeId) {
         set({
           workspaceWorktreeId: targetWorktreeId,
+          workspaceExplicitTargetWorktreeId: targetWorktreeId,
           workspaceOpenTabs: [path],
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
@@ -1353,6 +1359,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const tabs = get().workspaceOpenTabs;
         const newTabs = tabs.includes(path) ? tabs : [...tabs, path];
         set({
+          workspaceExplicitTargetWorktreeId: targetWorktreeId ?? null,
           workspaceOpenTabs: newTabs,
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
@@ -1362,6 +1369,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } else {
       set({
+        workspaceExplicitTargetWorktreeId: null,
         workspaceOpenFilePath: null,
         workspaceOpenFileLine: null,
       });
@@ -1373,7 +1381,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (active === path) {
       const idx = tabs.indexOf(path);
       const next = newTabs[Math.min(idx, newTabs.length - 1)] ?? null;
-      set({ workspaceOpenTabs: newTabs, workspaceOpenFilePath: next, workspaceOpenFileLine: null });
+      set({
+        workspaceOpenTabs: newTabs,
+        workspaceOpenFilePath: next,
+        workspaceOpenFileLine: null,
+        ...(next ? {} : { workspaceExplicitTargetWorktreeId: null }),
+      });
     } else {
       set({ workspaceOpenTabs: newTabs });
     }
@@ -1383,6 +1396,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       workspaceOpenTabs: tabs,
       workspaceOpenFilePath: openFile,
       workspaceOpenFileLine: null,
+      workspaceExplicitTargetWorktreeId: null,
       workspaceEditToken: null,
       workspaceEditTokenExpiry: null,
     });
@@ -2044,7 +2058,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     void saveThreadsSnapshot(threads).catch(() => {});
   },
   setCurrentProject: (projectPath) =>
-    set((state) => (state.currentProjectPath === projectPath ? state : { currentProjectPath: projectPath })),
+    set((state) =>
+      state.currentProjectPath === projectPath
+        ? state
+        : { currentProjectPath: projectPath, workspaceExplicitTargetWorktreeId: null },
+    ),
   setLoadingThreads: (loading) => set({ isLoadingThreads: loading }),
   setOfflineSnapshot: (v) => set({ isOfflineSnapshot: v }),
 
@@ -2112,6 +2130,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       return {
         currentThreadId: threadId,
+        workspaceExplicitTargetWorktreeId: null,
         threadStates: {
           ...state.threadStates,
           [state.currentThreadId]: saved,

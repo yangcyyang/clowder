@@ -9,9 +9,11 @@ describe('workspace navigate store (F131)', () => {
       workspaceOpenFilePath: null,
       workspaceOpenFileLine: null,
       workspaceWorktreeId: null,
+      workspaceExplicitTargetWorktreeId: null,
       workspaceOpenTabs: [],
       _workspaceFileSetAt: { ts: 0, threadId: null },
       rightPanelMode: 'status',
+      currentProjectPath: 'default',
     });
   });
 
@@ -48,13 +50,25 @@ describe('workspace navigate store (F131)', () => {
   it('setWorkspaceWorktreeId clears file state when switching to a different worktree', () => {
     useChatStore.getState().setWorkspaceOpenFile('src/app.ts', 10, 'cat-cafe');
     expect(useChatStore.getState().workspaceOpenFilePath).toBe('src/app.ts');
+    expect(useChatStore.getState().workspaceExplicitTargetWorktreeId).toBe('cat-cafe');
 
     useChatStore.getState().setWorkspaceWorktreeId('cat-cafe-runtime');
 
     const state = useChatStore.getState();
     expect(state.workspaceWorktreeId).toBe('cat-cafe-runtime');
+    expect(state.workspaceExplicitTargetWorktreeId).toBeNull();
     expect(state.workspaceOpenFilePath).toBeNull();
     expect(state.workspaceOpenTabs).toEqual([]);
+  });
+
+  it('tracks only an explicitly targeted file and clears the target on a normal project switch', () => {
+    useChatStore.setState({ currentProjectPath: '/workspace/project-a' });
+    useChatStore.getState().setWorkspaceOpenFile('docs/notes.md', null, 'project-a');
+    expect(useChatStore.getState().workspaceExplicitTargetWorktreeId).toBe('project-a');
+
+    useChatStore.getState().setCurrentProject('/workspace/project-b');
+
+    expect(useChatStore.getState().workspaceExplicitTargetWorktreeId).toBeNull();
   });
 
   it('setWorkspaceOpenFile stamps _workspaceFileSetAt with threadId', () => {
