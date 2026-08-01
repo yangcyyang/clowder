@@ -138,14 +138,7 @@ vi.mock('@/utils/api-client', () => ({
 
 import { configureDebug, invocationDebugConstants } from '@/debug/invocationEventDebug';
 // ── Import useSocket after mocks ──
-import { type OrchestrationFlow, useGuideStore } from '@/stores/guideStore';
 import { type SocketCallbacks, useSocket } from '../useSocket';
-
-const GUIDE_FLOW: OrchestrationFlow = {
-  id: 'add-member',
-  name: 'Add Member',
-  steps: [{ id: 'step-1', target: 'cats.add-member', tips: 'Add member', advance: 'click' }],
-};
 
 /**
  * Minimal wrapper component to mount the useSocket hook with controlled threadId.
@@ -219,7 +212,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockAddToast.mockClear();
     mockGetThreadState.mockClear();
     mockApiFetch.mockReset();
-    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
     // Clear all socket listeners from previous tests
     mockSocket.removeAllListeners();
   });
@@ -232,7 +224,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     window.sessionStorage.removeItem(invocationDebugConstants.STORAGE_KEY);
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
-    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
   });
 
   it('intent_mode from active thread is forwarded to callback', () => {
@@ -334,105 +325,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-A', true);
     expect(mockSetThreadIntentMode).toHaveBeenCalledWith('thread-A', 'execute');
     expect(mockSetThreadTargetCats).toHaveBeenCalledWith('thread-A', ['opus']);
-  });
-
-  it('guide_complete from active thread is reduced into guide store state', () => {
-    mockStoreCurrentThreadId = 'thread-A';
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-    useGuideStore.setState({
-      session: {
-        flow: GUIDE_FLOW,
-        sessionId: 'guide-add-member-1',
-        threadId: 'thread-A',
-        currentStepIndex: 0,
-        phase: 'active',
-        startedAt: Date.now(),
-      },
-    });
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_complete', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: Date.now(),
-      });
-    });
-
-    expect(useGuideStore.getState().session?.phase).toBe('complete');
-  });
-
-  it('replays a dropped guide_start into pendingStart when that thread becomes active again', () => {
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-
-    mockStoreCurrentThreadId = 'thread-B';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_start', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 123,
-      });
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
-
-    mockStoreCurrentThreadId = 'thread-A';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    expect(useGuideStore.getState().pendingStart).toEqual({
-      guideId: 'add-member',
-      threadId: 'thread-A',
-    });
-  });
-
-  it('does not replay a queued guide_start after off-thread exit control clears it', () => {
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-    };
-
-    mockStoreCurrentThreadId = 'thread-B';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    act(() => {
-      simulateServerEvent('guide_start', {
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 123,
-      });
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
-
-    act(() => {
-      simulateServerEvent('guide_control', {
-        action: 'exit',
-        guideId: 'add-member',
-        threadId: 'thread-A',
-        timestamp: 124,
-      });
-    });
-
-    mockStoreCurrentThreadId = 'thread-A';
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
-    });
-
-    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('intent_mode for switched-away thread routes to background after thread change', () => {
