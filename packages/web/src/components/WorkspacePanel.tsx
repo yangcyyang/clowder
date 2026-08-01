@@ -8,6 +8,7 @@ import { useTreeNavigation } from '@/hooks/useTreeNavigation';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useWorkspaceSearch } from '@/hooks/useWorkspaceSearch';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { ensureSocketSession, SOCKET_URL } from '@/utils/socket-url';
 import { RecallFeed } from './memory/RecallFeed';
 import { TaskBoardPanel } from './TaskBoardPanel';
@@ -110,6 +111,82 @@ const MenuIcon = () => (
   </svg>
 );
 
+/**
+ * The linked-roots API only accepts a conservative ASCII identifier. The
+ * directory label plus a stable path hash keeps the persistent root readable
+ * without accumulating a duplicate entry for the same directory.
+ */
+function linkedRootNameForDirectory(directoryPath: string): string {
+  let hash = 2_166_136_261;
+  for (const byte of new TextEncoder().encode(directoryPath)) {
+    hash = Math.imul(hash ^ byte, 16_777_619);
+  }
+  const directoryName = directoryPath.split('/').filter(Boolean).at(-1) ?? 'root';
+  const safeDirectoryName = directoryName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'folder';
+  return `local_md_${safeDirectoryName}_${(hash >>> 0).toString(36)}`;
+}
+
+type LocalMarkdownPath = { directoryPath: string; relativePath: string };
+
+class LocalMarkdownPreviewError extends Error {}
+
+function parseLocalMarkdownPath(filePath: string): LocalMarkdownPath | { error: string } {
+  if (!filePath.startsWith('/')) {
+    return { error: '请输入绝对路径（例如 /Users/name/notes/readme.md）。' };
+  }
+  if (!/\.mdx?$/i.test(filePath)) {
+    return { error: '仅支持 .md 或 .mdx 文件。' };
+  }
+  if (filePath.split('/').some((segment) => segment === '.' || segment === '..')) {
+    return { error: '路径不能包含 . 或 .. 段。' };
+  }
+
+  const slashIndex = filePath.lastIndexOf('/');
+  const directoryPath = filePath.slice(0, slashIndex) || '/';
+  const relativePath = filePath.slice(slashIndex + 1);
+  if (!relativePath || directoryPath === '/') {
+    return { error: '路径格式不正确。' };
+  }
+  return { directoryPath, relativePath };
+}
+
+async function prepareLocalMarkdownPreview(
+  localPath: LocalMarkdownPath,
+  worktrees: Array<{ id: string; root: string }>,
+) {
+  const existingRoot = worktrees.find((worktree) => worktree.root === localPath.directoryPath);
+  let targetWorktreeId = existingRoot?.id;
+  let mountedRoot = false;
+
+  if (!targetWorktreeId) {
+    const rootResponse = await apiFetch('/api/workspace/linked-roots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: linkedRootNameForDirectory(localPath.directoryPath),
+        path: localPath.directoryPath,
+      }),
+    });
+    const rootData = await rootResponse.json().catch(() => ({}));
+    if (!rootResponse.ok || !rootData.linked?.id) {
+      throw new LocalMarkdownPreviewError(`无法挂载文件所在目录：${rootData.error ?? '请求失败'}`);
+    }
+    targetWorktreeId = rootData.linked.id;
+    mountedRoot = true;
+  }
+
+  // Verify through the existing guarded file endpoint before changing the open
+  // tab, so a missing file is reported at the local-path entry.
+  const fileParams = new URLSearchParams({ worktreeId: targetWorktreeId, path: localPath.relativePath });
+  const fileResponse = await apiFetch(`/api/workspace/file?${fileParams}`);
+  const fileData = await fileResponse.json().catch(() => ({}));
+  if (!fileResponse.ok) {
+    throw new LocalMarkdownPreviewError(`无法打开文件：${fileData.error ?? '文件不存在'}`);
+  }
+
+  return { mountedRoot, relativePath: localPath.relativePath, worktreeId: targetWorktreeId };
+}
+
 /* ── Main panel ──────────────────────────────── */
 export function WorkspacePanel() {
   const confirm = useConfirm();
@@ -169,6 +246,9 @@ export function WorkspacePanel() {
   const [previewPort, setPreviewPort] = useState<number | undefined>();
   const [previewPath, setPreviewPath] = useState<string>('/');
   const [focusedPane, setFocusedPane] = useState<'browser' | 'changes' | 'file' | 'git' | 'terminal' | null>(null);
+  const [localMarkdownPath, setLocalMarkdownPath] = useState('');
+  const [localMarkdownError, setLocalMarkdownError] = useState<string | null>(null);
+  const [openingLocalMarkdown, setOpeningLocalMarkdown] = useState(false);
 
   // Keep parent state in sync with BrowserPanel navigation (focus mode state preservation)
   const handleBrowserNavigate = useCallback((port: number, path: string) => {
@@ -233,6 +313,38 @@ export function WorkspacePanel() {
       setEditMode(false);
     },
     [setOpenFile, setSearchResults, setDidSearch, setEditMode],
+  );
+
+  const handleOpenLocalMarkdown = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const localPath = parseLocalMarkdownPath(localMarkdownPath.trim());
+      if ('error' in localPath) {
+        setLocalMarkdownError(localPath.error);
+        return;
+      }
+
+      setOpeningLocalMarkdown(true);
+      setLocalMarkdownError(null);
+      try {
+        const target = await prepareLocalMarkdownPreview(localPath, worktrees);
+        if (target.mountedRoot) void fetchWorktrees();
+
+        setWorkspaceMode('dev');
+        setViewMode('files');
+        setFocusedPane(null);
+        setOpenFile(target.relativePath, null, target.worktreeId);
+        setRightPanelMode('workspace');
+        setLocalMarkdownPath('');
+      } catch (error) {
+        setLocalMarkdownError(
+          error instanceof LocalMarkdownPreviewError ? error.message : '无法连接到工作区服务，请稍后重试。',
+        );
+      } finally {
+        setOpeningLocalMarkdown(false);
+      }
+    },
+    [fetchWorktrees, localMarkdownPath, setOpenFile, setRightPanelMode, setWorkspaceMode, worktrees],
   );
 
   // G7-2: Per-thread expandedPaths cache is now handled inside useTreeNavigation hook.
@@ -455,6 +567,35 @@ export function WorkspacePanel() {
               <CloseIcon />
             </button>
           </div>
+
+          {/* P1: keep arbitrary local-file access behind the linked-root security boundary. */}
+          <form
+            aria-label="打开本地 Markdown 文件"
+            onSubmit={handleOpenLocalMarkdown}
+            className="px-3 py-2 border-b border-[var(--console-border-soft)]"
+          >
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={localMarkdownPath}
+                onChange={(event) => {
+                  setLocalMarkdownPath(event.target.value);
+                  setLocalMarkdownError(null);
+                }}
+                placeholder="打开本地 .md 路径"
+                aria-label="本地 Markdown 文件路径"
+                className="min-w-0 flex-1 rounded-md border border-[var(--console-border-soft)] bg-cafe-surface/80 px-2 py-1 text-[10px] text-cafe-black placeholder:text-cafe-muted focus:border-cafe-accent focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={openingLocalMarkdown}
+                className="console-button-primary px-2 py-1 text-[10px] disabled:opacity-50"
+              >
+                {openingLocalMarkdown ? '打开中...' : '打开'}
+              </button>
+            </div>
+            {localMarkdownError && <div className="mt-1 text-[10px] text-conn-red-text">{localMarkdownError}</div>}
+          </form>
 
           {/* Worktree indicator */}
           {currentWorktree && (
