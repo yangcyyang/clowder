@@ -196,4 +196,9 @@ describe('InlineThreadPanel composer parity with the main channel input', () => 
       Array.from(container.querySelectorAll('label, span')).some((el) => el.textContent?.trim() === 'As Task'),
     ).toBe(false);
   });
+
+  it('does not render the keyboard shortcut hint below the composer', async () => {
+    await mountPanel();
+    expect(container.textContent).not.toContain('Enter 发送 · Shift+Enter 换行');
+  });
 });

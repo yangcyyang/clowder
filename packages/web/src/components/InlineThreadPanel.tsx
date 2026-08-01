@@ -1901,9 +1901,6 @@ export function InlineThreadPanel({
               </div>
             </div>
           </div>
-          <div className="mt-2 flex items-center justify-end">
-            <span className="text-[11px] text-[var(--cafe-text-muted)]">Enter 发送 · Shift+Enter 换行</span>
-          </div>
         </div>
       </aside>
     </div>
