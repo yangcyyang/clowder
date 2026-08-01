@@ -11,7 +11,7 @@
     "prestart": "${NODE:-node} scripts/runtime-preflight.mjs",
     "start": "${NODE:-node} dist/index.js",
     "start:pm2": "${NODE:-node} ../../scripts/live-worktree-build-gate.mjs --artifact dist/index.js -- pnpm run build && pnpm run start",
-    "test": "pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js",
+    "test": "pnpm run test:ci",
     "test:ci": "pnpm run test:lane:contracts && pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && node scripts/run-test-lane.mjs --tier core",
     "test:public": "pnpm run test:ci",
     "test:lane:contracts": "node --test scripts/select-ci-tests.test.mjs scripts/run-test-lane.test.mjs",

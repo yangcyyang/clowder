@@ -169,25 +169,26 @@ describe('POST /api/config/secrets', () => {
     assert.equal(process.env.DINGTALK_APP_SECRET, undefined);
   });
 
-  it('accepts GitHub plugin config keys (GITHUB_TOKEN, NOISE)', async () => {
+  it('accepts the GitHub connector secret and rejects non-secret plugin settings', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/config/secrets',
       headers: { 'x-cat-cafe-user': 'test-user' },
-      payload: {
-        updates: [
-          { name: 'GITHUB_TOKEN', value: 'ghp_test123abc' },
-          { name: 'GITHUB_SETUP_NOISE_BOT_LOGINS', value: 'dependabot[bot]' },
-        ],
-      },
+      payload: { updates: [{ name: 'GITHUB_TOKEN', value: 'ghp_test123abc' }] },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(process.env.GITHUB_TOKEN, 'ghp_test123abc');
-    assert.equal(process.env.GITHUB_SETUP_NOISE_BOT_LOGINS, 'dependabot[bot]');
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/config/secrets',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: { updates: [{ name: 'GITHUB_SETUP_NOISE_BOT_LOGINS', value: 'dependabot[bot]' }] },
+    });
+    assert.equal(rejected.statusCode, 400);
 
     delete process.env.GITHUB_TOKEN;
-    delete process.env.GITHUB_SETUP_NOISE_BOT_LOGINS;
   });
 });

@@ -1,7 +1,7 @@
 // @ci-tier local-os reason="requires POSIX shell stub resolution and filesystem symlinks"
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -64,7 +64,7 @@ function emitKimiEvents(proc, events) {
   proc._emitter.emit('exit', 0, null);
 }
 
-test('yields text, tool_use, inferred session_init, and done on print-mode success', async () => {
+test('yields text, tool_use, inferred session_init, and done on prompt-mode success', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -129,7 +129,7 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     assert.equal(msgs[5].type, 'done');
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--print'));
+    assert.equal(args.includes('--print'), false);
     assert.ok(args.includes('--output-format'));
     assert.ok(args.includes('stream-json'));
     assert.ok(args.includes('--prompt'));
@@ -308,17 +308,12 @@ test('api-key mode normalizes legacy kimi code base url to /coding/v1', async ()
   assert.equal(env.KIMI_BASE_URL, 'https://api.kimi.com/coding/v1');
 });
 
-test('injects cat-cafe MCP config file when callback env is present', async () => {
+test('uses project MCP auto-discovery and forwards callback env', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-mcp-'));
   const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-mcp-'));
-  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-mcp-server-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   try {
     mkdirSync(join(projectDir, '.kimi'), { recursive: true });
@@ -337,8 +332,6 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
       }),
       'utf8',
     );
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
-
     const promise = collect(
       service.invoke('Hello', {
         workingDirectory: projectDir,
@@ -352,44 +345,32 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
       }),
     );
     const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpFlagIndex = args.indexOf('--mcp-config-file');
-    assert.ok(mcpFlagIndex >= 0);
-    const mcpPath = args[mcpFlagIndex + 1];
-    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    assert.ok(mcpConfig.mcpServers['cat-cafe']);
-    assert.ok(mcpConfig.mcpServers.filesystem);
-    assert.equal(mcpConfig.mcpServers['probe-off'], undefined);
-    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'], undefined);
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].command, 'node');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CLOWDER_API_BEARER_TOKEN, 'api-bearer-123');
+    assert.equal(args.includes('--mcp-config-file'), false);
+    const spawnEnv = spawnFn.mock.calls[0].arguments[2].env;
+    assert.equal(spawnEnv.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
+    assert.equal(spawnEnv.CAT_CAFE_INVOCATION_ID, 'invoke-123');
+    assert.equal(spawnEnv.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
+    assert.equal(spawnEnv.CLOWDER_API_BEARER_TOKEN, 'api-bearer-123');
+    const projectConfig = JSON.parse(readFileSync(join(projectDir, '.kimi', 'mcp.json'), 'utf8'));
+    assert.ok(projectConfig.mcpServers['cat-cafe-collab']);
 
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
     await promise;
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
-    rmSync(mcpServerDir, { recursive: true, force: true });
   }
 });
 
-test('creates Kimi share dir before writing temp MCP config on fresh setups', async () => {
+test('does not pass removed MCP config flags on fresh setups', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kimi-fresh-root-'));
   const shareDir = join(root, 'does-not-exist-yet');
   const projectDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-project-'));
-  const mcpServerDir = mkdtempSync(join(tmpdir(), 'kimi-fresh-mcp-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({
-    spawnFn,
-    model: 'kimi-code/kimi-for-coding',
-    mcpServerPath: join(mcpServerDir, 'index.js'),
-  });
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
 
   try {
-    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
     const promise = collect(
       service.invoke('Hello', {
         workingDirectory: projectDir,
@@ -403,10 +384,8 @@ test('creates Kimi share dir before writing temp MCP config on fresh setups', as
     );
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    const mcpFlagIndex = args.indexOf('--mcp-config-file');
-    assert.ok(mcpFlagIndex >= 0);
-    const mcpPath = args[mcpFlagIndex + 1];
-    assert.ok(readFileSync(mcpPath, 'utf8').includes('cat-cafe'));
+    assert.equal(args.includes('--mcp-config-file'), false);
+    assert.equal(args.includes('--work-dir'), false);
 
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
     const msgs = await promise;
@@ -414,7 +393,6 @@ test('creates Kimi share dir before writing temp MCP config on fresh setups', as
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
-    rmSync(mcpServerDir, { recursive: true, force: true });
   }
 });
 
@@ -500,7 +478,7 @@ test('enables thinking mode, parses think blocks, and grants image directories t
     assert.match(msgs[2].content, /图片路径提示/);
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--thinking'));
+    assert.equal(args.includes('--thinking'), false);
     const addDirIndex = args.indexOf('--add-dir');
     assert.ok(addDirIndex >= 0);
     assert.equal(args[addDirIndex + 1], uploadDir);

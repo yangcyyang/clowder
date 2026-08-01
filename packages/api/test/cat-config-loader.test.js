@@ -806,8 +806,10 @@ describe('F32-b: getDefaultCatId', () => {
     // Make opus-45 the default and give it a custom catId
     cfg.breeds[0].defaultVariantId = 'opus-45';
     const saved = process.env.CAT_TEMPLATE_PATH;
+    const savedDefault = process.env.DEFAULT_CAT_ID;
     const path = writeTempConfig(cfg);
     process.env.CAT_TEMPLATE_PATH = path;
+    delete process.env.DEFAULT_CAT_ID;
     _resetCachedConfig();
     try {
       const id = getDefaultCatId();
@@ -817,6 +819,11 @@ describe('F32-b: getDefaultCatId', () => {
         delete process.env.CAT_TEMPLATE_PATH;
       } else {
         process.env.CAT_TEMPLATE_PATH = saved;
+      }
+      if (savedDefault === undefined) {
+        delete process.env.DEFAULT_CAT_ID;
+      } else {
+        process.env.DEFAULT_CAT_ID = savedDefault;
       }
       _resetCachedConfig();
     }

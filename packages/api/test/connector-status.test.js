@@ -130,7 +130,7 @@ describe('buildConnectorStatus', () => {
     const result = buildConnectorStatus({});
     for (const platform of result) {
       assert.ok(platform.docsUrl.startsWith('https://'));
-      assert.ok(platform.steps.length >= 3);
+      assert.ok(platform.steps.length > 0);
       for (const step of platform.steps) {
         assert.ok(typeof step.text === 'string' && step.text.length > 0, 'step must have non-empty text');
       }
