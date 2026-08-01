@@ -26,6 +26,15 @@ const EMPTY_CONFIG: PermissionConfig = {
   allowedGroups: [],
 };
 
+function normalizePermissionConfig(value: Partial<PermissionConfig> | null | undefined): PermissionConfig {
+  return {
+    whitelistEnabled: value?.whitelistEnabled === true,
+    commandAdminOnly: value?.commandAdminOnly === true,
+    adminOpenIds: Array.isArray(value?.adminOpenIds) ? value.adminOpenIds : [],
+    allowedGroups: Array.isArray(value?.allowedGroups) ? value.allowedGroups : [],
+  };
+}
+
 export interface HubPermissionsTabHandle {
   getConfig(): PermissionConfig;
   applyConfig(c: PermissionConfig): void;
@@ -50,8 +59,8 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
     try {
       const res = await apiFetch(`/api/connector/permissions/${connectorId}`);
       if (res.ok) {
-        const data = await res.json();
-        setConfig(data);
+        const data = (await res.json()) as Partial<PermissionConfig>;
+        setConfig(normalizePermissionConfig(data));
       }
     } catch {
       // Permission store may not be available
@@ -71,7 +80,7 @@ const HubPermissionsTab = forwardRef<HubPermissionsTabHandle, HubPermissionsTabP
         return config;
       },
       applyConfig(c: PermissionConfig) {
-        setConfig(c);
+        setConfig(normalizePermissionConfig(c));
       },
     }),
     [config],
