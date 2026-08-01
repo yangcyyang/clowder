@@ -21,7 +21,10 @@ import pino from 'pino';
 export const isDebugMode = process.argv.includes('--debug');
 const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
 const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
-const RETENTION_FILES = 14;
+export const LOG_ROLL_LIMIT = {
+  count: 13,
+  removeOtherLogFiles: true,
+} as const;
 
 /**
  * Pino redaction paths — masks values at these JSON paths.
@@ -69,7 +72,7 @@ const stream =
               file: resolve(LOG_DIR, 'api.log'),
               frequency: 'daily',
               dateFormat: 'yyyy-MM-dd',
-              limit: { count: RETENTION_FILES },
+              limit: LOG_ROLL_LIMIT,
               mkdir: true,
             },
             level: 'trace',
