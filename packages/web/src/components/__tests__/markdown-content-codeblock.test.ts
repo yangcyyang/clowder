@@ -47,13 +47,14 @@ describe('MarkdownContent file path linking', () => {
     expect(html).toContain('text-[var(--color-cafe-accent)]');
   });
 
-  it('renders relative paths as styled span when PROJECT_ROOT is not set', () => {
+  it('renders relative paths as workspace links when PROJECT_ROOT is not set', () => {
     // Bare path (not in backticks) for linkifyFilePaths to detect
     const html = render('Check packages/web/src/app/page.tsx:10 for the fix');
-    // Without PROJECT_ROOT, relative paths become styled <span>, not <a> links
+    // A missing VSCode root must not prevent regular workspace opening.
     expect(html).toContain('packages/web/src/app/page.tsx:10');
     expect(html).not.toContain('vscode://file');
-    expect(html).toContain('text-[var(--color-cafe-accent)]');
+    expect(html).toContain('markdown-file-link');
+    expect(html).toContain('href="#"');
   });
 
   it('renders plain generated filenames as local file shortcuts', () => {

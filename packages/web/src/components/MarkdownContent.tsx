@@ -169,19 +169,20 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
 /* ── File path → VSCode link ──────────────────────────────── */
 const PROJECT_ROOT = process.env.NEXT_PUBLIC_PROJECT_ROOT ?? '';
-const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\w.@-]+)+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
-const REL_PATH_RE = /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::(\d+))?)(?:`?)/g;
+const FILE_PATH_RE = /(?:^|\s)`?((?:\/[\p{L}\p{M}\p{N}_.@-]+)+(?:\.[\p{L}\p{M}\p{N}_]+)(?::(\d+))?)(?:`?)/gu;
+const REL_PATH_RE =
+  /(?:^|\s)`?((?:packages|src|docs|tests?)\/[\p{L}\p{M}\p{N}_./@-]+(?:\.[\p{L}\p{M}\p{N}_]+)(?::(\d+))?)(?:`?)/gu;
 const INLINE_FILE_PATH_RE =
-  /^(?:\/[\w.@-]+)+(?:\.[\w]+)(?::\d+)?$|^(?:packages|src|docs|tests?)\/[\w./@-]+(?:\.[\w]+)(?::\d+)?$/;
+  /^(?:\/[\p{L}\p{M}\p{N}_.@-]+)+(?:\.[\p{L}\p{M}\p{N}_]+)(?::\d+)?$|^(?:packages|src|docs|tests?)\/[\p{L}\p{M}\p{N}_./@-]+(?:\.[\p{L}\p{M}\p{N}_]+)(?::\d+)?$/u;
 const TASK_REF_RE = /(^|[\s（(「『【[])(task\s+#(\d+))(?![\w-])/giu;
 const WT_TAG_RE = /^\s*\[wt:([a-zA-Z0-9_/-]+)\]/;
 const LOCAL_FILE_NAME_RE =
   /(?:^|[\s（(「『【[])(`?)([^`"'<>/\\|:：\s]+(?:[\s-][^`"'<>/\\|:：\s]+)*\.(?:html?|mdx?|pdf|pptx?|docx?|xlsx?|txt|json|png|jpe?g|svg|webp))(`?)(?=$|[\s，。；;、）)」』】\].,!?！？])/giu;
 
-function linkifyFilePaths(text: string): ReactNode[] {
+export function linkifyFilePaths(text: string, projectRoot = PROJECT_ROOT): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIdx = 0;
-  const combined = new RegExp(`${FILE_PATH_RE.source}|${REL_PATH_RE.source}`, 'g');
+  const combined = new RegExp(`${FILE_PATH_RE.source}|${REL_PATH_RE.source}`, 'gu');
   let m: RegExpExecArray | null;
 
   combined.lastIndex = 0;
@@ -204,16 +205,16 @@ function linkifyFilePaths(text: string): ReactNode[] {
     const display = path;
     const isAbsolute = path.startsWith('/');
     const filePath = path.split(':')[0];
-    const absPath = isAbsolute ? filePath : PROJECT_ROOT ? `${PROJECT_ROOT}/${filePath}` : null;
-    const href = absPath ? `vscode://file${absPath}${line ? `:${line}` : ''}` : null;
+    const absPath = isAbsolute ? filePath : projectRoot ? `${projectRoot}/${filePath}` : null;
+    const vscodeHref = absPath ? `vscode://file${absPath}${line ? `:${line}` : ''}` : undefined;
 
     parts.push(
-      href ? (
+      vscodeHref || !isAbsolute ? (
         <FilePathLink
           key={`fp${m.index}`}
           display={display}
-          href={href}
-          filePath={filePath!}
+          vscodeHref={vscodeHref}
+          filePath={filePath}
           line={line ? parseInt(line, 10) : undefined}
           worktreeId={worktreeId}
         />
@@ -249,13 +250,13 @@ function isInlineFilePath(children: ReactNode): boolean {
 /** F063: File path link — click opens in workspace panel, Cmd/Ctrl+click opens in VSCode */
 function FilePathLink({
   display,
-  href,
+  vscodeHref,
   filePath,
   line,
   worktreeId,
 }: {
   display: string;
-  href: string;
+  vscodeHref?: string;
   filePath: string;
   line?: number;
   worktreeId?: string;
@@ -265,20 +266,25 @@ function FilePathLink({
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       // Cmd/Ctrl+click → VSCode (default link behavior)
-      if (e.metaKey || e.ctrlKey) return;
+      if (e.metaKey || e.ctrlKey) {
+        // A relative path can still open in the workspace before its project
+        // root is configured, but it has no safe VSCode target yet.
+        if (!vscodeHref) e.preventDefault();
+        return;
+      }
       e.preventDefault();
       // Regular click → open in workspace panel (with optional worktree switch)
       setOpenFile(filePath, line ?? null, worktreeId ?? null);
     },
-    [setOpenFile, filePath, line, worktreeId],
+    [setOpenFile, filePath, line, worktreeId, vscodeHref],
   );
 
   return (
     <a
-      href={href}
+      href={vscodeHref ?? '#'}
       onClick={handleClick}
       className="markdown-file-link text-[var(--color-cafe-accent)] hover:opacity-80 hover:underline font-mono text-[0.85em] cursor-pointer"
-      title={`点击在工作区中查看 · Cmd+Click 打开 VSCode\n${display}`}
+      title={vscodeHref ? `点击在工作区中查看 · Cmd+Click 打开 VSCode\n${display}` : `点击在工作区中查看\n${display}`}
     >
       {display}
     </a>

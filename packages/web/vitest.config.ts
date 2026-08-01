@@ -2,6 +2,9 @@ import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Vite 8 defaults to OXC, which ignores the JSX options below and breaks
+  // existing TSX component tests. Keep Vitest on the established esbuild path.
+  oxc: false,
   esbuild: {
     jsx: 'automatic',
     jsxImportSource: 'react',

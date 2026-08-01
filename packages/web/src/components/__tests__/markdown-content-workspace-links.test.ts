@@ -91,9 +91,10 @@ describe('MarkdownContent workspace link rendering', () => {
     expect(html).toContain('https://github.com');
   });
 
-  it('renders relative md link as external when no basePath', () => {
+  it('renders relative md link as styled text when no basePath', () => {
     const html = render('[Feature spec](features/F046.md)');
-    expect(html).toContain('target="_blank"');
+    expect(html).not.toContain('target="_blank"');
     expect(html).not.toContain('在工作区中打开');
+    expect(html).toContain('text-[var(--color-cafe-accent)]');
   });
 });
