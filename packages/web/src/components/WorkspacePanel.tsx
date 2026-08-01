@@ -603,6 +603,7 @@ export function WorkspacePanel() {
               <SearchIcon />
               <input
                 type="text"
+                aria-label="工作区搜索"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);

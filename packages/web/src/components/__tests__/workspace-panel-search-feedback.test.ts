@@ -140,7 +140,7 @@ describe('WorkspacePanel search feedback', () => {
       root.render(React.createElement(WorkspacePanel));
     });
 
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const input = container.querySelector('input[aria-label="工作区搜索"]') as HTMLInputElement;
     expect(input).not.toBeNull();
 
     await act(async () => {
@@ -149,7 +149,7 @@ describe('WorkspacePanel search feedback', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    const form = container.querySelector('form');
+    const form = input.closest('form');
     expect(form).not.toBeNull();
 
     await act(async () => {
@@ -186,13 +186,13 @@ describe('WorkspacePanel search feedback', () => {
     });
 
     // Submit a search to set internal didSearch=true
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const input = container.querySelector('input[aria-label="工作区搜索"]') as HTMLInputElement;
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
       valueSetter?.call(input, '猫');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const form = container.querySelector('form');
+    const form = input.closest('form');
     await act(async () => {
       form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
