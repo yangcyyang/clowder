@@ -282,7 +282,7 @@ function FilePathLink({
   const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
 
   const handleClick = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       // Cmd/Ctrl+click → VSCode (default link behavior)
       if (e.metaKey || e.ctrlKey) {
         // A relative path can still open in the workspace before its project
@@ -291,8 +291,36 @@ function FilePathLink({
         return;
       }
       e.preventDefault();
-      // Regular click → open in workspace panel (with optional worktree switch)
-      setOpenFile(filePath, line ?? null, worktreeId ?? null);
+      // A known worktree (or an absolute path) can open directly. For an
+      // unscoped relative path, resolve its basename first so the first click
+      // selects the owning worktree and does not lose the pending file while
+      // the workspace panel initializes.
+      if (worktreeId || filePath.startsWith('/')) {
+        setOpenFile(filePath, line ?? null, worktreeId ?? null);
+        return;
+      }
+
+      const fileName = filePath.split(/[\\/]/u).pop() ?? filePath;
+      try {
+        const response = await apiFetch('/api/workspace/resolve-local-file', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ fileName }),
+        });
+        if (response.ok) {
+          const data = (await response.json()) as { results?: ResolvedLocalFile[] };
+          const matches = data.results ?? [];
+          const match = matches.find((candidate) => candidate.path === filePath) ?? matches[0];
+          if (match) {
+            setOpenFile(match.path, line ?? null, match.worktreeId);
+            return;
+          }
+        }
+      } catch {
+        // Keep the pre-existing current-worktree fallback on lookup failure.
+      }
+
+      setOpenFile(filePath, line ?? null, null);
     },
     [setOpenFile, filePath, line, worktreeId, vscodeHref],
   );

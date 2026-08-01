@@ -2,13 +2,17 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { setWorkspaceOpenFile } = vi.hoisted(() => {
-  return { setWorkspaceOpenFile: vi.fn() };
+const { apiFetchMock, setWorkspaceOpenFile } = vi.hoisted(() => {
+  return { apiFetchMock: vi.fn(), setWorkspaceOpenFile: vi.fn() };
 });
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (state: { setWorkspaceOpenFile: typeof setWorkspaceOpenFile }) => unknown) =>
     selector({ setWorkspaceOpenFile }),
+}));
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: apiFetchMock,
 }));
 
 import { linkifyFilePaths, MarkdownContent } from '../MarkdownContent';
@@ -28,6 +32,10 @@ describe('MarkdownContent file path links', () => {
   });
 
   beforeEach(() => {
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -67,6 +75,12 @@ describe('MarkdownContent file path links', () => {
 
   it('keeps a backtick-wrapped Chinese Markdown path clickable with the existing file-code style', async () => {
     const path = 'docs/个人内容资产操作系统-落地执行方案-v1.md';
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [{ worktreeId: 'resolved-notes', path, root: '/workspace' }],
+      }),
+    });
     await render(`请阅读 \`${path}\``);
 
     const code = container.querySelector<HTMLElement>('code.markdown-file-code');
@@ -74,10 +88,18 @@ describe('MarkdownContent file path links', () => {
     expect(link?.textContent).toBe(path);
 
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
-    const allowed = link?.dispatchEvent(event);
+    let allowed: boolean | undefined;
+    await act(async () => {
+      allowed = link?.dispatchEvent(event);
+    });
 
     expect(allowed).toBe(false);
-    expect(setWorkspaceOpenFile).toHaveBeenCalledWith(path, null, null);
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/workspace/resolve-local-file', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fileName: '个人内容资产操作系统-落地执行方案-v1.md' }),
+    });
+    expect(setWorkspaceOpenFile).toHaveBeenCalledWith(path, null, 'resolved-notes');
   });
 
   it('keeps a configured Chinese relative path on the existing VSCode and workspace interaction', async () => {
