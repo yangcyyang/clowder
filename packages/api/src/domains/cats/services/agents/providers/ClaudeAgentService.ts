@@ -50,6 +50,10 @@ const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
 const ANTHROPIC_PROFILE_BASE_URL = 'CAT_CAFE_ANTHROPIC_BASE_URL';
 const ANTHROPIC_MODEL_OVERRIDE_KEY = 'CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE';
+// Give a newly spawned CLI enough time to emit system/init before the
+// compatibility path writes stdin. A shorter parent-side timer can beat a
+// child Node process that is still starting under load.
+const CLAUDE_STDIN_INIT_FALLBACK_MS = 5_000;
 
 function isKnownAnthropicModel(model: string): boolean {
   return model.startsWith('claude-');
@@ -400,7 +404,7 @@ export class ClaudeAgentService implements AgentService {
         runtimeSteerInitialPromptTimer = setTimeout(() => {
           runtimeSteerInitialPromptTimer = undefined;
           sendRuntimeSteerInitialPrompt();
-        }, 250);
+        }, CLAUDE_STDIN_INIT_FALLBACK_MS);
       };
 
       const cliOpts = {

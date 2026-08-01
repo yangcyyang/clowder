@@ -455,7 +455,7 @@ process.stdin.on('data', (chunk) => {
 setTimeout(() => {
   console.error('NO_STDIN_FALLBACK');
   process.exit(9);
-}, 2000);
+}, 8000);
 `,
   );
   chmodSync(fakeClaude, 0o755);
@@ -517,7 +517,7 @@ process.stdin.on('end', () => {
 setTimeout(() => {
   console.error('NO_STDIN_END_AFTER_RESULT');
   process.exit(9);
-}, 1000);
+}, 8000);
 `,
   );
   chmodSync(fakeClaude, 0o755);
