@@ -77,10 +77,32 @@ export function useWorkspace() {
       const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
       if (res.ok) {
         const data = await res.json();
-        const newList: typeof worktrees = data.worktrees ?? [];
+        let newList: WorktreeEntry[] = data.worktrees ?? [];
+        let currentStillExists = Boolean(worktreeId && newList.some((w) => w.id === worktreeId));
+
+        // A file-path link may explicitly target a worktree outside the current
+        // project's scoped list. Keep that target available while the file is
+        // open instead of immediately replacing it with the scoped default.
+        if (!currentStillExists && worktreeId && openFilePath && qs) {
+          try {
+            const allRes = await apiFetch('/api/workspace/worktrees');
+            if (allRes.ok) {
+              const allData = await allRes.json();
+              const explicitTarget = ((allData.worktrees ?? []) as WorktreeEntry[]).find(
+                (worktree) => worktree.id === worktreeId,
+              );
+              if (explicitTarget) {
+                newList = [explicitTarget, ...newList.filter((worktree) => worktree.id !== explicitTarget.id)];
+                currentStillExists = true;
+              }
+            }
+          } catch {
+            /* fall back to the scoped worktree list */
+          }
+        }
+
         setWorktrees(newList);
         // Auto-select first worktree if none selected or current was removed
-        const currentStillExists = worktreeId && newList.some((w: { id: string }) => w.id === worktreeId);
         if (!currentStillExists && newList.length > 0) {
           setWorktreeId(newList[0].id);
         }
@@ -88,7 +110,7 @@ export function useWorkspace() {
     } catch {
       /* ignore */
     }
-  }, [worktreeId, setWorktreeId, projectPath]);
+  }, [worktreeId, openFilePath, setWorktreeId, projectPath]);
 
   useEffect(() => {
     fetchWorktrees();
