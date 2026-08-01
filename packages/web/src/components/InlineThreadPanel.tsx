@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { isCommandInvocation } from '@/hooks/useChatCommands';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
 import type { CatStatusType, InvocationPhase } from '@/stores/chat-types';
@@ -627,6 +628,7 @@ export function InlineThreadPanel({
   onReplyCountChange,
 }: InlineThreadPanelProps) {
   const { cats } = useCatData();
+  const ime = useIMEGuard();
   const threadRuntime = useChatStore((state) => state.threadStates[threadId]);
   const [panelWidth, setPanelWidth, resetPanelWidth] = usePersistedState(
     'cat-cafe:inlineThreadPanelWidth:v2',
@@ -1345,6 +1347,8 @@ export function InlineThreadPanel({
 
   const handleInputKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (ime.isComposing()) return;
+
       if (showSlashCommands) {
         if (event.key === 'ArrowDown') {
           event.preventDefault();
@@ -1407,6 +1411,7 @@ export function InlineThreadPanel({
       handleSend,
       insertMention,
       insertSlashCommand,
+      ime,
       mentionSelectedIdx,
       showMentionPicker,
       showSlashCommands,
@@ -1782,6 +1787,8 @@ export function InlineThreadPanel({
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
+              onCompositionStart={ime.onCompositionStart}
+              onCompositionEnd={ime.onCompositionEnd}
               onPaste={handleImagePaste}
               placeholder="Message thread"
               rows={2}
