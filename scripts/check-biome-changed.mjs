@@ -16,13 +16,23 @@ function runGit(args, options = {}) {
   });
 }
 
-export function resolveDiffBase(candidate, { cwd = process.cwd() } = {}) {
+export function resolveDiffBase(candidate, { cwd = process.cwd(), git = runGit } = {}) {
   if (candidate && !ZERO_SHA_RE.test(candidate)) {
-    const probe = runGit(['cat-file', '-e', `${candidate}^{commit}`], { cwd });
+    const probe = git(['cat-file', '-e', `${candidate}^{commit}`], { cwd });
     if (probe.status === 0) return candidate;
   }
 
-  const parentProbe = runGit(['rev-parse', '--verify', 'HEAD^'], { cwd });
+  const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], { cwd });
+  const fallbackRefs = [upstream.status === 0 ? upstream.stdout.trim() : '', 'origin/HEAD', 'origin/main', 'main'];
+  for (const ref of fallbackRefs) {
+    if (!ref) continue;
+    const probe = git(['cat-file', '-e', `${ref}^{commit}`], { cwd });
+    if (probe.status !== 0) continue;
+    const mergeBase = git(['merge-base', 'HEAD', ref], { cwd });
+    if (mergeBase.status === 0 && mergeBase.stdout.trim()) return mergeBase.stdout.trim();
+  }
+
+  const parentProbe = git(['rev-parse', '--verify', 'HEAD^'], { cwd });
   if (parentProbe.status !== 0) {
     throw new Error('cannot resolve CI diff base; fetch history or provide CI_BASE_SHA');
   }

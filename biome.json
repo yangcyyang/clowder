@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!gitnexus"]
+    "includes": ["**", "!gitnexus", "!cat-cafe-skills/external/**"]
   },
   "formatter": {
     "enabled": true,

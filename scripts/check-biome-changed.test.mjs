@@ -3,9 +3,18 @@ import { describe, it } from 'node:test';
 import { buildBiomeArgs, filterBiomeCandidates, resolveDiffBase } from './check-biome-changed.mjs';
 
 describe('CI changed-file Biome gate', () => {
-  it('falls back from an all-zero GitHub before SHA to HEAD parent', () => {
-    const base = resolveDiffBase('0000000000000000000000000000000000000000');
-    assert.match(base, /^[0-9a-f]{40}$/);
+  it('prefers the repository merge base over HEAD parent when the explicit SHA is all-zero', () => {
+    const git = (args) => {
+      const command = args.join(' ');
+      if (command === 'rev-parse --abbrev-ref --symbolic-full-name @{upstream}') {
+        return { status: 1, stdout: '' };
+      }
+      if (command === 'cat-file -e origin/HEAD^{commit}') return { status: 0, stdout: '' };
+      if (command === 'merge-base HEAD origin/HEAD') return { status: 0, stdout: `${'a'.repeat(40)}\n` };
+      return { status: 1, stdout: '' };
+    };
+
+    assert.equal(resolveDiffBase('0000000000000000000000000000000000000000', { git }), 'a'.repeat(40));
   });
 
   it('keeps project files while excluding external skill links and other symlinks', () => {
