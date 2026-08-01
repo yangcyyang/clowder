@@ -107,7 +107,7 @@ describe('InlineThreadPanel IME guard', () => {
     );
   }
 
-  it('does not send while an IME composition consumes Enter or Space, then sends Enter after composition ends', async () => {
+  it('does not send while an IME composition consumes Enter or Space, including Chrome compositionend timing', async () => {
     await mountPanel();
     apiFetchMock.mockClear();
 
@@ -124,6 +124,13 @@ describe('InlineThreadPanel IME guard', () => {
 
     await act(async () => {
       textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      // Chrome fires this final Enter after compositionend but before the next animation frame.
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+
+    expect(sentMessageRequests()).toHaveLength(0);
+
+    await act(async () => {
       for (const callback of animationFrames.values()) callback(performance.now());
       animationFrames.clear();
     });

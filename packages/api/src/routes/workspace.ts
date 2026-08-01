@@ -26,6 +26,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import {
   addLinkedRoot,
   getLinkedRootsAsync,
+  getRegisteredWorktrees,
   getWorktreeRoot,
   isDenylisted,
   listWorktrees,
@@ -33,6 +34,7 @@ import {
   removeLinkedRoot,
   resolveWorkspacePath,
   WorkspaceSecurityError,
+  type WorktreeEntry,
 } from '../domains/workspace/workspace-security.js';
 
 const execFileAsync = promisify(execFile);
@@ -42,6 +44,7 @@ const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
 const MAX_CONTENT_SEARCH_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per searchable text file
 const MAX_FILENAME_RESOLVE_RESULTS = 20;
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx']);
 
 const CONTENT_SEARCH_EXTENSIONS = new Set([
   '.ts',
@@ -124,6 +127,105 @@ interface ResolvedLocalFile {
   path: string;
   root: string;
   mtimeMs: number;
+}
+
+interface AuthorizedMarkdownTarget {
+  worktreeId: string;
+  path: string;
+}
+
+class LocalMarkdownPathError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: 400 | 403 | 404,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'LocalMarkdownPathError';
+  }
+}
+
+function isMarkdownPath(path: string): boolean {
+  return MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+function validateLocalMarkdownPath(path: string | undefined): string {
+  const requestedPath = path?.trim();
+  if (!requestedPath) {
+    throw new LocalMarkdownPathError('path is required', 400);
+  }
+  if (!isAbsoluteFilesystemPath(requestedPath)) {
+    throw new LocalMarkdownPathError('path must be absolute', 400);
+  }
+  if (requestedPath.split(/[\\/]/).some((segment) => segment === '.' || segment === '..')) {
+    throw new LocalMarkdownPathError('path must not contain dot segments', 400);
+  }
+
+  const absolutePath = resolve(requestedPath);
+  if (!isMarkdownPath(absolutePath)) {
+    throw new LocalMarkdownPathError('only .md and .mdx files are supported', 400);
+  }
+  return absolutePath;
+}
+
+function findContainingWorkspaceRoot(roots: WorktreeEntry[], absolutePath: string) {
+  return roots
+    .map((entry) => ({ entry, relativePath: relative(entry.root, absolutePath) }))
+    .filter(
+      ({ relativePath }) =>
+        relativePath && !relativePath.startsWith(`..${sep}`) && relativePath !== '..' && !isAbsolute(relativePath),
+    )
+    .sort((a, b) => b.entry.root.length - a.entry.root.length)[0];
+}
+
+async function resolveAuthorizedMarkdownTarget(requestedPath: string | undefined): Promise<AuthorizedMarkdownTarget> {
+  const absolutePath = validateLocalMarkdownPath(requestedPath);
+  const [worktrees, linkedRoots] = await Promise.all([listWorktrees().catch(() => []), getLinkedRootsAsync()]);
+  const roots = [...worktrees, ...linkedRoots, ...getRegisteredWorktrees()];
+  registerWorktrees(roots);
+
+  const match = findContainingWorkspaceRoot(roots, absolutePath);
+  if (!match) {
+    throw new LocalMarkdownPathError(
+      'path is not inside a registered workspace or linked root',
+      403,
+      'PATH_NOT_AUTHORIZED',
+    );
+  }
+
+  const relativePath = normalizeWorkspaceRelativePath(match.relativePath);
+  const resolvedPath = await resolveWorkspacePath(match.entry.root, relativePath);
+  const fileStat = await stat(resolvedPath);
+  if (!fileStat.isFile()) {
+    throw new LocalMarkdownPathError('path is not a file', 400);
+  }
+  if (!isMarkdownPath(resolvedPath)) {
+    throw new LocalMarkdownPathError('only .md and .mdx files are supported', 400);
+  }
+
+  return { worktreeId: match.entry.id, path: relativePath };
+}
+
+function toLocalMarkdownErrorResponse(error: unknown): {
+  statusCode: number;
+  body: { error: string; code?: string };
+} {
+  if (error instanceof LocalMarkdownPathError) {
+    return {
+      statusCode: error.statusCode,
+      body: { error: error.message, ...(error.code ? { code: error.code } : {}) },
+    };
+  }
+  if (error instanceof WorkspaceSecurityError) {
+    return {
+      statusCode: error.code === 'NOT_FOUND' ? 404 : 403,
+      body: { error: error.message, code: error.code },
+    };
+  }
+  if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    return { statusCode: 404, body: { error: 'File not found' } };
+  }
+  return { statusCode: 500, body: { error: 'Internal error' } };
 }
 
 async function listWorkspaceFiles(root: string): Promise<string[]> {
@@ -398,6 +500,22 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       }
       reply.status(500);
       return { error: 'Internal error' };
+    }
+  });
+
+  // POST /api/workspace/resolve-local-markdown-path — map an absolute Markdown path
+  // to an already-authorized workspace root. This deliberately does not create a
+  // linked root: linking a directory is a persistent permission change and must stay
+  // behind the explicit LinkedRootsManager action.
+  app.post<{
+    Body: { path?: string };
+  }>('/api/workspace/resolve-local-markdown-path', async (request, reply) => {
+    try {
+      return await resolveAuthorizedMarkdownTarget(request.body?.path);
+    } catch (error) {
+      const response = toLocalMarkdownErrorResponse(error);
+      reply.status(response.statusCode);
+      return response.body;
     }
   });
 

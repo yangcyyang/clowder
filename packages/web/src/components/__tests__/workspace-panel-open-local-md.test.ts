@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -173,6 +175,13 @@ describe('WorkspacePanel local Markdown path entry', () => {
     expect(container.textContent).toContain('仅支持 .md 或 .mdx 文件。');
   });
 
+  it('treats uppercase Markdown extensions as rendered Markdown files', async () => {
+    const { isMarkdownFilePath } = await import('@/components/WorkspacePanel');
+
+    expect(isMarkdownFilePath('README.MD')).toBe(true);
+    expect(isMarkdownFilePath('guide.MDX')).toBe(true);
+  });
+
   it('rejects dot path segments before they can widen the linked root', async () => {
     setupMocks();
     await renderPanel();
@@ -188,14 +197,12 @@ describe('WorkspacePanel local Markdown path entry', () => {
     expect(container.textContent).toContain('路径不能包含 . 或 .. 段。');
   });
 
-  it('mounts the parent as a linked root and opens its relative Markdown path', async () => {
+  it('opens an authorized local Markdown file without persisting a linked root', async () => {
     const { fetchWorktrees, setOpenFile, setRightPanelMode, setWorkspaceMode } = setupMocks();
-    mocks.apiFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ linked: { id: 'linked_notes', root: '/Users/cy/notes' } }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({ path: 'guide.mdx' }) });
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ worktreeId: 'linked_notes', path: 'guide.mdx' }),
+    });
     await renderPanel();
 
     const input = container.querySelector('input[aria-label="本地 Markdown 文件路径"]') as HTMLInputElement;
@@ -205,19 +212,14 @@ describe('WorkspacePanel local Markdown path entry', () => {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
 
-    expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
-    const [, rootRequest] = mocks.apiFetch.mock.calls[0];
-    expect(mocks.apiFetch).toHaveBeenNthCalledWith(
-      1,
-      '/api/workspace/linked-roots',
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    const [, previewRequest] = mocks.apiFetch.mock.calls[0];
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      '/api/workspace/resolve-local-markdown-path',
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(JSON.parse((rootRequest as RequestInit).body as string)).toEqual({
-      name: expect.stringMatching(/^local_md_notes_[a-z0-9]+$/),
-      path: '/Users/cy/notes',
-    });
-    expect(mocks.apiFetch).toHaveBeenNthCalledWith(2, '/api/workspace/file?worktreeId=linked_notes&path=guide.mdx');
-    expect(fetchWorktrees).toHaveBeenCalledOnce();
+    expect(JSON.parse((previewRequest as RequestInit).body as string)).toEqual({ path: '/Users/cy/notes/guide.mdx' });
+    expect(fetchWorktrees).not.toHaveBeenCalled();
     expect(setOpenFile).toHaveBeenCalledWith('guide.mdx', null, 'linked_notes');
     expect(setWorkspaceMode).toHaveBeenCalledWith('dev');
     expect(setRightPanelMode).toHaveBeenCalledWith('workspace');
@@ -225,12 +227,7 @@ describe('WorkspacePanel local Markdown path entry', () => {
 
   it('keeps a missing file in the path entry and shows the API error', async () => {
     setupMocks();
-    mocks.apiFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ linked: { id: 'linked_notes', root: '/Users/cy/notes' } }),
-      })
-      .mockResolvedValueOnce({ ok: false, json: vi.fn().mockResolvedValue({ error: 'File not found' }) });
+    mocks.apiFetch.mockResolvedValueOnce({ ok: false, json: vi.fn().mockResolvedValue({ error: 'File not found' }) });
     await renderPanel();
 
     const input = container.querySelector('input[aria-label="本地 Markdown 文件路径"]') as HTMLInputElement;
@@ -241,5 +238,27 @@ describe('WorkspacePanel local Markdown path entry', () => {
     });
 
     expect(container.textContent).toContain('无法打开文件：File not found');
+  });
+
+  it('explains how to authorize a local path instead of creating a linked root implicitly', async () => {
+    setupMocks();
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: false,
+      json: vi.fn().mockResolvedValue({ code: 'PATH_NOT_AUTHORIZED', error: 'not authorized' }),
+    });
+    await renderPanel();
+
+    const input = container.querySelector('input[aria-label="本地 Markdown 文件路径"]') as HTMLInputElement;
+    const form = container.querySelector('form[aria-label="打开本地 Markdown 文件"]') as HTMLFormElement;
+    await act(async () => {
+      setInputValue(input, '/Users/cy/private/guide.md');
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      '/api/workspace/resolve-local-markdown-path',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(container.textContent).toContain('请先通过 Link external folder 主动授权目录。');
   });
 });

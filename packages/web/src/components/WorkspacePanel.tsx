@@ -111,22 +111,7 @@ const MenuIcon = () => (
   </svg>
 );
 
-/**
- * The linked-roots API only accepts a conservative ASCII identifier. The
- * directory label plus a stable path hash keeps the persistent root readable
- * without accumulating a duplicate entry for the same directory.
- */
-function linkedRootNameForDirectory(directoryPath: string): string {
-  let hash = 2_166_136_261;
-  for (const byte of new TextEncoder().encode(directoryPath)) {
-    hash = Math.imul(hash ^ byte, 16_777_619);
-  }
-  const directoryName = directoryPath.split('/').filter(Boolean).at(-1) ?? 'root';
-  const safeDirectoryName = directoryName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'folder';
-  return `local_md_${safeDirectoryName}_${(hash >>> 0).toString(36)}`;
-}
-
-type LocalMarkdownPath = { directoryPath: string; relativePath: string };
+type LocalMarkdownPath = { path: string };
 
 class LocalMarkdownPreviewError extends Error {}
 
@@ -141,50 +126,38 @@ function parseLocalMarkdownPath(filePath: string): LocalMarkdownPath | { error: 
     return { error: '路径不能包含 . 或 .. 段。' };
   }
 
-  const slashIndex = filePath.lastIndexOf('/');
-  const directoryPath = filePath.slice(0, slashIndex) || '/';
-  const relativePath = filePath.slice(slashIndex + 1);
-  if (!relativePath || directoryPath === '/') {
+  if (filePath === '/') {
     return { error: '路径格式不正确。' };
   }
-  return { directoryPath, relativePath };
+  return { path: filePath };
 }
 
-async function prepareLocalMarkdownPreview(
-  localPath: LocalMarkdownPath,
-  worktrees: Array<{ id: string; root: string }>,
-) {
-  const existingRoot = worktrees.find((worktree) => worktree.root === localPath.directoryPath);
-  let targetWorktreeId = existingRoot?.id;
-  let mountedRoot = false;
-
-  if (!targetWorktreeId) {
-    const rootResponse = await apiFetch('/api/workspace/linked-roots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: linkedRootNameForDirectory(localPath.directoryPath),
-        path: localPath.directoryPath,
-      }),
-    });
-    const rootData = await rootResponse.json().catch(() => ({}));
-    if (!rootResponse.ok || !rootData.linked?.id) {
-      throw new LocalMarkdownPreviewError(`无法挂载文件所在目录：${rootData.error ?? '请求失败'}`);
+async function prepareLocalMarkdownPreview(localPath: LocalMarkdownPath) {
+  const response = await apiFetch('/api/workspace/resolve-local-markdown-path', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(localPath),
+  });
+  const data = (await response.json().catch(() => ({}))) as {
+    code?: string;
+    error?: string;
+    path?: string;
+    worktreeId?: string;
+  };
+  if (!response.ok || !data.worktreeId || !data.path) {
+    if (data.code === 'PATH_NOT_AUTHORIZED') {
+      throw new LocalMarkdownPreviewError(
+        '该文件不在当前工作区或已连接文件夹中。请先通过 Link external folder 主动授权目录。',
+      );
     }
-    targetWorktreeId = rootData.linked.id;
-    mountedRoot = true;
+    throw new LocalMarkdownPreviewError(`无法打开文件：${data.error ?? '请求失败'}`);
   }
 
-  // Verify through the existing guarded file endpoint before changing the open
-  // tab, so a missing file is reported at the local-path entry.
-  const fileParams = new URLSearchParams({ worktreeId: targetWorktreeId, path: localPath.relativePath });
-  const fileResponse = await apiFetch(`/api/workspace/file?${fileParams}`);
-  const fileData = await fileResponse.json().catch(() => ({}));
-  if (!fileResponse.ok) {
-    throw new LocalMarkdownPreviewError(`无法打开文件：${fileData.error ?? '文件不存在'}`);
-  }
+  return { relativePath: data.path, worktreeId: data.worktreeId };
+}
 
-  return { mountedRoot, relativePath: localPath.relativePath, worktreeId: targetWorktreeId };
+export function isMarkdownFilePath(filePath: string | null): boolean {
+  return !!filePath && /\.mdx?$/i.test(filePath);
 }
 
 /* ── Main panel ──────────────────────────────── */
@@ -327,8 +300,7 @@ export function WorkspacePanel() {
       setOpeningLocalMarkdown(true);
       setLocalMarkdownError(null);
       try {
-        const target = await prepareLocalMarkdownPreview(localPath, worktrees);
-        if (target.mountedRoot) void fetchWorktrees();
+        const target = await prepareLocalMarkdownPreview(localPath);
 
         setWorkspaceMode('dev');
         setViewMode('files');
@@ -344,7 +316,7 @@ export function WorkspacePanel() {
         setOpeningLocalMarkdown(false);
       }
     },
-    [fetchWorktrees, localMarkdownPath, setOpenFile, setRightPanelMode, setWorkspaceMode, worktrees],
+    [localMarkdownPath, setOpenFile, setRightPanelMode, setWorkspaceMode],
   );
 
   // G7-2: Per-thread expandedPaths cache is now handled inside useTreeNavigation hook.
@@ -481,7 +453,7 @@ export function WorkspacePanel() {
     [createFile, createDir, deleteItem, renameItem, uploadFile, fetchTree, setOpenFile, closeTab, confirm],
   );
 
-  const isMarkdown = !!(openFilePath && (openFilePath.endsWith('.md') || openFilePath.endsWith('.mdx')));
+  const isMarkdown = isMarkdownFilePath(openFilePath);
   const isHtml = !!(openFilePath && /\.html?$/i.test(openFilePath));
   const isJsx = !!(openFilePath && /\.[jt]sx$/i.test(openFilePath));
 
@@ -568,7 +540,7 @@ export function WorkspacePanel() {
             </button>
           </div>
 
-          {/* P1: keep arbitrary local-file access behind the linked-root security boundary. */}
+          {/* 绝对路径只解析到已授权根目录，绝不隐式写入 linked-roots 配置。 */}
           <form
             aria-label="打开本地 Markdown 文件"
             onSubmit={handleOpenLocalMarkdown}
@@ -582,7 +554,7 @@ export function WorkspacePanel() {
                   setLocalMarkdownPath(event.target.value);
                   setLocalMarkdownError(null);
                 }}
-                placeholder="打开本地 .md 路径"
+                placeholder="打开已授权的本地 .md 路径"
                 aria-label="本地 Markdown 文件路径"
                 className="min-w-0 flex-1 rounded-md border border-[var(--console-border-soft)] bg-cafe-surface/80 px-2 py-1 text-[10px] text-cafe-black placeholder:text-cafe-muted focus:border-cafe-accent focus:outline-none"
               />

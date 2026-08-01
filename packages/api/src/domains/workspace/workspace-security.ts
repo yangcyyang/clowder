@@ -10,15 +10,20 @@ const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
 const DENYLIST_DIRS = new Set(['.git', 'secrets']);
 
 /**
- * In-memory registry: worktreeId → absolute root path.
+ * In-memory registry: worktreeId → authorized workspace entry.
  * Populated when /api/workspace/worktrees lists foreign repos.
  * Allows getWorktreeRoot to resolve foreign worktrees without repoRoot.
  */
-const worktreeRegistry = new Map<string, string>();
+const worktreeRegistry = new Map<string, WorktreeEntry>();
 
 /** Register worktree entries so getWorktreeRoot can resolve them later. */
 export function registerWorktrees(entries: WorktreeEntry[]): void {
-  for (const e of entries) worktreeRegistry.set(e.id, e.root);
+  for (const entry of entries) worktreeRegistry.set(entry.id, entry);
+}
+
+/** Return the workspaces that the current API process has already authorized. */
+export function getRegisteredWorktrees(): WorktreeEntry[] {
+  return [...worktreeRegistry.values()];
 }
 
 export class WorkspaceSecurityError extends Error {
@@ -159,8 +164,8 @@ export async function getWorktreeRoot(worktreeId: string, repoRoot?: string): Pr
   if (linkedEntry) return linkedEntry.root;
 
   // Check in-memory registry (populated by /worktrees?repoRoot= calls)
-  const registeredRoot = worktreeRegistry.get(worktreeId);
-  if (registeredRoot) return registeredRoot;
+  const registeredEntry = worktreeRegistry.get(worktreeId);
+  if (registeredEntry) return registeredEntry.root;
 
   throw new WorkspaceSecurityError(`Worktree not found: ${worktreeId}`, 'NOT_FOUND');
 }
@@ -180,8 +185,8 @@ export async function resolveWorktreeIdByPath(dirPath: string, repoRoot?: string
   const linkedEntry = linked.find((r) => r.root === resolved);
   if (linkedEntry) return linkedEntry.id;
 
-  for (const [id, root] of worktreeRegistry.entries()) {
-    if (root === resolved) return id;
+  for (const entry of worktreeRegistry.values()) {
+    if (entry.root === resolved) return entry.id;
   }
 
   throw new WorkspaceSecurityError(`No worktree found for path: ${dirPath}`, 'NOT_FOUND');
