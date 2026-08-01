@@ -71,6 +71,12 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
       if (url === '/api/services') {
         return Promise.resolve(jsonResponse({ services: [] }));
       }
+      if (url === '/api/connector/permissions/feishu') {
+        return Promise.resolve(
+          jsonResponse({ whitelistEnabled: false, commandAdminOnly: false, adminOpenIds: [], allowedGroups: [] }),
+        );
+      }
+      expect(url).toBe('/api/connector/status');
       statusCallCount += 1;
       if (statusCallCount === 1) {
         return Promise.resolve(
