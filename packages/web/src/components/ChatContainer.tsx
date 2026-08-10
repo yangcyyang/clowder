@@ -866,7 +866,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             onPinMessage={setPinnedMessage}
             onEditMessage={handleStartEditMessage}
             canConvertToTask={canConvertToTask}
-            getCatById={getCatById}
           >
             <ChatMessage
               message={msg}

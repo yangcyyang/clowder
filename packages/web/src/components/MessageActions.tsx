@@ -7,9 +7,9 @@ import { useMessageSelectionStore } from '@/stores/messageSelectionStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-import { buildMessageMarkdownQuote, resolveMessageAuthorLabel } from '@/utils/message-markdown';
-import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
+import { getAgentVisibleContent } from '@/utils/chat-message-visibility';
 import { getDefaultReactionEmojis, hasUserReaction, toggleMessageReaction } from '@/utils/message-reactions';
+import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -58,9 +58,6 @@ interface MessageActionsProps {
    * inside a branch thread by construction.
    */
   canConvertToTask?: boolean;
-  /** Cat display-name lookup for the "Copy Markdown" author header. Optional — falls back to
-   * the raw catId (or '你' for user messages) when not provided. */
-  getCatById?: (catId: string) => { displayName: string } | undefined;
 }
 
 export function MessageActions({
@@ -71,7 +68,6 @@ export function MessageActions({
   onPinMessage,
   onEditMessage,
   canConvertToTask = true,
-  getCatById,
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -215,15 +211,14 @@ export function MessageActions({
   }, [message.id, threadId]);
 
   const handleCopyMarkdown = useCallback(async () => {
-    const author = resolveMessageAuthorLabel(message, getCatById);
-    const quote = buildMessageMarkdownQuote({ author, timestamp: message.timestamp, content: message.content });
+    const content = isAssistant ? getAgentVisibleContent(message) : message.content;
     try {
-      await navigator.clipboard.writeText(quote);
+      await navigator.clipboard.writeText(content);
       useToastStore.getState().addToast({ type: 'success', title: 'Markdown 已复制', message: '', duration: 1400 });
     } catch {
       useToastStore.getState().addToast({ type: 'error', title: '复制失败', message: '请手动复制内容', duration: 2400 });
     }
-  }, [getCatById, message]);
+  }, [isAssistant, message]);
 
   const handleSelectMessage = useCallback(() => {
     startSelection(threadId, message.id);

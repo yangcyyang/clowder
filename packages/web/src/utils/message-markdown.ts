@@ -1,10 +1,8 @@
 'use client';
 
 /**
- * Shared "Copy Markdown" quote-block formatting for the Raft-parity message context menu
- * (MessageContextMenu.tsx) — used both for a single message's "Copy Markdown" action and for
- * MessageSelectionBar's bulk copy of a multi-select. Kept as pure, dependency-free functions so
- * both call sites (and their tests) stay simple.
+ * Shared "Copy Markdown" quote-block formatting for MessageSelectionBar's multi-select copy.
+ * Kept as pure, dependency-free functions so the selection path and its tests stay simple.
  */
 
 export interface MessageMarkdownQuoteInput {

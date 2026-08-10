@@ -1588,7 +1588,7 @@ export function InlineThreadPanel({
                     `parentThreadId: sourceMessage.threadId ?? threadId`), not this branch —
                     Copy Link/Save/Delete must operate against parentThreadId or they'd
                     target/link to the wrong thread. */}
-                <MessageActions message={sourceMessage} threadId={parentThreadId} canConvertToTask={false} getCatById={getCatById}>
+                <MessageActions message={sourceMessage} threadId={parentThreadId} canConvertToTask={false}>
                   <ChatMessage
                     message={sourceMessage}
                     getCatById={getCatById}
@@ -1622,7 +1622,7 @@ export function InlineThreadPanel({
                         : ''
                     }`}
                   >
-                    <MessageActions message={msg} threadId={threadId} canConvertToTask={false} getCatById={getCatById}>
+                    <MessageActions message={msg} threadId={threadId} canConvertToTask={false}>
                       <ChatMessage
                         message={msg}
                         getCatById={getCatById}

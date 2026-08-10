@@ -76,7 +76,7 @@ describe('MessageActions — Raft-parity context menu wiring', () => {
     id: 'msg-1',
     type: 'assistant' as const,
     catId: 'codex',
-    content: '第一行\n第二行',
+    content: '## 标题\n\n- 第一项\n- 第二项\n[model=gpt-5.6]',
     timestamp: new Date('2026-07-25T14:50:00').getTime(),
   };
 
@@ -135,12 +135,12 @@ describe('MessageActions — Raft-parity context menu wiring', () => {
     expect(writeTextMock).toHaveBeenCalledWith(`${window.location.origin}/thread/thread-1?highlight=msg-1`);
   });
 
-  it('Copy Markdown copies an author + timestamp quote block, resolving the author via getCatById', async () => {
-    await openContextMenu({ getCatById: (id) => (id === 'codex' ? { displayName: 'Codex' } : undefined) });
+  it('Copy Markdown copies only the visible Markdown content', async () => {
+    await openContextMenu();
     await act(async () => {
       findMenuItem('Copy Markdown')?.click();
     });
-    expect(writeTextMock).toHaveBeenCalledWith('> **Codex** · 07/25 14:50\n> 第一行\n> 第二行');
+    expect(writeTextMock).toHaveBeenCalledWith('## 标题\n\n- 第一项\n- 第二项');
   });
 
   it('Save Message toggles to Unsave Message and back through repeated menu opens', async () => {
