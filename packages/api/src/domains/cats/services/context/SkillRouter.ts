@@ -477,10 +477,11 @@ export function loadSkillRouterCatalog(): SkillRouterCatalogEntry[] {
 
   try {
     const entries = mergeSkillEntries([
+      // External links are lowest priority: they must not shadow personal or native skills.
+      ...loadExternalSkillDirectoryEntries(),
       ...loadPersonalIndexEntries(),
       ...loadExternalManifestEntries(manifestPath),
       ...loadRepoManifestEntries(),
-      ...loadExternalSkillDirectoryEntries(),
     ]);
 
     catalogCache = { cacheKey, entries };

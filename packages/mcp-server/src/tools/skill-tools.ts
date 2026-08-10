@@ -5,7 +5,7 @@
  * 这里保留一份只读 catalog loader，读取同一份 skills-manifest.json。
  */
 
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +63,12 @@ type RepoSkillManifest = {
 };
 
 type RepoSkillManifestEntry = {
+  description?: unknown;
+  triggers?: unknown;
+};
+
+type SkillFrontmatter = {
+  name?: unknown;
   description?: unknown;
   triggers?: unknown;
 };
@@ -140,6 +146,17 @@ function toStringList(value: unknown): string[] {
     return trimmed ? [trimmed] : [];
   }
   return [];
+}
+
+function parseSkillFrontmatter(content: string): SkillFrontmatter {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match?.[1]) return {};
+  try {
+    const parsed = parseYaml(match[1]) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as SkillFrontmatter) : {};
+  } catch {
+    return {};
+  }
 }
 
 function splitCsv(value: string | undefined, fallback: string[]): string[] {
@@ -297,6 +314,44 @@ function loadRepoManifestEntries(): SkillRouterCatalogEntry[] {
     .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
 }
 
+function listExternalSkillDirs(): string[] {
+  const externalRoot = resolve(resolveRepoSkillRoot(), 'external');
+  try {
+    return readdirSync(externalRoot, { withFileTypes: true })
+      .filter((entry) => !entry.name.startsWith('.') && (entry.isDirectory() || entry.isSymbolicLink()))
+      .map((entry) => resolve(externalRoot, entry.name))
+      .filter((dirPath) => existsSync(resolve(dirPath, 'SKILL.md')));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeExternalSkillEntry(sourcePath: string): SkillRouterCatalogEntry | null {
+  const content = readSkillContent(sourcePath);
+  if (!content) return null;
+
+  const frontmatter = parseSkillFrontmatter(content);
+  const dirName = dirname(sourcePath).split('/').pop() ?? '';
+  const name = typeof frontmatter.name === 'string' && frontmatter.name.trim() ? frontmatter.name.trim() : dirName;
+  return makeCatalogEntry({
+    id: `external:${name}`,
+    name,
+    description: typeof frontmatter.description === 'string' ? flattenText(frontmatter.description) : name,
+    triggers: skillTriggers(frontmatter.triggers, name),
+    riskLevel: 'external',
+    sourcePath,
+    content,
+    // External skills are query-discoverable but do not flood the default menu.
+    menuVisible: false,
+  });
+}
+
+function loadExternalSkillDirectoryEntries(): SkillRouterCatalogEntry[] {
+  return listExternalSkillDirs()
+    .map((dirPath) => normalizeExternalSkillEntry(resolve(dirPath, 'SKILL.md')))
+    .filter((entry): entry is SkillRouterCatalogEntry => Boolean(entry));
+}
+
 function resolvePersonalIndexPath(): string {
   const raw = process.env['CAT_CAFE_PERSONAL_SKILL_INDEX_PATH']?.trim() || DEFAULT_PERSONAL_SKILL_INDEX_PATH;
   const expanded = expandTildePath(raw, process.env['HOME'] ?? process.env['USERPROFILE'] ?? homedir());
@@ -319,6 +374,13 @@ function fileFingerprint(path: string): string {
   }
 }
 
+function externalSkillDirFingerprint(): string {
+  return listExternalSkillDirs()
+    .map((dirPath) => `${dirPath}:${fileFingerprint(resolve(dirPath, 'SKILL.md'))}`)
+    .sort()
+    .join('|');
+}
+
 function skillCatalogCacheKey(manifestPath: string, repoManifestPath: string): string {
   const personalEnabled = isTruthyEnv(process.env['CAT_CAFE_PERSONAL_SKILLS_ENABLED']);
   const personalIndexPath = resolvePersonalIndexPath();
@@ -335,6 +397,7 @@ function skillCatalogCacheKey(manifestPath: string, repoManifestPath: string): s
       process.env['CAT_CAFE_PERSONAL_SKILL_VISIBLE_NAMES'],
       DEFAULT_PERSONAL_SKILL_VISIBLE_NAMES,
     ).sort(),
+    externalSkillDir: externalSkillDirFingerprint(),
   });
 }
 
@@ -387,6 +450,8 @@ function loadSkillCatalog(): SkillRouterCatalogEntry[] {
   }
 
   const entries = mergeSkillEntries([
+    // External links are lowest priority: they must not shadow personal or native skills.
+    ...loadExternalSkillDirectoryEntries(),
     ...loadPersonalIndexEntries(),
     ...loadExternalManifestEntries(manifestPath),
     ...loadRepoManifestEntries(),
