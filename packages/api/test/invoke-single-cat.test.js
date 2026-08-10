@@ -2742,6 +2742,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // This is the ACTUAL message invoke-single-cat receives after formatCliExitError propagates reasonCode
     const taggedMsg = 'Codex CLI: CLI 异常退出 (code: 1, signal: none) [missing_rollout]';
     assert.equal(classifyResumeFailure(taggedMsg), 'missing_session');
+    assert.equal(
+      classifyResumeFailure('Kimi CLI: CLI 异常退出 (code: 1, signal: none) [missing_session]'),
+      'missing_session',
+    );
     // Priority: isMissingClaudeSessionError must win over isTransientCliExitCode1 for tagged messages
     const { isMissingClaudeSessionError, isTransientCliExitCode1 } = await import(
       '../dist/domains/cats/services/agents/invocation/invoke-helpers.js'
@@ -2853,6 +2857,60 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'stale-session bootstrap error should be suppressed when retry succeeds',
     );
     assert.ok(sessionStores.includes('new-sess'), 'new session should be stored after recovery');
+  });
+
+  it('session self-heal: drops a stale Kimi session after a tagged resume failure', async () => {
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push({ ...options });
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'kimi',
+            error: 'Kimi CLI: CLI 异常退出 (code: 1, signal: none) [missing_session]',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'kimi', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'kimi', sessionId: 'fresh-kimi-session', timestamp: Date.now() };
+        yield { type: 'text', catId: 'kimi', content: 'Kimi recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'kimi', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'stale-kimi-session',
+      store: async () => {},
+      delete: async (userId, catId, threadId) => {
+        sessionDeletes.push(`${userId}:${catId}:${threadId}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'kimi',
+        service,
+        prompt: 'test',
+        systemPrompt: 'You are Kimi',
+        userId: 'user-kimi-retry',
+        threadId: 'thread-kimi-retry',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 2);
+    assert.equal(optionsSeen[0].sessionId, 'stale-kimi-session');
+    assert.equal(optionsSeen[1].sessionId, undefined, 'fresh retry must not reuse the stale Kimi session');
+    assert.equal(optionsSeen[1].systemPrompt, 'You are Kimi', 'fresh retry must restore the system prompt');
+    assert.deepEqual(sessionDeletes, ['user-kimi-retry:kimi:thread-kimi-retry']);
+    assert.ok(msgs.some((msg) => msg.type === 'text' && msg.content === 'Kimi recovered'));
+    assert.equal(msgs.some((msg) => msg.type === 'error'), false, 'recovered invocation must suppress bootstrap error');
   });
 
   it('F118 P2-fix: self-heal retry clears cliSessionId from baseOptions', async () => {

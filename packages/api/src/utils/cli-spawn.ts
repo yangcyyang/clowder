@@ -21,7 +21,7 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout';
+type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout' | 'missing_session';
 
 function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined {
   if (/Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i.test(stderr)) {
@@ -29,6 +29,9 @@ function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined 
   }
   if (/no rollout found/i.test(stderr)) {
     return 'missing_rollout';
+  }
+  if (/Session\s+["'][^"']+["']\s+(?:not found|was created under a different directory)\b/i.test(stderr)) {
+    return 'missing_session';
   }
   return undefined;
 }

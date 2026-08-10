@@ -484,6 +484,28 @@ test('spawnCli marks no rollout found stderr as missing_rollout reasonCode', asy
   assert.equal(results[0].reasonCode, 'missing_rollout');
 });
 
+test('spawnCli marks recoverable Kimi resume stderr as missing_session reasonCode', async () => {
+  const stderrCases = [
+    'error: failed to run prompt: Session "stale-kimi-session" not found.\n',
+    'Session "stale-kimi-session" was created under a different directory.\n',
+  ];
+
+  for (const stderr of stderrCases) {
+    const proc = createMockProcess({ exitOnKill: false });
+    const spawnFn = createMockSpawnFn(proc);
+    const promise = collect(spawnCli({ command: 'kimi', args: ['--session', 'stale-kimi-session'] }, { spawnFn }));
+
+    proc.stderr.write(stderr);
+    proc.stdout.end();
+    proc._emitter.emit('exit', 1, null);
+
+    const results = await promise;
+    assert.equal(results.length, 1);
+    assert.equal(isCliError(results[0]), true);
+    assert.equal(results[0].reasonCode, 'missing_session');
+  }
+});
+
 test('formatCliExitError propagates reasonCode into message string', async () => {
   const { formatCliExitError } = await import('../dist/utils/cli-format.js');
 
