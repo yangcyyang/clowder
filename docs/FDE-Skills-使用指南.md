@@ -95,7 +95,7 @@ shadow-work → psf-screening → mvd-validation → deployment-activation
 
 ## 维护说明
 
-- **来源书**：`/Users/cy/Documents/03 life/AI design/FDE/books/fde-skill/`（完整产物 + INDEX.md + 提取候选单元）
+- **来源书**：本机 FDE books 根目录下的 `fde-skill/`（完整产物 + INDEX.md + 提取候选单元）
 - **安装目录**：`cat-cafe-skills/<skill-name>/`（SKILL.md + test-prompts.json）
 - **注册文件**：`cat-cafe-skills/manifest.yaml` + `cat-cafe-skills/BOOTSTRAP.md`
 - **增改流程**：改 SKILL.md 后同步 manifest 条目；跑 `test-prompts.json` 验证；新增 skill 记得补 manifest + BOOTSTRAP
