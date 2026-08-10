@@ -38,6 +38,12 @@ describe('A2A routing message persistence (#648)', () => {
       assert.equal(parsed?.systemKind, 'progress_heartbeat');
     });
 
+    it('preserves systemKind: sanity_handoff (#386)', () => {
+      const raw = JSON.stringify({ systemKind: 'sanity_handoff' });
+      const parsed = safeParseExtra(raw);
+      assert.equal(parsed?.systemKind, 'sanity_handoff');
+    });
+
     it('drops unknown systemKind values', () => {
       const raw = JSON.stringify({ systemKind: 'unknown_kind' });
       const parsed = safeParseExtra(raw);

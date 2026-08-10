@@ -11,6 +11,8 @@ function baseShellEnv(overrides = {}) {
     PATH: process.env.PATH ?? '',
     HOME: process.env.HOME ?? '',
     TERM: process.env.TERM ?? 'xterm-256color',
+    // Source-only helper tests must not pay the interactive 5s unpushed-state warning on every case.
+    CAT_CAFE_SKIP_START_PREFLIGHT: '1',
     ...overrides,
   };
 }

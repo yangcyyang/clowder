@@ -83,6 +83,7 @@ test('prefers latest token_count with non-zero rate usage when duplicates exist'
     assert.equal(snapshot.totalInputTokens, 529593);
     assert.equal(snapshot.totalCachedInputTokens, 405760);
     assert.equal(snapshot.totalOutputTokens, 10298);
+    assert.ok(snapshot.sessionFileBytes > 0, 'rollout size should be observed without loading the full file');
     // Must pick the non-zero-rate event reset value (1771482198s).
     assert.equal(snapshot.contextResetsAtMs, 1771482198 * 1000);
   } finally {
