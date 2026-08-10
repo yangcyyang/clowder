@@ -827,6 +827,31 @@ skills:
     merged_from: null
 
   # ── PPT 制作全链路 (F144) ──
+  ppt-agent:
+    description: >
+      PPT 内容规划全链路：Brief 补齐 → 叙事规划 → 页面计划 → 交付给 ppt-forge。
+      模型在规则约束下推理，不用关键词硬编码。
+      Use when: 用户要做 PPT、需要从大纲/资料规划页面结构、需要叙事设计。
+      Not for: 风格定调/HTML 渲染/导出（用 ppt-forge）、纯代码开发。
+      Output: narrative_plan.json + deck.json + 交接包给 ppt-forge。
+    triggers:
+      - "ppt-agent"
+      - "PPT Agent"
+      - "页面计划"
+      - "Brief补齐"
+      - "资料理解"
+      - "叙事规划"
+      - "从大纲生成 PPT"
+      - "PPT蓝图"
+    not_for:
+      - "风格定调"
+      - "HTML 渲染"
+      - "纯代码开发"
+    output: "narrative_plan.json + deck.json + handoff to ppt-forge"
+    next: ["ppt-forge"]
+    sop_step: null
+    merged_from: null
+
   ppt-forge:
     description: >
       PPT 制作全链路：内容规划 → 风格定调 → Slide 制作 → 视觉审查 → 导出验证 → 交付。

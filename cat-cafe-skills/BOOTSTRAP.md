@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（34 个）
+## Skills 列表（35 个）
 
 ### 开发流程链
 ```
@@ -45,6 +45,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
 | `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
 | `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
+| `ppt-agent` | PPT 内容规划：Brief 补齐/叙事规划/页面计划/交接给 ppt-forge | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
 
