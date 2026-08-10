@@ -2910,7 +2910,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[1].systemPrompt, 'You are Kimi', 'fresh retry must restore the system prompt');
     assert.deepEqual(sessionDeletes, ['user-kimi-retry:kimi:thread-kimi-retry']);
     assert.ok(msgs.some((msg) => msg.type === 'text' && msg.content === 'Kimi recovered'));
-    assert.equal(msgs.some((msg) => msg.type === 'error'), false, 'recovered invocation must suppress bootstrap error');
+    assert.equal(
+      msgs.some((msg) => msg.type === 'error'),
+      false,
+      'recovered invocation must suppress bootstrap error',
+    );
   });
 
   it('F118 P2-fix: self-heal retry clears cliSessionId from baseOptions', async () => {

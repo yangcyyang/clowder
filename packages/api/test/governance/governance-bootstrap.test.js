@@ -196,8 +196,8 @@ describe('GovernanceBootstrapService', () => {
   it('treats concurrent creation of the same correct skill symlink as idempotent', async () => {
     const svc = new GovernanceBootstrapService(catCafeRoot);
 
-    await assert.doesNotReject(
-      () => Promise.all(Array.from({ length: 4 }, () => svc.bootstrap(targetProject, { dryRun: false }))),
+    await assert.doesNotReject(() =>
+      Promise.all(Array.from({ length: 4 }, () => svc.bootstrap(targetProject, { dryRun: false }))),
     );
 
     const linkPath = join(targetProject, '.claude', 'skills', 'tdd');

@@ -21,8 +21,8 @@ import {
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getCliEffortOptionsForClient,
-  initialState,
   type HubCatEditorFormState,
+  initialState,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
@@ -1048,7 +1048,10 @@ describe('HubCatEditor', () => {
   });
 
   it('infers Grok instead of silently showing Claude when a legacy member lacks clientId', () => {
-    const state = initialState({ color: { primary: '#111827', secondary: '#f3f4f6' }, defaultModel: 'grok-4.5' } as CatData);
+    const state = initialState({
+      color: { primary: '#111827', secondary: '#f3f4f6' },
+      defaultModel: 'grok-4.5',
+    } as CatData);
 
     expect(state.clientId).toBe('grok');
   });

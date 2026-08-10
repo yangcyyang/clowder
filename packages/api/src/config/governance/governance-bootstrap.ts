@@ -54,8 +54,7 @@ export interface BootstrapOptions {
 
 /** Mirrors governance-preflight's private check — EPERM/EACCES must never be mistaken for "file missing". */
 function isBootstrapPermissionError(err: unknown): boolean {
-  const code =
-    typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
   const message = err instanceof Error ? err.message : String(err ?? '');
   return code === 'EPERM' || code === 'EACCES' || /operation not permitted|permission denied/i.test(message);
 }

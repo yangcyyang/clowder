@@ -116,8 +116,8 @@ describe('Skill Sync Service (ADR-025 Phase 2)', () => {
   });
 
   test('treats concurrent creation of the same correct skill symlink as idempotent', async () => {
-    await assert.doesNotReject(
-      () => Promise.all(Array.from({ length: 4 }, () => syncSkills(projectRoot, skillsSource))),
+    await assert.doesNotReject(() =>
+      Promise.all(Array.from({ length: 4 }, () => syncSkills(projectRoot, skillsSource))),
     );
 
     const linkPath = join(projectRoot, '.claude', 'skills', 'tdd');

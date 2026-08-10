@@ -1,5 +1,6 @@
 'use client';
 
+import { getClientAuthCapabilities } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
@@ -18,11 +19,10 @@ import {
   splitStrengthTags,
   TOOL_POLICY_OPTIONS,
 } from './hub-cat-editor.model';
-import { getClientAuthCapabilities } from '@cat-cafe/shared';
 import { CollapsibleSectionCard, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { MODEL_SOURCE_LABELS, type ModelCandidateSource } from './hub-cat-model-options';
-import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 import { TagEditor } from './hub-tag-editor';
+import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 type AssetBrowseEntry = { name: string; path: string; isDirectory: boolean };

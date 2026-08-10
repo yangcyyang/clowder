@@ -1219,7 +1219,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // that actually confirms a queued message reached a cat, so it's the
         // correct place to retire the "排队中" badge (rather than a timer/guess).
         const updated = msgs.map((m) =>
-          idSet.has(m.id) ? { ...m, deliveredAt, ...(m.deliveryStatus ? { deliveryStatus: 'delivered' as const } : {}) } : m,
+          idSet.has(m.id)
+            ? { ...m, deliveredAt, ...(m.deliveryStatus ? { deliveryStatus: 'delivered' as const } : {}) }
+            : m,
         );
         const insertedIds = new Set<string>();
         const mentionMessages: ChatMessage[] = [];

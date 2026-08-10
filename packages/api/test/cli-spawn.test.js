@@ -1391,9 +1391,7 @@ test('R8-1: idleTimeoutMs=0 (default off) — long silence never triggers the id
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(
-    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 0 }, { spawnFn }),
-  );
+  const promise = collect(spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 0 }, { spawnFn }));
 
   proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
   await new Promise((r) => setImmediate(r));
@@ -1418,9 +1416,7 @@ test('R8-1: idle watchdog kills the child and yields the literal "cli stream idl
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(
-    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
-  );
+  const promise = collect(spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }));
 
   proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
   await new Promise((r) => setImmediate(r));
@@ -1452,9 +1448,7 @@ test('R8-1: stdout heartbeat keeps resetting the idle watchdog — slow-but-aliv
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(
-    spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
-  );
+  const promise = collect(spawnCli({ command: 'codex', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }));
 
   proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
   await new Promise((r) => setImmediate(r));
@@ -1483,9 +1477,7 @@ test('R8-1: stderr heartbeat also resets the idle watchdog (not just stdout)', a
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
 
-  const promise = collect(
-    spawnCli({ command: 'claude', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }),
-  );
+  const promise = collect(spawnCli({ command: 'claude', args: [], timeoutMs: 0, idleTimeoutMs: 5000 }, { spawnFn }));
 
   proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
   await new Promise((r) => setImmediate(r));
@@ -1519,10 +1511,7 @@ test('R8-1: idle watchdog fires even while the CPU-aware probe would classify th
   const spawnFn = createMockSpawnFn(proc);
 
   const promise = collect(
-    spawnCli(
-      { command: 'codex', args: [], timeoutMs: 60 * 60 * 1000, idleTimeoutMs: 300_000 },
-      { spawnFn },
-    ),
+    spawnCli({ command: 'codex', args: [], timeoutMs: 60 * 60 * 1000, idleTimeoutMs: 300_000 }, { spawnFn }),
   );
 
   proc.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\n');
