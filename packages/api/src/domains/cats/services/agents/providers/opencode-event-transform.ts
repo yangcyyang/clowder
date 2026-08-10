@@ -63,7 +63,8 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
         timestamp: ts,
       };
 
-    case 'text': {
+    case 'text':
+    case 'part:text': {
       const text = event.part?.text;
       if (typeof text !== 'string' || text.length === 0) return null;
       return {

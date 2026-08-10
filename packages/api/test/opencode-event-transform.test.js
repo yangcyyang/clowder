@@ -35,6 +35,20 @@ describe('transformOpenCodeEvent', () => {
     assert.strictEqual(result.catId, catId);
   });
 
+  test('maps part:text → text with content', () => {
+    const event = {
+      type: 'part:text',
+      timestamp: 1773304958494,
+      sessionID: 'ses_xxx',
+      part: { type: 'text', text: 'HELLO_PART_TEXT' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.type, 'text');
+    assert.strictEqual(result.content, 'HELLO_PART_TEXT');
+    assert.strictEqual(result.catId, catId);
+  });
+
   // ── tool_use → tool_use ──
   test('maps tool_use → tool_use with toolName and toolInput', () => {
     const event = {
