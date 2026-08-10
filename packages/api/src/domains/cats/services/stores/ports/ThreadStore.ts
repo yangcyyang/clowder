@@ -329,7 +329,7 @@ export interface IThreadStore {
     threadId: string,
     mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
   ): void | Promise<void>;
-  updateLastActive(threadId: string): void | Promise<void>;
+  updateLastActive(threadId: string, at?: number): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
   softDelete(threadId: string): boolean | Promise<boolean>;
@@ -692,10 +692,10 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
-  updateLastActive(threadId: string): void {
+  updateLastActive(threadId: string, at: number = Date.now()): void {
     const thread = this.get(threadId);
     if (thread) {
-      thread.lastActiveAt = Date.now();
+      thread.lastActiveAt = at;
       // Move to end of Map for LRU (delete + re-insert)
       this.threads.delete(threadId);
       this.threads.set(threadId, thread);

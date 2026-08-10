@@ -118,6 +118,17 @@ describe('ThreadStore', () => {
     assert.ok(updated.lastActiveAt >= originalTime);
   });
 
+  test('updateLastActive() accepts an explicit activity timestamp', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Timestamp source');
+
+    store.updateLastActive(thread.id, 1700000000123);
+
+    assert.equal(store.get(thread.id)?.lastActiveAt, 1700000000123);
+  });
+
   test('updateMentionActionabilityMode() stores relaxed and clears on strict', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 

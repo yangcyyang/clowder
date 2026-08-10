@@ -552,8 +552,8 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async updateLastActive(threadId: string): Promise<void> {
-    const now = String(Date.now());
+  async updateLastActive(threadId: string, at: number = Date.now()): Promise<void> {
+    const now = String(at);
     const key = ThreadKeys.detail(threadId);
     const updated = (await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'lastActiveAt', now)) as number;
     if (updated === 0) return;

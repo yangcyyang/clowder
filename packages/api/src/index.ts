@@ -83,6 +83,10 @@ import { createSummaryStore } from './domains/cats/services/stores/factories/Sum
 import { createTaskStore } from './domains/cats/services/stores/factories/TaskStoreFactory.js';
 import { createThreadStore } from './domains/cats/services/stores/factories/ThreadStoreFactory.js';
 import { createWorkflowSopStore } from './domains/cats/services/stores/factories/WorkflowSopStoreFactory.js';
+import {
+  createThreadActivityAppendListener,
+  type ThreadActivityListener,
+} from './domains/cats/services/stores/thread-activity-listener.js';
 import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
 import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
@@ -448,18 +452,16 @@ async function main(): Promise<void> {
     catSupervisor.stop();
   });
 
-  // F102 KD-34: append listener placeholder (wired after memoryServices init)
-  let appendListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
-    null;
-
+  const threadStore = createThreadStore(redis);
+  let memoryAppendListener: ThreadActivityListener | null = null;
   const messageStore = createMessageStore(redis, {
-    onAppend: (msg) => {
-      appendListener?.(msg);
-    },
+    onAppend: createThreadActivityAppendListener({
+      threadStore,
+      onAfterUpdate: (msg) => memoryAppendListener?.(msg),
+    }),
   });
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
-  const threadStore = createThreadStore(redis);
   // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
   const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
   const guideSessionStore = new InMemoryGuideSessionStore();
@@ -723,7 +725,7 @@ async function main(): Promise<void> {
       // F102 KD-34: Wire append listener now that memoryServices is ready.
       // This covers ALL 36 messageStore.append() call sites via the store itself,
       // replacing the old HTTP onResponse hooks that only caught 2 routes.
-      appendListener = (msg) => {
+      memoryAppendListener = (msg) => {
         if (msg.threadId) {
           ib.markThreadDirty(msg.threadId);
           // G-3c P1 fix (砚砚 review): accumulate delta from actual new message,
