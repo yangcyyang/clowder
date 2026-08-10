@@ -124,7 +124,7 @@ describe('FirstRunQuestWizard', () => {
     expect(container.textContent).toContain('暂无可用角色模板');
   });
 
-  it('sends clientId (not client) in POST /api/cats payload', async () => {
+  it('sends the Grok clientId rather than its xAI protocol in POST /api/cats payload', async () => {
     let catsPayload: Record<string, unknown> | null = null;
 
     mockApiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -147,10 +147,10 @@ describe('FirstRunQuestWizard', () => {
         return jsonResponse({
           clients: [
             {
-              client: 'claude',
-              provider: 'anthropic',
-              label: 'Claude',
-              cli: 'claude',
+              client: 'grok',
+              provider: 'xai',
+              label: 'Grok',
+              cli: 'grok',
               installed: true,
               hasApiKey: false,
             },
@@ -161,14 +161,14 @@ describe('FirstRunQuestWizard', () => {
         return jsonResponse({
           providers: [
             {
-              id: 'claude',
-              displayName: 'Claude (OAuth)',
-              name: 'Claude (OAuth)',
-              authType: 'oauth',
+              id: 'grok',
+              displayName: 'Grok (CLI)',
+              name: 'Grok (CLI)',
+              authType: 'api_key',
 
               mode: 'subscription',
-              models: ['claude-opus-4-6'],
-              hasApiKey: false,
+              models: ['grok-4.5'],
+              hasApiKey: true,
               createdAt: '2026-01-01',
               updatedAt: '2026-01-01',
             },
@@ -207,7 +207,7 @@ describe('FirstRunQuestWizard', () => {
     await flushEffects();
 
     // Step 2: select client
-    const clientButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Claude'));
+    const clientButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Grok'));
     expect(clientButton).toBeTruthy();
     await act(async () => {
       clientButton!.click();
@@ -237,7 +237,7 @@ describe('FirstRunQuestWizard', () => {
 
     // Assert: POST /api/cats must use clientId, not client
     expect(catsPayload).not.toBeNull();
-    expect(catsPayload!.clientId).toBe('anthropic');
+    expect(catsPayload!.clientId).toBe('grok');
     expect(catsPayload!.client).toBeUndefined();
   });
 });

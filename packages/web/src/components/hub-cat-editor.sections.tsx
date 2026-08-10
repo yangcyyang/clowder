@@ -18,6 +18,7 @@ import {
   splitStrengthTags,
   TOOL_POLICY_OPTIONS,
 } from './hub-cat-editor.model';
+import { getClientAuthCapabilities } from '@cat-cafe/shared';
 import { CollapsibleSectionCard, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { MODEL_SOURCE_LABELS, type ModelCandidateSource } from './hub-cat-model-options';
 import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
@@ -828,8 +829,9 @@ export function AccountSection({
   onAdoptLocalCli: (probe: LocalCliProbeResult) => void;
 }) {
   const accountOptions = availableProfiles;
+  const requiresAccountBinding = getClientAuthCapabilities(form.clientId).accountBinding === 'required';
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
-  const modelRequired = selectedProfile?.authType === 'api_key';
+  const modelRequired = requiresAccountBinding && selectedProfile?.authType === 'api_key';
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const providerSuggestions = useMemo(() => buildProviderSuggestions(modelOptions), [modelOptions]);
   const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
@@ -843,7 +845,15 @@ export function AccountSection({
           value={form.clientId}
           options={CLIENT_OPTIONS}
           onChange={(value) =>
-            onChange({ clientId: value as HubCatEditorFormState['clientId'], provider: '', cliEffort: '' })
+            onChange({
+              clientId: value as HubCatEditorFormState['clientId'],
+              accountRef:
+                getClientAuthCapabilities(value as HubCatEditorFormState['clientId']).accountBinding === 'required'
+                  ? form.accountRef
+                  : '',
+              provider: '',
+              cliEffort: '',
+            })
           }
           required
         />
@@ -867,28 +877,30 @@ export function AccountSection({
           </>
         ) : (
           <>
-            <SelectField
-              label="认证信息"
-              value={form.accountRef}
-              options={[
-                { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
-                ...accountOptions
-                  .filter((profile) => {
-                    if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
-                    return true;
-                  })
-                  .map((profile) => ({
-                    value: profile.id,
-                    label:
-                      profile.authType === 'oauth'
-                        ? `${profile.displayName}（OAuth）`
-                        : `${profile.displayName}（API Key）`,
-                  })),
-              ]}
-              onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
-              disabled={loadingProfiles}
-              required
-            />
+            {requiresAccountBinding ? (
+              <SelectField
+                label="认证信息"
+                value={form.accountRef}
+                options={[
+                  { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
+                  ...accountOptions
+                    .filter((profile) => {
+                      if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
+                      return true;
+                    })
+                    .map((profile) => ({
+                      value: profile.id,
+                      label:
+                        profile.authType === 'oauth'
+                          ? `${profile.displayName}（OAuth）`
+                          : `${profile.displayName}（API Key）`,
+                    })),
+                ]}
+                onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
+                disabled={loadingProfiles}
+                required
+              />
+            ) : null}
             <ComboField
               label="Model"
               ariaLabel="Model"

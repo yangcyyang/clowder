@@ -299,6 +299,16 @@ function legacyProfileClient(profile: ProfileItem): BuiltinAccountClient | undef
   return undefined;
 }
 
+function inferClientIdFromModel(model: string | undefined): ClientId | undefined {
+  const normalizedModel = model?.trim().toLowerCase() ?? '';
+  if (normalizedModel.includes('grok') || normalizedModel.includes('xai')) return 'grok';
+  if (normalizedModel.includes('claude')) return 'anthropic';
+  if (normalizedModel.includes('gemini')) return 'google';
+  if (normalizedModel.includes('kimi') || normalizedModel.includes('moonshot')) return 'kimi';
+  if (normalizedModel.includes('gpt') || normalizedModel.includes('codex')) return 'openai';
+  return undefined;
+}
+
 function parseHostname(baseUrl: string | undefined): string | null {
   if (!baseUrl) return null;
   try {
@@ -392,7 +402,11 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     assetCardPath: cat?.assetCard?.path ?? '',
-    clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+    clientId:
+      (cat?.clientId as ClientId | undefined) ??
+      createDraft?.clientId ??
+      inferClientIdFromModel(cat?.defaultModel ?? createDraft?.defaultModel) ??
+      'anthropic',
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     toolPolicy: cat?.toolPolicy ?? 'standard',

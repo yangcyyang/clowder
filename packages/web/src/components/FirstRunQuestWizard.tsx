@@ -31,6 +31,9 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
   const [error, setError] = useState<string | null>(null);
   // Track created cat to avoid orphans on thread-creation retry
   const createdCatRef = useRef<{ id: string; name: string } | null>(null);
+  // `provider` is normally the persisted client ID, but Grok uses the xAI
+  // protocol name there. The cats API accepts the CLI identity (`grok`).
+  const selectedClientId = selectedClient?.client === 'grok' ? 'grok' : selectedClient?.provider;
 
   // Reset wizard state when reopening modal
   useEffect(() => {
@@ -101,7 +104,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
               roleDescription: selectedTemplate.roleDescription,
               personality: selectedTemplate.personality,
               teamStrengths: selectedTemplate.teamStrengths,
-              clientId: selectedClient.provider,
+              clientId: selectedClientId,
               accountRef: config.accountRef,
               defaultModel: config.model,
             }),
@@ -148,7 +151,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
         setStep('config');
       }
     },
-    [selectedTemplate, selectedClient, onCreated, refresh],
+    [selectedClient, selectedClientId, selectedTemplate, onCreated, refresh],
   );
 
   if (!open) return null;
@@ -200,11 +203,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           {step === 'template' && <TemplateStep onSelect={handleTemplateSelect} />}
           {step === 'client' && <ClientStep onSelect={handleClientSelect} />}
           {step === 'config' && selectedClient && (
-            <ConfigStep
-              client={selectedClient.client}
-              clientId={selectedClient.provider}
-              onComplete={handleConfigComplete}
-            />
+            <ConfigStep client={selectedClient.client} clientId={selectedClientId} onComplete={handleConfigComplete} />
           )}
           {step === 'creating' && (
             <div className="flex flex-col items-center py-12">

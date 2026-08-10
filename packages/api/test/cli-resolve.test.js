@@ -138,6 +138,30 @@ test(
   },
 );
 
+test(
+  'resolveCliCommand prefers the official Grok managed binary over a PATH collision (Unix)',
+  { skip: process.platform === 'win32' && 'Unix-only Grok managed directory' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-grok-managed-'));
+    const grokBin = join(tempRoot, '.grok', 'bin');
+    mkdirSync(grokBin, { recursive: true });
+    const officialGrok = join(grokBin, 'grok');
+    writeFileSync(officialGrok, '#!/bin/sh\necho "grok 0.2.112"\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRoot;
+      invalidateCliCommand('grok');
+      assert.equal(resolveCliCommand('grok'), officialGrok);
+    } finally {
+      invalidateCliCommand('grok');
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 // --- F173 Phase D AC-D1/D2: cache invalidation on stale entry ---
 
 test(

@@ -21,6 +21,7 @@ import {
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getCliEffortOptionsForClient,
+  initialState,
   type HubCatEditorFormState,
   splitCommandArgs,
   validateModelFormatForClient,
@@ -943,7 +944,7 @@ describe('HubCatEditor', () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it('adopts a scanned Grok CLI with its builtin account and default model', async () => {
+  it('adopts a scanned Grok CLI without forcing a provider binding', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(
@@ -1027,6 +1028,8 @@ describe('HubCatEditor', () => {
       adoptGrok?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
+    expect(container.textContent).not.toContain('认证信息');
+
     await changeField(queryField(container, 'input[aria-label="Name"]'), '本地 Grok');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '本机 Grok 执行');
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@grok');
@@ -1040,8 +1043,14 @@ describe('HubCatEditor', () => {
     expect(postCall).toBeTruthy();
     const payload = JSON.parse(String(postCall?.[1]?.body));
     expect(payload.clientId).toBe('grok');
-    expect(payload.accountRef).toBe('grok');
+    expect(payload.accountRef).toBeUndefined();
     expect(payload.defaultModel).toBe('grok-4');
+  });
+
+  it('infers Grok instead of silently showing Claude when a legacy member lacks clientId', () => {
+    const state = initialState({ color: { primary: '#111827', secondary: '#f3f4f6' }, defaultModel: 'grok-4.5' } as CatData);
+
+    expect(state.clientId).toBe('grok');
   });
 
   it('AC-C2: defaults API-key member aliases to the selected model name', async () => {

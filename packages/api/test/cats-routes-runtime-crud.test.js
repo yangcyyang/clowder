@@ -505,7 +505,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('POST /api/cats creates a Grok member with the default CLI when the builtin account exists', async () => {
+  it('POST /api/cats creates a Grok CLI member without a provider binding', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
     writeFileSync(
@@ -548,7 +548,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           mentionPatterns: ['@runtime-grok'],
           roleDescription: 'Grok CLI runtime member',
           clientId: 'grok',
-          accountRef: 'grok',
           defaultModel: 'grok-4.5',
         }),
       });
@@ -556,7 +555,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       assert.equal(createRes.statusCode, 201);
       const created = JSON.parse(createRes.body).cat;
       assert.equal(created.clientId, 'grok');
-      assert.equal(created.accountRef, 'grok');
+      assert.equal(created.accountRef, undefined);
       assert.equal(created.defaultModel, 'grok-4.5');
       assert.equal(created.cli.command, 'grok');
       assert.equal(created.cli.outputFormat, 'streaming-json');
@@ -564,7 +563,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
       const variant = catalog.breeds.find((breed) => breed.catId === 'runtime-grok')?.variants?.[0];
       assert.equal(variant.clientId, 'grok');
-      assert.equal(variant.accountRef, 'grok');
+      assert.equal(variant.accountRef, undefined);
       assert.equal(variant.defaultModel, 'grok-4.5');
       assert.equal(variant.cli.command, 'grok');
       assert.equal(variant.cli.outputFormat, 'streaming-json');

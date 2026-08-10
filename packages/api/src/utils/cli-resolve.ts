@@ -91,6 +91,19 @@ export function resolveCliCommand(command: string): string | null {
     }
   }
 
+  // Grok's official installer owns ~/.grok/bin. Prefer that provider-managed
+  // binary over PATH: the npm ecosystem also contains unrelated `grok` CLIs
+  // with incompatible flags, which would otherwise pass a version probe and
+  // fail only after a cat is created.
+  if (!IS_WINDOWS && command === 'grok') {
+    const home = process.env.HOME ?? '';
+    const managedGrok = home ? resolve(home, '.grok', 'bin', 'grok') : '';
+    if (managedGrok && existsSync(managedGrok)) {
+      resolvedCache.set(command, managedGrok);
+      return managedGrok;
+    }
+  }
+
   // Fast path: already in PATH
   try {
     const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;

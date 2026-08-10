@@ -27,6 +27,7 @@ import {
   toStrategyForm,
   withDefaultModelMentionPattern,
 } from './hub-cat-editor.model';
+import { getClientAuthCapabilities } from '@cat-cafe/shared';
 import { AccountSection, IdentitySection, MoreSettingsSection, RoutingSection } from './hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
@@ -324,8 +325,7 @@ export function HubCatEditor({
   }, [cat, open, showCodexSettings]);
 
   useEffect(() => {
-    if (form.clientId === 'antigravity') {
-      setForm((prev) => (prev.accountRef === '' ? prev : { ...prev, accountRef: '' }));
+    if (getClientAuthCapabilities(form.clientId).accountBinding !== 'required') {
       return;
     }
     setForm((prev) => {
@@ -537,9 +537,13 @@ export function HubCatEditor({
     const availableForClient = filterAccounts(probe.clientId, profiles);
     const preferredBuiltin = builtinAccountIdForClient(probe.clientId);
     const accountRef =
-      (preferredBuiltin ? availableForClient.find((profile) => profile.id === preferredBuiltin)?.id : undefined) ??
-      availableForClient[0]?.id ??
-      '';
+      getClientAuthCapabilities(probe.clientId).accountBinding === 'required'
+        ? (preferredBuiltin
+            ? availableForClient.find((profile) => profile.id === preferredBuiltin)?.id
+            : undefined) ??
+          availableForClient[0]?.id ??
+          ''
+        : '';
     patchForm({
       clientId: probe.clientId,
       accountRef,
