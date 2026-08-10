@@ -15,6 +15,7 @@ import {
   readKimiContextUsedTokens,
   readKimiModelConfigInfo,
   readKimiSessionId,
+  resolveKimiCliSessionId,
   resolveKimiModelAlias,
 } from './kimi-config.js';
 import {
@@ -28,6 +29,7 @@ import {
 } from './kimi-event-parser.js';
 
 const log = createModuleLogger('kimi-agent');
+const KIMI_RESUME_FALLBACK_REASON_CODES = new Set(['kimi_session_not_found', 'kimi_context_limit']);
 
 interface KimiAgentServiceOptions {
   catId?: CatId;
@@ -56,6 +58,9 @@ export class KimiAgentService implements AgentService {
     const workingDirectory = options?.workingDirectory ?? process.cwd();
     const apiKeyEnv = buildApiKeyEnv(effectiveModel, options?.callbackEnv);
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
+    const resumeSessionId = options?.sessionId
+      ? resolveKimiCliSessionId(options.sessionId, workingDirectory, options?.callbackEnv)
+      : undefined;
     const supportsThinking =
       modelConfig.capabilities.includes('thinking') ||
       apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
@@ -66,13 +71,13 @@ export class KimiAgentService implements AgentService {
     // kimi-code 0.28+ uses prompt mode directly. Older adapter flags such as
     // --print/--work-dir/--thinking/--mcp-config-file now fail fast with code 1.
     const args = ['--output-format', 'stream-json'];
-    if (options?.sessionId) {
-      args.push('--session', options.sessionId);
-      metadata.sessionId = options.sessionId;
+    if (resumeSessionId) {
+      args.push('--session', resumeSessionId);
+      metadata.sessionId = resumeSessionId;
       yield {
         type: 'session_init',
         catId: this.catId,
-        sessionId: options.sessionId,
+        sessionId: resumeSessionId,
         metadata,
         timestamp: Date.now(),
       };
@@ -209,6 +214,31 @@ export class KimiAgentService implements AgentService {
           continue;
         }
         if (isCliError(event)) {
+          if (
+            resumeSessionId &&
+            typeof (event as { reasonCode?: unknown }).reasonCode === 'string' &&
+            KIMI_RESUME_FALLBACK_REASON_CODES.has((event as { reasonCode: string }).reasonCode)
+          ) {
+            const reasonCode = (event as { reasonCode: string }).reasonCode;
+            log.warn(
+              { catId: this.catId, invocationId: options?.invocationId, sessionId: resumeSessionId, reasonCode },
+              '[KimiAgent] resume failed with recoverable session error; retrying fresh session',
+            );
+            yield {
+              type: 'system_info' as const,
+              catId: this.catId,
+              timestamp: Date.now(),
+              content: JSON.stringify({
+                type: 'resume_fallback',
+                provider: 'kimi',
+                reasonCode,
+                previousSessionId: resumeSessionId,
+              }),
+              metadata,
+            };
+            yield* this.invoke(prompt, { ...options, sessionId: undefined });
+            return;
+          }
           yield {
             type: 'error',
             catId: this.catId,

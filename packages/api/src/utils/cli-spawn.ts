@@ -21,7 +21,11 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout';
+type CliErrorReasonCode =
+  | 'invalid_thinking_signature'
+  | 'missing_rollout'
+  | 'kimi_session_not_found'
+  | 'kimi_context_limit';
 
 function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined {
   if (/Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i.test(stderr)) {
@@ -29,6 +33,12 @@ function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined 
   }
   if (/no rollout found/i.test(stderr)) {
     return 'missing_rollout';
+  }
+  if (/Session\s+["'][^"']+["']\s+not found/i.test(stderr)) {
+    return 'kimi_session_not_found';
+  }
+  if (/k3-256k supports only 256K context/i.test(stderr) || /supports only \d+K context/i.test(stderr)) {
+    return 'kimi_context_limit';
   }
   return undefined;
 }

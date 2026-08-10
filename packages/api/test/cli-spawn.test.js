@@ -484,6 +484,42 @@ test('spawnCli marks no rollout found stderr as missing_rollout reasonCode', asy
   assert.equal(results[0].reasonCode, 'missing_rollout');
 });
 
+test('spawnCli marks Kimi context limit stderr as kimi_context_limit reasonCode', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'kimi', args: ['--session', 'ses_old'] }, { spawnFn }));
+
+  proc.stderr.write('error: failed to run prompt: provider.auth_error: 401 k3-256k supports only 256K context.\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+
+  assert.equal(results.length, 1);
+  assert.equal(isCliError(results[0]), true);
+  assert.equal(results[0].reasonCode, 'kimi_context_limit');
+  assert.ok(!results[0].stderr, 'stderr should not be exposed to users');
+});
+
+test('spawnCli marks Kimi missing session stderr as kimi_session_not_found reasonCode', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'kimi', args: ['--session', 'old'] }, { spawnFn }));
+
+  proc.stderr.write('Error: Session "ffe7f4c3-71eb-4c3d-9a5f-139538414668" not found.\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+
+  assert.equal(results.length, 1);
+  assert.equal(isCliError(results[0]), true);
+  assert.equal(results[0].reasonCode, 'kimi_session_not_found');
+  assert.ok(!results[0].stderr, 'stderr should not be exposed to users');
+});
+
 test('formatCliExitError propagates reasonCode into message string', async () => {
   const { formatCliExitError } = await import('../dist/utils/cli-format.js');
 

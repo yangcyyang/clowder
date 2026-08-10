@@ -60,7 +60,12 @@ export interface KimiModelConfigInfo {
 }
 
 export function resolveKimiShareDir(callbackEnv?: Record<string, string>): string {
-  return callbackEnv?.KIMI_SHARE_DIR || process.env.KIMI_SHARE_DIR || resolve(homedir(), '.kimi');
+  const explicit = callbackEnv?.KIMI_SHARE_DIR || process.env.KIMI_SHARE_DIR;
+  if (explicit) return explicit;
+  const kimiCodeHome = callbackEnv?.KIMI_CODE_HOME || process.env.KIMI_CODE_HOME;
+  if (kimiCodeHome) return resolve(kimiCodeHome);
+  const newHome = resolve(homedir(), '.kimi-code');
+  return existsSync(newHome) ? newHome : resolve(homedir(), '.kimi');
 }
 
 export function resolveKimiConfigPath(callbackEnv?: Record<string, string>): string {
@@ -169,6 +174,78 @@ export function readKimiSessionId(workingDirectory: string, callbackEnv?: Record
   } catch {
     return undefined;
   }
+}
+
+function resolveKimiSessionLookupDirs(callbackEnv?: Record<string, string>): string[] {
+  const candidates = [
+    callbackEnv?.KIMI_SHARE_DIR,
+    process.env.KIMI_SHARE_DIR,
+    callbackEnv?.KIMI_CODE_HOME,
+    process.env.KIMI_CODE_HOME,
+    resolve(homedir(), '.kimi-code'),
+    resolve(homedir(), '.kimi'),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  return Array.from(new Set(candidates.map((value) => resolve(value))));
+}
+
+function buildKimiSessionLookupIds(sessionId: string): Set<string> {
+  const trimmed = sessionId.trim();
+  const ids = new Set<string>([trimmed]);
+  const bare = trimmed.replace(/^(ses_|session_)/, '');
+  if (bare.length > 0 && bare === trimmed) {
+    ids.add(`ses_${bare}`);
+    ids.add(`session_${bare}`);
+  }
+  return ids;
+}
+
+export function resolveKimiCliSessionId(
+  sessionId: string,
+  workingDirectory: string,
+  callbackEnv?: Record<string, string>,
+): string {
+  const trimmed = sessionId.trim();
+  if (!trimmed) return sessionId;
+
+  const lookupIds = buildKimiSessionLookupIds(trimmed);
+  const targetWorkDir = normalizeKimiWorkDirPath(workingDirectory);
+  const matches: Array<{ sessionId: string; exact: boolean; workDirMatches: boolean }> = [];
+
+  for (const shareDir of resolveKimiSessionLookupDirs(callbackEnv)) {
+    const indexPath = join(shareDir, 'session_index.jsonl');
+    if (!existsSync(indexPath)) continue;
+    let lines: string[];
+    try {
+      lines = readFileSync(indexPath, 'utf8').split('\n');
+    } catch {
+      continue;
+    }
+    for (const line of lines) {
+      const raw = line.trim();
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const indexedSessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId.trim() : '';
+        if (!indexedSessionId || !lookupIds.has(indexedSessionId)) continue;
+        const indexedWorkDir = typeof parsed.workDir === 'string' ? normalizeKimiWorkDirPath(parsed.workDir) : '';
+        matches.push({
+          sessionId: indexedSessionId,
+          exact: indexedSessionId === trimmed,
+          workDirMatches: indexedWorkDir === targetWorkDir,
+        });
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return (
+    matches.find((entry) => entry.exact && entry.workDirMatches)?.sessionId ??
+    matches.find((entry) => entry.workDirMatches)?.sessionId ??
+    matches.find((entry) => entry.exact)?.sessionId ??
+    matches[0]?.sessionId ??
+    trimmed
+  );
 }
 
 export function buildProjectMcpArgs(workingDirectory?: string): string[] {
