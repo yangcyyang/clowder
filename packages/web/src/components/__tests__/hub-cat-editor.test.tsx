@@ -22,6 +22,7 @@ import {
   filterProfiles,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
+  initialState,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
@@ -119,6 +120,24 @@ describe('HubCatEditor', () => {
     act(() => root.unmount());
     container.remove();
     vi.clearAllMocks();
+  });
+
+  it('does not disguise a legacy member with no clientId as Claude', () => {
+    const legacyGrokCat = {
+      id: 'grok',
+      name: '荧荧',
+      displayName: '荧荧',
+      defaultModel: 'grok-4.5',
+      color: { primary: '#111827', secondary: '#f3f4f6' },
+      mentionPatterns: ['@grok'],
+      avatar: '/avatars/grok.png',
+      roleDescription: '实时检索',
+    } as CatData;
+
+    const form = initialState(legacyGrokCat, null);
+
+    expect(form.clientId).toBe('');
+    expect(form.defaultModel).toBe('grok-4.5');
   });
 
   it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {

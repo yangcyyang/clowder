@@ -553,6 +553,10 @@ export function HubCatEditor({
   const handleSave = async () => {
     const errors: Record<string, boolean> = {};
     const errorMessages: string[] = [];
+    if (!form.clientId) {
+      errors.account = true;
+      errorMessages.push('Client');
+    }
     // Create-only pre-flight: existing cats already passed backend validation.
     if (!cat) {
       if (!form.name.trim()) {

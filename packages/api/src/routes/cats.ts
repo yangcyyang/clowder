@@ -15,6 +15,7 @@ import {
   type ContextBudget,
   catRegistry,
   getCliEffortOptionsForProvider,
+  getClientAuthCapabilities,
   getDefaultCliEffortForProvider,
   isValidCliEffortForProvider,
   type RosterEntry,
@@ -466,10 +467,11 @@ async function validateAccountBindingOrThrow(
   options?: { legacyCompat?: boolean },
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
-  if (client === 'antigravity' && trimmedAccountRef) {
-    throw new Error('antigravity client does not support accountRef');
+  const authCapabilities = getClientAuthCapabilities(client);
+  if (authCapabilities.accountBinding === 'unsupported' && trimmedAccountRef) {
+    throw new Error(`client "${client}" does not support accountRef`);
   }
-  if (client !== 'antigravity' && client !== 'pi' && !trimmedAccountRef) {
+  if (authCapabilities.accountBinding === 'required' && !trimmedAccountRef) {
     throw new Error(`client "${client}" requires a provider binding`);
   }
   if (!trimmedAccountRef) return;

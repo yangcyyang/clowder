@@ -568,6 +568,72 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       assert.equal(variant.defaultModel, 'grok-4.5');
       assert.equal(variant.cli.command, 'grok');
       assert.equal(variant.cli.outputFormat, 'streaming-json');
+
+      const clearBindingRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-grok',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          clientId: 'grok',
+          accountRef: null,
+          defaultModel: 'grok-4.5',
+        }),
+      });
+
+      assert.equal(clearBindingRes.statusCode, 200, clearBindingRes.body);
+      assert.equal(JSON.parse(clearBindingRes.body).cat.accountRef, undefined);
+      const catalogAfterClear = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      const variantAfterClear = catalogAfterClear.breeds.find((breed) => breed.catId === 'runtime-grok')?.variants?.[0];
+      assert.equal(variantAfterClear.accountRef, undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/cats allows Grok CLI login without an account binding', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-grok-cli-login',
+          name: 'Grok CLI Cat',
+          displayName: 'Grok CLI Cat',
+          avatar: '/avatars/grok.png',
+          color: { primary: '#111827', secondary: '#f3f4f6' },
+          mentionPatterns: ['@runtime-grok-cli-login'],
+          roleDescription: 'Reuse the Grok CLI login state',
+          clientId: 'grok',
+          defaultModel: 'grok-4.5',
+        }),
+      });
+
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      const created = JSON.parse(createRes.body).cat;
+      assert.equal(created.clientId, 'grok');
+      assert.equal(created.accountRef, undefined);
+      assert.equal(created.defaultModel, 'grok-4.5');
+
+      const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      const variant = catalog.breeds.find((breed) => breed.catId === 'runtime-grok-cli-login')?.variants?.[0];
+      assert.ok(variant, 'Grok CLI member must be persisted to the runtime catalog');
+      assert.equal(variant.accountRef, undefined);
     } finally {
       await app.close();
     }

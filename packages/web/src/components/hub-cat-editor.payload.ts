@@ -1,7 +1,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import {
-  CODEX_FAST_MODE_ARG,
   type ClientId,
+  CODEX_FAST_MODE_ARG,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type HubCatEditorFormState,
   isCodexFastModeArg,
@@ -85,6 +85,9 @@ export function buildContextBudget(form: HubCatEditorFormState) {
 }
 
 export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null) {
+  if (!form.clientId) {
+    throw new Error('Client 未设置');
+  }
   const contextBudget = buildContextBudget(form);
   const hasExistingBudget = Boolean(cat?.contextBudget);
   const contextBudgetPatch =

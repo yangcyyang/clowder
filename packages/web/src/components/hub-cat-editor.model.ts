@@ -3,6 +3,8 @@ import {
   CLI_EFFORT_VALUES,
   type CliEffortValue,
   getCliEffortOptionsForProvider,
+  getClientAuthCapabilities,
+  type ClientId as SharedClientId,
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
@@ -10,17 +12,8 @@ import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
 /** clowder-ai#340 P5: Renamed from ClientValue → ClientId (aligned with shared type). */
-export type ClientId =
-  | 'anthropic'
-  | 'openai'
-  | 'google'
-  | 'kimi'
-  | 'grok'
-  | 'dare'
-  | 'opencode'
-  | 'pi'
-  | 'antigravity'
-  | 'catagent';
+export type ConfiguredClientId = Exclude<SharedClientId, 'a2a'>;
+export type ClientId = ConfiguredClientId | '';
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -75,7 +68,7 @@ export interface HubCatEditorFormState {
 }
 
 export interface HubCatEditorDraft {
-  clientId: ClientId;
+  clientId: ConfiguredClientId;
   accountRef?: string;
   defaultModel: string;
   commandArgs?: string;
@@ -106,6 +99,7 @@ export interface CodexRuntimeSettings {
 }
 
 export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
+  { value: '', label: '未设置' },
   { value: 'anthropic', label: 'Claude' },
   { value: 'openai', label: 'Codex' },
   { value: 'google', label: 'Gemini' },
@@ -175,6 +169,7 @@ export function isCodexFastModeArg(value: string): boolean {
 }
 
 export function getCliEffortOptionsForClient(client: ClientValue): readonly CliEffortValue[] | null {
+  if (!client) return null;
   return getCliEffortOptionsForProvider(client);
 }
 
@@ -319,6 +314,7 @@ function isAllowedGoogleGatewayProfile(profile: ProfileItem): boolean {
 }
 
 function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | null {
+  if (!client) return null;
   if (typeof builtinAccountFamilyForClient === 'function') {
     const family = builtinAccountFamilyForClient(client);
     if (family) return family;
@@ -329,7 +325,13 @@ function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | nu
 }
 
 export function builtinAccountIdForClient(client: ClientId): string | null {
+  if (!client) return null;
   return sharedBuiltinAccountIdForClient(client);
+}
+
+export function accountBindingModeForClient(client: ClientId): 'required' | 'optional' | 'unsupported' {
+  if (!client) return 'unsupported';
+  return getClientAuthCapabilities(client).accountBinding;
 }
 
 export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
@@ -392,7 +394,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     assetCardPath: cat?.assetCard?.path ?? '',
-    clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+    clientId: cat ? ((cat.clientId as ConfiguredClientId | undefined) ?? '') : (createDraft?.clientId ?? 'anthropic'),
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     toolPolicy: cat?.toolPolicy ?? 'standard',

@@ -6,6 +6,7 @@ import { apiFetch } from '@/utils/api-client';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
+  accountBindingModeForClient,
   autoSlug,
   CLIENT_OPTIONS,
   CODEX_FAST_MODE_ARG,
@@ -20,8 +21,8 @@ import {
 } from './hub-cat-editor.model';
 import { CollapsibleSectionCard, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { MODEL_SOURCE_LABELS, type ModelCandidateSource } from './hub-cat-model-options';
-import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 import { TagEditor } from './hub-tag-editor';
+import { type LocalCliProbeResult, LocalCliProbeSection } from './local-cli-probe-section';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 type AssetBrowseEntry = { name: string; path: string; isDirectory: boolean };
@@ -829,6 +830,7 @@ export function AccountSection({
 }) {
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
+  const accountBindingMode = accountBindingModeForClient(form.clientId);
   const modelRequired = selectedProfile?.authType === 'api_key';
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
   const providerSuggestions = useMemo(() => buildProviderSuggestions(modelOptions), [modelOptions]);
@@ -848,7 +850,11 @@ export function AccountSection({
           required
         />
 
-        {form.clientId === 'antigravity' ? (
+        {!form.clientId ? (
+          <p className="rounded-[10px] bg-conn-orange-bg px-3 py-2 text-[11px] font-bold text-conn-orange-text">
+            此成员缺少 Client 配置，请先选择真实 Client 后再保存。
+          </p>
+        ) : form.clientId === 'antigravity' ? (
           <>
             <TextField
               label="CLI Command"
@@ -868,10 +874,17 @@ export function AccountSection({
         ) : (
           <>
             <SelectField
-              label="认证信息"
+              label={accountBindingMode === 'optional' ? '认证信息（可选）' : '认证信息'}
               value={form.accountRef}
               options={[
-                { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
+                {
+                  value: '',
+                  label: loadingProfiles
+                    ? '加载中…'
+                    : accountBindingMode === 'optional'
+                      ? '使用 CLI 登录态'
+                      : '请选择认证方式',
+                },
                 ...accountOptions
                   .filter((profile) => {
                     if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
@@ -887,7 +900,7 @@ export function AccountSection({
               ]}
               onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
               disabled={loadingProfiles}
-              required
+              required={accountBindingMode === 'required'}
             />
             <ComboField
               label="Model"
