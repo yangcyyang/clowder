@@ -1,0 +1,51 @@
+{
+  "skill": "revenue-expansion",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "一个客户部署很成功，怎么扩大合同额？",
+      "expected_behavior": "应激活 revenue-expansion，用存量深耕三方向（横向/纵向/纵深）+ 价值度量系统",
+      "notes": "典型扩大收入场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "我们想按结果收费，怎么设计才落地？",
+      "expected_behavior": "应激活 revenue-expansion 的成果计价部分：评估计价档位、确认评估体系是归因基础设施、设计毕业与转换开关",
+      "notes": "成果计价设计"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户问我们到底给他创造了多少价值，怎么答？",
+      "expected_behavior": "应激活 revenue-expansion 的价值度量系统：用基线+3-5 个共建指标输出价值报告",
+      "notes": "价值量化场景"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "我们要开拓一个新行业的大客户，怎么切入？",
+      "expected_behavior": "不应激活本skill，这是获客问题，应用 lighthouse-customer",
+      "notes": "诱饵：获客≠存量扩张"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我定价一个 SaaS 产品的基础版/专业版",
+      "expected_behavior": "不应激活本skill，这是纯产品定价，无 FDE 交付语境",
+      "notes": "诱饵：产品定价≠FDE 计价"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户是国央企，只接受'买断加实施'，成果计价行不通怎么办？",
+      "expected_behavior": "应激活但给出中国注脚：纯订阅制是理想混合制是活路——按阶段交付验收+价值指标写入验收标准，把成果计价基因注入项目制外壳",
+      "notes": "边界：国央企计价格局"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

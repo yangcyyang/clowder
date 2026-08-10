@@ -1,0 +1,51 @@
+{
+  "skill": "lighthouse-customer",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "我们有两个潜在客户：一家小银行和一家行业协会，先做哪个？",
+      "expected_behavior": "应激活 lighthouse-customer，用灯塔价值×学习价值双维打分排序",
+      "notes": "典型排期决策"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "有个客户合同很大，但要求我们按人头派活，像外包一样，接不接？",
+      "expected_behavior": "应激活 lighthouse-customer，识别需求蝗虫三特征（当廉价外包使唤），提示拒绝即使合同诱人",
+      "notes": "需求蝗虫识别"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户成功案例怎么让它发挥最大销售价值？",
+      "expected_behavior": "应激活 lighthouse-customer 的灯塔经营部分：确认客户愿公开背书、准备'能讲出去的故事'",
+      "notes": "灯塔背书经营"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "老客户合同到期要续约，怎么谈？",
+      "expected_behavior": "不应激活本skill，这是续约管理，应用 retention-defense",
+      "notes": "诱饵：续约≠灯塔获客"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写产品发布会的新闻稿",
+      "expected_behavior": "不应激活本skill，营销文案非本skill范围",
+      "notes": "诱饵：文案≠策略"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "有个客户灯塔价值极高但学习价值低（行业太特殊），做吗？",
+      "expected_behavior": "应激活但给出权衡：双高最优，一高一低需评估——灯塔价值高可做但明确其学习不回流产品，警惕被带偏产品基因",
+      "notes": "边界：双维不平衡"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

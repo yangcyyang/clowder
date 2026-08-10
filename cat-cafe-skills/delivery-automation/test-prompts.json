@@ -1,0 +1,51 @@
+{
+  "skill": "delivery-automation",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "每次新客户进场都要从零搭环境，特别累，怎么办？",
+      "expected_behavior": "应激活 delivery-automation，盘点重复劳动、建部署模板等四类资产",
+      "notes": "典型交付自动化场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "我们的打法手册写了但没人看，怎么让它生效？",
+      "expected_behavior": "应激活 delivery-automation 的打法手册部分：长在流程里、按场景组织、有负责人有版本有折旧",
+      "notes": "打法手册激活"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "团队扩了但交付产能没跟上，怎么破？",
+      "expected_behavior": "应激活 delivery-automation，指出人海战术的本质是不可复用的一次性劳动，用自动化杠杆破局",
+      "notes": "产能瓶颈诊断"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "帮我写一份客户季度汇报 PPT",
+      "expected_behavior": "不应激活本skill，这是具体任务执行，不是自动化体系建设",
+      "notes": "诱饵：单次任务≠体系"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "这个模型的推理速度怎么优化？",
+      "expected_behavior": "不应激活本skill，纯技术优化",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "团队只有两个人，忙到没时间做自动化沉淀，怎么办？",
+      "expected_behavior": "应激活但给出小团队策略：先只沉淀最高频的 1-2 类资产（如部署模板），用'第二次做'原则强制触发，避免一次性铺开",
+      "notes": "边界：小团队的优先级"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

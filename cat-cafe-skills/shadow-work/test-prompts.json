@@ -1,0 +1,51 @@
+{
+  "skill": "shadow-work",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户说他们想要一个数据平台，但我感觉这不像真需求，怎么验证？",
+      "expected_behavior": "应激活 shadow-work，去现场观察真实工作流而非听会议室描述，找变通点",
+      "notes": "需求真伪验证"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "进场第一周，该干什么才能找到客户的真实痛点？",
+      "expected_behavior": "应激活 shadow-work，选人跟随、观察变通、行为对说辞",
+      "notes": "进场第一周动作"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "做了用户访谈，大家都说愿意用，但我怀疑他们实际不会用",
+      "expected_behavior": "应激活 shadow-work，用行为观察验证说辞（律师例：问卷愿意用、实际用 ChatGPT）",
+      "notes": "行为与说辞一致性检验"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "帮我设计一个客户满意度问卷",
+      "expected_behavior": "不应激活本skill，问卷是'问'的传统调研，本方法强调'看'",
+      "notes": "诱饵：问卷≠影子工作法"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "这个 API 的并发性能怎么优化？",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户不让驻场，只能远程，还能做需求发现吗？",
+      "expected_behavior": "应激活但说明降级方案：看工单数据、系统日志、远程跟会；同时强调'第一手认知必须物理创造'，建议至少一次现场",
+      "notes": "边界：无现场时的降级"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

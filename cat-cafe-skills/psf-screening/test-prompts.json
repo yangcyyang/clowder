@@ -1,0 +1,51 @@
+{
+  "skill": "psf-screening",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户说想要一个智能客服，我们该不该接这个项目？",
+      "expected_behavior": "应激活 psf-screening，把'智能客服'翻译成具体的人的具体的痛，再过经济性与可行性关",
+      "notes": "典型的需求筛选场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "老板说公司要搞 AI 转型，从哪里开始比较好？",
+      "expected_behavior": "应激活 psf-screening，提示先找具体痛点而非'全面转型'，用三关筛出值得做的第一个场景",
+      "notes": "从方向到具体问题的转化"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "我们想做一个排产优化项目，值不值得投入？",
+      "expected_behavior": "应激活 psf-screening，检查是否有量化靶子（如排产冲突降低30%）、数据在哪、准确率门槛",
+      "notes": "典型的企业 AI 项目筛选"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "帮我比较一下用 LangChain 还是直接调 API 实现这个功能",
+      "expected_behavior": "不应激活本skill，这是技术方案选型，问题已锁定",
+      "notes": "诱饵：技术选型≠问题筛选"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "这个功能上线后用户反馈不好，帮我看看怎么调优",
+      "expected_behavior": "不应激活本skill，这是执行期迭代问题，应使用部署激活相关 skill",
+      "notes": "诱饵：执行期≠决策期"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户的问题看起来很痛，但他们的数据特别乱，能做吗？",
+      "expected_behavior": "应激活但重点走可行性关：数据在哪、什么状态，评估是否要先用数据治理补短板",
+      "notes": "边界：痛点过但可行性存疑的处理"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

@@ -1,0 +1,51 @@
+{
+  "skill": "retention-defense",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户这个季度使用率明显下滑，续约还有半年，怎么办？",
+      "expected_behavior": "应激活 retention-defense，按五类流失诊断（价值蒸发/支持者离场/质量漂移/成本反噬/戒断反应），再建健康度分级响应",
+      "notes": "典型流失预警场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "客户的核心支持者要跳槽了，怎么应对？",
+      "expected_behavior": "应激活 retention-defense 的单点防御：关系网格化、价值组织化、离场仪式化",
+      "notes": "单点依赖场景"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户财务说账单太高，系统不值这个价",
+      "expected_behavior": "应激活 retention-defense 的成本反噬处理：主动算价值账、成本优化方案、分级承诺",
+      "notes": "成本反噬场景"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "我们要开拓一个新行业的大客户，怎么切入？",
+      "expected_behavior": "不应激活本skill，这是获客问题，应用 lighthouse-customer",
+      "notes": "诱饵：获客≠续约"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写个数据库备份脚本",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户重度下滑濒临停用，怎么处理才体面？",
+      "expected_behavior": "应激活但给出重度响应：高管层介入坦诚对话'还值不值得继续'，接受体面退出/降级以保关系口碑，为未来重逢留门",
+      "notes": "边界：不可救项目的体面退出"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

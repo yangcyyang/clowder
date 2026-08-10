@@ -1229,6 +1229,344 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── 批量操作确认门禁 ──
+  batch-confirm-gate:
+    description: >
+      批量/有成本操作前的"扫描 → 待处理清单 → 显式确认 → 执行 → 结果报告"四段式流程。
+      Use when: 委托一批可判定规则的批量操作（清理文件、批量删除/改名、批量发送、批量迁移等），
+      且规则可拆成若干条可判定条件。
+      Not for: 单个/单次操作、规则本身模糊需要人来判断的场景、已明确授权免确认的场景。
+      Output: 待处理清单（逐项规则判定）+ 确认后的执行结果报告（动了/跳过了/为什么）。
+    triggers:
+      - "批量清理"
+      - "批量删除"
+      - "批量改名"
+      - "先列清单再执行"
+      - "执行规矩全部满足才动"
+    not_for:
+      - "单个操作直接做"
+      - "规则模糊未澄清"
+    output: "Pending list (per-rule judgment) + post-confirm execution report"
+    next: ["quality-gate"]
+    sop_step: null
+    merged_from: null
+
+  # ── FDE 交付（《前线部署工程师》范冰蒸馏，15 skills）──
+  psf-screening:
+    description: >
+      问题-方案契合（PSF）三关检验：痛点/经济性/可行性，写第一行代码前判定值不值得做。
+      Use when: 评估一个新问题值不值得做、写第一行代码前判定、痛点筛选、problem-solution fit。
+      Not for: 技术实现、方案验证（那是 mvd-validation）。
+      Output: 三关判定结论 + 不做/缓做的理由 + 下一步行动。
+    triggers:
+      - "PSF"
+      - "三关检验"
+      - "问题值不值得做"
+      - "痛点筛选"
+      - "problem-solution fit"
+      - "验证问题"
+    not_for:
+      - "技术实现"
+      - "方案验证（用 mvd-validation）"
+    output: "PSF 三关判定 + 不做/缓做的理由"
+    next: ["mvd-validation", "poc-rejection"]
+    sop_step: null
+    merged_from: null
+
+  shadow-work:
+    description: >
+      影子工作法：现场观察真实工作流，发现文档里没有的痛点（看比问更真）。
+      Use when: 找不到真实痛点、需要了解一线真实工作流、做进场尽调的流程观察。
+      Not for: 纯访谈（访谈是辅助）、已有明确问题。
+      Output: 真实工作流观察记录 + 痛点清单（时间/出错/情绪三个点位）。
+    triggers:
+      - "影子工作"
+      - "现场观察"
+      - "发现痛点"
+      - "工作流观察"
+      - "看比问更真"
+      - "shadow work"
+    not_for:
+      - "纯访谈（访谈是辅助）"
+      - "已有明确问题"
+    output: "工作流观察记录 + 痛点清单（三个点位）"
+    next: ["psf-screening", "site-due-diligence"]
+    sop_step: null
+    merged_from: null
+
+  mvd-validation:
+    description: >
+      最小可行部署（MVD）：真实数据/缩小切口/定死截止三军规，在客户真实环境验证价值。
+      Use when: 快速验证企业 AI 方案、设计验证期、POC 怎么做才不烂尾、训练营打法。
+      Not for: 消费级 MVP、问题还没找到（先用 shadow-work）。
+      Output: 验证方案（战场/数据/截止）+ 读旧写新边界。
+    triggers:
+      - "MVD"
+      - "最小可行部署"
+      - "快速验证方案"
+      - "POC 怎么做"
+      - "真实数据验证"
+      - "验证期设计"
+    not_for:
+      - "消费级 MVP"
+      - "问题还没找到时（先用 shadow-work）"
+    output: "验证方案（真实数据/缩小切口/定死截止）+ 读旧写新边界"
+    next: ["deployment-activation"]
+    sop_step: null
+    merged_from: null
+
+  poc-rejection:
+    description: >
+      拒绝机制与免费验证治理：毕业标准防概念验证坟墓，转换五开关。
+      Use when: 决定接不接验证项目、免费验证的许可条件、POC 烂尾风险、验证收费吗。
+      Not for: 消费级产品验证、验证期设计（那是 mvd-validation）。
+      Output: 接/不接决策 + 毕业标准 + 转换五开关。
+    triggers:
+      - "拒绝项目"
+      - "免费验证"
+      - "POC 烂尾"
+      - "概念验证"
+      - "毕业标准"
+      - "验证收费吗"
+    not_for:
+      - "消费级产品验证"
+      - "验证期设计（用 mvd-validation）"
+    output: "POC 治理决策（接/不接/毕业标准/转换五开关）"
+    next: ["lighthouse-customer", "revenue-expansion"]
+    sop_step: null
+    merged_from: null
+
+  site-due-diligence:
+    description: >
+      进场尽调五份地图：数据/流程/组织/系统/政治，写第一行代码前摸清客户家底。
+      Use when: 新客户进场准备、摸清客户真实情况、项目卡壳怀疑了解不足、进场第一周计划。
+      Not for: 老客户常规迭代、纯远程轻量项目。
+      Output: 五份地图 + 排期与变革管理预案。
+    triggers:
+      - "进场尽调"
+      - "五份地图"
+      - "摸清客户家底"
+      - "尽调"
+      - "进场准备"
+      - "due diligence"
+    not_for:
+      - "老客户常规迭代"
+      - "纯远程轻量项目"
+    output: "五份地图（数据/流程/组织/系统/政治）+ 排期与变革预案"
+    next: ["deployment-activation", "retention-defense"]
+    sop_step: null
+    merged_from: null
+
+  lighthouse-customer:
+    description: >
+      灯塔客户策略与排期：双维打分/需求蝗虫识别/生态捆绑，选能发行业信号的标杆。
+      Use when: 多个客户候选排序、判断灯塔还是蝗虫、产能排期、生态合作规划。
+      Not for: 存量客户续约（那是 retention-defense）、消费级获客。
+      Output: 客户双维打分排序 + 排期方案 + 生态捆绑计划。
+    triggers:
+      - "灯塔客户"
+      - "标杆客户"
+      - "先做哪个客户"
+      - "客户排期"
+      - "需求蝗虫"
+      - "生态合作"
+    not_for:
+      - "存量客户续约（用 retention-defense）"
+      - "消费级获客"
+    output: "客户双维打分排序 + 需求蝗虫识别 + 排期方案 + 生态捆绑计划"
+    next: ["revenue-expansion", "trust-marketing"]
+    sop_step: null
+    merged_from: null
+
+  proposal-pyramid:
+    description: >
+      倒金字塔提案四层：业务结果→价值验证路径→交付方法→风险对策，企业提案的信任工程。
+      Use when: 写方案书/投标文档、POC 方案、技术方案转译成客户语言。
+      Not for: 内部技术文档、产品白皮书。
+      Output: 倒金字塔四层提案 + POC 毕业标准块。
+    triggers:
+      - "写提案"
+      - "方案书"
+      - "POC 方案"
+      - "投标"
+      - "倒金字塔"
+      - "proposal"
+    not_for:
+      - "内部技术文档"
+      - "产品白皮书"
+    output: "倒金字塔四层提案（业务结果/验证路径/交付方法/风险对策）"
+    next: ["poc-rejection"]
+    sop_step: null
+    merged_from: null
+
+  deployment-activation:
+    description: >
+      部署激活六件武器：热修复/评估体系/降门槛/集成/变革管理/自动化，上线≠激活。
+      Use when: 系统上线没人用、激活率低、部署期迭代节奏、员工抵触新系统、提升使用率。
+      Not for: 问题筛选期（那是 psf-screening）、续约期（那是 retention-defense）。
+      Output: 激活三关诊断 + 六件武器行动方案。
+    triggers:
+      - "没人用"
+      - "激活率"
+      - "上线了没用"
+      - "部署期迭代"
+      - "员工不愿意用"
+      - "激活"
+    not_for:
+      - "问题筛选期（用 psf-screening）"
+      - "续约期（用 retention-defense）"
+    output: "激活诊断（顺手/可信/相关三关）+ 六件武器行动方案"
+    next: ["retention-defense"]
+    sop_step: null
+    merged_from: null
+
+  delivery-automation:
+    description: >
+      交付自动化与打法手册：四类资产（模板/组件/清单/汇报）+ 场景手册三属性，摆脱人海。
+      Use when: 交付重复劳动多、新客户从零搭环境、打法手册没人看、产能跟不上扩张。
+      Not for: 一次性任务、纯产品研发。
+      Output: 四类自动化资产 + 活的场景打法手册。
+    triggers:
+      - "交付自动化"
+      - "重复劳动"
+      - "打法手册"
+      - "模板化交付"
+      - "效率杠杆"
+      - "人海战术"
+    not_for:
+      - "一次性任务"
+      - "纯产品研发"
+    output: "四类资产（部署模板/组件库/检查清单/自动汇报）+ 场景打法手册"
+    next: ["scale-copy"]
+    sop_step: null
+    merged_from: null
+
+  retention-defense:
+    description: >
+      续约守卫五道防线：流失诊断/可靠性/有损服务/上手引导/单点防御/健康度体系。
+      Use when: 客户使用率下滑、续约谈判、核心支持者离职、客户抱怨不值、建健康度监控。
+      Not for: 新客户获取（那是 lighthouse-customer）、激活期（那是 deployment-activation）。
+      Output: 流失五类诊断 + 五道防线行动方案 + 健康度预警。
+    triggers:
+      - "续约"
+      - "客户流失"
+      - "使用率下降"
+      - "支持者离职"
+      - "健康度"
+      - "NRR"
+    not_for:
+      - "新客户获取（用 lighthouse-customer）"
+      - "激活期（用 deployment-activation）"
+    output: "流失五类诊断 + 五道防线行动方案 + 健康度预警体系"
+    next: ["revenue-expansion"]
+    sop_step: null
+    merged_from: null
+
+  revenue-expansion:
+    description: >
+      收入扩大四引擎：成果计价/存量深耕/变惩为奖/价值度量，让存量收入自然增长。
+      Use when: 部署成功后扩大合同额、设计成果计价、量化客户价值、横向/纵向/纵深扩张。
+      Not for: 首次获客（那是 lighthouse-customer）、纯产品定价。
+      Output: 计价档位设计 + 存量深耕三方向 + 价值度量系统。
+    triggers:
+      - "扩大收入"
+      - "成果计价"
+      - "存量深耕"
+      - "变惩为奖"
+      - "价值度量"
+      - "NRR 提升"
+    not_for:
+      - "首次获客（用 lighthouse-customer）"
+      - "纯产品定价"
+    output: "计价档位设计 + 存量深耕三方向 + 价值度量系统"
+    next: ["scale-copy"]
+    sop_step: null
+    merged_from: null
+
+  scale-copy:
+    description: >
+      规模化复制与产品化：三级杠杆（知识/组件/产品）+ 失败复盘 + 产品化四问 + 组织政治。
+      Use when: 定制项目变产品、团队扩张质量不稳、失败项目变资产、毛利率上不去。
+      Not for: 单客户交付执行（那是 deployment-activation）、商业模式未验证。
+      Output: 三级杠杆评估 + 复盘机制 + 产品化四问决策。
+    triggers:
+      - "规模化"
+      - "产品化"
+      - "定制递减"
+      - "复制杠杆"
+      - "毛利率"
+      - "组织能力沉淀"
+    not_for:
+      - "单客户交付执行（用 deployment-activation）"
+      - "商业模式未验证"
+    output: "三级复制杠杆评估 + 失败复盘机制 + 产品化四问决策"
+    next: ["trust-marketing"]
+    sop_step: null
+    merged_from: null
+
+  trust-marketing:
+    description: >
+      信任营销与口碑传播：战壕视角内容/借势定义议题/传播三圈层/产品内置裂变因子。
+      Use when: 客户没听说过我们、案例文章怎么写、行业热点借势、让客户帮传播。
+      Not for: 流量驱动的消费级营销、付费广告投放。
+      Output: 战壕内容 + 英雄叙事案例 + 借势计划 + 三圈层经营。
+    triggers:
+      - "信任营销"
+      - "内容营销"
+      - "借势"
+      - "口碑传播"
+      - "战壕视角"
+      - "专业信任"
+    not_for:
+      - "流量驱动的消费级营销"
+      - "付费广告投放"
+    output: "战壕视角内容 + 案例英雄叙事 + 借势计划 + 三圈层经营 + 裂变因子"
+    next: []
+    sop_step: null
+    merged_from: null
+
+  fde-ethics:
+    description: >
+      FDE 职业道德六底线：数据主权/诚实报告/不制造依赖/善待被替代者/说不/代表技术。
+      Use when: 客户提灰色要求、数据能否用于训练、要求粉饰结果、该不该做的伦理判断。
+      Not for: 明确违法（直接拒绝）、日常技术决策。
+      Output: 六底线对照结论 + 合规依据 + 体面的说不方案。
+    triggers:
+      - "职业道德"
+      - "数据主权"
+      - "合规边缘"
+      - "粉饰结果"
+      - "该不该做"
+      - "灰色要求"
+    not_for:
+      - "明确违法（直接拒绝）"
+      - "日常技术决策"
+    output: "六底线对照结论 + 合规依据确认 + 体面的说不方案"
+    next: []
+    sop_step: null
+    merged_from: null
+
+  fde-metrics:
+    description: >
+      四层指标体系：交付/客户/商业/组织层指标，3-5 个核心指标 + 第一天采基线 + 健康度。
+      Use when: 项目定指标、建 FDE 仪表盘、判断模式健康度、NRR/毛利率/定制递减率解读。
+      Not for: 单点技术性能排查、财务合规报表。
+      Output: 指标选型 + 基线 + 健康度预警 + 季度体检。
+    triggers:
+      - "指标体系"
+      - "项目指标"
+      - "健康度"
+      - "仪表盘"
+      - "NRR 是什么"
+      - "怎么衡量成功"
+    not_for:
+      - "单点技术性能排查"
+      - "财务合规报表"
+    output: "四层指标选型（3-5 个核心指标）+ 基线采集 + 健康度预警"
+    next: []
+    sop_step: null
+    merged_from: null
+
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:
   mcp-callbacks:

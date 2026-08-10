@@ -1,0 +1,51 @@
+{
+  "skill": "trust-marketing",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户总说'你们是谁，没听说过'，怎么建立专业信任？",
+      "expected_behavior": "应激活 trust-marketing，用战壕视角内容+方法论开源+案例英雄叙事建立'专业信任的预售'",
+      "notes": "典型信任建立场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "行业最近 AI 很热，我们怎么借势获客？",
+      "expected_behavior": "应激活 trust-marketing 的借势三动作：定义议题/绑定行业议程（董事会语言）/在风口期建资产",
+      "notes": "借势场景"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户案例文章怎么写才有说服力？",
+      "expected_behavior": "应激活 trust-marketing：写战壕视角、让客户支持者成为英雄（具体数字+具体人+具体反差）",
+      "notes": "案例写作"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "帮我投放抖音信息流广告",
+      "expected_behavior": "不应激活本skill，这是流量驱动的付费投放，本方法追求信任预售而非曝光转化",
+      "notes": "诱饵：付费投放≠信任营销"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写产品发布会演讲稿",
+      "expected_behavior": "不应激活本skill，发布会演讲稿非信任预售内容",
+      "notes": "诱饵：演讲≠内容体系"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "我们方法论开源后，怕被竞争对手抄走，怎么办？",
+      "expected_behavior": "应激活但给出权衡：书中论证定义权收益大于教会同行损失；建议先开源'怎么做发现/验证'这类流程方法论，保留'具体场景的独有数据/组件'作为竞争壁垒",
+      "notes": "边界：开源与保密的分寸"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

@@ -1,0 +1,51 @@
+{
+  "skill": "poc-rejection",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户想先做一个免费的 POC 试点，我们接不接？",
+      "expected_behavior": "应激活 poc-rejection，检查三类高危信号、要求毕业标准、显性化免费边界",
+      "notes": "典型 POC 决策场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "这个验证项目拖了大半年了，一直在'持续推进中'，怎么办？",
+      "expected_behavior": "应激活 poc-rejection，诊断概念验证坟墓症状，设计毕业/散伙路径",
+      "notes": "坟墓诊断场景"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "免费验证做完客户不想付费，怎么设计转换机制？",
+      "expected_behavior": "应激活 poc-rejection 的转换五开关：毕业标准、边界显性化、支持者当销售员、价格锚点、体面出口",
+      "notes": "转换设计场景"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "项目已签约，现在部署期用户反馈界面不好用，帮我看看",
+      "expected_behavior": "不应激活本skill，这是执行期问题，应使用部署激活相关 skill",
+      "notes": "诱饵：执行期≠验证期治理"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我算一下这个项目的技术架构选型",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术选型"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户是大客户，合同额很诱人，但只肯给脱敏数据做验证",
+      "expected_behavior": "应激活但提示权衡：'只许看不给碰'是三大高危信号之一，即使合同诱人也建议先谈真实数据条件",
+      "notes": "边界：大合同与高危信号冲突"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

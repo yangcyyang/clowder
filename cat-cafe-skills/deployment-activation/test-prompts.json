@@ -1,0 +1,51 @@
+{
+  "skill": "deployment-activation",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "系统上线三个月了，但基本没人用，怎么办？",
+      "expected_behavior": "应激活 deployment-activation，诊断激活三关（不顺手/不可信/无关），再用六件武器对症处理",
+      "notes": "典型激活失败诊断"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "员工说新系统不如他们现在用的工具顺手，不愿意切换",
+      "expected_behavior": "应激活 deployment-activation，用降门槛四手法（寄生已有界面/默认值/按钮化/副驾驶先行）",
+      "notes": "降门槛场景"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "部署期用户反馈问题，迭代节奏应该怎么定？",
+      "expected_behavior": "应激活 deployment-activation 的热修复部分：反馈直达写代码的人、按使用阻塞度排序、以天/小时计",
+      "notes": "热修复节奏"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "客户想做个试点验证，不知道该不该接",
+      "expected_behavior": "不应激活本skill，这是验证期治理，应用 poc-rejection",
+      "notes": "诱饵：验证期≠激活期"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我调一下数据库连接池参数",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户高管要求一步到位推全自动化，但一线员工抵触",
+      "expected_behavior": "应激活但建议：先做副驾驶再谈自动驾驶（在一次次确认中校准信任），并用变革管理经营受损者，避免硬推",
+      "notes": "边界：自动化推进节奏"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 
 const PERSONAL_ENV_KEYS = [
@@ -142,6 +142,39 @@ describe('skill tools', () => {
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
       rmSync(personalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('cat_cafe_list_skills discovers an external symlink by trigger and reads its SKILL.md', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'mcp-external-project-'));
+    const sourceRoot = join(projectRoot, 'research-first-task-compiler');
+    const manifestPath = join(projectRoot, 'skills-manifest.json');
+    const externalRoot = resolve(process.cwd(), '..', '..', 'cat-cafe-skills', 'external');
+    const externalName = `research-first-probe-${Date.now()}`;
+    const linkPath = join(externalRoot, externalName);
+    mkdirSync(sourceRoot, { recursive: true });
+    mkdirSync(externalRoot, { recursive: true });
+    writeFileSync(
+      join(sourceRoot, 'SKILL.md'),
+      `---\nname: ${externalName}\ndescription: 先查再造测试技能\ntriggers:\n  - 先查再造\n---\n\n# External skill\n`,
+      'utf-8',
+    );
+    writeFileSync(manifestPath, JSON.stringify({ skills: [] }, null, 2));
+
+    try {
+      symlinkSync(sourceRoot, linkPath, 'dir');
+      process.env.CAT_CAFE_SKILL_MANIFEST_PATH = manifestPath;
+      const moduleUrl = new URL(`../dist/tools/skill-tools.js?case=external-${Date.now()}`, import.meta.url);
+      const { handleListSkills, handleReadSkill } = await import(moduleUrl.href);
+
+      const listText = (await handleListSkills({ query: '先查再造' })).content[0]?.text ?? '';
+      assert.match(listText, new RegExp(externalName));
+
+      const readText = (await handleReadSkill({ name: externalName })).content[0]?.text ?? '';
+      assert.match(readText, /# External skill/);
+    } finally {
+      rmSync(linkPath, { force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 

@@ -1,0 +1,51 @@
+{
+  "skill": "mvd-validation",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户想先做个 POC 验证我们的排产方案，怎么设计验证流程？",
+      "expected_behavior": "应激活 mvd-validation：锁核心战场、要真实数据、定死以周计的截止时间",
+      "notes": "典型 MVD 设计场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "我们想做个'覆盖全公司的智能客服'验证一下，行不行？",
+      "expected_behavior": "应激活 mvd-validation 并纠正：缩小切口不缩小野心，改成'只覆盖退换货工单但端到端无人干预'",
+      "notes": "宇宙级需求的 MVD 纠正"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户的数据特别老，在大型机上，我们的方案要不要迁就他们的旧环境？",
+      "expected_behavior": "应激活 mvd-validation 的读旧写新：数据上兼容、架构上不寄生、流程上顺从人的习惯",
+      "notes": "迁就环境的分寸"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "我们想验证一个新的消费 App 有没有市场",
+      "expected_behavior": "不应激活本skill，消费级产品用 MVP（裁判是市场），不是 MVD（裁判是具体客户业务）",
+      "notes": "诱饵：MVP≠MVD"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写一段 Python 代码处理数据清洗",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户只肯给脱敏样例数据，说真实数据涉及机密，能做验证吗？",
+      "expected_behavior": "应激活但强烈提示风险：假数据验证会出假阳性（概念验证坟墓第一块砖），建议先谈真实数据脱敏方案，谈不拢考虑拒绝",
+      "notes": "边界：真实数据军规与客户机密冲突"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

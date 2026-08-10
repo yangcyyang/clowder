@@ -1,0 +1,51 @@
+{
+  "skill": "scale-copy",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "我们做了好多定制项目，每个客户都从零开始，怎么变成可复制的能力？",
+      "expected_behavior": "应激活 scale-copy，评估三级复制杠杆现状（知识/组件/产品），识别定制重复信号",
+      "notes": "典型规模化场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "团队扩张后交付质量不稳，怎么沉淀组织能力？",
+      "expected_behavior": "应激活 scale-copy，建打法手册+失败复盘机制（无罪化/结构化/适度外传）",
+      "notes": "组织能力沉淀"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "有几个客户都提了类似的需求，要不要做成平台功能？",
+      "expected_behavior": "应激活 scale-copy 的产品化四问：三客户独立出现？泛化代价小于收益？能被非工程师用？收编后现场有空间？",
+      "notes": "产品化决策"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "新客户进场，第一周怎么部署？",
+      "expected_behavior": "不应激活本skill，这是单客户交付执行，应用 deployment-activation 或 site-due-diligence",
+      "notes": "诱饵：执行≠复制"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写客户案例营销文章",
+      "expected_behavior": "不应激活本skill，营销内容属于 trust-marketing",
+      "notes": "诱饵：营销≠组织复制"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "我们是 5 个人的小团队，产品化四问总是答'不'，怎么办？",
+      "expected_behavior": "应激活但给出适配：小团队停在二级杠杆（组件复用）是合理选择，先攒组件和打法手册，等重复信号足够（三客户独立出现）再谈平台化",
+      "notes": "边界：小团队的复制上限"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

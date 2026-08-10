@@ -1,0 +1,51 @@
+{
+  "skill": "fde-metrics",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "我们启动一个新客户项目，该盯哪些指标？",
+      "expected_behavior": "应激活 fde-metrics，按四层选 3-5 个核心指标组合（价值+使用+关系），第一天采基线",
+      "notes": "典型项目启动指标设定"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "怎么判断我们的 FDE 模式健不健康？",
+      "expected_behavior": "应激活 fde-metrics，用商业层指标（NRR/毛利率趋势/定制递减率）+组织层指标（回流速率/复用率/人均产能）综合判断",
+      "notes": "模式健康度体检"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户问'你们凭什么说自己创造价值'，怎么答？",
+      "expected_behavior": "应激活 fde-metrics，用基线+共建指标输出价值报告（TTV/省工时/错误率下降）",
+      "notes": "价值证明场景"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "API 延迟突然变高了，帮我排查",
+      "expected_behavior": "不应激活本skill，这是单点技术性能排查，非经营指标体系",
+      "notes": "诱饵：技术排查"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我做季度财务合规报表",
+      "expected_behavior": "不应激活本skill，财务合规报表是会计要求，非经营分析",
+      "notes": "诱饵：财务合规"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "我们的 NRR 只有 95%（低于及格线 100%），但客户满意度很高，怎么解读？",
+      "expected_behavior": "应激活但给出综合解读：NRR 是总裁判不能只看满意度；结合流失五类诊断（可能价值蒸发/支持者离场）+毛利率与定制递减率一起读，找出 NRR 低的具体环节",
+      "notes": "边界：指标冲突时的综合判断"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

@@ -55,6 +55,26 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `update-skills-dashboard` | 新增/删除/修改 skill 后刷新技能看板 HTML | — |
 | `subagent-dispatch` | 子任务并行分派（借鉴 Superpowers） | — |
 
+### FDE 交付（《前线部署工程师》范冰蒸馏，15 skills）
+
+| Skill | 触发场景 | SOP Step |
+|-------|----------|----------|
+| `psf-screening` | 问题三关检验（痛点/经济性/可行性），值不值得做 | — |
+| `shadow-work` | 影子工作法：现场观察发现文档里没有的痛点 | — |
+| `mvd-validation` | 最小可行部署：真实数据/缩小切口/定死截止验证价值 | — |
+| `poc-rejection` | 拒绝机制与免费验证治理：毕业标准防概念验证坟墓 | — |
+| `site-due-diligence` | 进场尽调五份地图：数据/流程/组织/系统/政治 | — |
+| `lighthouse-customer` | 灯塔客户策略与排期：双维打分/需求蝗虫识别/生态捆绑 | — |
+| `proposal-pyramid` | 倒金字塔提案：业务结果→验证路径→交付方法→风险对策 | — |
+| `deployment-activation` | 部署激活六件武器：热修复/评估/降门槛/集成/变革/自动化 | — |
+| `delivery-automation` | 交付自动化与打法手册：四类资产/场景手册 | — |
+| `retention-defense` | 续约守卫五道防线：流失诊断/可靠性/单点防御/健康度 | — |
+| `revenue-expansion` | 收入扩大四引擎：成果计价/存量深耕/变惩为奖/价值度量 | — |
+| `scale-copy` | 规模化复制与产品化：三级杠杆/复盘/产品化四问 | — |
+| `trust-marketing` | 信任营销与口碑传播：战壕视角/借势/三圈层/裂变因子 | — |
+| `fde-ethics` | 职业道德六底线：数据主权/诚实报告/不制造依赖/说不 | — |
+| `fde-metrics` | 四层指标体系：交付/客户/商业/组织 + 健康度 | — |
+
 ### 参考文件（refs/，按需读取）
 
 | 文件 | 内容 |

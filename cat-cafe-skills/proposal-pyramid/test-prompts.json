@@ -1,0 +1,51 @@
+{
+  "skill": "proposal-pyramid",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "客户要我们写一份方案书，怎么组织结构？",
+      "expected_behavior": "应激活 proposal-pyramid，按倒金字塔四层组织：业务结果→价值验证路径→交付方法→风险对策",
+      "notes": "典型提案场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "POC 方案怎么写才能让客户敢拍板又不烂尾？",
+      "expected_behavior": "应激活 proposal-pyramid，重点在第二层验证路径和毕业标准块（周期上限/验收指标/毕业与散伙）",
+      "notes": "POC 方案专项"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户说我们的方案太技术化，看不懂",
+      "expected_behavior": "应激活 proposal-pyramid，检查第一层是否给了客户语言业务结果、第三层是否让非技术读者跟上",
+      "notes": "方案可读性修复"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "帮我写系统架构设计文档",
+      "expected_behavior": "不应激活本skill，内部技术文档不需要倒金字塔",
+      "notes": "诱饵：技术文档≠客户提案"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "这个模型训练 loss 降不下来，帮我看看",
+      "expected_behavior": "不应激活本skill，纯技术问题",
+      "notes": "诱饵：技术问题"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户要求先看技术细节再谈业务价值，怎么办？",
+      "expected_behavior": "应激活但给出适配：倒金字塔顺序是说服逻辑，若客户是技术评审委员会，可调整权重但保留第一层业务结果作为开场锚点",
+      "notes": "边界：不同读者结构"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}

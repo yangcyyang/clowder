@@ -1,0 +1,51 @@
+{
+  "skill": "site-due-diligence",
+  "version": "0.1.0",
+  "source_book": "《前线部署工程师》 — 范冰",
+  "darwin_compatible": true,
+  "test_cases": [
+    {
+      "id": "should-trigger-01",
+      "type": "should_trigger",
+      "prompt": "拿到一个新客户，进场前需要做什么准备？",
+      "expected_behavior": "应激活 site-due-diligence，启动五份地图尽调（数据/流程/组织/系统/政治）",
+      "notes": "典型进场场景"
+    },
+    {
+      "id": "should-trigger-02",
+      "type": "should_trigger",
+      "prompt": "项目总是卡壳，怀疑是我们对客户了解不够，怎么办？",
+      "expected_behavior": "应激活 site-due-diligence，诊断哪份地图缺失（通常是组织地图或政治地图）",
+      "notes": "卡壳诊断场景"
+    },
+    {
+      "id": "should-trigger-03",
+      "type": "should_trigger",
+      "prompt": "客户的数据很乱，怎么确定该接哪个数据源？",
+      "expected_behavior": "应激活 site-due-diligence 的数据地图部分：重点判断'哪个被信任'而非'有什么'",
+      "notes": "数据地图专项"
+    },
+    {
+      "id": "should-not-trigger-01",
+      "type": "should_not_trigger",
+      "prompt": "我们跟这个客户合作五年了，这次只是加一个新功能",
+      "expected_behavior": "不应激活本skill，老客户常规迭代不需要全量尽调",
+      "notes": "诱饵：存量迭代"
+    },
+    {
+      "id": "should-not-trigger-02",
+      "type": "should_not_trigger",
+      "prompt": "帮我写一个客户访谈提纲",
+      "expected_behavior": "不应激活本skill，访谈提纲是传统调研工具，五地图是结构化家底摸底",
+      "notes": "诱饵：访谈≠尽调"
+    },
+    {
+      "id": "edge-01",
+      "type": "edge_case",
+      "prompt": "客户不让进现场，只能远程尽调，五份地图能画全吗？",
+      "expected_behavior": "应激活但说明降级：数据/系统地图可远程，流程/组织/政治地图需至少一次现场或深度访谈弥补，并明确告知客户风险",
+      "notes": "边界：远程尽调的完整性"
+    }
+  ],
+  "minimum_pass_rate": 0.8
+}
