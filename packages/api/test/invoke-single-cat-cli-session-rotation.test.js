@@ -155,7 +155,18 @@ describe('F-G invokeSingleCat CLI native session rotation wiring', () => {
     const service = {
       async *invoke(_prompt, options) {
         receivedSessionId = options.sessionId;
-        yield { type: 'done', catId: CAT_ID, metadata: { provider: 'grok', model: 'grok-test' }, timestamp: Date.now() };
+        yield {
+          type: 'session_init',
+          catId: CAT_ID,
+          sessionId: 'fresh-session-after-rotation',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'done',
+          catId: CAT_ID,
+          metadata: { provider: 'grok', model: 'grok-test' },
+          timestamp: Date.now(),
+        };
       },
     };
 
@@ -171,7 +182,11 @@ describe('F-G invokeSingleCat CLI native session rotation wiring', () => {
     );
     assert.ok(msgs.length > 0);
 
-    assert.equal(receivedSessionId, undefined, 'service.invoke must NOT receive the oversized session id — resume dropped');
+    assert.equal(
+      receivedSessionId,
+      undefined,
+      'service.invoke must NOT receive the oversized session id — resume dropped',
+    );
 
     assert.equal(existsSync(sessionDir), false, 'old session path must no longer exist at its old name');
     const archivedPath = `${sessionDir}.rotated-${new Date().toISOString().slice(0, 10)}`;
@@ -213,7 +228,12 @@ describe('F-G invokeSingleCat CLI native session rotation wiring', () => {
     const service = {
       async *invoke(_prompt, options) {
         receivedSessionId = options.sessionId;
-        yield { type: 'done', catId: CAT_ID, metadata: { provider: 'grok', model: 'grok-test' }, timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: CAT_ID,
+          metadata: { provider: 'grok', model: 'grok-test' },
+          timestamp: Date.now(),
+        };
       },
     };
 
@@ -260,7 +280,12 @@ describe('F-G invokeSingleCat CLI native session rotation wiring', () => {
     const service = {
       async *invoke(_prompt, options) {
         receivedSessionId = options.sessionId;
-        yield { type: 'done', catId: CAT_ID, metadata: { provider: 'grok', model: 'grok-test' }, timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: CAT_ID,
+          metadata: { provider: 'grok', model: 'grok-test' },
+          timestamp: Date.now(),
+        };
       },
     };
 
@@ -277,6 +302,65 @@ describe('F-G invokeSingleCat CLI native session rotation wiring', () => {
 
     assert.equal(receivedSessionId, oldSessionId, 'not-whitelisted cat must resume normally');
     assert.equal(existsSync(sessionDir), true, 'session dir must be untouched when the cat is not on the whitelist');
-    assert.equal(messageAppends.some((m) => m.extra?.systemKind === 'cli_session_rotated'), false);
+    assert.equal(
+      messageAppends.some((m) => m.extra?.systemKind === 'cli_session_rotated'),
+      false,
+    );
+  });
+
+  it('fresh CLI startup failure before session_init restores the archived old session and does not publish a success notice', async () => {
+    const fakeRepo = makeFakeMonorepo();
+    const grokHome = mkdtempSync(join(tmpdir(), 'grok-home-rotation-rollback-'));
+    tempDirs.push(grokHome);
+    const oldSessionId = 'old-session-needs-rollback';
+    const sessionDir = makeGrokSessionOnDisk({
+      grokHome,
+      workingDirectory: fakeRepo,
+      sessionId: oldSessionId,
+      fileSizeBytes: 9 * 1024 * 1024,
+    });
+    process.env.CLOWDER_CLI_SESSION_MAX_MB = '1';
+    process.env.CLOWDER_CLI_SESSION_ROTATE_CATS = CAT_ID;
+    process.env.GROK_HOME = grokHome;
+
+    const messageAppends = [];
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'error',
+          catId: CAT_ID,
+          error: 'fresh CLI bootstrap failed before session_init',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'done',
+          catId: CAT_ID,
+          metadata: { provider: 'grok', model: 'grok-test' },
+          timestamp: Date.now(),
+        };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(makeDeps({ fakeRepo, oldSessionId, messageAppends }), {
+        catId: CAT_ID,
+        service,
+        prompt: 'test rollback',
+        userId: 'user1',
+        threadId: 'thread-rotation-rollback',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(existsSync(sessionDir), true, 'old session must be restored at its original path');
+    const archivedPath = `${sessionDir}.rotated-${new Date().toISOString().slice(0, 10)}`;
+    assert.equal(existsSync(archivedPath), false, 'rollback must consume the temporary archive path');
+    assert.equal(
+      messageAppends.some((m) => m.extra?.systemKind === 'cli_session_rotated'),
+      false,
+      'success notice must not be published before a fresh session_init is observed',
+    );
+    const rollbackNotice = messageAppends.find((m) => m.extra?.systemKind === 'cli_session_rotation_rolled_back');
+    assert.ok(rollbackNotice, 'rollback should be visible in the thread');
   });
 });

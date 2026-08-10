@@ -9,8 +9,8 @@
  *  - clientId 不支持（本轮只做 grok）→ 安全短路 path_unresolved，不报错
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm, truncate, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
@@ -21,7 +21,9 @@ const {
   resolveNativeSessionPath,
   computeNativeSessionSizeBytes,
   archiveNativeSessionPath,
+  loadCliSessionArchiveRetentionPolicy,
   maybeRotateCliNativeSession,
+  pruneCliNativeSessionArchives,
 } = await import('../dist/domains/cats/services/agents/invocation/cli-native-session-rotation.js');
 
 let tempDir;
@@ -62,7 +64,11 @@ describe('F-G CLI native session rotation', () => {
 
     test('isCliSessionRotationEnabledFor: needs BOTH positive threshold AND catId in whitelist', () => {
       const off = { thresholdBytes: 0, cats: new Set(['grok']) };
-      assert.equal(isCliSessionRotationEnabledFor(off, 'grok'), false, 'threshold=0 always disabled regardless of whitelist');
+      assert.equal(
+        isCliSessionRotationEnabledFor(off, 'grok'),
+        false,
+        'threshold=0 always disabled regardless of whitelist',
+      );
 
       const noWhitelist = { thresholdBytes: 8 * 1024 * 1024, cats: new Set() };
       assert.equal(isCliSessionRotationEnabledFor(noWhitelist, 'grok'), false, 'empty whitelist = nobody opted in');
@@ -156,10 +162,29 @@ describe('F-G CLI native session rotation', () => {
       await writeFile(join(dir2, 'f.jsonl'), 'second');
       const archived2 = await archiveNativeSessionPath(dir2, now);
 
-      assert.equal(archived2, `${dir1}.rotated-2026-07-25-2`, 'collision must bump counter, not clobber the first archive');
+      assert.equal(
+        archived2,
+        `${dir1}.rotated-2026-07-25-2`,
+        'collision must bump counter, not clobber the first archive',
+      );
       assert.equal(existsSync(archived1), true, 'first archive must survive untouched');
       assert.equal(await readFile(join(archived1, 'f.jsonl'), 'utf-8'), 'first');
       assert.equal(await readFile(join(archived2, 'f.jsonl'), 'utf-8'), 'second');
+    });
+
+    test('77 MiB sparse Grok session is measured and archived by same-filesystem rename', async () => {
+      const dir = join(tempDir, 'session-77mb');
+      await mkdir(dir, { recursive: true });
+      const updatesPath = join(dir, 'updates.jsonl');
+      await writeFile(updatesPath, '');
+      await truncate(updatesPath, 77 * 1024 * 1024);
+
+      assert.equal(await computeNativeSessionSizeBytes(dir), 77 * 1024 * 1024);
+      const archived = await archiveNativeSessionPath(dir, Date.parse('2026-07-26T00:00:00Z'));
+
+      assert.equal(existsSync(dir), false);
+      assert.equal(existsSync(archived), true);
+      assert.equal((await readFile(join(archived, 'updates.jsonl'))).length, 77 * 1024 * 1024);
     });
   });
 
@@ -169,7 +194,12 @@ describe('F-G CLI native session rotation', () => {
 
     test('HARD CONSTRAINT: threshold=0 (default/unset) → disabled, zero fs access even with a huge session on disk', async () => {
       const grokHome = join(tempDir, 'grok-home-1');
-      const sessionDir = await makeGrokSession({ grokHome, workingDirectory, sessionId, fileSizeBytes: 20 * 1024 * 1024 });
+      const sessionDir = await makeGrokSession({
+        grokHome,
+        workingDirectory,
+        sessionId,
+        fileSizeBytes: 20 * 1024 * 1024,
+      });
 
       const result = await maybeRotateCliNativeSession({
         catId: 'grok',
@@ -186,7 +216,12 @@ describe('F-G CLI native session rotation', () => {
 
     test('over threshold + catId not on whitelist → not_whitelisted, no rotation', async () => {
       const grokHome = join(tempDir, 'grok-home-2');
-      const sessionDir = await makeGrokSession({ grokHome, workingDirectory, sessionId, fileSizeBytes: 2 * 1024 * 1024 });
+      const sessionDir = await makeGrokSession({
+        grokHome,
+        workingDirectory,
+        sessionId,
+        fileSizeBytes: 2 * 1024 * 1024,
+      });
 
       const result = await maybeRotateCliNativeSession({
         catId: 'grok',
@@ -220,7 +255,12 @@ describe('F-G CLI native session rotation', () => {
 
     test('over threshold + whitelisted → rotated: true, session archived (renamed, not deleted)', async () => {
       const grokHome = join(tempDir, 'grok-home-4');
-      const sessionDir = await makeGrokSession({ grokHome, workingDirectory, sessionId, fileSizeBytes: 9 * 1024 * 1024 });
+      const sessionDir = await makeGrokSession({
+        grokHome,
+        workingDirectory,
+        sessionId,
+        fileSizeBytes: 9 * 1024 * 1024,
+      });
 
       const result = await maybeRotateCliNativeSession({
         catId: 'grok',
@@ -277,6 +317,102 @@ describe('F-G CLI native session rotation', () => {
       });
       assert.equal(result.rotated, false);
       assert.equal(result.reason, 'session_not_found');
+    });
+
+    test('two concurrent rotation checks for the same session serialize: one rotates, the other observes the missing source without throwing', async () => {
+      const grokHome = join(tempDir, 'grok-home-concurrent');
+      const sessionDir = await makeGrokSession({
+        grokHome,
+        workingDirectory,
+        sessionId,
+        fileSizeBytes: 9 * 1024 * 1024,
+      });
+      const input = {
+        catId: 'grok',
+        clientId: 'grok',
+        sessionId,
+        workingDirectory,
+        env: { GROK_HOME: grokHome, CLOWDER_CLI_SESSION_MAX_MB: '8', CLOWDER_CLI_SESSION_ROTATE_CATS: 'grok' },
+        now: () => Date.parse('2026-07-26T00:00:00Z'),
+      };
+
+      const results = await Promise.allSettled([
+        maybeRotateCliNativeSession(input),
+        maybeRotateCliNativeSession(input),
+      ]);
+
+      assert.equal(
+        results.every((result) => result.status === 'fulfilled'),
+        true,
+        'concurrent checks must not throw',
+      );
+      const reasons = results.map((result) => result.value.reason).sort();
+      assert.deepEqual(reasons, ['rotated', 'session_not_found']);
+      assert.equal(existsSync(sessionDir), false);
+      assert.equal(existsSync(`${sessionDir}.rotated-2026-07-26`), true);
+    });
+  });
+
+  describe('archive retention policy', () => {
+    test('default policy is disabled and does not inspect or remove archives', async () => {
+      const bucket = join(tempDir, 'retention-disabled');
+      const archive = join(bucket, 'sess-a.rotated-2026-06-01');
+      await mkdir(archive, { recursive: true });
+      await writeFile(join(archive, 'updates.jsonl'), 'keep');
+
+      const policy = loadCliSessionArchiveRetentionPolicy({});
+      assert.equal(policy.enabled, false);
+      const result = await pruneCliNativeSessionArchives({ archivedPath: archive, env: {} });
+
+      assert.equal(result.reason, 'disabled');
+      assert.equal(existsSync(archive), true);
+    });
+
+    test('explicit retention prunes only exact rotated directories, preserves current archive and unrelated entries', async () => {
+      const bucket = join(tempDir, 'retention-enabled');
+      await mkdir(bucket, { recursive: true });
+      const names = [
+        'sess-a.rotated-2026-06-01',
+        'sess-b.rotated-2026-06-02',
+        'sess-c.rotated-2026-07-25',
+        'sess-current.rotated-2026-07-26',
+      ];
+      for (const name of names) {
+        const path = join(bucket, name);
+        await mkdir(path, { recursive: true });
+        await writeFile(join(path, 'updates.jsonl'), Buffer.alloc(1024, name));
+      }
+      const unrelated = join(bucket, 'notes.rotated-not-a-date');
+      await mkdir(unrelated, { recursive: true });
+      await writeFile(join(unrelated, 'keep.txt'), 'keep');
+      await utimes(join(bucket, names[0]), new Date('2026-06-01T00:00:00Z'), new Date('2026-06-01T00:00:00Z'));
+      await utimes(join(bucket, names[1]), new Date('2026-06-02T00:00:00Z'), new Date('2026-06-02T00:00:00Z'));
+      await utimes(join(bucket, names[2]), new Date('2026-07-25T00:00:00Z'), new Date('2026-07-25T00:00:00Z'));
+      await utimes(join(bucket, names[3]), new Date('2026-07-26T00:00:00Z'), new Date('2026-07-26T00:00:00Z'));
+
+      const currentArchive = join(bucket, names[3]);
+      const result = await pruneCliNativeSessionArchives({
+        archivedPath: currentArchive,
+        env: {
+          CLOWDER_CLI_SESSION_ARCHIVE_RETENTION_DAYS: '30',
+          CLOWDER_CLI_SESSION_ARCHIVE_MAX_COUNT: '2',
+          CLOWDER_CLI_SESSION_ARCHIVE_MAX_MB: '1',
+        },
+        now: () => Date.parse('2026-07-26T12:00:00Z'),
+      });
+
+      assert.equal(result.reason, 'pruned');
+      assert.deepEqual(result.removedPaths.map((path) => path.split('/').at(-1)).sort(), [
+        'sess-a.rotated-2026-06-01',
+        'sess-b.rotated-2026-06-02',
+      ]);
+      assert.equal(existsSync(currentArchive), true, 'the archive created by the current rotation must be preserved');
+      assert.equal(existsSync(unrelated), true, 'non-matching entries must never be touched');
+      assert.deepEqual((await readdir(bucket)).sort(), [
+        'notes.rotated-not-a-date',
+        'sess-c.rotated-2026-07-25',
+        'sess-current.rotated-2026-07-26',
+      ]);
     });
   });
 });
