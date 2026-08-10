@@ -56,6 +56,7 @@ const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockAddActiveInvocation = vi.fn();
 const mockSetCatStatus = vi.fn();
+const mockSetGlobalCatActivity = vi.fn();
 const mockRemoveActiveInvocation = vi.fn();
 const mockAddToast = vi.fn();
 const mockThreadQueues = new Map<string, unknown[]>();
@@ -104,6 +105,7 @@ vi.mock('@/stores/chatStore', () => {
     addActiveInvocation: vi.fn(),
     removeActiveInvocation: mockRemoveActiveInvocation,
     setCatStatus: mockSetCatStatus,
+    setGlobalCatActivity: mockSetGlobalCatActivity,
     activeInvocations: mockActiveInvocations,
     targetCats: mockTargetCats,
     getThreadState: mockGetThreadState,
@@ -216,6 +218,11 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
     mockAddActiveInvocation.mockClear();
+    // 跨视图感知修复(F001)期间发现: 这个 mock 之前从没在 beforeEach 里清过——之前的用例
+    // 全部用 toHaveBeenCalledWith(顺序无关的存在性检查)侥幸没暴露。新增的
+    // not.toHaveBeenCalled() 断言需要每个测试从干净状态开始,顺手补上。
+    mockSetCatStatus.mockClear();
+    mockSetGlobalCatActivity.mockClear();
     mockAddToast.mockClear();
     mockGetThreadState.mockClear();
     mockApiFetch.mockReset();
@@ -303,6 +310,86 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
 
     expect(mockSetCatStatus).toHaveBeenCalledWith('pi-agent', 'alive_but_silent');
+  });
+
+  // 跨视图感知修复(F001): catStatusChange 现在无条件驱动 globalCatActivity,
+  // 即使猫不属于当前 thread(per-thread catStatuses 门槛不通过)。
+  describe('跨视图感知修复: globalCatActivity 无条件更新', () => {
+    it('cat 不属于当前 thread 时,per-thread catStatuses 仍被跳过,但 globalCatActivity 照样更新', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+
+      act(() => {
+        simulateServerEvent('catStatusChange', {
+          catId: 'pi-agent',
+          status: 'processing',
+          threadId: 'thread-branch-99',
+        });
+      });
+
+      // 对照组: per-thread catStatuses 行为不变——cat 不在当前 thread,不应该被 setCatStatus。
+      expect(mockSetCatStatus).not.toHaveBeenCalled();
+      // 全局活动状态必须无条件更新,带上事件里的 threadId。
+      expect(mockSetGlobalCatActivity).toHaveBeenCalledWith('pi-agent', 'active', 'thread-branch-99');
+    });
+
+    it('cat 属于当前 thread 时,per-thread 和全局状态都更新(互不影响)', () => {
+      mockActiveInvocations = { 'inv-1': { catId: 'pi-agent', mode: 'execute' } };
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+
+      act(() => {
+        simulateServerEvent('catStatusChange', {
+          catId: 'pi-agent',
+          status: 'processing',
+          threadId: 'thread-B',
+        });
+      });
+
+      expect(mockSetCatStatus).toHaveBeenCalledWith('pi-agent', 'streaming');
+      expect(mockSetGlobalCatActivity).toHaveBeenCalledWith('pi-agent', 'active', 'thread-B');
+    });
+
+    it('终态(online_idle/offline)清灯: globalCatActivity 收到 idle,不留僵尸灯', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+
+      act(() => {
+        simulateServerEvent('catStatusChange', {
+          catId: 'pi-agent',
+          status: 'offline',
+        });
+      });
+
+      expect(mockSetGlobalCatActivity).toHaveBeenCalledWith('pi-agent', 'idle', undefined);
+    });
+
+    it('timeout(疑似卡死)不计入全局"active"——与既有 per-message 语义一致(仅 processing 算 active)', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+      });
+
+      act(() => {
+        simulateServerEvent('catStatusChange', {
+          catId: 'pi-agent',
+          status: 'timeout',
+          threadId: 'thread-branch-99',
+        });
+      });
+
+      expect(mockSetGlobalCatActivity).toHaveBeenCalledWith('pi-agent', 'idle', 'thread-branch-99');
+    });
   });
 
   it('intent_mode from OTHER thread routes to background path, not callback', () => {
