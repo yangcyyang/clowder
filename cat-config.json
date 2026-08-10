@@ -46,6 +46,16 @@
       "available": true,
       "evaluation": "Opus 4.7 试用分身——据铲屎官体感猫格偏砚砚风格，待真实任务验证"
     },
+    "sonnet-45": {
+      "family": "ragdoll",
+      "roles": [
+        "assistant",
+        "coder"
+      ],
+      "lead": false,
+      "available": true,
+      "evaluation": "Sonnet 4.5 — 最新平衡型模型，速度与质量兼顾"
+    },
     "codex": {
       "family": "maine-coon",
       "roles": [
@@ -344,6 +354,62 @@
             "refAudio": "genshin/万叶/vo_kazuha_dialog_greetingMorning.wav",
             "refText": "清晨的鸟鸣，是大自然的馈赠。启程吧，属于我们的旅途也要开始了。",
             "instruct": "用一个清澈温和的少年语气说话，带着从容的力量感",
+            "temperature": 0.3
+          }
+        },
+        {
+          "id": "sonnet-45",
+          "catId": "sonnet-45",
+          "variantLabel": "Sonnet 4.5",
+          "displayName": "布偶猫",
+          "mentionPatterns": [
+            "@sonnet45",
+            "@sonnet-45",
+            "@布偶sonnet45",
+            "@布偶猫sonnet45",
+            "@sonnet4.5"
+          ],
+          "provider": "anthropic",
+          "defaultModel": "claude-sonnet-4-5",
+          "mcpSupport": true,
+          "avatar": "/avatars/sonnet-45.png",
+          "color": {
+            "primary": "#9575CD",
+            "secondary": "#D1C4E9"
+          },
+          "cli": {
+            "command": "claude",
+            "outputFormat": "stream-json",
+            "defaultArgs": [
+              "--output-format",
+              "stream-json",
+              "--model",
+              "claude-sonnet-4-5"
+            ],
+            "effort": "max"
+          },
+          "personality": "最新的 Sonnet 4.5，平衡速度与质量的新一代模型",
+          "strengths": [
+            "balanced-performance",
+            "coding",
+            "reasoning",
+            "speed"
+          ],
+          "teamStrengths": "快速推理与代码实现的平衡者",
+          "caution": null,
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/流浪者/vo_wanderer_dialog_greetingMorning.wav",
+            "refText": "快醒醒，太阳要晒屁股咯。哈，你不会以为我会这么叫你起床吧？",
+            "instruct": "用一个调皮狡黠的少年语气说话，带着得意和戏弄",
             "temperature": 0.3
           }
         }
