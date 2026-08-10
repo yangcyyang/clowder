@@ -205,32 +205,63 @@
   --console-status-connected: #2bac76;
 }
 
-[data-visual-theme="tesla"] {
+[data-visual-theme="slockv1"] {
   --console-shell-bg: #ffffff;
-  --console-panel-bg: #ffffff;
+  --console-panel-bg: #fffaef;
   --console-card-bg: #ffffff;
-  --console-card-soft-bg: #f4f4f4;
-  --console-code-bg: #f4f4f4;
-  --console-pill-bg: #eeeeee;
-  --console-border-soft: #eeeeee;
-  --console-border-strong: #d0d1d2;
-  --console-shadow: none;
-  --console-shadow-soft: none;
+  --console-card-soft-bg: #fffaef;
+  --console-code-bg: #111827;
+  --console-pill-bg: #fff4cf;
+  --console-border-soft: #141111;
+  --console-border-strong: #141111;
+  --console-shadow: 4px 4px 0 #141111;
+  --console-shadow-soft: 2px 2px 0 #141111;
   --console-field-bg: #ffffff;
-  --console-active-bg: #f4f4f4;
-  --console-hover-bg: #f4f4f4;
-  --console-rail-bg: #ffffff;
-  --console-rail-item: #ffffff;
-  --console-rail-active: #f4f4f4;
-  --console-rail-fg: #171a20;
-  --console-input-stroke: #3e6ae1;
-  --console-button-emphasis: #171a20;
-  --console-button-emphasis-hover: #393c41;
-  --console-modal-title: #171a20;
-  --console-modal-close-bg: #f4f4f4;
-  --console-modal-close-fg: #393c41;
-  --console-cat-fallback: #8e8e8e;
-  --console-status-connected: #3e6ae1;
+  --console-active-bg: #fe7da8;
+  --console-hover-bg: #fff4cf;
+  --console-rail-bg: #ffd440;
+  --console-rail-item: #ffd440;
+  --console-rail-active: #ffffff;
+  --console-rail-fg: #141111;
+  --console-input-stroke: #141111;
+  --console-button-emphasis: #fe7da8;
+  --console-button-emphasis-hover: #ff8db7;
+  --console-modal-title: #141111;
+  --console-modal-close-bg: #ffffff;
+  --console-modal-close-fg: #141111;
+  --console-cat-fallback: #ffd440;
+  --console-status-connected: #a9d877;
+}
+
+[data-visual-theme="kami"] {
+  --console-shell-bg: #f5f4ed;
+  --console-panel-bg: #f5f4ed;
+  --console-card-bg: #faf9f5;
+  --console-card-soft-bg: #f5f4ed;
+  --console-code-bg: #faf9f5;
+  --console-pill-bg: #eef2f7;
+  --console-border-soft: #e8e6dc;
+  --console-border-strong: #d0dce9;
+  --console-shadow: 0 4pt 24pt rgba(0, 0, 0, 0.05);
+  --console-shadow-soft: 0 1px 0 #e8e6dc;
+  --console-field-bg: #faf9f5;
+  --console-active-bg: #e4ecf5;
+  --console-hover-bg: #faf9f5;
+  --console-rail-bg: #141413;
+  --console-rail-item: transparent;
+  --console-rail-active: #1b365d;
+  --console-rail-fg: #faf9f5;
+  --console-input-stroke: #1b365d;
+  --console-button-emphasis: #1b365d;
+  --console-button-emphasis-hover: #2d5a8a;
+  --console-modal-title: #1b365d;
+  --console-modal-close-bg: #e8e6dc;
+  --console-modal-close-fg: #3d3d3a;
+  --console-cat-fallback: #6b6a64;
+  --console-status-connected: #1b365d;
+  --chat-code-bg: #faf9f5;
+  --chat-code-text: #141413;
+  --chat-code-btn-bg: #e8e6dc;
 }
 
 [data-theme="dark"][data-visual-theme="slack"] {
@@ -261,32 +292,63 @@
   --console-status-connected: #36c5f0;
 }
 
-[data-theme="dark"][data-visual-theme="tesla"] {
+[data-theme="dark"][data-visual-theme="slockv1"] {
   --console-shell-bg: #0f1115;
-  --console-panel-bg: #0f1115;
+  --console-panel-bg: #141111;
   --console-card-bg: #171a20;
-  --console-card-soft-bg: #20242a;
-  --console-code-bg: #090b0f;
-  --console-pill-bg: #20242a;
-  --console-border-soft: #2b2f36;
-  --console-border-strong: #3a3f48;
-  --console-shadow: none;
-  --console-shadow-soft: none;
-  --console-field-bg: #090b0f;
-  --console-active-bg: #171a20;
-  --console-hover-bg: #171a20;
-  --console-rail-bg: #0f1115;
-  --console-rail-item: #0f1115;
-  --console-rail-active: #171a20;
-  --console-rail-fg: #f4f4f4;
-  --console-input-stroke: #5c86ff;
-  --console-button-emphasis: #f4f4f4;
-  --console-button-emphasis-hover: #ffffff;
-  --console-modal-title: #f4f4f4;
-  --console-modal-close-bg: #171a20;
-  --console-modal-close-fg: #c8c9cc;
-  --console-cat-fallback: #8e8e8e;
-  --console-status-connected: #5c86ff;
+  --console-card-soft-bg: #241f1b;
+  --console-code-bg: #090807;
+  --console-pill-bg: rgba(255, 212, 64, 0.16);
+  --console-border-soft: #ffd440;
+  --console-border-strong: #ffd440;
+  --console-shadow: 4px 4px 0 #ffd440;
+  --console-shadow-soft: 2px 2px 0 #ffd440;
+  --console-field-bg: #090807;
+  --console-active-bg: #fe7da8;
+  --console-hover-bg: #241f1b;
+  --console-rail-bg: #ffd440;
+  --console-rail-item: #ffd440;
+  --console-rail-active: #141111;
+  --console-rail-fg: #141111;
+  --console-input-stroke: #ffd440;
+  --console-button-emphasis: #fe7da8;
+  --console-button-emphasis-hover: #ff9abe;
+  --console-modal-title: #fffaf0;
+  --console-modal-close-bg: #241f1b;
+  --console-modal-close-fg: #ffd440;
+  --console-cat-fallback: #ffd440;
+  --console-status-connected: #a9d877;
+}
+
+[data-theme="dark"][data-visual-theme="kami"] {
+  --console-shell-bg: #141413;
+  --console-panel-bg: #141413;
+  --console-card-bg: #242421;
+  --console-card-soft-bg: #1f1f1c;
+  --console-code-bg: #0f0f0e;
+  --console-pill-bg: #242421;
+  --console-border-soft: #504e49;
+  --console-border-strong: #6b6a64;
+  --console-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+  --console-shadow-soft: 0 1px 0 #3d3d3a;
+  --console-field-bg: #0f0f0e;
+  --console-active-bg: #1b365d;
+  --console-hover-bg: #242421;
+  --console-rail-bg: #0f0f0e;
+  --console-rail-item: transparent;
+  --console-rail-active: #1b365d;
+  --console-rail-fg: #f5f4ed;
+  --console-input-stroke: #8fb1d5;
+  --console-button-emphasis: #8fb1d5;
+  --console-button-emphasis-hover: #a7c3df;
+  --console-modal-title: #c7daed;
+  --console-modal-close-bg: #242421;
+  --console-modal-close-fg: #d9d6cb;
+  --console-cat-fallback: #b7b3a8;
+  --console-status-connected: #8fb1d5;
+  --chat-code-bg: #0f0f0e;
+  --chat-code-text: #f5f4ed;
+  --chat-code-btn-bg: #242421;
 }
 
 .console-shell {

@@ -9,10 +9,10 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
-type VisualTheme = 'claude' | 'slack' | 'tesla';
+type VisualTheme = 'claude' | 'slack' | 'slockv1' | 'kami';
 
 const VISUAL_THEME_STORAGE_KEY = 'clowder:visual-theme';
-const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'tesla'];
+const VISUAL_THEME_ORDER: VisualTheme[] = ['claude', 'slack', 'slockv1', 'kami'];
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
@@ -92,15 +92,21 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
   return (
     <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
-      {theme === 'tesla' ? 'T' : theme === 'slack' ? 'S' : 'C'}
+      {theme === 'slockv1' ? 'V1' : theme === 'kami' ? 'K' : theme === 'slack' ? 'S' : 'C'}
     </span>
   );
 }
 
 function getVisualThemeLabel(theme: VisualTheme): string {
-  if (theme === 'tesla') return 'Tesla';
+  if (theme === 'kami') return 'KAMI';
+  if (theme === 'slockv1') return 'Slock v1';
   if (theme === 'slack') return 'Slack';
   return 'Claude';
+}
+
+function normalizeVisualTheme(theme: string | null): VisualTheme {
+  if (theme === 'tesla') return 'slockv1';
+  return VISUAL_THEME_ORDER.includes(theme as VisualTheme) ? (theme as VisualTheme) : 'claude';
 }
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
@@ -185,9 +191,10 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(VISUAL_THEME_STORAGE_KEY);
-    const nextTheme = VISUAL_THEME_ORDER.includes(storedTheme as VisualTheme) ? (storedTheme as VisualTheme) : 'claude';
+    const nextTheme = normalizeVisualTheme(storedTheme);
     setVisualTheme(nextTheme);
     document.documentElement.dataset.visualTheme = nextTheme;
+    window.localStorage.setItem(VISUAL_THEME_STORAGE_KEY, nextTheme);
     setMounted(true);
   }, []);
 
