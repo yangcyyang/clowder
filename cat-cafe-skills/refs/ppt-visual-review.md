@@ -80,12 +80,13 @@ D1/D2 之前先跑自动检查，能机器判的不用人眼：
 
 ### 审查流程
 
-1. 读 brief + archetype + 主观看模式 → 建立期望
-2. 做 reviewer 自检三问（见下）
-3. 看截图 → 第一印象：信息层级清不清楚？密度够不够？
-4. 读 HTML/CSS → 检查布局结构是否正确（grid/flex 分配、overflow、background）
-5. 看密度数据 → 对照 density gate 标准（30% whitespace 上限）
-6. 出 P1/P2 清单
+1. **检查页面类型约束**（见 ppt-page-types.md）：封面/目录/章节页是否符合类型规范？
+2. 读 brief + archetype + 主观看模式 → 建立期望
+3. 做 reviewer 自检三问（见下）
+4. 看截图 → 第一印象：信息层级清不清楚？密度够不够？
+5. 读 HTML/CSS → 检查布局结构是否正确（grid/flex 分配、overflow、background）
+6. 看密度数据 → 对照 density gate 标准（30% whitespace 上限）
+7. 出 P1/P2 清单
 
 ### Reviewer 自检三问（出单前必须过）
 
@@ -99,6 +100,7 @@ D1/D2 之前先跑自动检查，能机器判的不用人眼：
 
 | 级别 | 类型 | 定义 | 示例 |
 |------|------|------|------|
+| P1 | 页面类型违规 | 违反页面类型内容约束（详见 ppt-page-types.md） | 封面有长段落正文、目录有长说明、章节页有列表 |
 | P1 | 布局 bug | CSS/HTML 导致的真实渲染错误 | strategy-bar 吃 1fr、overflow clipping |
 | P1 | 信息失败 | 读者看完不知道重点是什么 | 标题和内容不匹配、层级混乱 |
 | P1 | 密度失衡 | 该密不密（大块留白）或该疏不疏（挤到不可读） | 720px slide 只填 50%、文字重叠 |
