@@ -361,6 +361,24 @@ describe('QueueProcessor', () => {
     assert.equal(routeOptions.responsePresentation, undefined);
   });
 
+  it('keeps fresh-session isolation when a scheduled entry waits in the queue', async () => {
+    const entry = enqueueEntry(deps.queue, {
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      forceFreshCliSession: true,
+      targetCats: ['codex'],
+      content: 'daily digest',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-fresh-scheduled');
+
+    const result = await processor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const routeOptions = deps.router.routeExecution.mock.calls[0]?.arguments[6];
+    assert.equal(routeOptions.forceFreshCliSession, true);
+  });
+
   it('does not infer silent presentation from scheduled reminder text', async () => {
     const entry = enqueueEntry(deps.queue, {
       source: 'connector',

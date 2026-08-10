@@ -272,6 +272,17 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(textBroadcast.msg.extra.scheduler.hiddenReceipt, true);
   });
 
+  it('passes scheduled fresh-session isolation into the direct route', async () => {
+    const trigger = createTrigger();
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'daily digest', 'msg-fresh', undefined, {
+      sourceCategory: 'scheduled',
+      forceFreshCliSession: true,
+    });
+    await waitForTrigger();
+
+    assert.strictEqual(routerMock.calls[0].options.forceFreshCliSession, true);
+  });
+
   it('broadcasts agent messages to WebSocket room', async () => {
     const trigger = createTrigger();
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
