@@ -546,7 +546,8 @@ describe('tryCliProbe (unit)', () => {
     const result = await tryCliProbe('kimi', { execFn: exec });
     assert.ok(result);
     assert.equal(result.ok, true);
-    assert.ok(capturedCmd.includes('kimi --print'));
+    assert.ok(capturedCmd.includes('kimi --prompt'));
+    assert.equal(capturedCmd.includes('--print'), false);
     assert.ok(capturedCmd.includes('--prompt'));
   });
 });

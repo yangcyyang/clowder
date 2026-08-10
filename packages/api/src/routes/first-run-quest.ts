@@ -47,7 +47,7 @@ const CLI_PROBE_CMD: Record<string, (model?: string) => string> = {
   claude: (m) => `echo "reply pong" | claude -p${m ? ` --model ${m}` : ''} --max-budget-usd 0.05`,
   codex: (m) => `codex exec${m ? ` --model ${m}` : ''} "reply pong"`,
   gemini: (m) => `gemini -p "reply pong"${m ? ` --model ${m}` : ''}`,
-  kimi: (m) => `kimi --print${m ? ` --model ${m}` : ''} --prompt "reply pong"`,
+  kimi: (m) => `kimi --prompt "reply pong"${m ? ` --model ${m}` : ''}`,
   opencode: (m) => `opencode run${m ? ` --model ${m}` : ''} "reply pong"`,
 };
 
