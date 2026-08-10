@@ -274,10 +274,18 @@ test('injects an isolated native MCP config without persisting callback or accou
   }
 });
 
-test('subscription native MCP mode reuses the existing Grok auth and session store', async () => {
+test('subscription native MCP mode reuses the existing Grok auth and session store', async (t) => {
   const originalGrokAuthPath = process.env.GROK_AUTH_PATH;
-  delete process.env.GROK_AUTH_PATH;
   const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-subscription-home-'));
+  t.after(() => {
+    if (originalGrokAuthPath === undefined) {
+      delete process.env.GROK_AUTH_PATH;
+    } else {
+      process.env.GROK_AUTH_PATH = originalGrokAuthPath;
+    }
+    rmSync(sourceGrokHome, { recursive: true, force: true });
+  });
+  delete process.env.GROK_AUTH_PATH;
   const sourceSessions = join(sourceGrokHome, 'sessions');
   const sourceAuth = join(sourceGrokHome, 'auth.json');
   const sourceModelCache = join(sourceGrokHome, 'models_cache.json');
@@ -304,31 +312,62 @@ test('subscription native MCP mode reuses the existing Grok auth and session sto
     yield { type: 'end', sessionId: 'grok-subscription-native-mcp-session' };
   }
 
-  try {
-    const service = new GrokAgentService({ model: 'grok-4.5', grokHome: sourceGrokHome, mcpServerPath });
-    await collect(
-      service.invoke('Continue with tools', {
-        callbackEnv: {
-          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-          CAT_CAFE_INVOCATION_ID: 'inv-subscription-mcp',
-          CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
-          CAT_CAFE_GROK_PROFILE_MODE: 'subscription',
-        },
-        spawnCliOverride,
-      }),
-    );
+  const service = new GrokAgentService({ model: 'grok-4.5', grokHome: sourceGrokHome, mcpServerPath });
+  await collect(
+    service.invoke('Continue with tools', {
+      callbackEnv: {
+        CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+        CAT_CAFE_INVOCATION_ID: 'inv-subscription-mcp',
+        CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+        CAT_CAFE_GROK_PROFILE_MODE: 'subscription',
+      },
+      spawnCliOverride,
+    }),
+  );
 
-    assert.ok(runtimeHome, 'subscription invocation should receive an isolated GROK_HOME');
-    assert.equal(xaiApiKey, null);
-    assert.equal(authPath, sourceAuth);
-    assert.equal(runtimeSessions, realpathSync(sourceSessions));
-    assert.equal(runtimeModelCache, readFileSync(sourceModelCache, 'utf8'));
-  } finally {
+  assert.ok(runtimeHome, 'subscription invocation should receive an isolated GROK_HOME');
+  assert.equal(xaiApiKey, null);
+  assert.equal(authPath, sourceAuth);
+  assert.equal(runtimeSessions, realpathSync(sourceSessions));
+  assert.equal(runtimeModelCache, readFileSync(sourceModelCache, 'utf8'));
+});
+
+test('subscription native MCP mode honors an explicit GROK_AUTH_PATH override', async (t) => {
+  const originalGrokAuthPath = process.env.GROK_AUTH_PATH;
+  const sourceGrokHome = mkdtempSync(join(tmpdir(), 'grok-subscription-auth-override-'));
+  t.after(() => {
     if (originalGrokAuthPath === undefined) {
       delete process.env.GROK_AUTH_PATH;
     } else {
       process.env.GROK_AUTH_PATH = originalGrokAuthPath;
     }
     rmSync(sourceGrokHome, { recursive: true, force: true });
+  });
+
+  const configuredAuthPath = join(sourceGrokHome, 'configured-auth.json');
+  const mcpServerPath = join(sourceGrokHome, 'mcp-server.js');
+  writeFileSync(configuredAuthPath, '{}\n');
+  writeFileSync(mcpServerPath, '// test MCP entry\n');
+  process.env.GROK_AUTH_PATH = configuredAuthPath;
+  let authPath;
+
+  async function* spawnCliOverride(options) {
+    authPath = options.env.GROK_AUTH_PATH;
+    yield { type: 'text', data: 'ok' };
+    yield { type: 'end', sessionId: 'grok-subscription-auth-override-session' };
   }
+
+  const service = new GrokAgentService({ model: 'grok-4.5', grokHome: sourceGrokHome, mcpServerPath });
+  await collect(
+    service.invoke('Continue with configured auth', {
+      callbackEnv: {
+        CAT_CAFE_INVOCATION_ID: 'inv-subscription-auth-override',
+        CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+        CAT_CAFE_GROK_PROFILE_MODE: 'subscription',
+      },
+      spawnCliOverride,
+    }),
+  );
+
+  assert.equal(authPath, configuredAuthPath);
 });

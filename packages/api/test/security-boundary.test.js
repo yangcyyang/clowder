@@ -1,7 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -131,7 +131,8 @@ test('API binds to 127.0.0.1 by default', async (t) => {
     EVIDENCE_DB: path.join(tempRoot, 'evidence.sqlite'),
   };
   delete childEnv.API_SERVER_HOST;
-  delete childEnv.REDIS_URL;
+  // Empty is an explicit test sentinel: deleting lets load-project-env refill the live repo REDIS_URL.
+  childEnv.REDIS_URL = '';
   delete childEnv.CAT_CAFE_REDIS_TEST_ISOLATED;
 
   const child = spawn(process.execPath, ['dist/index.js'], {
@@ -166,4 +167,70 @@ test('API binds to 127.0.0.1 by default', async (t) => {
     await Promise.race([once(child, 'exit'), delay(2000)]);
     rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('Grok trusted headless mode keeps its MCP runtime isolated and decision-recorded', async (t) => {
+  const apiDir = path.resolve(process.cwd());
+  const repoRoot = path.resolve(apiDir, '..', '..');
+  const decisionPath = path.join(repoRoot, 'docs', 'decisions', '025-grok-trusted-headless-permissions.md');
+  assert.equal(existsSync(decisionPath), true, 'Grok broad tool approval must have an accepted decision record');
+
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'grok-security-boundary-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true }));
+  const sourceGrokHome = path.join(tempRoot, 'source-home');
+  const mcpServerPath = path.join(tempRoot, 'mcp-server.js');
+  mkdirSync(sourceGrokHome, { recursive: true });
+  writeFileSync(mcpServerPath, '// security-boundary MCP fixture\n');
+
+  let spawnOptions;
+  let runtimeConfig = '';
+  let bridgeSource = '';
+  async function* spawnCliOverride(options) {
+    spawnOptions = options;
+    runtimeConfig = readFileSync(path.join(options.env.GROK_HOME, 'config.toml'), 'utf8');
+    bridgeSource = readFileSync(path.join(options.env.GROK_HOME, 'cat-cafe-mcp-bridge.mjs'), 'utf8');
+    yield { type: 'end', stopReason: 'EndTurn', sessionId: 'grok-security-boundary-session' };
+  }
+
+  const { GrokAgentService } = await import('../dist/domains/cats/services/agents/providers/GrokAgentService.js');
+  const service = new GrokAgentService({
+    model: 'grok-4.5',
+    cliCommand: process.execPath,
+    grokHome: sourceGrokHome,
+    mcpServerPath,
+  });
+  for await (const _message of service.invoke('Inspect the trusted headless boundary', {
+    callbackEnv: {
+      CAT_CAFE_INVOCATION_ID: 'inv-grok-security-boundary',
+      CAT_CAFE_CALLBACK_TOKEN: 'callback-secret',
+      CAT_CAFE_GROK_PROFILE_MODE: 'api_key',
+      ALLOWED_WORKSPACE_DIRS: tempRoot,
+    },
+    accountEnv: { XAI_API_KEY: 'xai-account-secret' },
+    spawnCliOverride,
+  })) {
+    // Exhaust the provider stream so its finally block removes the isolated runtime home.
+  }
+
+  const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
+  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'bypassPermissions');
+  assert.deepEqual(
+    spawnOptions.args.flatMap((value, index, args) =>
+      value === '--allow' && args[index + 1] ? [args[index + 1]] : [],
+    ),
+    ['MCPTool(cat-cafe-clowder-runtime__*)', 'Bash', 'Write', 'Edit'],
+  );
+  assert.match(runtimeConfig, /\[compat\.claude\]\nmcps = false/);
+  assert.match(runtimeConfig, /\[compat\.cursor\]\nmcps = false/);
+  assert.equal((runtimeConfig.match(/\[mcp_servers\./g) ?? []).length, 1);
+  assert.match(runtimeConfig, /\[mcp_servers\.cat-cafe-clowder-runtime\]/);
+  assert.doesNotMatch(runtimeConfig, /callback-secret|xai-account-secret/);
+  assert.match(bridgeSource, /CAT_CAFE_CALLBACK_TOKEN/);
+  assert.doesNotMatch(bridgeSource, /XAI_API_KEY/);
+  assert.equal(existsSync(spawnOptions.env.GROK_HOME), false);
+
+  const decision = readFileSync(decisionPath, 'utf8');
+  assert.match(decision, /bypassPermissions/);
+  assert.match(decision, /能力文档[^。\n]*不是[^。\n]*安全边界/);
+  assert.match(decision, /无 OS 级沙箱/);
 });

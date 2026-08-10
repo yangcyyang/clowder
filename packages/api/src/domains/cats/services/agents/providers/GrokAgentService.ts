@@ -207,16 +207,17 @@ export class GrokAgentService implements AgentService {
       'streaming-json',
       '--model',
       this.model,
-      // Run headless tools without approval prompts; explicit allow rules below remain as capability documentation.
+      // ADR-025: this trusted headless profile intentionally auto-approves Grok's built-in tools.
       '--permission-mode',
       'bypassPermissions',
-      // The isolated GROK_HOME exposes only Cat Cafe's MCP server; approve that namespace explicitly.
+      // Under bypassPermissions, these rules document the expected capability inventory; they are not a security boundary.
+      // The isolated GROK_HOME still exposes only Cat Cafe's MCP server.
       '--allow',
       'MCPTool(cat-cafe-clowder-runtime__*)',
       // Grok names the runtime tool `run_terminal_command`, but permission rules use the Bash alias.
       '--allow',
       'Bash',
-      // Structured workspace edits are core engineering actions. Keep them explicit so unknown tools stay gated.
+      // Structured workspace edits are core engineering actions in this trusted profile.
       '--allow',
       'Write',
       '--allow',
@@ -310,7 +311,9 @@ export class GrokAgentService implements AgentService {
             // discipline for classifyProviderError's cli_stall + task-run-linkage's
             // timeout→blocked matching — see utils/cli-spawn.ts). Surface it verbatim
             // instead of the normal composed Chinese timeout string.
-            error: rawEvent.idleWatchdogKill ? rawEvent.message : `Grok CLI 响应超时 (${Math.round(rawEvent.timeoutMs / 1000)}s)`,
+            error: rawEvent.idleWatchdogKill
+              ? rawEvent.message
+              : `Grok CLI 响应超时 (${Math.round(rawEvent.timeoutMs / 1000)}s)`,
             metadata,
             timestamp: Date.now(),
           };
