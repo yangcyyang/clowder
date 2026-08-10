@@ -79,6 +79,22 @@ describe('cat-cafe probe path resolution', () => {
 });
 
 describe('probeMcpCapability', () => {
+  it('waits for a timed-out stdio probe child to exit before returning', async () => {
+    const marker = `mcp-probe-cleanup-${process.pid}-${Date.now()}`;
+    const result = await probeMcpCapability(
+      makeCapability(process.execPath, ['-e', `process.title=${JSON.stringify(marker)};setInterval(()=>{},1000)`]),
+      { projectRoot: process.cwd(), timeoutMs: 100 },
+    );
+
+    assert.equal(result.connectionStatus, 'disconnected');
+    const leaked = process
+      ._getActiveHandles()
+      .filter((handle) => handle?.constructor?.name === 'ChildProcess')
+      .filter((handle) => handle.spawnargs?.some((arg) => arg.includes(marker)))
+      .filter((handle) => handle.exitCode === null && handle.signalCode === null && handle.killed === false);
+    assert.deepEqual(leaked, []);
+  });
+
   it('returns unknown when pencil resolver-backed capability cannot resolve a local binary', async () => {
     const originalBin = process.env.PENCIL_MCP_BIN;
     const originalApp = process.env.PENCIL_MCP_APP;

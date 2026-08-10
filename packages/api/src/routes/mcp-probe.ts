@@ -19,12 +19,17 @@ export interface McpProbeResult {
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
 const SLOW_START_PROBE_TIMEOUT_MS = 7000;
-const CLOSE_TIMEOUT_MS = 300;
+// The SDK shutdown sequence waits up to 2s before SIGTERM and another 2s before SIGKILL.
+// Do not abandon close() early: doing so leaves timed-out probe children attached to the API/test process.
+const CLOSE_TIMEOUT_MS = 4500;
 const MIN_STEP_TIMEOUT_MS = 100;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Probe timeout after ${timeoutMs}ms`)), timeoutMs);
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`Probe timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
     promise.then(
       (value) => {
         clearTimeout(timer);
@@ -51,8 +56,20 @@ function remainingTimeout(deadlineMs: number): number {
   return Math.max(MIN_STEP_TIMEOUT_MS, deadlineMs - Date.now());
 }
 
-async function closeTransportBounded(transport: StdioClientTransport): Promise<void> {
-  await Promise.race([transport.close(), new Promise<void>((resolve) => setTimeout(resolve, CLOSE_TIMEOUT_MS))]);
+async function closeTransportBounded(transport: StdioClientTransport, transportClosed?: Promise<void>): Promise<void> {
+  const closePromise = transport.close().catch(() => {});
+  const settled = transportClosed ? Promise.all([closePromise, transportClosed]).then(() => undefined) : closePromise;
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      settled,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function normalizeTools(tools: Array<{ name?: string | undefined; description?: string | undefined }>): McpToolInfo[] {
@@ -143,10 +160,42 @@ export async function probeMcpCapability(
 
   const transport = new StdioClientTransport(serverParams);
   const client = new Client({ name: 'cat-cafe-capability-probe', version: '0.1.0' }, { capabilities: {} });
+  let resolveTransportClosed: (() => void) | undefined;
+  const transportClosed = new Promise<void>((resolve) => {
+    resolveTransportClosed = resolve;
+  });
+  const previousOnClose = transport.onclose;
+  transport.onclose = () => {
+    previousOnClose?.();
+    resolveTransportClosed?.();
+  };
+  let transportStarted = false;
 
   try {
-    await withTimeout(client.connect(transport), remainingTimeout(deadlineMs));
-    const result = await withTimeout(client.listTools(), remainingTimeout(deadlineMs));
+    const connectAbort = new AbortController();
+    const connectPromise = client.connect(transport, { signal: connectAbort.signal });
+    transportStarted = transport.pid !== null;
+    const connectTimeoutMs = remainingTimeout(deadlineMs);
+    try {
+      await withTimeout(connectPromise, connectTimeoutMs, () =>
+        connectAbort.abort(new Error(`Probe timeout after ${connectTimeoutMs}ms`)),
+      );
+    } catch (error) {
+      connectAbort.abort(error);
+      throw error;
+    }
+
+    const listAbort = new AbortController();
+    const listTimeoutMs = remainingTimeout(deadlineMs);
+    let result: Awaited<ReturnType<Client['listTools']>>;
+    try {
+      result = await withTimeout(client.listTools(undefined, { signal: listAbort.signal }), listTimeoutMs, () =>
+        listAbort.abort(new Error(`Probe timeout after ${listTimeoutMs}ms`)),
+      );
+    } catch (error) {
+      listAbort.abort(error);
+      throw error;
+    }
     return {
       connectionStatus: 'connected',
       tools: normalizeTools(result.tools ?? []),
@@ -157,6 +206,6 @@ export async function probeMcpCapability(
       tools: [],
     };
   } finally {
-    await closeTransportBounded(transport).catch(() => {});
+    await closeTransportBounded(transport, transportStarted ? transportClosed : undefined).catch(() => {});
   }
 }
