@@ -216,6 +216,7 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
     steps: [
       { text: '创建 GitHub Personal Access Token（需 repo + notifications 权限）' },
       { text: '填写 Token 后用于 Scheduler 仓库活跃度模板鉴权' },
+      { text: '填写以下配置并保存，重启 API 服务后生效' },
     ],
   },
 ];
