@@ -136,14 +136,18 @@ function normalizeCats(rawCats: unknown[]): CatData[] {
       mentionPatterns: Array.isArray(cat.mentionPatterns) ? cat.mentionPatterns : [],
       accountRef: cat.accountRef,
       assetCard: cat.assetCard,
-      clientId: cat.clientId ?? 'openai',
+      // Missing provider identity is a data-quality signal. Preserve it so the
+      // editor can show “未设置” instead of inventing a plausible-looking client.
+      clientId: cat.clientId ?? '',
       defaultModel: cat.defaultModel ?? '',
       toolPolicy:
         cat.toolPolicy === 'minimal' || cat.toolPolicy === 'standard' || cat.toolPolicy === 'full'
           ? cat.toolPolicy
           : undefined,
       permissionProfile:
-        cat.permissionProfile === 'strict' || cat.permissionProfile === 'standard' || cat.permissionProfile === 'trusted'
+        cat.permissionProfile === 'strict' ||
+        cat.permissionProfile === 'standard' ||
+        cat.permissionProfile === 'trusted'
           ? cat.permissionProfile
           : undefined,
       cli: cat.cli,

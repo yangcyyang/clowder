@@ -105,6 +105,31 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────
 
 describe('useCatData retry mechanism', () => {
+  it('keeps a missing clientId unconfigured instead of inventing a provider', async () => {
+    const legacyGrokCat = {
+      id: 'grok',
+      displayName: '荧荧',
+      color: { primary: '#111827', secondary: '#f3f4f6' },
+      mentionPatterns: ['@grok'],
+      defaultModel: 'grok-4.5',
+      avatar: '/avatars/grok.png',
+      roleDescription: '实时检索',
+      personality: '直接',
+    };
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ cats: [legacyGrokCat] }) });
+    });
+
+    await act(async () => {
+      root.render(React.createElement(TestComponent));
+    });
+    await flushPromises();
+
+    expect(hookResult.cats[0]?.clientId).toBe('');
+    expect(hookResult.cats[0]?.defaultModel).toBe('grok-4.5');
+  });
+
   it('retries after 10s on failure and stops after success', async () => {
     // F166: /api/config/cat-order always returns empty order; /api/cats follows
     // the retry sequence (fail → success).
