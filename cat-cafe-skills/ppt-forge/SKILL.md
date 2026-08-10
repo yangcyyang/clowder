@@ -17,6 +17,18 @@ description: >
 - QA/审查猫（跨 family）：布局/信息审查 + Export Truth Gate
 - 视觉把关猫（跨 family）：审美/品牌审查 + 风格定调
 
+## 页面类型约束（开工前必读）
+
+**不同页面类型有不同的内容约束。** 详见 [ppt-page-types.md](../refs/ppt-page-types.md)。
+
+速查：
+- **封面 (cover)**：只有标题+副标题，❌ 禁止长段落正文
+- **目录 (toc)**：短问题列表（≤18 字/条），❌ 禁止长说明
+- **章节页 (chapter)**：1-2 句过渡判断，❌ 禁止长段落和列表
+- **内容页**：才是密度填充的主战场
+
+**页面类型是第一道门禁，密度是第二道门禁。**
+
 ## 开局参数（必须声明）
 
 | 参数 | 说明 | 示例 |
@@ -31,24 +43,71 @@ description: >
 
 ## 场景路由
 
-| 触发 | 场景 | 主导 | 详细文档 |
-|------|------|------|---------|
-| 铲屎官说"做个 PPT" | **A: 内容规划** | 主执行猫 | 主 skill 最小规则（ref 待补） |
-| 大纲确认 | **B: 风格定调** | 视觉把关猫审 + 主执行猫做 | [ppt-style-tile.md](../refs/ppt-style-tile.md) |
-| 风格确认 | **C: Slide 批量制作** | 主执行猫 | [ppt-slide-authoring.md](../refs/ppt-slide-authoring.md) |
-| Slide 做完 | **D: 视觉审查 Gate** | QA/审查猫(D1) + 视觉把关猫(D2) | [ppt-visual-review.md](../refs/ppt-visual-review.md) |
-| 审查通过 | **E: Export Truth Gate** | QA/审查猫 | 主 skill 最小规则（ref 待补） |
-| 导出验证通过 | **F: 交付** | 主执行猫 | [ppt-delivery.md](../refs/ppt-delivery.md) |
-| 需要对比竞品 | **G: Benchmark 对拍** | QA/审查猫 + 视觉把关猫 | 主 skill 最小规则（ref 待补） |
-| 铲屎官不满意 / 连续 2 轮 P1>0 | **R: 翻盘重来** | 全部参与猫 | 主 skill 最小规则（ref 待补） |
+| 触发 | 场景 | 主导 | 脚本/工具 | 详细文档 |
+|------|------|------|----------|---------|
+| 铲屎官说"做个 PPT" | → **ppt-agent** 先做内容规划 | — | — | 用 ppt-agent skill |
+| ppt-agent 交接包到达 | **B: 风格定调** | 视觉把关猫审 + 主执行猫做 | `design_taste.py` + `deck_to_html.py` | 见下方 Stage B |
+| 风格确认 | **C: Slide 批量制作** | 主执行猫 | `deck_to_html.py` | [ppt-slide-authoring.md](../refs/ppt-slide-authoring.md) |
+| Slide 做完 | **D: 视觉审查 Gate** | QA/审查猫(D1) + 视觉把关猫(D2) | `review_html_deck.py` + `narrative_critic.py` | [ppt-visual-review.md](../refs/ppt-visual-review.md) |
+| 审查通过 | **E: Export Truth Gate** | QA/审查猫 | `export_pptx.py` | 见下方 Stage E |
+| 导出验证通过 | **F: 交付** | 主执行猫 | — | [ppt-delivery.md](../refs/ppt-delivery.md) |
+| 需要对比竞品 | **G: Benchmark 对拍** | QA/审查猫 + 视觉把关猫 | — | 主 skill 最小规则（ref 待补） |
+| 铲屎官不满意 / 连续 2 轮 P1>0 | **R: 翻盘重来** | 全部参与猫 | — | 主 skill 最小规则（ref 待补） |
 
 ## 还没拆成 ref 的场景（当前最小真相源）
 
-### A: 内容规划
+### A: 内容规划 → 已移交 ppt-agent
 
-- 先锁：`archetype / 品牌 / 受众 / 场景 / 主观看模式`
-- 至少产出：`本页目的一句话 + 证据源列表 + 页面结构草图`
-- 没说清"这页让人看完要得出什么结论" → 不进 C
+内容规划链路（Brief → 叙事 → 页面计划）现由 ppt-agent skill 负责。
+ppt-forge 从 Stage B 开始，接收 ppt-agent 的交接包。
+
+### B: 风格定调（必经门禁）
+
+**输入**：ppt-agent 交接包（deck.json + narrative_plan.json + brand tokens CSS）
+
+**流程**：
+
+1. 选 2 页代表性样稿（cover + 信息最密的内容页）
+2. 对每个样稿生成 3 套风格变体：
+   - Variant 1: spacious-minimal（low × minimal × soft）
+   - Variant 2: balanced-default（moderate × balanced × standard）
+   - Variant 3: dense-bold（high × rich × bold）
+3. 每套变体执行：
+   ```bash
+   python3 design_taste.py --variant N --token-css brand.tokens.css \
+     --output style-pack.css --report style-pack-report.json
+   ```
+4. 合并 CSS：`cat brand.tokens.css style-pack.css > combined.css`
+5. 渲染 2 页预览：
+   ```bash
+   python3 deck_to_html.py --input sample-deck.json --output preview.html \
+     --schema deck-schema.json --token-css combined.css --report render-report.json
+   ```
+6. 输出 taste-report.json
+
+**人审门禁**：人选定一个 variant。未选定 = 不进 Stage C。
+
+### C: Slide 批量制作（脚本命令）
+
+```bash
+python3 deck_to_html.py --input deck.json --output deck.html \
+  --schema deck-schema.json --token-css combined.css \
+  --report render-report.json
+```
+
+### D: 视觉审查（脚本命令）
+
+D1 布局/信息审查：
+```bash
+python3 review_html_deck.py --html deck.html --deck deck.json \
+  --report review-report.json --require-token
+```
+
+D2 叙事连贯性：
+```bash
+python3 narrative_critic.py --deck deck.json \
+  --narrative-plan narrative_plan.json --report narrative-review.json
+```
 
 ### E: Export Truth Gate
 
@@ -84,6 +143,7 @@ description: >
 
 | 级别 | 维度 | 判定 |
 |------|------|------|
+| P1 | 页面类型违规 | 封面有长正文/目录有长说明/章节页有列表（见 [ppt-page-types.md](../refs/ppt-page-types.md)） |
 | P1 | 布局 bug | 真实 CSS/HTML 错误 |
 | P1 | 信息失败 | 没讲清重点 / 层级错 / 受众看不懂 |
 | P1 | 密度失衡 | 该密不密 / 该疏不疏 |
@@ -151,6 +211,7 @@ def inline_images(html_path):
 
 | 错误 | 后果 | 修复 |
 |------|------|------|
+| 封面/目录/章节页违反类型约束 | PPT 结构混乱，观众认知负担增加 | 开工前读 ppt-page-types.md，审查时优先检查类型约束 |
 | 没声明开局参数 | 开工和审查没有标准 | 开工前锁 `archetype + 品牌 + 受众 + 场景 + 主观看模式` |
 | 20 页全做完才审 | 返工成本爆炸 | B 场景：先做 1-2 页核心页定调 |
 | 自己说"没问题"不截图 | 布局 bug 漏检 | 自检必须截图看一遍再交活 |
@@ -163,6 +224,19 @@ def inline_images(html_path):
 - `request-review` / `receive-review`：**代码**审查 — ppt-forge D 场景是**视觉**审查
 - `expert-panel`：多猫分析报告 — ppt-forge 是做 PPT
 - `quality-gate`：代码自检 — ppt-forge 有自己的 density gate
+
+## 从 ppt-agent 接收的交接包
+
+| 交接物 | 格式 | 来源 |
+|--------|------|------|
+| deck.json | JSON (deck-schema.json) | ppt-agent Stage 3 |
+| narrative_plan.json | JSON | ppt-agent Stage 2 |
+| brand tokens CSS | CSS | L0 / 用户提供 |
+| archetype | 文本 | Brief |
+| brand | 文本 | Brief |
+| audience | 文本 | Brief |
+| scenario | 文本 | Brief |
+| view-mode | 文本 | Brief |
 
 ## 下一步
 
