@@ -193,6 +193,18 @@ describe('GovernanceBootstrapService', () => {
     }
   });
 
+  it('treats concurrent creation of the same correct skill symlink as idempotent', async () => {
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+
+    await assert.doesNotReject(
+      () => Promise.all(Array.from({ length: 4 }, () => svc.bootstrap(targetProject, { dryRun: false }))),
+    );
+
+    const linkPath = join(targetProject, '.claude', 'skills', 'tdd');
+    const target = await readlink(linkPath);
+    assert.equal(resolve(dirname(linkPath), target), resolve(catCafeRoot, 'cat-cafe-skills', 'tdd'));
+  });
+
   it('creates hooks symlink for claude provider', async () => {
     // Create source hooks dir in catCafeRoot
     await mkdir(join(catCafeRoot, '.claude', 'hooks'), { recursive: true });

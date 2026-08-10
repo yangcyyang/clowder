@@ -43,7 +43,15 @@ async function ensureCorrectSymlink(linkPath: string, target: string): Promise<v
   } catch {
     // Doesn't exist — fine, we'll create it
   }
-  await symlink(target, linkPath);
+  try {
+    await symlink(target, linkPath);
+  } catch (err) {
+    const code = typeof err === 'object' && err !== null && 'code' in err ? err.code : undefined;
+    if (code !== 'EEXIST') throw err;
+
+    const existing = await readlink(linkPath);
+    if (existing !== target) throw err;
+  }
 }
 
 async function removeSymlinkIfExists(linkPath: string): Promise<void> {

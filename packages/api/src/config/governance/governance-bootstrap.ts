@@ -258,7 +258,16 @@ export class GovernanceBootstrapService {
 
       if (!dryRun) {
         const relPath = IS_WIN32 ? sourceSkill : relative(dirname(linkPath), sourceSkill);
-        await symlink(relPath, linkPath, IS_WIN32 ? 'junction' : undefined);
+        try {
+          await symlink(relPath, linkPath, IS_WIN32 ? 'junction' : undefined);
+        } catch (err) {
+          const code = typeof err === 'object' && err !== null && 'code' in err ? err.code : undefined;
+          if (code !== 'EEXIST') throw err;
+
+          const current = await readlink(linkPath);
+          const resolved = resolve(dirname(linkPath), current);
+          if (!pathsEqual(resolved, sourceSkill)) throw err;
+        }
       }
       actions.push({ file: `${skillsDir}/${name}`, action: 'symlinked', reason: `linked to ${sourceSkill}` });
     }

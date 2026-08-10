@@ -115,6 +115,15 @@ describe('Skill Sync Service (ADR-025 Phase 2)', () => {
     assert.deepStrictEqual(result1.synced.sort(), result2.synced.sort());
   });
 
+  test('treats concurrent creation of the same correct skill symlink as idempotent', async () => {
+    await assert.doesNotReject(
+      () => Promise.all(Array.from({ length: 4 }, () => syncSkills(projectRoot, skillsSource))),
+    );
+
+    const linkPath = join(projectRoot, '.claude', 'skills', 'tdd');
+    assert.equal(await readlink(linkPath), join(skillsSource, 'tdd'));
+  });
+
   test('returns empty result for source dir with no skills', async () => {
     const emptySource = join(tempDir, 'empty-skills');
     await mkdir(emptySource, { recursive: true });
