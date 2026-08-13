@@ -1200,3 +1200,20 @@ created: 2026-02-26
 - 原理（可选）：待补充。
 
 - 关联：待补充。
+
+### LL-059: 符号链接不等于只读隔离
+- 状态：draft
+- 更新时间：2026-08-13
+
+- 坑：为隔离的 CLI Home 恢复用户 Skills 时，直接 symlink 源目录看似零复制，实际会把原 Skill 暴露为运行时写入目标。
+- 根因：符号链接只改变路径解析，不增加只读权限；当 provider 使用 trusted headless/bypass 权限时，运行进程拥有与宿主用户相同的写权限。
+- 触发条件：临时 HOME、容器目录或测试沙箱通过 symlink 复用宿主配置、Skill、插件或脚本，并把“路径隔离”误认为“权限隔离”。
+- 修复：对允许进入运行时的白名单 Skill 建立 invocation 级临时快照；用户顶层链接先校验再解引用复制，回合结束删除临时副本。
+- 防护：测试同时断言临时副本可发现、源文件内容/mtime 不变、凭据与无关目录未进入快照、所有退出路径清理临时目录。
+- 来源锚点：
+  - `docs/discussions/2026-08-13-f038-grok-skills-design-gate.md`
+  - `docs/decisions/025-grok-trusted-headless-permissions.md`
+  - `packages/api/test/grok-agent-service.test.js`
+- 原理（可选）：隔离必须改变可写对象的所有权或副本关系；只改变入口路径不会改变能力边界。
+
+- 关联：F038 | ADR-025

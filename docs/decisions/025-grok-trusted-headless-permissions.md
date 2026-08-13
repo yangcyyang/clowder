@@ -55,3 +55,15 @@ Grok 的 trusted headless profile 使用：
 - `GrokAgentService` 中的参数注释必须准确说明 bypass 的语义，避免“未知工具仍受门控”的误导。
 - `security-boundary.test.js` 固定检查 permission mode、MCP 隔离、机密不泄露以及本 ADR 的存在。
 - `grok-agent-service.test.js` 覆盖 subscription 模式的 `GROK_AUTH_PATH` 回落与显式宿主覆盖，防止隔离逻辑改变既有认证语义。
+
+## 2026-08-13 补充：Grok Skills 隔离快照
+
+Clowder 中的 Grok 需要使用 `~/.grok/skills` 与 `~/.grok/bundled/skills`，但不得因此把完整宿主 Home 透传给临时运行目录。
+
+- 禁止把源 Skills 目录直接 symlink 到临时 `GROK_HOME`：symlink 不提供只读边界，trusted headless 工具可写入链接目标。
+- 禁止透传完整 `~/.grok`：凭据、日志、插件、Hooks、配置与历史不属于本能力范围。
+- 每次 invocation 只把含有效 `SKILL.md` 的用户和 bundled Skill 复制到临时快照；用户顶层链接在复制时解引用。
+- 单个 Skill 缺失、损坏或复制失败应降级跳过并聚合告警；临时 Home 的基础配置无法建立时才终止调用。
+- 临时副本沿用 Grok 原生的用户优先于 bundled 的同名解析规则，并在 invocation 结束后清理。
+
+该补充不改变 `bypassPermissions` 决策，也不新增 OS 级沙箱声明。

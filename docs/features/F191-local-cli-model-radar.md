@@ -108,6 +108,7 @@ in_context_observability:
 | 2026-07-11 | 收尾审计补齐身份校验、用户隔离、static fallback 语义和 HOME 隔离测试 |
 | 2026-07-11 | `aa1cdc8e` 落地 F191；后续迭代补充 Grok、Kimi 新配置目录、远程清单与云目录 |
 | 2026-07-26 | 复核实现与真机来源，完成任务 #55 收口 |
+| 2026-08-13 | F038 Phase B 关联刷新：真机 Grok CLI 为 1.0.3，默认模型为 `grok-4.6`；进入探测 fixture 与 static fallback 回归 |
 
 ## Verification Evidence
 
