@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "expectedTotals": {
-    "files": 15,
-    "tests": 122,
-    "failures": 37
+    "files": 10,
+    "tests": 94,
+    "failures": 19
   },
   "entries": [
     {
@@ -16,110 +16,6 @@
         {
           "fullName": "ChatContainer intent_mode loading lock renders ThinkingIndicator when a single active slot exists even if intentMode is missing",
           "failureKind": "assertion:call-count"
-        }
-      ]
-    },
-    {
-      "relativeFile": "src/components/__tests__/chat-input-b10-whisper-active.test.ts",
-      "owner": "@yangcyyang",
-      "reason": "Whisper selector behavior for executing cats, default selection, status badges, and queue placeholders needs product-owner confirmation.",
-      "expiry": "2026-07-29",
-      "testCount": 8,
-      "failures": [
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats disables executing cat chips in whisper selector",
-          "failureKind": "assertion:defined"
-        },
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats does not auto-select executing cats when entering whisper mode",
-          "failureKind": "assertion:invalid-input"
-        },
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats F108B AC-B7: whisper to idle cat shows whisper placeholder, not queue placeholder",
-          "failureKind": "assertion:contains"
-        },
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats falls back to targetCats when activeInvocations is empty but hasActiveInvocation is true (legacy path)",
-          "failureKind": "assertion:object-is"
-        },
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats P1-1: entering whisper with active cat — idle cats NOT pre-selected either",
-          "failureKind": "assertion:object-is"
-        },
-        {
-          "fullName": "F122B AC-B10: whisper mode + executing cats shows \"执行中\" status badge on executing cat row",
-          "failureKind": "assertion:invalid-input"
-        }
-      ]
-    },
-    {
-      "relativeFile": "src/components/__tests__/chat-input-game-send-guard.test.ts",
-      "owner": "@yangcyyang",
-      "reason": "Game menu availability, temporary send guards, drill-in behavior, and dedicated start API handling need product-owner confirmation.",
-      "expiry": "2026-07-29",
-      "testCount": 7,
-      "failures": [
-        {
-          "fullName": "game button toggle closes open menu clicking game button again dismisses the menu",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "game start calls dedicated API (not message pipeline) calls /api/game/start regardless of hasActiveInvocation",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "game start failure handling (P1-1) shows error and restores lobby on network failure",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "game start failure handling (P1-1) shows error and restores lobby when API returns error",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "layer drill-in does not trigger outside-click close clicking werewolf drills into modes (layer 2 visible)",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "sendGameCommand respects sendTemporarilyDisabled does NOT send game command when upload starts after menu is open",
-          "failureKind": "assertion:truthy"
-        },
-        {
-          "fullName": "sendGameCommand respects sendTemporarilyDisabled opens lobby when upload is idle, calls game API on confirm",
-          "failureKind": "runtime:null-property-access"
-        }
-      ]
-    },
-    {
-      "relativeFile": "src/components/__tests__/chat-input-mobile.test.ts",
-      "owner": "@yangcyyang",
-      "reason": "Mobile toolbar whisper affordance and single-row textarea defaults need product-owner confirmation.",
-      "expiry": "2026-07-29",
-      "testCount": 7,
-      "failures": [
-        {
-          "fullName": "ChatInput mobile toolbar expands toolbar on + click and shows attach/whisper buttons",
-          "failureKind": "assertion:contains"
-        },
-        {
-          "fullName": "ChatInput textarea auto-grow starts with rows=1",
-          "failureKind": "assertion:object-is"
-        }
-      ]
-    },
-    {
-      "relativeFile": "src/components/__tests__/chat-input-whisper-targets.test.ts",
-      "owner": "@yangcyyang",
-      "reason": "Whisper targets with empty mention patterns need product-owner confirmation for visibility and selection behavior.",
-      "expiry": "2026-07-29",
-      "testCount": 2,
-      "failures": [
-        {
-          "fullName": "ChatInput whisper targets with empty mentionPatterns can toggle a whisper target with empty mentionPatterns",
-          "failureKind": "runtime:null-property-access"
-        },
-        {
-          "fullName": "ChatInput whisper targets with empty mentionPatterns shows all cats including those with empty mentionPatterns as whisper targets",
-          "failureKind": "assertion:not-null"
         }
       ]
     },
@@ -205,19 +101,6 @@
         {
           "fullName": "resolvePluginStatuses service plugins show configured when features known but not running",
           "failureKind": "assertion:object-is"
-        }
-      ]
-    },
-    {
-      "relativeFile": "src/components/__tests__/thinking-content-mode.test.ts",
-      "owner": "@yangcyyang",
-      "reason": "Default collapsed state for thinking and CLI output needs product-owner confirmation.",
-      "expiry": "2026-07-29",
-      "testCount": 4,
-      "failures": [
-        {
-          "fullName": "ThinkingContent default collapse default: thinking is collapsed, CLI output block is collapsed",
-          "failureKind": "assertion:truthy"
         }
       ]
     },

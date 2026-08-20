@@ -177,3 +177,10 @@ packages/api/test/__b1_parent_a__/
 # Isolated production build used by the API bearer fallback verification.
 packages/web/.next-auth-test/
 .gstack/
+
+# Local CLI / personal scratch (do not publish)
+**/.grok/
+packages/api/codex-article-fulltext.txt
+packages/api/web-articles/
+packages/api/wtp-preview.png
+packages/api/docs/evidence-archive/**/*.png
